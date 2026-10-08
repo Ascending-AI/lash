@@ -95,16 +95,12 @@ fn child_session_actor(process: &ProcessId) -> ActorKey {
     ActorKey::session(process_child_session_id(process).as_str()).unwrap()
 }
 
-/// The subagent plugin: one `default` capability, whose children live
-/// until their starter ends.
-fn subagents() -> Arc<dyn lash_core::facade_support::PluginFactory> {
-    Arc::new(lash::subagents::SubagentsPluginFactory::new(
-        Arc::new(lash::subagents::CapabilityRegistry::new().with(Arc::new(
-            lash::subagents::StaticCapability::new(
-                "default",
-                lash_core::facade_support::SessionSpec::inherit(),
-            ),
-        ))),
+/// The host's delegation tool (`examples/delegation`): children are created
+/// from the parent's spec, stated explicitly, and live until their starter
+/// ends.
+fn delegation() -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(delegation::DelegationPluginFactory::new(
+        served::spec(16),
         lash_core::lifetime::starter,
     ))
 }
@@ -122,10 +118,7 @@ fn scripts(width: usize) -> Arc<served::Scripts> {
                         served::call(
                             &format!("declared-start-spawn-{index}"),
                             "spawn_agent",
-                            serde_json::json!({
-                                "task": child_task(index),
-                                "capability": "default",
-                            }),
+                            serde_json::json!({ "task": child_task(index) }),
                         )
                     })
                     .collect(),
@@ -200,7 +193,7 @@ fn migrated_parent(target: &ProcessId) -> Vec<lash_core::LlmResponse> {
             served::call(
                 "declared-start-spawn-0",
                 "spawn_agent",
-                serde_json::json!({ "task": child_task(0), "capability": "default" }),
+                serde_json::json!({ "task": child_task(0) }),
             ),
             served::call(
                 "migrated-batch",
@@ -327,7 +320,7 @@ impl Spawn {
                         served::model(Arc::clone(&self.scripts)),
                         served::metadata(),
                     )
-                    .plugin(subagents());
+                    .plugin(delegation());
                 let builder = if self.migrated {
                     builder
                         .plugin(Arc::new(

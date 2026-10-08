@@ -608,7 +608,7 @@ pub use plugin::{
     AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,
     ConfigCommandDescriptor, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, ConfigRegistry,
     ConfigSubmitError, ConfigTransaction, ConfigWire, CoreConfigOwner, CoreConfigRefusal,
-    CreationConfigError, CreationFacts, NoRunOptions, OwnerChange, PluginConfig,
+    CreationConfigError, NoRunOptions, OwnerChange, PluginConfig,
 };
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
@@ -618,11 +618,10 @@ pub use plugin::{
     PluginStateError, PluginStateView, PluginTransitionBase, PluginTransitionId,
     PluginTransitionRecord, PluginTransitionRequest, ProcessEngineContributionContext,
     ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionCreateRequest, SessionGraphService,
-    SessionLineage, SessionPluginInit, SessionPluginSource, SessionReadView, SessionRelation,
-    SessionSnapshot, SessionStartPoint, SessionStateService, SessionToolAccess,
-    SessionToolAccessError, StateCommands, SubagentSessionContext, UnstatedSessionConfig,
-    durable_identity_conflict, is_durable_identity_conflict, is_trigger_occurrence_reclaimed,
-    trigger_occurrence_reclaimed,
+    SessionLineage, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
+    SessionStateService, SessionToolAccess, SessionToolAccessError, StateCommands,
+    UnstatedSessionConfig, durable_identity_conflict, is_durable_identity_conflict,
+    is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 

@@ -193,6 +193,9 @@ run_rust_source_guards() {
   step "No Restate mention"
   python3 scripts/check-no-restate.py
 
+  step "No subagent in core"
+  python3 scripts/check-no-subagent.py
+
   step "Substrate stub lane tags"
   python3 scripts/check-substrate-todos.py
 

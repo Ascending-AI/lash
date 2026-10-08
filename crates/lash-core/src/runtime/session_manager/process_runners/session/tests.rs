@@ -39,7 +39,7 @@ fn every_non_cancelled_child_stop_is_distinguishable_to_the_parent() {
             tool_name: "submit_error".to_string(),
             value: serde_json::json!({
                 "class": "execution",
-                "code": "subagent_submit_error",
+                "code": "child_submit_error",
                 "message": "missing shard amber",
             }),
         },
@@ -76,7 +76,7 @@ fn a_child_authored_stop_reason_reaches_the_parent_verbatim() {
         tool_name: "submit_error".to_string(),
         value: serde_json::json!({
             "class": "execution",
-            "code": "subagent_submit_error",
+            "code": "child_submit_error",
             "message": "missing shard amber",
         }),
     });
@@ -89,7 +89,7 @@ fn a_child_authored_stop_reason_reaches_the_parent_verbatim() {
             .map(crate::ToolValue::to_json_value)
             .is_some_and(|raw| raw["stop"]
                 .as_str()
-                .is_some_and(|stop| stop.contains("subagent_submit_error"))),
+                .is_some_and(|stop| stop.contains("child_submit_error"))),
         "the projected stop rides the bounded `raw` channel: {tool_error:?}"
     );
 }
@@ -175,7 +175,7 @@ use std::sync::Arc;
 async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let backend = crate::testing::sqlite_recording_backend().await;
     let child_session_id = SessionId::from("snapshot-start-child");
-    let process_id = crate::ProcessId::fixture("process:subagent:snapshot-start-child");
+    let process_id = crate::ProcessId::fixture("process:child:snapshot-start-child");
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
@@ -191,19 +191,12 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let services = runtime
         .runtime_session_services()
         .expect("runtime session services");
-    let plugin_init = runtime
-        .session_state_service()
-        .expect("session state")
-        .session_plugin_init(&SessionId::from(runtime.session_id()))
-        .await
-        .expect("plugin init");
     let create_request = crate::SessionCreateRequest::child_session(
         runtime.session_id(),
         crate::SessionStartPoint::Empty,
         crate::PluginOptions::default(),
     )
-    .with_session_id(&child_session_id)
-    .with_plugin_source(crate::SessionPluginSource::ParentFork(plugin_init));
+    .with_session_id(&child_session_id);
 
     // Rewrite the recorded request's `start` to the predecessor durable
     // spelling — what a pre-FIG-3378 `ProcessInput::SessionTurn` row
@@ -474,7 +467,7 @@ fn spawn_agent_projects_final_value() {
         tool_name: "submit_error".to_string(),
         value: serde_json::json!({
             "class": "execution",
-            "code": "subagent_submit_error",
+            "code": "child_submit_error",
             "message": "missing shard amber",
         }),
     });

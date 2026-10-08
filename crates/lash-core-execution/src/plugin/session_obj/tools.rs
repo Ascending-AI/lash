@@ -95,7 +95,6 @@ impl PluginSession {
             tools,
             resolve_contract: Some(Arc::clone(&resolve_contract)),
             tool_access: authority.tool_access,
-            subagent: authority.subagent,
             extensions: self.extensions.clone(),
         })?;
         registry.validate_resident_catalog_routes(&catalog)?;
@@ -120,14 +119,13 @@ impl PluginSession {
 
     /// The catalog a session's calls resolve against when `tools` is its
     /// live provider: the registry's manifests and contracts through this
-    /// session's catalog contributions, `tool_access` and `subagent`. It is
+    /// session's catalog contributions and `tool_access`. It is
     /// what a recorded tool is judged against by a turn's recorded surface
     /// and the logical Run's recorded admission.
     pub fn resolve_live_tool_catalog(
         &self,
         tools: Arc<dyn crate::ToolProvider>,
         tool_access: crate::SessionToolAccess,
-        subagent: Option<crate::SubagentSessionContext>,
     ) -> Result<crate::ToolCatalog, PluginError> {
         let manifests = tools.tool_manifests();
         let resolve_contract: lash_sansio::ToolContractResolver =
@@ -137,7 +135,6 @@ impl PluginSession {
             tools: manifests,
             resolve_contract: Some(resolve_contract),
             tool_access,
-            subagent,
             extensions: self.extensions.clone(),
         })
     }
@@ -154,7 +151,6 @@ impl PluginSession {
                 tools: ctx.tools.clone(),
                 resolve_contract: ctx.resolve_contract.clone(),
                 tool_access: ctx.tool_access.clone(),
-                subagent: ctx.subagent.clone(),
                 extensions: ctx.extensions.clone(),
             },
             |hook, ctx| hook(ctx),

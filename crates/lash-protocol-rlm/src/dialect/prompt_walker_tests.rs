@@ -28,7 +28,7 @@
 //! `agents.spawn` rendered `const Shape = Type { ... }` to TypeScript sessions
 //! (FIG-1480). The rewriter stays pinned here over representative spellings;
 //! each owning crate pins its own rendered catalog (see the rendered-catalog
-//! test on `spawn_agent_tool_definition` in `lash-subagents`).
+//! test on `spawn_agent_tool_definition` in `examples/delegation`).
 
 use super::*;
 use lash_lashlang_runtime::ToolDefinitionBindingExt as _;

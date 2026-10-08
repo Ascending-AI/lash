@@ -124,7 +124,7 @@ fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
     let tool = ToolDefinition::raw(
         "tool:spawn_agent",
         "spawn_agent",
-        "Run a subagent",
+        "Run a child session",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -146,7 +146,7 @@ fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
     assert_eq!(contract.render_returns(), "");
     assert_eq!(
         tool.compact_contract().render_markdown(),
-        "### spawn_agent<T = any>({ output?: TypeSpec<T> }) -> T\nRun a subagent\nParameters:\n- `output?: TypeSpec<T>`"
+        "### spawn_agent<T = any>({ output?: TypeSpec<T> }) -> T\nRun a child session\nParameters:\n- `output?: TypeSpec<T>`"
     );
 }
 

@@ -449,7 +449,6 @@ pub struct PromptCut {
     model: PromptModel,
     history: ProjectedHistoryStats,
     namespaces: BTreeMap<String, CommittedPluginNamespace>,
-    subagent: Option<crate::SubagentSessionContext>,
     protocol: Option<ProtocolPromptFacts>,
 }
 
@@ -460,7 +459,6 @@ impl std::fmt::Debug for PromptCut {
             .field("offered", &self.offered)
             .field("model", &self.model)
             .field("history", &self.history)
-            .field("subagent", &self.subagent)
             .field("protocol", &self.protocol.is_some())
             .finish_non_exhaustive()
     }
@@ -501,16 +499,8 @@ impl PromptCut {
             model,
             history,
             namespaces,
-            subagent: None,
             protocol: None,
         }
-    }
-
-    /// The session's recorded subagent authority, when it is a subagent.
-    #[must_use]
-    pub(crate) fn with_subagent(mut self, subagent: Option<crate::SubagentSessionContext>) -> Self {
-        self.subagent = subagent;
-        self
     }
 
     /// The protocol's committed facts for this call.
@@ -595,11 +585,6 @@ impl PromptInput<'_> {
 
     pub fn history(&self) -> ProjectedHistoryStats {
         self.cut.history
-    }
-
-    /// The session's recorded subagent authority, when it is a subagent.
-    pub fn subagent(&self) -> Option<&crate::SubagentSessionContext> {
-        self.cut.subagent.as_ref()
     }
 
     /// The protocol's committed facts for this call, when the session's

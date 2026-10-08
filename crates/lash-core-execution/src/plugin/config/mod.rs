@@ -8,8 +8,9 @@
 //!
 //! - The host collects owners when configuration is first used, after format
 //!   preflight ([`PluginFactory::register_config`](super::PluginFactory::register_config)):
-//!   its [`ConfigOwner`] creates the namespace from the creator's input, its
-//!   defaults and its parent's recorded value, and validates every candidate.
+//!   its [`ConfigOwner`] creates the namespace from the creator's input and
+//!   its defaults, and validates every candidate. Creation reads no other
+//!   session: only a fork copies a recorded namespace (ADR 0134).
 //! - The owner's typed [`ConfigCommand`]s are the only changes the namespace
 //!   admits. A setting no command changes is immutable by construction.
 //!   A reducer sees the recorded namespace and its command, and nothing else:
@@ -63,16 +64,6 @@ impl<T> ConfigWire for T where
 {
 }
 
-/// What an owner creates its namespace from.
-#[derive(Clone, Copy, Debug)]
-pub struct CreationFacts<'a, R> {
-    /// The creating parent's recorded namespace, for a child session: the
-    /// owner decides what a child inherits.
-    pub parent: Option<&'a R>,
-    /// Whether the session being created is a root session.
-    pub is_root_session: bool,
-}
-
 /// The candidate config an owner validates its namespace in: the core share
 /// and every namespace, as they will be published together.
 #[derive(Clone, Copy, Debug)]
@@ -96,14 +87,12 @@ pub trait ConfigOwner: Send + Sync + 'static {
     /// owner whose namespace no run overrides uses [`NoRunOptions`].
     type RunOptions: ConfigWire;
 
-    /// The namespace a session being created records: the creator's input,
-    /// this owner's defaults, and what a child inherits from `facts.parent`.
-    /// `None` records nothing. Called at creation only, never on an open.
-    fn create(
-        &self,
-        input: Option<Self::Create>,
-        facts: CreationFacts<'_, Self::Recorded>,
-    ) -> Result<Option<Self::Recorded>, Self::Refusal>;
+    /// The namespace a session being created records: the creator's input
+    /// over this owner's defaults, and nothing else. A session's parent link
+    /// is lineage only (ADR 0134), so no other session's namespace reaches
+    /// here. `None` records nothing. Called at creation only, never on an
+    /// open.
+    fn create(&self, input: Option<Self::Create>) -> Result<Option<Self::Recorded>, Self::Refusal>;
 
     /// Validate `value` as this owner's namespace within the final
     /// candidate. `base` is the namespace the candidate was derived from:
@@ -335,8 +324,6 @@ trait ErasedOwner: Send + Sync {
         &self,
         owner_id: &str,
         input: Option<&serde_json::Value>,
-        parent: Option<&serde_json::Value>,
-        is_root_session: bool,
     ) -> Result<Option<serde_json::Value>, ConfigFault>;
     fn validate(
         &self,
@@ -426,8 +413,6 @@ impl<O: ConfigOwner> ErasedOwner for TypedOwner<O> {
         &self,
         owner_id: &str,
         input: Option<&serde_json::Value>,
-        parent: Option<&serde_json::Value>,
-        is_root_session: bool,
     ) -> Result<Option<serde_json::Value>, ConfigFault> {
         let at = || RefusalSite::Creation;
         let input = input
@@ -440,19 +425,9 @@ impl<O: ConfigOwner> ErasedOwner for TypedOwner<O> {
                     unreadable(ConfigValueRole::CreationInput, error),
                 )
             })?;
-        let parent = parent
-            .map(|parent| serde_json::from_value::<O::Recorded>(parent.clone()))
-            .transpose()
-            .map_err(|error| corrupt(owner_id, error))?;
         let created = self
             .0
-            .create(
-                input,
-                CreationFacts {
-                    parent: parent.as_ref(),
-                    is_root_session,
-                },
-            )
+            .create(input)
             .map_err(|refusal| ConfigRefusal::by_owner(owner_id, at(), &refusal))?;
         created
             .map(|recorded| {
@@ -642,8 +617,8 @@ fn reduce_typed<C: ConfigCommand>(
 }
 
 /// Why a session's creation recorded no plugin config: an owner refused
-/// what the creator stated, the parent's recorded config is corrupt, or
-/// this deployment's config registrations cannot stand.
+/// what the creator stated, or this deployment's config registrations
+/// cannot stand.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum CreationConfigError {
     #[error(transparent)]
@@ -789,8 +764,7 @@ impl ConfigRegistry {
     /// registered plugin owner creates its namespace — the stated value, its
     /// defaults otherwise — and `protocol_plugin_id` names the protocol
     /// owner. A stated namespace no owner registers is refused typed, the
-    /// first in key order. A parent's recorded namespace its owner cannot
-    /// read is corruption.
+    /// first in key order.
     ///
     /// Each namespace is written in the format `writers` records for its
     /// plugin (FIG-4747), and in the plugin's native format when the
@@ -799,8 +773,6 @@ impl ConfigRegistry {
         &self,
         protocol_plugin_id: Option<&str>,
         requested: &PluginOptions,
-        parent: Option<&PluginConfig>,
-        is_root_session: bool,
         writers: &crate::store::plugin_writers::PluginAdmission,
     ) -> Result<PluginConfig, ConfigFault> {
         if let Some(unknown) = requested.plugins.keys().find(|plugin_id| {
@@ -815,21 +787,14 @@ impl ConfigRegistry {
         let requested_config = PluginConfig::from_recorded_parts(None, requested.plugins.clone());
         let requested = super::formats::decode_config_for(&self.factories, &requested_config)
             .map_err(|refusal| format_fault(refusal, RefusalSite::Creation))?;
-        let parent = parent
-            .map(|parent| super::formats::decode_config_for(&self.factories, parent))
-            .transpose()
-            .map_err(|refusal| format_fault(refusal, RefusalSite::Creation))?;
         let mut config = PluginConfig::for_protocol(protocol_plugin_id.map(str::to_string));
         for (plugin_id, registered) in &self.owners {
             if plugin_id == CORE_CONFIG_OWNER {
                 continue;
             }
-            let created = registered.owner.create(
-                plugin_id,
-                requested.get(plugin_id),
-                parent.as_ref().and_then(|parent| parent.get(plugin_id)),
-                is_root_session,
-            )?;
+            let created = registered
+                .owner
+                .create(plugin_id, requested.get(plugin_id))?;
             if let Some(value) = created {
                 let Some(factory) = self
                     .factories

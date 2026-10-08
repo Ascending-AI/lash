@@ -160,14 +160,10 @@ fn build_hidden_session(
 ) -> Arc<lash_core::facade_support::PluginSession> {
     let authority = hidden_authority(hidden_tool_name);
     match snapshot {
-        Some(snapshot) => plugin_host.build_session(PluginSessionRequest {
-            parent_session_id: Some(SessionId::from("parent")),
-            ..PluginSessionRequest::rematerialization(session_id, snapshot, authority)
-        }),
-        None => plugin_host.build_session(PluginSessionRequest {
-            parent_session_id: Some(SessionId::from("parent")),
-            ..PluginSessionRequest::creation(session_id, authority)
-        }),
+        Some(snapshot) => plugin_host.build_session(PluginSessionRequest::rematerialization(
+            session_id, snapshot, authority,
+        )),
+        None => plugin_host.build_session(PluginSessionRequest::creation(session_id, authority)),
     }
     .expect("hidden child plugin session")
 }
@@ -234,7 +230,7 @@ async fn broader_authority_fork_regains_parent_hidden_tool() {
     .await
     .expect("broader child session");
     let surface = session
-        .pin_tool_surface(&lash_core::SessionToolAccess::default(), None)
+        .pin_tool_surface(&lash_core::SessionToolAccess::default())
         .expect("broader child request surface");
 
     assert!(

@@ -23,7 +23,7 @@ pub(super) fn benchmark_stream_profile_for_request(
         && request
             .instructions
             .as_deref()
-            .is_some_and(|text| text.contains("Subagent capability: default. Depth: 1/5."))
+            .is_some_and(|text| text.contains(delegation::DELEGATED_CHILD_INSTRUCTIONS))
     {
         if matches!(scenario, RuntimePerfScenario::DeepTurnComposition) {
             return text_profile(typescript_block(
@@ -408,7 +408,6 @@ finish("runtime perf benchmark ok");"#
                 r#"
 const spawnChild = await processes.create({ dialect: "typescript", source: `const spawnChild = async () => {
   return await agents.spawn({
-    capability: "default",
     task: "Submit \`{ len: chunk.length }\` using the seeded \`chunk\` variable.",
     seed: { chunk: ["alpha", "beta", "gamma"] },
     output: { len: "int" }
@@ -430,7 +429,6 @@ finish("runtime perf benchmark ok");"#,
                 r#"
 const explore = await processes.create({ dialect: "typescript", source: `const explore = async () => {
   return await agents.spawn({
-    capability: "default",
     task: "Return \`{ len: chunk.length }\` using the seeded chunk.",
     seed: { chunk: ["obliq", "retrieval", "rerank", "trace"] },
     output: { len: "int" }
@@ -505,7 +503,6 @@ const deepChild = await processes.create({ dialect: "typescript", source: `const
   const pending = await tools.benchmark_async({ value: "parent tool loop", delay_ms: 0 });
   await sleep(0);
   const child = await agents.spawn({
-    capability: "default",
     task: "Use the seeded chunk and return its length after the durable waits.",
     seed: { chunk: ["parent", "child", "tool", "wait"] },
     output: { len: "int" }
@@ -550,7 +547,6 @@ finish(result.value);"#,
         return text_profile(typescript_block(
             r#"const loadChild = await processes.create({ dialect: "typescript", source: `const loadChild = async () => {
   return await agents.spawn({
-    capability: "default",
     task: "Submit \`{ len: chunk.length }\` using the seeded \`chunk\` variable.",
     seed: { chunk: ["alpha", "beta", "gamma"] },
     output: { len: "int" }

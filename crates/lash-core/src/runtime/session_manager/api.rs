@@ -91,13 +91,6 @@ impl crate::plugin::SessionStateService for RuntimeSessionStateService {
             .apply_tool_state(session_id, snapshot)
             .await
     }
-
-    async fn session_plugin_init(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<crate::SessionPluginInit, crate::PluginError> {
-        self.services.current.plugin_init_by_id(session_id).await
-    }
 }
 
 #[async_trait::async_trait]

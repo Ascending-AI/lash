@@ -12481,41 +12481,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "A captured plugin init payload exceeded the durable-request bound.",
-          "properties": {
-            "message": {
-              "additionalProperties": false,
-              "properties": {
-                "bytes": {
-                  "format": "uint",
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "limit": {
-                  "format": "uint",
-                  "minimum": 0,
-                  "type": "integer"
-                }
-              },
-              "required": [
-                "bytes",
-                "limit"
-              ],
-              "type": "object"
-            },
-            "type": {
-              "const": "session_init_too_large",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type",
-            "message"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "description": "An existing plugin session cannot be reconstructed because a required\nprotocol-owned field is absent from its durable record.",
           "properties": {
             "message": {

@@ -1255,14 +1255,10 @@ impl ProcessIdentity {
     pub fn from_process_input(input: &ProcessInput) -> Self {
         match input {
             ProcessInput::Engine { kind, .. } => Self::new(kind.clone()),
-            ProcessInput::SessionTurn { create_request, .. } => {
-                let label = create_request
-                    .subagent
-                    .as_ref()
-                    .map(|subagent| subagent.capability.clone())
-                    .or_else(|| create_request.session_id.clone().map(Into::into));
-                Self::labelled("session_turn", label)
-            }
+            ProcessInput::SessionTurn { create_request, .. } => Self::labelled(
+                "session_turn",
+                create_request.session_id.as_ref().map(ToString::to_string),
+            ),
         }
     }
 }

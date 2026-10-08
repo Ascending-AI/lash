@@ -273,8 +273,8 @@ pub struct SessionNodeRecord {
 ///
 /// Version 6 stores checked `FrameKey` values in durable frame-open payloads.
 ///
-/// Version 7 persists tool-access and subagent authority in the durable
-/// session configuration.
+/// Version 7 persists tool-access authority in the durable session
+/// configuration.
 ///
 /// Version 3 removes the duplicated `LlmResponse.full_text` member.
 ///
@@ -537,10 +537,6 @@ pub struct PersistedSessionConfig {
         skip_serializing_if = "crate::prompt_sections::PromptPlan::is_default"
     )]
     pub prompt_plan: crate::prompt_sections::PromptPlan,
-    /// Subagent authority is part of durable session construction rather than
-    /// ambient worker state.
-    #[serde(default)]
-    pub subagent: Option<crate::SubagentSessionContext>,
     /// Every plugin's recorded configuration namespace, the protocol's
     /// included (FIG-4379): created by its owner at creation, changed only by
     /// an owner-validated config transaction, and delivered unchanged on every
@@ -602,7 +598,6 @@ impl PersistedSessionConfig {
             generation: crate::GenerationOptions::default(),
             tool_access: crate::SessionToolAccess::default(),
             prompt_plan: crate::prompt_sections::PromptPlan::default(),
-            subagent: None,
             plugin_config: crate::PluginConfig::default(),
             config_revision: 0,
         }
@@ -628,7 +623,6 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             generation: policy.generation.clone(),
             tool_access: crate::SessionToolAccess::default(),
             prompt_plan: crate::prompt_sections::PromptPlan::default(),
-            subagent: None,
             // A `SessionPolicy` carries no plugin configuration; its creator
             // records what the owners resolved.
             plugin_config: crate::PluginConfig::default(),

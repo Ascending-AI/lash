@@ -255,18 +255,10 @@ const CHILD_TASK: &str = "core-node child: answer your literal";
 const CHILD_REPLY: &str = "the core-node child's literal";
 const PARENT_DONE: &str = "the parent saw its child";
 
-/// The subagent plugin: one `default` capability, whose children live
-/// until their starter ends.
-fn subagents() -> Arc<dyn lash_core::facade_support::PluginFactory> {
-    Arc::new(lash::subagents::SubagentsPluginFactory::new(
-        Arc::new(lash::subagents::CapabilityRegistry::new().with(Arc::new(
-            lash::subagents::StaticCapability::new(
-                "default",
-                lash_core::facade_support::SessionSpec::inherit(),
-            ),
-        ))),
-        lash_core::lifetime::starter,
-    ))
+/// The host's delegation tool (`examples/delegation`): children are created
+/// from [`spec`], stated explicitly, and live until their starter ends.
+fn delegation() -> delegation::DelegationPluginFactory {
+    delegation::DelegationPluginFactory::new(spec(), lash_core::lifetime::starter)
 }
 
 /// A parent turn sent to the core calls `spawn_agent`: the core's node runs
@@ -289,7 +281,7 @@ async fn spawn_agent_child_runs_and_answers_its_parent(tier: Tier) {
                 return call(
                     "core-node-spawn",
                     "spawn_agent",
-                    serde_json::json!({ "task": CHILD_TASK, "capability": "default" }),
+                    serde_json::json!({ "task": CHILD_TASK }),
                 );
             }
             *parent_saw.lock().unwrap() = seen;
@@ -299,7 +291,7 @@ async fn spawn_agent_child_runs_and_answers_its_parent(tier: Tier) {
     let deployment = deploy(tier, Vec::new(), |builder| {
         builder
             .serve_test_llm_profile(model, metadata())
-            .plugin(subagents())
+            .plugin(Arc::new(delegation()))
     })
     .await;
     let output = settle(&deployment.core, "core-node-parent", PARENT_INPUT).await;
@@ -378,25 +370,6 @@ fn parent_prompt_plan() -> lash::prompt::PromptPlan {
     }
 }
 
-/// A tool creator can opt into any plan by stating it on its ordinary
-/// create request. The standard capability leaves the field unstated.
-struct PlannedChild(lash::prompt::PromptPlan);
-
-impl lash::subagents::Capability for PlannedChild {
-    fn name(&self) -> &str {
-        "default"
-    }
-
-    fn build_session_request(
-        &self,
-        ctx: lash::subagents::SubagentSpawnContext<'_>,
-    ) -> Result<lash_core::SessionCreateRequest, String> {
-        Ok(ctx
-            .rlm_request("default", &lash::SessionSpec::inherit())?
-            .with_prompt_plan(self.0.clone()))
-    }
-}
-
 async fn assert_child_creation_plan(
     tier: Tier,
     kind: PromptChild,
@@ -421,19 +394,18 @@ async fn assert_child_creation_plan(
                 return call(
                     "prompt-plan-spawn",
                     "spawn_agent",
-                    serde_json::json!({"task": CHILD_TASK, "capability": "default"}),
+                    serde_json::json!({ "task": CHILD_TASK }),
                 );
             }
             text(request, PARENT_DONE)
         })
     };
-    let plugin = match explicit.clone() {
-        Some(plan) => Arc::new(lash::subagents::SubagentsPluginFactory::new(
-            Arc::new(lash::subagents::CapabilityRegistry::new().with(Arc::new(PlannedChild(plan)))),
-            lash_core::lifetime::starter,
-        )) as Arc<dyn lash_core::facade_support::PluginFactory>,
-        None => subagents(),
-    };
+    // A tool creator opts into a plan by stating it on its ordinary create
+    // request; without one the child takes the neutral default.
+    let plugin = Arc::new(match explicit.clone() {
+        Some(plan) => delegation().with_child_prompt_plan(plan),
+        None => delegation(),
+    });
     let deployment = deploy(tier, Vec::new(), |builder| {
         builder
             .serve_test_llm_profile(model, metadata())
@@ -603,6 +575,141 @@ async fn a_child_uses_exactly_its_explicit_prompt_plan(tier: Tier) {
     assert_child_creation_plan(tier, PromptChild::Related, Some(plan)).await;
 }
 
+// FIG-5296 (ADR 0134): a parent link is lineage for display and audit only.
+
+/// A child created with a parent link records and runs exactly what an
+/// unlinked session created from the same explicit input does: the same
+/// config head and the same first model request, whatever the parent's own
+/// config. Deleting the parent leaves the child session untouched: it keeps
+/// its head and still runs a turn.
+async fn a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent(tier: Tier) {
+    const INPUT: &str = "lineage law: answer your literal";
+    let instructions = Arc::new(Mutex::new(Vec::new()));
+    let model = {
+        let instructions = Arc::clone(&instructions);
+        scripted(move |request, _| {
+            instructions.lock().unwrap().push((
+                request.session_id().to_string(),
+                request.instructions.clone(),
+            ));
+            text(request, CHILD_REPLY)
+        })
+    };
+    let deployment = deploy(tier, Vec::new(), |builder| {
+        builder.serve_test_llm_profile(model, metadata())
+    })
+    .await;
+    let catalog = deployment.backend.stores().session_store_factory();
+    let parent_id = SessionId::from("lineage-parent");
+    deployment
+        .core
+        .session(parent_id.clone())
+        .create(lash::SessionCreation::root(spec()))
+        .await
+        .unwrap();
+    // The parent's own config differs from the neutral default.
+    set_prompt_plan(
+        &deployment.core,
+        &parent_id,
+        "parent-plan",
+        parent_prompt_plan(),
+    )
+    .await;
+    let linked = SessionId::from("lineage-linked-child");
+    let unlinked = SessionId::from("lineage-unlinked");
+    for (id, creation) in [
+        (
+            linked.clone(),
+            lash::SessionCreation::child_of(parent_id.clone(), spec()),
+        ),
+        (unlinked.clone(), lash::SessionCreation::root(spec())),
+    ] {
+        deployment.core.session(id).create(creation).await.unwrap();
+    }
+    let head = |id: SessionId| {
+        let catalog = Arc::clone(&catalog);
+        async move {
+            lash_core::SessionCommitStore::load_session_head_meta(catalog.as_ref(), &id)
+                .await
+                .unwrap()
+                .unwrap()
+                .config
+        }
+    };
+    let linked_head = head(linked.clone()).await;
+    assert_eq!(
+        linked_head,
+        head(unlinked.clone()).await,
+        "the parent link adds nothing to the child's recorded config"
+    );
+    let first_request = |id: &SessionId| {
+        instructions
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(session, _)| session == id.as_str())
+            .map(|(_, instructions)| instructions.clone())
+            .expect("the session's model was asked")
+    };
+    for id in [&linked, &unlinked] {
+        let output = deployment
+            .core
+            .session(id.clone())
+            .durable()
+            .await
+            .unwrap()
+            .send(lash::TurnInput::text(INPUT))
+            .output()
+            .await
+            .unwrap();
+        assert!(output.is_success(), "{output:?}");
+    }
+    assert_eq!(
+        first_request(&linked),
+        first_request(&unlinked),
+        "the child's first model request is the unlinked session's"
+    );
+
+    let administration = deployment.core.session_administration().await;
+    lash::LashCore::delete_session(administration.delete_context(&parent_id).unwrap())
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while !matches!(
+            catalog.lookup_session(&parent_id).await.unwrap(),
+            lash_core::store::SessionLookup::Deleted
+        ) {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the parent's deletion completes within a minute");
+    assert!(
+        matches!(
+            catalog.lookup_session(&linked).await.unwrap(),
+            lash_core::store::SessionLookup::Live(_)
+        ),
+        "deleting the parent leaves the child session"
+    );
+    let mut kept = linked_head.clone();
+    let after = head(linked.clone()).await;
+    kept.config_revision = after.config_revision;
+    assert_eq!(after, kept, "deleting the parent leaves the child's config");
+    let output = deployment
+        .core
+        .session(linked.clone())
+        .durable()
+        .await
+        .unwrap()
+        .send(lash::TurnInput::text(INPUT))
+        .output()
+        .await
+        .unwrap();
+    assert!(output.is_success(), "the child still runs: {output:?}");
+    drop(deployment.backend);
+}
+
+on_every_tier!(a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent);
 on_every_tier!(a_child_uses_exactly_its_explicit_prompt_plan);
 on_every_tier!(a_fork_starts_with_its_parents_full_configuration);
 on_every_tier!(spawned_and_related_children_start_with_the_default_prompt_plan);

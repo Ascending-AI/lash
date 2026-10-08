@@ -237,7 +237,6 @@ mod tests {
                 tools: vec![missing.manifest()],
                 resolve_contract: None,
                 tool_access: lash_core::SessionToolAccess::default(),
-                subagent: None,
                 extensions: Default::default(),
             },
             &typescript_test_dialect(),
@@ -281,7 +280,6 @@ mod tests {
                 tools: vec![retired_only.manifest()],
                 resolve_contract: None,
                 tool_access: lash_core::SessionToolAccess::default(),
-                subagent: None,
                 extensions: Default::default(),
             },
             &typescript_test_dialect(),
@@ -338,7 +336,6 @@ mod tests {
                     move |manifest| contracts.get(&manifest.id).cloned()
                 })),
                 tool_access: lash_core::SessionToolAccess::default(),
-                subagent: None,
                 extensions: Default::default(),
             },
             &typescript_test_dialect(),
@@ -481,7 +478,7 @@ mod tests {
 
     #[test]
     fn typescript_tool_prose_is_rendered_verbatim() {
-        let description = "Run a TypeScript subagent in a <typescript> cell.";
+        let description = "Run a TypeScript child session in a <typescript> cell.";
         let schema_description = "A TypeScript process definition value.";
         let tool = tool_with_prose(description, schema_description);
         let catalog = build_tool_catalog(ToolCatalogBuildInput {

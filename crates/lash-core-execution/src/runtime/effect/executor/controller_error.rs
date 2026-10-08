@@ -165,7 +165,6 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ToolRegistrationRefused { .. }
             | PluginError::ResidentToolRouteUnavailable { .. }
             | PluginError::SessionAlreadyExists { .. }
-            | PluginError::SessionInitTooLarge { .. }
             | PluginError::MissingRecordedSessionConfig { .. }
             | PluginError::RecordedSessionConfigConflict { .. }
             | PluginError::AppendOperationIdentityConflict { .. }

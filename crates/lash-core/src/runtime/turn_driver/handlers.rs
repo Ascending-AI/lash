@@ -300,11 +300,7 @@ impl RuntimeTurnDriver<'_> {
         if result.is_ok() {
             let authority = &self.turn_pipeline.state().authority;
             self.session
-                .install_recorded_tool_surface(
-                    &authority.tool_access,
-                    authority.subagent.as_ref(),
-                    &tool_surface,
-                )
+                .install_recorded_tool_surface(&authority.tool_access, &tool_surface)
                 // The install pins the live registry and runs the catalog
                 // contributors again, as the sync's step body did, so their
                 // failures are classified the same way (FIG-4651): a live

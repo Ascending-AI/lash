@@ -16,8 +16,8 @@ dependency aliases keep internal Rust crate names readable without promising
 those package paths to hosts.
 
 Optional facade features expose host-wired extensions: `sqlite`, `postgres`,
-`s3`, `openai`, `anthropic`, `google`, `mcp`, `subagents`,
-`typescript`, and `http-transport`. Each selects its domain module and
+`s3`, `openai`, `anthropic`, `google`, `mcp`, `typescript`, and
+`http-transport`. Each selects its domain module and
 internal dependency. Hosts name remote vocabulary through `lash::remote`.
 
 ### 2. Integrator contracts deepen existing facade modules

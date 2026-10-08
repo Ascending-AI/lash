@@ -6,7 +6,6 @@ pub struct ToolCatalogContext {
     pub tools: Vec<ToolManifest>,
     pub resolve_contract: Option<lash_sansio::ToolContractResolver>,
     pub tool_access: SessionToolAccess,
-    pub subagent: Option<SubagentSessionContext>,
     pub extensions: PluginExtensions,
 }
 

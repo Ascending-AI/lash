@@ -180,7 +180,7 @@ const WORKBENCH_SEARCH_MCP_URL: &str = "https://search.parallel.ai/mcp";
 pub(crate) fn configure_workbench_plugins(
     plugins: &mut lash::PluginStack,
     mail_world: mail::MailWorld,
-    subagent_registry: Arc<lash::subagents::CapabilityRegistry>,
+    delegation: Arc<dyn PluginFactory>,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
     approvals: approvals::WorkbenchApprovals,
     mcp: Arc<dyn PluginFactory>,
@@ -196,13 +196,7 @@ pub(crate) fn configure_workbench_plugins(
             lash::process::lifetime::session_or_starter,
         ),
     ));
-    plugins.push(Arc::new(
-        lash::subagents::SubagentsPluginFactory::new(
-            subagent_registry,
-            lash::process::lifetime::starter,
-        )
-        .with_session_spec(SessionSpec::inherit()),
-    ));
+    plugins.push(delegation);
     plugins.push(mcp);
 }
 
@@ -245,7 +239,9 @@ struct WorkbenchCorePlugins {
     rlm_workers: Option<lash::rlm::WorkerService>,
     tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
     mail_world: mail::MailWorld,
-    subagent_registry: Arc<lash::subagents::CapabilityRegistry>,
+    /// The session config a delegated child is created with: the
+    /// workbench's own session defaults, stated explicitly (ADR 0134).
+    child_spec: SessionSpec,
     deferred_tools: deferred_tools::WorkbenchDeferredTools,
     approvals: approvals::WorkbenchApprovals,
     mcp: Arc<dyn PluginFactory>,
@@ -270,7 +266,7 @@ async fn workbench_core_builder(
         rlm_workers,
         tool_provider,
         mail_world,
-        subagent_registry,
+        child_spec,
         deferred_tools,
         approvals,
         mcp,
@@ -278,7 +274,18 @@ async fn workbench_core_builder(
         #[cfg(feature = "e2e-tools")]
         operation,
     } = plugins;
-    let mut builder = match crate::session_protocol::selected()? {
+    let protocol = crate::session_protocol::selected()?;
+    // The workbench's delegation tool (`examples/delegation`): children run
+    // the workbench's session defaults and live until their starter ends.
+    let delegation =
+        delegation::DelegationPluginFactory::new(child_spec, lash::process::lifetime::starter);
+    let delegation: Arc<dyn PluginFactory> = match protocol {
+        crate::session_protocol::SessionProtocol::Standard => Arc::new(delegation),
+        crate::session_protocol::SessionProtocol::Rlm => {
+            Arc::new(delegation.with_rlm_children(lash::rlm::RlmFinalAnswerFormat::RawFinalValue))
+        }
+    };
+    let mut builder = match protocol {
         crate::session_protocol::SessionProtocol::Standard => {
             LashCore::standard_builder(host_backend)
         }
@@ -321,7 +328,7 @@ async fn workbench_core_builder(
         configure_workbench_plugins(
             plugins,
             mail_world,
-            subagent_registry,
+            delegation,
             deferred_tools,
             approvals,
             mcp,
@@ -451,7 +458,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     eprintln!("agent-workbench durable store: {}", stores.backend);
     let core_store_factory = stores.stores.session_store_factory();
     let trigger_store = stores.stores.trigger_store();
-    let subagent_registry = Arc::new(lash::subagents::default_registry(&BTreeMap::new()));
     let mail_world = mail::MailWorld::new();
     let sessions = WorkbenchSessions::persistent(data_dir.join("session-id"))?;
     // The boot session joins the roster so the selector lists it. A roster row
@@ -564,7 +570,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         rlm_workers,
         tool_provider,
         mail_world: mail_world.clone(),
-        subagent_registry,
+        child_spec: session_defaults.clone(),
         deferred_tools,
         approvals: approvals.clone(),
         mcp: Arc::clone(&mcp_search) as Arc<dyn PluginFactory>,

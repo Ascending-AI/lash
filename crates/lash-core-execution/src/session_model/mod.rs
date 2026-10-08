@@ -416,9 +416,9 @@ impl SessionSpec {
 
     /// Layer generation options over the ones the session inherits.
     ///
-    /// Options this call leaves unset keep their inherited value, so a
-    /// subagent spec that caps output tokens does not silently drop the
-    /// temperature and seed its parent pinned. Use
+    /// Options this call leaves unset keep their base value, so a spec that
+    /// caps output tokens does not silently drop the temperature and seed
+    /// its base pinned. Use
     /// [`replace_generation`](Self::replace_generation) or
     /// [`clear_generation`](Self::clear_generation) to discard what is
     /// inherited.
@@ -856,8 +856,8 @@ mod tests {
 
     #[test]
     fn session_spec_generation_merge_keeps_a_parent_pin_a_child_never_mentioned() {
-        // A parent pins sampling for a repeatable benchmark; a subagent
-        // capability only bounds its own output length. The subagent must not
+        // A base pins sampling for a repeatable benchmark; an overlay only
+        // bounds its own output length. The result must not
         // silently fall back to provider-default sampling — nothing reports
         // an option the child never requested.
         let base = SessionPolicy {

@@ -49,28 +49,14 @@ impl ConfigOwner for CounterOwner {
     fn create(
         &self,
         input: Option<CounterCreate>,
-        facts: CreationFacts<'_, CounterConfig>,
     ) -> Result<Option<CounterConfig>, CounterRefusal> {
-        let inherited = facts.parent.cloned();
         let input = input.unwrap_or(CounterCreate {
             count: None,
             label: None,
         });
         Ok(Some(CounterConfig {
-            count: input
-                .count
-                .or(inherited.as_ref().map(|parent| parent.count))
-                .unwrap_or(0),
-            label: input
-                .label
-                .or(inherited.map(|parent| parent.label))
-                .unwrap_or_else(|| {
-                    if facts.is_root_session {
-                        "root".to_string()
-                    } else {
-                        "child".to_string()
-                    }
-                }),
+            count: input.count.unwrap_or(0),
+            label: input.label.unwrap_or_else(|| "root".to_string()),
         }))
     }
 
@@ -209,8 +195,6 @@ fn head(registry: &ConfigRegistry, revision: u64) -> crate::PersistedSessionConf
         .resolve_creation(
             None,
             &PluginOptions::default(),
-            None,
-            true,
             &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .expect("creation config");
@@ -227,14 +211,12 @@ fn increment(owner: &str, by: u32, limit: u32) -> ConfigCommandEntry {
 }
 
 #[test]
-fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
+fn creation_records_defaults_and_stated_values() {
     let (registry, _, _) = counters();
     let root = registry
         .resolve_creation(
             Some("first"),
             &PluginOptions::typed("first", serde_json::json!({ "count": 3 })).expect("options"),
-            None,
-            true,
             &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .expect("root config");
@@ -248,27 +230,10 @@ fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
         Some(&serde_json::json!({ "count": 0, "label": "root" })),
         "an owner asked with nothing stated records its defaults"
     );
-    let child = registry
-        .resolve_creation(
-            None,
-            &PluginOptions::default(),
-            Some(&root),
-            false,
-            &crate::store::plugin_writers::PluginAdmission::default(),
-        )
-        .expect("child config");
-    assert_eq!(
-        child.get("first"),
-        Some(&serde_json::json!({ "count": 3, "label": "root" })),
-        "the owner decides what a child inherits"
-    );
-
     let refused = registry
         .resolve_creation(
             None,
             &PluginOptions::typed("nobody", serde_json::json!({})).expect("options"),
-            None,
-            true,
             &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .expect_err("an unowned namespace is refused");
@@ -285,8 +250,6 @@ fn creation_records_defaults_stated_values_and_what_a_child_inherits() {
             None,
             &PluginOptions::typed("first", serde_json::json!({ "colour": "red" }))
                 .expect("options"),
-            None,
-            true,
             &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .expect_err("creation input the owner does not accept is refused");
@@ -974,7 +937,7 @@ fn config_namespaces_are_written_in_the_admissions_recorded_format() {
     };
     let create = |writers: &crate::store::plugin_writers::PluginAdmission| {
         registry
-            .resolve_creation(None, &PluginOptions::default(), None, true, writers)
+            .resolve_creation(None, &PluginOptions::default(), writers)
             .expect("creation config")
     };
 

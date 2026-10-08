@@ -32,10 +32,9 @@ impl LashRuntime {
     /// Make `state` the resident runtime state. Every whole-state swap goes
     /// through here (durable adoption and reload, append rollback and receipt
     /// replay, settled config commands, turn commits, session creation), so
-    /// none can skip what a replacement owes the live session: the whole
-    /// resident authority, tool access and subagent context (the two inputs
-    /// of the plugin catalog projection), is published to the live plugin
-    /// session, invalidating discovery caches only when it changed, so live
+    /// none can skip what a replacement owes the live session: the resident
+    /// authority, the tool access the plugin catalog projection reads, is
+    /// published to the live plugin session, invalidating discovery caches only when it changed, so live
     /// discovery always reflects the settled authority (FIG-2415, FIG-2987).
     pub(in crate::runtime) fn install_resident_state(
         &mut self,
@@ -106,10 +105,10 @@ impl LashRuntime {
         session
             .plugins()
             .publish_plugin_config(self.state.admitted_plugin_config())?;
-        if session.plugins().replace_authority(
-            &self.state.authority.tool_access,
-            self.state.authority.subagent.as_ref(),
-        ) {
+        if session
+            .plugins()
+            .replace_tool_access(&self.state.authority.tool_access)
+        {
             session.invalidate_runtime_caches();
         }
         Ok(())
@@ -516,7 +515,6 @@ impl LashRuntime {
             .inspect_prompt_catalog(
                 crate::RuntimeOwner::Session(self.state.session_id.clone()),
                 self.state.authority.tool_access.clone(),
-                self.state.authority.subagent.clone(),
                 self.state.admitted_plugin_config(),
             )
             .map_err(|error| RuntimeError::new(RuntimeErrorCode::Plugin, error.to_string()))

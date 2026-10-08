@@ -11,7 +11,6 @@ rust_min_stack="${LASH_RUST_MIN_STACK_BUDGET:-2097152}"
 # `stack_budget` compiles no test and the run passes vacuously (FIG-4432).
 cargo test -p lash-internal-lashlang --test stack_budget --locked --no-run
 cargo test -p lash-runtime --features rlm stack_budget --locked --no-run
-cargo test -p lash-internal-subagents --locked --no-run
 cargo build -p lash-perf --locked
 
 # RLM turns run model code in the shipped worker helper, which the runtime
@@ -44,7 +43,6 @@ run_stack_budget() {
   export RUST_MIN_STACK="$rust_min_stack"
   run_stack_budget lashlang cargo test -p lash-internal-lashlang --test stack_budget --locked -- --nocapture --test-threads=1
   run_stack_budget runtime cargo test -p lash-runtime --features rlm stack_budget --locked -- --nocapture --test-threads=1
-  run_stack_budget subagents cargo test -p lash-internal-subagents rlm_spawn_seed_is_visible_to_child_executor_and_prompt --locked -- --nocapture --test-threads=1
 )
 
 python3 scripts/profile_runtime_stack.py \

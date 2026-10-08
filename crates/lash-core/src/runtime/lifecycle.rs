@@ -1,32 +1,6 @@
 use super::*;
 use crate::plugin::PluginSessionRequest;
 
-pub(super) async fn recorded_parent_session_id(
-    store: Option<&crate::store::SessionStore>,
-) -> Result<Option<SessionId>, SessionError> {
-    let Some(store) = store else {
-        return Ok(None);
-    };
-    let meta = store
-        .store()
-        .lookup_session(store.session_id())
-        .await
-        .and_then(|lookup| match lookup {
-            crate::store::SessionLookup::Live(meta) => Ok(meta),
-            crate::store::SessionLookup::Absent => Err(crate::StoreError::SessionNotFound {
-                session_id: store.session_id().clone(),
-            }),
-            crate::store::SessionLookup::Deleted => Err(crate::StoreError::SessionDeleted {
-                session_id: store.session_id().clone(),
-            }),
-        })
-        .map_err(|source| SessionError::Store {
-            context: "failed to read session relation".to_string(),
-            source,
-        })?;
-    Ok(meta.relation.parent_session_id().map(SessionId::from))
-}
-
 pub(in crate::runtime) fn initial_park_preview(
     state: &crate::RuntimeSessionState,
     commit_budget: crate::CommitBudget,
@@ -200,7 +174,6 @@ impl LashRuntime {
                 state.policy = policy.clone();
             }
             state.authority.tool_access = services.plugins.tool_access();
-            state.authority.subagent = services.plugins.subagent_context();
         }
         {
             use crate::facade_support::{SessionGraphFacadeOps as _, SessionNodeProjection as _};
@@ -599,27 +572,22 @@ impl LashRuntime {
                 "RuntimeEnvironment.plugin_host is required for from_environment".to_string(),
             )
         })?;
-        let parent_session_id = recorded_parent_session_id(store.as_ref()).await?;
         // The session's recorded plugin configuration, as recorded: every
         // open delivers it unchanged (FIG-4379).
         let authority = crate::plugin::SessionAuthorityContext {
             tool_access: state.authority.tool_access.clone(),
-            subagent: state.authority.subagent.clone(),
             plugin_config: state.admitted_plugin_config(),
         };
         let plugin_session = match state.plugin_state() {
-            Some(snapshot) => plugin_host.defer_session(PluginSessionRequest {
-                parent_session_id: parent_session_id.clone(),
-                ..PluginSessionRequest::rematerialization(
-                    state.session_id.clone(),
-                    snapshot,
-                    authority,
-                )
-            }),
-            None => plugin_host.defer_session(PluginSessionRequest {
-                parent_session_id,
-                ..PluginSessionRequest::creation(state.session_id.clone(), authority)
-            }),
+            Some(snapshot) => plugin_host.defer_session(PluginSessionRequest::rematerialization(
+                state.session_id.clone(),
+                snapshot,
+                authority,
+            )),
+            None => plugin_host.defer_session(PluginSessionRequest::creation(
+                state.session_id.clone(),
+                authority,
+            )),
         }
         .map_err(SessionError::Plugin)?;
         let embedded = EmbeddedRuntimeHost::new(env.core.clone());

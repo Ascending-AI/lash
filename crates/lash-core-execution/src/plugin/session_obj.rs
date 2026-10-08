@@ -216,13 +216,12 @@ where
     Ok(out)
 }
 
-/// The session's resident authority. Tool access and subagent context are
-/// the two inputs of the plugin catalog projection, held under one lock so a
-/// catalog resolution never observes one without the other.
+/// The session's resident authority: the tool access the plugin catalog
+/// projection reads, and the plugin configuration its hooks run under, held
+/// under one lock.
 #[derive(Clone)]
 pub(super) struct LiveSessionAuthority {
     pub(super) tool_access: SessionToolAccess,
-    pub(super) subagent: Option<SubagentSessionContext>,
     /// The plugin configuration the session's hooks run under (FIG-4379):
     /// the running run's admitted configuration, the head's outside a run,
     /// or a process's captured configuration.
@@ -238,7 +237,6 @@ pub struct PluginSession {
     pub(super) capabilities: Arc<std::sync::OnceLock<PluginSessionCapabilities>>,
     pub(super) materialized: Arc<std::sync::atomic::AtomicBool>,
     pub(super) materialization_lock: Arc<std::sync::Mutex<()>>,
-    pub(super) parent_session_id: Option<SessionId>,
     pub(super) materialization: PluginSessionMaterialization,
     pub(super) tool_snapshot: Option<crate::ToolState>,
     pub(super) tool_catalog_overlay: ToolCatalogContribution,
@@ -512,11 +510,6 @@ impl PluginSession {
         self.authority.read_recover().tool_access.clone()
     }
 
-    /// Returns a snapshot of the session's current resident subagent context.
-    pub fn subagent_context(&self) -> Option<SubagentSessionContext> {
-        self.authority.read_recover().subagent.clone()
-    }
-
     /// The plugin configuration this session's hooks run under: a running
     /// run's admitted configuration and revision, taken from its recorded
     /// run (FIG-4379), never the session's current head.
@@ -539,20 +532,14 @@ impl PluginSession {
         self.authority.read_recover().clone()
     }
 
-    /// Replaces the whole resident authority (tool access and subagent
-    /// context) after the corresponding durable state has been adopted.
-    /// Returns whether it changed.
-    pub fn replace_authority(
-        &self,
-        tool_access: &SessionToolAccess,
-        subagent: Option<&SubagentSessionContext>,
-    ) -> bool {
+    /// Replaces the resident tool access after the corresponding durable
+    /// state has been adopted. Returns whether it changed.
+    pub fn replace_tool_access(&self, tool_access: &SessionToolAccess) -> bool {
         let mut current = self.authority.write_recover();
-        if current.tool_access == *tool_access && current.subagent.as_ref() == subagent {
+        if current.tool_access == *tool_access {
             return false;
         }
         current.tool_access = tool_access.clone();
-        current.subagent = subagent.cloned();
         true
     }
 
@@ -1210,23 +1197,7 @@ impl PluginSession {
                 seed_snapshot: Some(&snapshot),
             },
             owner: crate::RuntimeOwner::Session(session_id.into()),
-            parent_session_id: None,
         })
-    }
-
-    /// Capture everything a forked peer session needs to initialize, exactly
-    /// as a fork would read it now: this session's plugin state, tool-catalog
-    /// overlay, and exported tool state.
-    ///
-    /// The returned payload is recorded on the [`crate::SessionCreateRequest`]
-    /// at spawn and is the only input materialization reads — the peer never
-    /// observes later mutations of this session.
-    pub fn capture_fork_init(&self) -> Result<crate::SessionPluginInit, PluginError> {
-        crate::SessionPluginInit::captured(
-            self.capture_state(),
-            self.tool_catalog_overlay.clone(),
-            self.capabilities().tool_registry.export_state(),
-        )
     }
 
     fn effective_operation_session(

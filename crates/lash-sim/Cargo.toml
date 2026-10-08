@@ -38,11 +38,11 @@ lash-provider-anthropic = { workspace = true }
 lash-provider-google = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
+delegation = { workspace = true }
 lash-protocol-standard = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
-lash-subagents = { workspace = true }
 lash-typescript = { workspace = true }
 lash-vm-broker = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }

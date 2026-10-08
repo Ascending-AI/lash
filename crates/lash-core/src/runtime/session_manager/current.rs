@@ -54,7 +54,7 @@ impl CurrentOwnerCapability {
     /// A named session's snapshot: the resident session's own state, or any
     /// other session's durable head read by name. A process runtime has no
     /// resident session, so every snapshot it reads names one explicitly
-    /// (a subagent spawned inside a process reads its originator's).
+    /// (a child spawned inside a process reads its originator's).
     pub(in crate::runtime::session_manager) async fn snapshot_by_id(
         &self,
         session_id: &SessionId,
@@ -150,19 +150,6 @@ impl CurrentOwnerCapability {
         tool_registry
             .apply_state(snapshot)
             .map_err(|err| crate::PluginError::Session(err.to_string()))
-    }
-
-    /// Capture the spawn-time [`crate::SessionPluginInit`] for a peer fork of
-    /// the current session. This is the only read of the source session a
-    /// fork performs — the payload it returns is what the journaled creation
-    /// request carries, so materialization never touches the live session
-    /// again.
-    pub(in crate::runtime::session_manager) async fn plugin_init_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<crate::SessionPluginInit, crate::PluginError> {
-        self.known_session(session_id)?;
-        self.plugins.capture_fork_init()
     }
 
     pub(in crate::runtime::session_manager) async fn emit_trace_event(

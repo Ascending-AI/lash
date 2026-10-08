@@ -211,7 +211,7 @@ impl ProcessLineage {
     /// The lineage a process's body starts children under.
     ///
     /// Its scopes are the process itself, then the session it runs of its own
-    /// (a `SessionTurn` child session: a subagent's own session replaces the
+    /// (a `SessionTurn` child session: the child's own session replaces the
     /// inherited one, R10), then its recorded ancestry, ending at its session
     /// capability's scope. The session capability is the process's own
     /// session when it has one, and otherwise the one it inherited; a
@@ -563,11 +563,11 @@ mod tests {
         assert_eq!(cx.session_capability(), Some(SessionId::from("s")));
     }
 
-    /// A subagent's own session replaces the inherited one (R10).
+    /// A child session's own session replaces the inherited one (R10).
     #[test]
-    fn a_subagent_session_replaces_the_inherited_session() {
-        let process = crate::process_id_for_test("subagent");
-        let own = SessionId::from("session:process:subagent");
+    fn a_child_session_replaces_the_inherited_session() {
+        let process = crate::process_id_for_test("child");
+        let own = SessionId::from("session:process:child");
         let parent_cx = StartCx::materialize(&turn_admitted(), None).expect("turn");
         let lineage = ProcessLineage::of_process(
             &process,

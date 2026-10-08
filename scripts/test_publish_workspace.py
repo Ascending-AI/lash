@@ -46,7 +46,6 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-sansio": "lash-internal-sansio",
     "lash-sqlite-store": "lash-internal-sqlite-store",
     "lash-store-sql": "lash-internal-store-sql",
-    "lash-subagents": "lash-internal-subagents",
     "lash-tool-support": "lash-internal-tool-support",
     "lash-trace": "lash-internal-trace",
     "lash-vm-broker": "lash-internal-vm-broker",

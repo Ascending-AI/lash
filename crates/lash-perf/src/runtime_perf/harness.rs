@@ -774,16 +774,27 @@ fn benchmark_plugin_factories(
     if wiring.llm_query_plugin {
         factories.push(Arc::new(LlmToolsPluginFactory::default()));
     }
-    if wiring.subagents_plugin {
-        factories.push(Arc::new(lash_subagents::SubagentsPluginFactory::new(
-            Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
-                lash_subagents::StaticCapability::new(
-                    "default",
-                    lash_core::facade_support::SessionSpec::inherit(),
-                ),
-            ))),
+    if wiring.delegation_plugin {
+        // The host's delegation tool (`examples/delegation`): each child runs
+        // the benchmark model under the harness's budgets, stated explicitly.
+        let turn_budget = if scenario.execution_mode().is_rlm() {
+            lash::TurnBudget::bounded(RUNTIME_PERF_MAX_TURNS)
+        } else {
+            lash::TurnBudget::Unbounded
+        };
+        let delegation = delegation::DelegationPluginFactory::new(
+            lash::SessionSpec::new(
+                benchmark_llm_profile_spec().wire_model,
+                turn_budget,
+                lash::MaxToolCalls::new(1024),
+            ),
             lash_core::lifetime::starter,
-        )));
+        );
+        factories.push(Arc::new(if scenario.execution_mode().is_rlm() {
+            delegation.with_rlm_children(lash::rlm::RlmFinalAnswerFormat::RawFinalValue)
+        } else {
+            delegation
+        }));
     }
     if wiring.oblique_tools_plugin {
         factories.push(Arc::new(StaticPluginFactory::new(

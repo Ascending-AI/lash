@@ -291,8 +291,6 @@ impl SessionBuilder {
                     .as_ref()
                     .map(|protocol_factory| protocol_factory.id()),
                 &plugin_options,
-                None,
-                parent.is_none(),
                 &admission,
             )
             .map_err(lash_core::SessionError::from)?;

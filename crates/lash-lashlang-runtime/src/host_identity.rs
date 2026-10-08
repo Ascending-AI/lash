@@ -57,7 +57,7 @@ impl LashlangHostIdentities {
     /// The id of the call the program issued at `ordinal`: the tool call's
     /// id, and the reply id of an awaited handle.
     ///
-    /// The subagent spawn tool keys its child's start on this id (through
+    /// A child-spawning tool keys its child's start on this id (through
     /// its recorded call), so it is what keeps a redriven spawn from starting
     /// a second child: it moves only when the command's position in the run
     /// moves.
@@ -300,14 +300,13 @@ mod tests {
         );
     }
 
-    /// A session id that itself carries `:` — the shape every spawned child's
-    /// session takes (`session:subagent:{call_id}`,
-    /// `crates/lash-subagents/src/rlm.rs`) — round-trips through the typed
+    /// A session id that itself carries `:` — the shape a spawned child's
+    /// session takes (`session:child:{call_id}`) — round-trips through the typed
     /// opener untouched and mints an identity that cannot alias a different
     /// split of the same bytes.
     #[test]
     fn a_delimiter_bearing_session_id_round_trips() {
-        let spawned_session = "session:subagent:lashlang:turn:1:x:1:y";
+        let spawned_session = "session:child:lashlang:turn:1:x:1:y";
         let scope = ExecutionScope::turn(spawned_session, "turn-1");
         let opener =
             EffectOpener::for_scope(&AdmittedScope::new(scope)).expect("a turn is an opener");
@@ -321,7 +320,7 @@ mod tests {
         assert_ne!(
             leaf,
             LashlangHostIdentities::cell(
-                EffectOpener::turn("session:subagent:lashlang:turn:1:x:1", "y:turn-1"),
+                EffectOpener::turn("session:child:lashlang:turn:1:x:1", "y:turn-1"),
                 "exec-code:1",
             )
             .call_id(0),

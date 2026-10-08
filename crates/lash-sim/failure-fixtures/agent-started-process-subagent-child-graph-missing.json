@@ -6,11 +6,11 @@
   "max_boundaries": 32,
   "mutation": {
     "contract_execution_field": {
-      "contract": "agent.started_process_subagent_spawn",
+      "contract": "agent.started_process_child_spawn",
       "pointer": "/result/graph_facts/child_session_exec_completed_count",
       "replacement": 0
     }
   },
-  "expected_oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_started_process_labeled_subagent_spawn",
+  "expected_oracle_id": "sim.oracle.scenario.agent-contract.v1:agent_scenario_started_process_labeled_child_spawn",
   "expected_reason_contains": "fixed-source replay validation"
 }

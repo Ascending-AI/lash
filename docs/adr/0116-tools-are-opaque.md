@@ -14,7 +14,7 @@ whose execution Lash owns. Giving a body a controller would let it create
 durable records inside an attempt and make cancellation and recovery depend on
 unrecorded body execution. Parallel calls need independently started attempts
 in one logical Run ([ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)).
-A subagent spawn also needs a process identity the body cannot mint, a durable
+A child-session spawn also needs a process identity the body cannot mint, a durable
 terminal, cancellation and protection against pruning during recovery.
 
 ## Decision
@@ -206,7 +206,7 @@ store-side tool launch log.
 `CancelExternalWork` records cancellation of the owned process before releasing
 its consumer hold. `Ignore` releases only observer interest. A terminal that
 wins the decision issues no cancel. The cancel command derives from the Lash
-call identity. Session-lifetime subagents keep their independent lifetime when
+call identity. Session-lifetime child sessions keep their independent lifetime when
 the observing turn cancels; `processes.await` uses `Ignore`. Process scope-end
 lifetime rules still apply.
 
@@ -246,19 +246,21 @@ refusal, beside the completed tool call. Intent realization fires the
 child-process trace hook when supplied. The model receives the child's
 projected value, failure or cancellation.
 
-### 4. `spawn_agent`
+### 4. Delegation tools
 
-`lash-subagents` registers ordinary providers for `spawn_agent` and, in child
-sessions, `submit_error`. Preparation checks depth, capability and output schema,
-captures parent policy and any `ParentFork` initialization, and records the child
-input. Execution declares one `SessionTurn` process with definition key
-`lash-subagent-session-turn`, stable start identity and final-value projection,
-and returns Pending on its terminal source.
+Lash ships no spawn tool
+([ADR 0134](0134-creating-a-session-is-explicit-only-a-fork-clones.md)). A
+host's delegation tool is an ordinary provider; `examples/delegation` shows one
+on the facade alone. Its preparation checks the call's output schema and records
+the child's create request, which states the child's spec, tool access and the
+plugin's own namespace and reads nothing of the parent. Execution declares one
+`SessionTurn` process with the host's definition key, a stable start identity
+and final-value projection, and returns Pending on its terminal source.
 
 A process-owned spawn uses the session that originated its process chain as
 parent and records the process as cause. A host-originated chain cannot fabricate
-a parent session; `ParentFork` also refuses without a parent conversation.
-Handles and durable composition use `processes.start` and `processes.await`.
+a parent session. Handles and durable composition use `processes.start` and
+`processes.await`.
 
 ### 5. Host operations
 
@@ -300,9 +302,10 @@ folding. The standard plugin tests the configuration ceiling.
 `crates/lash-conformance/src/conformance/declared_start.rs` covers launch
 crashes, discarded retries, refusal, early terminal, cancellation, scope close,
 retention, decoded identity refusal, child metadata and overlapping spawns.
-`crates/lash-subagents/tests/declared_start.rs` registers them on the
-production runtime, including stable launch and cancel and immutable
-completion and authority.
+`crates/lash-durable-test/tests/declared_start.rs` and
+`declared_start_crash_laws.rs` run them through a host's send() on the core's
+served node with the delegation example's tool, including stable launch and
+cancel and immutable completion and authority.
 
 #### 7.4 Compile-fail fixtures
 
@@ -315,7 +318,7 @@ start and a pending outcome without ordinary intents.
 
 Process engines own executable process bodies. Language aggregates compose
 recorded calls and process operations. Hosts never execute a durable process;
-a custom host subagent tool is an ordinary provider returning a
+a host's delegation tool is an ordinary provider returning a
 `DeclaredStart`. Process ancestry and lifetimes follow
 [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md).
 `crates/lash-core-execution/src/tool_provider.rs`, `tool_intent.rs` and
@@ -329,5 +332,5 @@ The tool API gives bodies one attempt context and explicit result modes. The
 Run owns admission, launch, terminal sources, cancellation, retention and
 recovery. Independent attempts supply parallel execution without nested body
 dispatch. `batch` costs no executable wrapper execution, while its model
-presentation remains one call and result. A host-defined subagent uses the same
-declared start path as `spawn_agent`.
+presentation remains one call and result. A host's delegation tool uses the same
+declared start path as any other start.

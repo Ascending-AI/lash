@@ -183,8 +183,8 @@ pub struct ForkSessionRequest {
     pub relation: SessionRelation,
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
     /// The config the fork records: the forked revision's recorded config in
-    /// full, model, execution controls, generation, tool access, subagent
-    /// authority and plugin configuration alike (FIG-4594). It is the new
+    /// full, model, execution controls, generation, tool access and plugin
+    /// configuration alike (FIG-4594). It is the new
     /// session's own head, so its `config_revision` starts at `0`.
     pub config: crate::PersistedSessionConfig,
 }

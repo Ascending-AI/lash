@@ -49,11 +49,11 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
     ContractFactSpec {
         spec: contract_spec(
             AGENT_SCENARIO_CONTRACTS,
-            "agent.started_process_subagent_spawn",
+            "agent.started_process_child_spawn",
         ),
-        fact: "agent_started_process_subagent_spawn_execution",
+        fact: "agent_started_process_child_spawn_execution",
         assertion: "Agent facade starts a Lashlang process that spawns a default subagent, preserves the labeled child-session graph, and returns the typed child value",
-        check: check_agent_started_process_subagent_spawn,
+        check: check_agent_started_process_child_spawn,
         extras_before: &[],
         extras_after: &[],
     },
@@ -218,7 +218,7 @@ fn check_agent_durable_input_suspension_resolution(
     }))
 }
 
-fn check_agent_started_process_subagent_spawn(
+fn check_agent_started_process_child_spawn(
     result: &Value,
     contract: &'static str,
 ) -> Result<Value, String> {

@@ -11,7 +11,7 @@ Most agent stacks treat the LLM as the runtime and stitch state around it — a 
 - **Durable per-turn commits** — every completed turn lands as one atomic `RuntimeCommit` against a `SessionGraph`. Effects are the replay boundary; turns are the semantic commit boundary.
 - **Workflow-host integration** — a sans-IO turn machine behind one `EffectHost` boundary. Lash's durable engine runs it over the SQLite or PostgreSQL store, exposes durable exact-turn cancellation and terminal attachment through `TurnWorkDriver`, and commits each turn once.
 - **Two execution modes, one commit unit** — `standard` uses native provider tool-calling with concurrent dispatch; `rlm` runs model-authored TypeScript, lowered into the `lashlang` IR, in resettable worker processes where every effect crosses the host. Language limits bound guest authority and processes contain native crashes; OS confinement belongs to the host.
-- **Tool providers and plugins** — ordinary host operations are `ToolProvider`s, delivered at least once and keyed for idempotency on the `call_id()` lash mints for each call; plugins add runtime/session behavior such as prompts, planning, memory, subagents, history transforms, UI activity, catalog policy, and tool-output budgeting. Hosts compose only what they embed.
+- **Tool providers and plugins** — ordinary host operations are `ToolProvider`s, delivered at least once and keyed for idempotency on the `call_id()` lash mints for each call; plugins add runtime/session behavior such as prompts, planning, memory, delegation, history transforms, UI activity, catalog policy, and tool-output budgeting. Hosts compose only what they embed.
 - **Provider portability** — Anthropic, OpenAI Responses, any OpenAI-compatible Chat Completions endpoint, OpenAI Codex, and Google Gemini / Code Assist. MCP servers attach through `lash-plugin-mcp`.
 - **Tracing as a first-class sink** — attach a `TraceSink` for structured turn, tool, LLM, prompt, and usage records. Bundled JSONL sink; optional OpenTelemetry export through a host-installed `OtelTelemetry` adapter (`lash::tracing`), whose span, attribute and metric contract is published in `crates/lash/docs/instrumentation-contract.md`.
 
@@ -25,6 +25,12 @@ opens a Lash session per chat, and resumes browser observation with durable
 cursors. It carries Standard and RLM turns, durable processes, triggers and cron.
 The upgrade node and external consumer remain structural harness adapters for
 upgrade and public API proofs.
+
+Lash ships no subagent implementation: creating a session is explicit and only
+a fork clones ([ADR 0134](docs/adr/0134-creating-a-session-is-explicit-only-a-fork-clones.md)).
+`examples/delegation` shows a host-written delegation tool on the facade alone:
+it creates a child session with explicit input, runs it and routes its result
+back to the calling turn.
 
 ```bash
 OPENROUTER_API_KEY=sk-or-... just agent-workbench 3000

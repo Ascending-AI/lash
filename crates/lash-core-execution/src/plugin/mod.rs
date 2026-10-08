@@ -69,7 +69,7 @@ pub use config::{
     AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,
     ConfigCommandDescriptor, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, ConfigRegistry,
     ConfigSubmitError, ConfigTransaction, ConfigWire, CoreConfigOwner, CoreConfigRefusal,
-    CreationConfigError, CreationFacts, NoRunOptions, OwnerChange, PluginConfig,
+    CreationConfigError, NoRunOptions, OwnerChange, PluginConfig,
 };
 pub use error::{
     PluginError, PluginErrorClass, ToolIntentCommandFailure, ToolIntentRuntimeFailure,
@@ -129,11 +129,10 @@ pub use services::{PersistentRuntimeServices, PluginOperationInvokeError, Runtim
 pub use session_obj::PluginSession;
 pub use session_types::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
-    OpenAgentFrameOutcome, OpenAgentFrameRequest, PluginOwned, SESSION_PLUGIN_INIT_MAX_BYTES,
-    SessionCreateRequest, SessionHandle, SessionLineage, SessionObservedProcessOutcome,
-    SessionObservedProcessReceipt, SessionObserverIntent, SessionPluginInit, SessionPluginSource,
-    SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess, SessionToolAccessError,
-    SubagentSessionContext, UnstatedSessionConfig,
+    OpenAgentFrameOutcome, OpenAgentFrameRequest, PluginOwned, SessionCreateRequest, SessionHandle,
+    SessionLineage, SessionObservedProcessOutcome, SessionObservedProcessReceipt,
+    SessionObserverIntent, SessionRelation, SessionSnapshot, SessionStartPoint, SessionToolAccess,
+    SessionToolAccessError, UnstatedSessionConfig,
 };
 pub use state::{
     FrontierRefusal, FrontierStep, HookCause, HookOccurrence, KeyRejection,

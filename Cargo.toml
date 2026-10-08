@@ -39,7 +39,6 @@ members = [
     "crates/lash-provider-google",
     "crates/lash-provider-openai",
     "crates/lash-sim",
-    "crates/lash-subagents",
     "crates/lash-perf",
     "crates/lash-regress",
     "crates/lashlang",
@@ -52,6 +51,7 @@ members = [
     "examples/toolbench",
     "examples/workflow-graph-roundtrip",
     "examples/integrator-contract",
+    "examples/delegation",
     "examples/e2e-consumer",
     "crates/transcript-contract",
     "runbooks/rlm-smoke",
@@ -89,7 +89,6 @@ default-members = [
     "crates/lash-plugin-mcp",
     "crates/lash-plugin-process-controls",
     "crates/lash-plugin-standard-compaction",
-    "crates/lash-subagents",
 ]
 resolver = "3"
 
@@ -302,7 +301,9 @@ lash-sansio = { package = "lash-internal-sansio", path = "crates/lash-sansio", v
 lash-store-sql = { package = "lash-internal-store-sql", path = "crates/lash-store-sql", version = "=0.0.0-dev" }
 lash-durable = { package = "lash-internal-durable", path = "crates/lash-durable", version = "=0.0.0-dev" }
 lash-durable-test = { package = "lash-internal-durable-test", path = "crates/lash-durable-test" }
-lash-subagents = { package = "lash-internal-subagents", path = "crates/lash-subagents", version = "=0.0.0-dev" }
+# The facade-only delegation example (ADR 0134): internal harnesses spawn
+# child sessions through it, as a host would.
+delegation = { path = "examples/delegation" }
 lash-tool-support = { package = "lash-internal-tool-support", path = "crates/lash-tool-support", version = "=0.0.0-dev" }
 lash-trace = { package = "lash-internal-trace", path = "crates/lash-trace", version = "=0.0.0-dev" }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "crates/lash-sqlite-store", version = "=0.0.0-dev" }

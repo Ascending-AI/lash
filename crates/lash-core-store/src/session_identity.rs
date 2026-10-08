@@ -590,18 +590,6 @@ impl<'de> Deserialize<'de> for SessionToolAccess {
             .map_err(serde::de::Error::custom)
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SubagentSessionContext {
-    pub capability: String,
-    pub depth: u8,
-}
-
-impl SubagentSessionContext {
-    /// Maximum child depth used by spawn admission and prompt rendering.
-    pub const MAX_DEPTH: u8 = 5;
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSnapshot {
     pub session_id: SessionId,

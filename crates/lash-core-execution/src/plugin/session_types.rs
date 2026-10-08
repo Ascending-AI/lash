@@ -2,7 +2,7 @@ pub use lash_core_store::session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, FrameNodeIdError,
     OpenAgentFrameOutcome, OpenAgentFrameRequest, SessionLineage, SessionObservedProcessOutcome,
     SessionObservedProcessReceipt, SessionObserverIntent, SessionRelation, SessionSnapshot,
-    SessionStartPoint, SessionToolAccess, SessionToolAccessError, SubagentSessionContext,
+    SessionStartPoint, SessionToolAccess, SessionToolAccessError,
 };
 
 use crate::SessionId;
@@ -27,160 +27,6 @@ pub struct SessionHandle {
 pub struct PluginOwned<T> {
     pub plugin_id: String,
     pub value: T,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionPluginSource {
-    CurrentHostFresh,
-    ParentFork(SessionPluginInit),
-}
-
-/// Serialized upper bound on a captured [`SessionPluginInit`]. The payload
-/// rides inside the durable creation request (process rows, trigger targets,
-/// remote protocol), so a single capture cannot exceed the row budget a
-/// durable journal carries. Captures larger than this are refused with
-/// [`PluginError::SessionInitTooLarge`] rather than truncated.
-pub const SESSION_PLUGIN_INIT_MAX_BYTES: usize = 8 * 1024 * 1024;
-
-/// The spawn site records exactly what the parent's [`PluginSession`]
-/// used to read when forking: the parent's plugin state, its tool-catalog
-/// overlay, and the
-/// exported tool state. The capture is taken once, travels inside the durable
-/// [`SessionCreateRequest`], and is what the materializer hands to plugin
-/// session construction — a worker restart between spawn and execution
-/// initializes byte-for-byte identically, and post-spawn parent mutations are
-/// invisible to the peer.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SessionPluginInit {
-    pub plugin_state: crate::PluginState,
-    pub tool_catalog_overlay: crate::ToolCatalogContribution,
-    pub tool_state: crate::ToolState,
-}
-
-impl SessionPluginInit {
-    /// Builds a bounded capture; payloads serialized beyond
-    /// [`SESSION_PLUGIN_INIT_MAX_BYTES`] are refused.
-    pub fn captured(
-        plugin_state: crate::PluginState,
-        tool_catalog_overlay: crate::ToolCatalogContribution,
-        tool_state: crate::ToolState,
-    ) -> Result<Self, PluginError> {
-        let init = Self {
-            plugin_state,
-            tool_catalog_overlay,
-            tool_state,
-        };
-        let bytes = serde_json::to_vec(&init).map_err(|err| {
-            PluginError::Session(format!("session plugin init failed to serialize: {err}"))
-        })?;
-        if bytes.len() > SESSION_PLUGIN_INIT_MAX_BYTES {
-            return Err(PluginError::SessionInitTooLarge {
-                bytes: bytes.len(),
-                limit: SESSION_PLUGIN_INIT_MAX_BYTES,
-            });
-        }
-        Ok(init)
-    }
-}
-
-#[cfg(test)]
-mod session_plugin_init_tests {
-    use super::{SESSION_PLUGIN_INIT_MAX_BYTES, SessionCreateRequest, SessionPluginInit};
-    use crate::PluginError;
-
-    #[test]
-    fn fig4669_creation_requires_an_explicit_complete_plugin_source() {
-        let request = SessionCreateRequest::child_session(
-            "parent",
-            crate::SessionStartPoint::Empty,
-            crate::PluginOptions::default(),
-        );
-        let mut omitted = serde_json::to_value(&request).expect("request");
-        omitted
-            .as_object_mut()
-            .expect("object")
-            .remove("plugin_source");
-        assert!(serde_json::from_value::<SessionCreateRequest>(omitted).is_err());
-
-        let mut uncaptured = serde_json::to_value(&request).expect("request");
-        uncaptured["plugin_source"] = serde_json::json!("parent_fork");
-        assert!(serde_json::from_value::<SessionCreateRequest>(uncaptured).is_err());
-
-        let mut ignored = serde_json::to_value(&request).expect("request");
-        ignored["plugin_init"] = serde_json::json!({});
-        assert!(serde_json::from_value::<SessionCreateRequest>(ignored).is_err());
-
-        let init = SessionPluginInit::captured(
-            crate::PluginState::default(),
-            crate::ToolCatalogContribution::default(),
-            crate::ToolState::default(),
-        )
-        .expect("capture");
-        let expected = serde_json::to_value(&init).expect("capture fixture");
-        let fork = request.with_plugin_source(super::SessionPluginSource::ParentFork(init));
-        let encoded = serde_json::to_value(&fork).expect("request fixture");
-        assert_eq!(encoded["plugin_source"]["parent_fork"], expected);
-        assert!(encoded.get("plugin_init").is_none());
-        let decoded: SessionCreateRequest = serde_json::from_value(encoded).expect("fork request");
-        let super::SessionPluginSource::ParentFork(captured) = decoded.plugin_source else {
-            panic!("a fork retains its capture");
-        };
-        assert_eq!(
-            serde_json::to_value(captured).expect("decoded capture"),
-            expected
-        );
-    }
-
-    #[test]
-    fn fig4669_subagent_context_cannot_record_parentage_or_a_second_depth_limit() {
-        let duplicate = serde_json::json!({
-            "capability": "peer", "depth": 1,
-            "parent_session_id": "different-parent", "max_depth": 3,
-        });
-        assert!(serde_json::from_value::<super::SubagentSessionContext>(duplicate).is_err());
-        let context: super::SubagentSessionContext =
-            serde_json::from_value(serde_json::json!({"capability": "peer", "depth": 1}))
-                .expect("only capability and depth are recorded");
-        assert_eq!(
-            serde_json::to_value(context).expect("context"),
-            serde_json::json!({"capability": "peer", "depth": 1})
-        );
-    }
-
-    fn oversize_plugin_state() -> crate::PluginState {
-        let mut plugins = std::collections::BTreeMap::new();
-        let mut values = std::collections::BTreeMap::new();
-        values.insert(
-            "blob".to_string(),
-            serde_json::Value::String("x".repeat(SESSION_PLUGIN_INIT_MAX_BYTES)),
-        );
-        plugins.insert(
-            "fat-plugin".to_string(),
-            crate::PluginNamespaceState {
-                format_version: lash_core_ids::FormatVersion::ONE,
-                generation: 0,
-                publication: Default::default(),
-                values,
-            },
-        );
-        crate::PluginState { plugins }
-    }
-
-    #[test]
-    fn capture_refuses_payloads_beyond_the_bound() {
-        let err = SessionPluginInit::captured(
-            oversize_plugin_state(),
-            crate::ToolCatalogContribution::default(),
-            crate::ToolState::default(),
-        )
-        .expect_err("oversize capture must be refused");
-
-        assert!(
-            matches!(err, PluginError::SessionInitTooLarge { .. }),
-            "expected SessionInitTooLarge, got {err:?}"
-        );
-    }
 }
 
 #[cfg(test)]
@@ -245,7 +91,6 @@ pub struct SessionCreateRequest {
     /// the key because a policy carries reasoning only with a minted model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<crate::ReasoningSelection>,
-    pub plugin_source: SessionPluginSource,
     #[serde(default)]
     pub initial_nodes: Vec<SessionAppendNode>,
     /// Host-selected process observer edges to apply after session creation.
@@ -256,8 +101,6 @@ pub struct SessionCreateRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observed_processes: Vec<crate::ProcessId>,
     pub tool_access: SessionToolAccess,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subagent: Option<SubagentSessionContext>,
     /// Plugin-owned options that configure plugin behavior at session
     /// creation time. Each plugin decodes only the entry keyed by its id.
     #[serde(default)]
@@ -271,11 +114,9 @@ impl SessionCreateRequest {
             relation: SessionRelation::Root,
             start,
             policy: None,
-            plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
             tool_access: SessionToolAccess::default(),
-            subagent: None,
             plugin_options,
             model: None,
             reasoning: None,
@@ -296,11 +137,9 @@ impl SessionCreateRequest {
             },
             start,
             policy: None,
-            plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
             tool_access: SessionToolAccess::default(),
-            subagent: None,
             plugin_options,
             model: None,
             reasoning: None,
@@ -322,11 +161,9 @@ impl SessionCreateRequest {
             },
             start,
             policy: Some(policy),
-            plugin_source: SessionPluginSource::CurrentHostFresh,
             initial_nodes: Vec::new(),
             observed_processes: Vec::new(),
             tool_access: SessionToolAccess::default(),
-            subagent: None,
             plugin_options,
             model: None,
             reasoning: None,
@@ -393,11 +230,6 @@ impl SessionCreateRequest {
         }
     }
 
-    pub fn with_plugin_source(mut self, plugin_source: SessionPluginSource) -> Self {
-        self.plugin_source = plugin_source;
-        self
-    }
-
     pub fn with_session_id(mut self, session_id: impl Into<SessionId>) -> Self {
         self.session_id = Some(session_id.into());
         self
@@ -420,11 +252,6 @@ impl SessionCreateRequest {
 
     pub fn with_tool_access(mut self, tool_access: SessionToolAccess) -> Self {
         self.tool_access = tool_access;
-        self
-    }
-
-    pub fn with_subagent_context(mut self, subagent: SubagentSessionContext) -> Self {
-        self.subagent = Some(subagent);
         self
     }
 

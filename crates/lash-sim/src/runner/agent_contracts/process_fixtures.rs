@@ -62,7 +62,7 @@ finish(result);
     Ok(result)
 }
 
-pub(super) async fn agent_started_process_subagent_spawn_execution()
+pub(super) async fn agent_started_process_child_spawn_execution()
 -> Result<Value, FixedScriptRunnerError> {
     let expected = json!({ "len": 2 });
     let result = facade_agent_process_execution_with_options(
@@ -74,7 +74,6 @@ pub(super) async fn agent_started_process_subagent_spawn_execution()
 const spawnChild = await processes.create({ dialect: "typescript", source: `const spawnChild = async () => {
   /** @label Spawn subagent with web search */
   const result = await agents.spawn({
-    capability: "default",
     task: "Finish \`{ len: chunk.length }\` using the seeded \`chunk\` variable.",
     seed: { chunk: ["a", "b"] },
     output: { len: "int" }

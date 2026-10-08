@@ -130,7 +130,7 @@ pub(crate) struct ScenarioWiring {
     pub(crate) compat_stream_server: bool,
     pub(crate) tool_catalog_observer: bool,
     pub(crate) llm_query_plugin: bool,
-    pub(crate) subagents_plugin: bool,
+    pub(crate) delegation_plugin: bool,
     pub(crate) oblique_tools_plugin: bool,
     pub(crate) large_tool_catalog_plugin: bool,
     pub(crate) workbench_trigger_plugin: bool,
@@ -142,7 +142,7 @@ impl ScenarioWiring {
         compat_stream_server: false,
         tool_catalog_observer: false,
         llm_query_plugin: false,
-        subagents_plugin: false,
+        delegation_plugin: false,
         oblique_tools_plugin: false,
         large_tool_catalog_plugin: false,
         workbench_trigger_plugin: false,
@@ -421,8 +421,8 @@ impl RuntimePerfScenario {
             Rlm,
             AgentScenario,
             "Measures subagent facade composition and child-session behavior.",
-            ["agent_scenario_started_process_labeled_subagent_spawn"],
-            wiring { subagents_plugin = true }
+            ["agent_scenario_started_process_labeled_child_spawn"],
+            wiring { delegation_plugin = true }
         ),
         runtime_perf_metadata!(
             RlmLlmQuery,
@@ -486,7 +486,7 @@ impl RuntimePerfScenario {
             Rlm,
             RlmProtocolScenario,
             "Measures mixed RLM protocol/Lashlang execution pressure without facade subagent ownership.",
-            wiring { subagents_plugin = true, oblique_tools_plugin = true }
+            wiring { delegation_plugin = true, oblique_tools_plugin = true }
         ),
         runtime_perf_metadata!(
             OpenAiCompatStream,
@@ -604,7 +604,7 @@ impl RuntimePerfScenario {
             AgentScenario,
             "Measures the composed parent/child turn future with active ingress, tool and process loops, cancellation observation, and timer/await-event durable waits.",
             ["agent_scenario_nested_process_start_await"],
-            wiring { subagents_plugin = true, workbench_trigger_plugin = true }
+            wiring { delegation_plugin = true, workbench_trigger_plugin = true }
         ),
         runtime_perf_metadata!(
             TurnStartGate,
@@ -661,7 +661,7 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures a complete parent and child agent turn through the runtime against the decorated SQLite persistence boundary.",
             Durable,
-            wiring { subagents_plugin = true },
+            wiring { delegation_plugin = true },
             false
         ),
         runtime_perf_metadata!(
@@ -726,7 +726,7 @@ impl RuntimePerfScenario {
             "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared SQLite persistence.",
             Durable,
             HighTraffic,
-            wiring { subagents_plugin = true, workbench_trigger_plugin = true },
+            wiring { delegation_plugin = true, workbench_trigger_plugin = true },
             false
         ),
         runtime_perf_metadata!(
@@ -737,7 +737,7 @@ impl RuntimePerfScenario {
             "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
             Durable,
             HighTraffic,
-            wiring { subagents_plugin = true, workbench_trigger_plugin = true },
+            wiring { delegation_plugin = true, workbench_trigger_plugin = true },
             false
         ),
         runtime_perf_metadata!(

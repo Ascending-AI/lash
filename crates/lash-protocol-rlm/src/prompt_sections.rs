@@ -12,20 +12,23 @@
 //! 3. `execution`: the channel's prose on writing and running programs,
 //!    titled by the dialect;
 //! 4. `declarations`: the generated declarations over exactly the offered
-//!    callable surface (tools, host surface) and the read-only variables;
-//! 5. `subagent`: what a subagent session may do, and how deep it sits.
+//!    callable surface (tools, host surface) and the read-only variables.
 //!
 //! Late, after the projected conversation and outside history, what the
 //! current call needs:
 //!
-//! 6. `bound_variables`: the values the session's programs have bound;
-//! 7. `finalization`: how to finish under the run's termination;
-//! 8. `required_output`: the contract a finish value must match;
-//! 9. `final_answer_format`: the presentation the answer is written in;
-//! 10. `context_budget`: the soft context budget, omitted without a
-//!     configured threshold or committed usage, its threshold clamped below
-//!     the context window, and read against the previous turn's committed
-//!     prompt usage.
+//! 5. `bound_variables`: the values the session's programs have bound;
+//! 6. `finalization`: how to finish under the run's termination;
+//! 7. `required_output`: the contract a finish value must match;
+//! 8. `final_answer_format`: the presentation the answer is written in;
+//! 9. `context_budget`: the soft context budget, omitted without a
+//!    configured threshold or committed usage, its threshold clamped below
+//!    the context window, and read against the previous turn's committed
+//!    prompt usage.
+//!
+//! A session's role among others is not the protocol's concern: a host
+//! plugin that creates child sessions registers its own section for them
+//! (ADR 0134).
 //!
 //! `intro` and `guidance` also render for a compaction's summarizer call,
 //! which offers no tools and runs no code. The declarations never depend on
@@ -53,7 +56,6 @@ pub mod section_keys {
     pub const GUIDANCE: &str = "guidance";
     pub const EXECUTION: &str = "execution";
     pub const DECLARATIONS: &str = "declarations";
-    pub const SUBAGENT: &str = "subagent";
     pub const BOUND_VARIABLES: &str = "bound_variables";
     pub const FINALIZATION: &str = "finalization";
     pub const REQUIRED_OUTPUT: &str = "required_output";
@@ -148,17 +150,6 @@ pub(crate) fn execution_section(
     }
 }
 
-/// The subagent description: what the session may do as a subagent and how
-/// deep it sits.
-fn subagent_description(subagent: &lash_core::SubagentSessionContext) -> String {
-    format!(
-        "Subagent capability: {}. Depth: {}/{}.",
-        subagent.capability,
-        subagent.depth,
-        lash_core::SubagentSessionContext::MAX_DEPTH
-    )
-}
-
 fn text_or_omit(text: impl AsRef<str>) -> SectionText {
     let text = text.as_ref().trim();
     if text.is_empty() {
@@ -241,15 +232,6 @@ fn declarations(
         ));
     }
     Ok(text_or_omit(parts.join("\n\n")))
-}
-
-fn subagent(
-    _: &RlmSectionBehaviour,
-    input: &PromptInput<'_>,
-) -> Result<SectionText, PromptRenderError> {
-    Ok(input.subagent().map_or(SectionText::Omit, |subagent| {
-        SectionText::Text(subagent_description(subagent))
-    }))
 }
 
 fn bound_variables(
@@ -365,12 +347,11 @@ pub(crate) fn register_sections(
     use PromptPlacement::{CurrentContext, InitialInstructions};
     use section_keys::*;
     let behaviour = Arc::new(behaviour);
-    let sections: [(&str, PromptPlacement, bool, Render); 10] = [
+    let sections: [(&str, PromptPlacement, bool, Render); 9] = [
         (INTRO, InitialInstructions, true, intro),
         (GUIDANCE, InitialInstructions, true, guidance),
         (EXECUTION, InitialInstructions, false, execution),
         (DECLARATIONS, InitialInstructions, false, declarations),
-        (SUBAGENT, InitialInstructions, false, subagent),
         (BOUND_VARIABLES, CurrentContext, false, bound_variables),
         (FINALIZATION, CurrentContext, false, finalization),
         (REQUIRED_OUTPUT, CurrentContext, false, required_output),

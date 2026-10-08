@@ -205,14 +205,12 @@ impl EmbeddedRuntimeBuilder {
     fn resolve_plugins(
         &self,
         state: &RuntimeSessionState,
-        parent_session_id: Option<SessionId>,
     ) -> Result<Arc<PluginSession>, SessionError> {
         match &self.plugin_source {
             PluginSource::Session(session) => Ok(Arc::clone(session)),
             PluginSource::Host(host) => {
                 let authority = crate::plugin::SessionAuthorityContext {
                     tool_access: state.authority.tool_access.clone(),
-                    subagent: state.authority.subagent.clone(),
                     plugin_config: state.admitted_plugin_config(),
                 };
                 let request = match state.plugin_state() {
@@ -227,10 +225,7 @@ impl EmbeddedRuntimeBuilder {
                     .with_trace_runtime(self.core.tracing.clone())
                     .with_execution_budgets(self.core.control.execution_budgets.clone())
                     .isolated_registry()
-                    .defer_session(PluginSessionRequest {
-                        parent_session_id,
-                        ..request
-                    })
+                    .defer_session(request)
                     .map_err(SessionError::Plugin)
             }
         }
@@ -243,10 +238,7 @@ impl EmbeddedRuntimeBuilder {
                 .map_err(crate::CoreConfigOwner::creation_refusal)
                 .map_err(SessionError::SessionConfigRefused)?;
         }
-        let parent_session_id =
-            super::lifecycle::recorded_parent_session_id(self.store.as_ref()).await?;
-        let is_root_session = parent_session_id.is_none();
-        let plugins = self.resolve_plugins(&state, parent_session_id)?;
+        let plugins = self.resolve_plugins(&state)?;
         if created {
             // A new session records what every installed owner resolves for
             // it, under the protocol its plugins registered (FIG-4379).
@@ -267,8 +259,6 @@ impl EmbeddedRuntimeBuilder {
             state.authority.plugin_config = plugins.host().resolve_creation_plugin_config(
                 plugins.host().protocol_plugin_id(),
                 &crate::PluginOptions::default(),
-                None,
-                is_root_session,
                 &admission,
             )?;
             plugins.adopt_plugin_admission(admission);

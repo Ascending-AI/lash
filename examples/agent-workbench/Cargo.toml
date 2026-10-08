@@ -27,7 +27,8 @@ chrono-tz = { workspace = true }
 croner = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
-lash = { workspace = true, features = ["rlm", "sqlite", "postgres", "mcp", "subagents", "http-transport", "openai"] }
+lash = { workspace = true, features = ["rlm", "sqlite", "postgres", "mcp", "http-transport", "openai"] }
+delegation = { workspace = true }
 # Opt-in provider wire test fixtures; never selected by the teaching host.
 lash-sim = { path = "../../crates/lash-sim", optional = true }
 percent-encoding = { workspace = true }

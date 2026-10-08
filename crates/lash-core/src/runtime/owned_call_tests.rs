@@ -134,7 +134,6 @@ async fn admit(world: &World) -> OwnedAdmission {
             plan: PromptPlan::default(),
             config: crate::AdmittedPluginConfig::default(),
             frame: None,
-            subagent: None,
             session: None,
         },
         request: world.request.clone(),

@@ -29,6 +29,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "croner",
+ "delegation",
  "dotenvy",
  "futures-util",
  "http",
@@ -891,6 +892,16 @@ name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
+
+[[package]]
+name = "delegation"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "derive_builder"
@@ -2148,6 +2159,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "chrono",
+ "delegation",
  "flate2",
  "lash-internal-core",
  "lash-internal-core-execution",
@@ -2613,28 +2625,6 @@ name = "lash-internal-store-sql"
 version = "0.0.0-dev"
 
 [[package]]
-name = "lash-internal-subagents"
-version = "0.0.0-dev"
-dependencies = [
- "async-trait",
- "jsonschema",
- "lash-internal-conformance",
- "lash-internal-core",
- "lash-internal-core-worker",
- "lash-internal-lashlang-runtime",
- "lash-internal-plugin-process-controls",
- "lash-internal-protocol-rlm",
- "lash-internal-rlm-types",
- "lash-internal-sansio",
- "lash-internal-tool-support",
- "lash-internal-typescript",
- "serde",
- "serde_json",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
 name = "lash-internal-tool-support"
 version = "0.0.0-dev"
 dependencies = [
@@ -2777,6 +2767,7 @@ dependencies = [
  "chrono",
  "clap",
  "crc32fast",
+ "delegation",
  "dhat",
  "flate2",
  "futures-util",
@@ -2798,7 +2789,6 @@ dependencies = [
  "lash-internal-rlm-types",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
- "lash-internal-subagents",
  "lash-internal-typescript",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",
@@ -2861,7 +2851,6 @@ dependencies = [
  "lash-internal-s3-store",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
- "lash-internal-subagents",
  "lash-internal-tool-support",
  "lash-internal-trace",
  "lash-internal-typescript",
@@ -2890,6 +2879,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chrono",
+ "delegation",
  "fastrand",
  "insta",
  "lash-internal-conformance",
@@ -2914,7 +2904,6 @@ dependencies = [
  "lash-internal-s3-store",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
- "lash-internal-subagents",
  "lash-internal-typescript",
  "lash-internal-vm-broker",
  "lash-internal-vm-client",

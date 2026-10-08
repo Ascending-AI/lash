@@ -151,7 +151,7 @@ pub enum Kind {
     Tool,
     /// A code / cell execution block.
     Exec,
-    /// Child work was created (process, subagent, child session).
+    /// Child work was created (process or child session).
     Spawn,
     /// A wait was registered on a handle or promise.
     Await,

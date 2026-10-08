@@ -623,14 +623,6 @@
     "peak_bytes": 99799040,
     "samples": 47
   },
-  "lash-internal-subagents/lash_subagents": {
-    "cpu_count": 1,
-    "memory_kb": 524288,
-    "p95_cores": 1.06,
-    "p99_peak_bytes": 122564608,
-    "peak_bytes": 122564608,
-    "samples": 25
-  },
   "lash-internal-tool-support/lash_tool_support": {
     "cpu_count": 1,
     "memory_kb": 524288,

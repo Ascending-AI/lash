@@ -701,7 +701,7 @@ pub use plugin::{
     AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigCommandCatalog,
     ConfigCommandDescriptor, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, ConfigRegistry,
     ConfigSubmitError, ConfigTransaction, ConfigWire, CoreConfigOwner, CoreConfigRefusal,
-    CreationConfigError, CreationFacts, NoRunOptions, OwnerChange, PluginConfig,
+    CreationConfigError, NoRunOptions, OwnerChange, PluginConfig,
 };
 pub use plugin::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, AppendSessionNodesOutcome,
@@ -710,12 +710,11 @@ pub use plugin::{
     PluginExtensions, PluginNamespaceState, PluginOptions, PluginState, PluginStateEffect,
     PluginStateError, PluginStateView, PluginTransitionBase, PluginTransitionId,
     PluginTransitionRecord, PluginTransitionRequest, ProcessEngineContributionContext,
-    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SESSION_PLUGIN_INIT_MAX_BYTES,
-    SessionCreateRequest, SessionGraphService, SessionLineage, SessionPluginInit,
-    SessionPluginSource, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
+    ProtocolBeforeLlmCallContext, ProtocolLlmCallAction, SessionCreateRequest, SessionGraphService,
+    SessionLineage, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
     SessionStateService, SessionToolAccess, SessionToolAccessError, StateCommands,
-    SubagentSessionContext, UnstatedSessionConfig, durable_identity_conflict,
-    is_durable_identity_conflict, is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
+    UnstatedSessionConfig, durable_identity_conflict, is_durable_identity_conflict,
+    is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 pub use provider::{
@@ -933,12 +932,9 @@ pub mod core_internal {
     /// the runtime, from committed state, at the call's admission.
     pub fn prompt_cut(
         parts: crate::plugin::prompt::PromptCutParts,
-        subagent: Option<crate::SubagentSessionContext>,
         protocol: Option<crate::plugin::prompt::ProtocolPromptFacts>,
     ) -> crate::plugin::prompt::PromptCut {
-        crate::plugin::prompt::PromptCut::new(parts)
-            .with_subagent(subagent)
-            .with_protocol_facts(protocol)
+        crate::plugin::prompt::PromptCut::new(parts).with_protocol_facts(protocol)
     }
 
     /// Compose a model call's prompt (ADR 0133 §5 to §7): the one route from

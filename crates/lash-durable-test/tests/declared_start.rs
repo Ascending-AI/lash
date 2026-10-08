@@ -38,8 +38,8 @@ use served::{Tier, WATCHDOG};
 const PARENT: &str = "declared-start law: spawn the children";
 const PARENT_DONE: &str = "declared-start parent done";
 
-/// The definition key of the subagent child's `SessionTurn` process.
-const SUBAGENT_DEFINITION: &str = "lash-subagent-session-turn";
+/// The definition key of a delegated child's `SessionTurn` process.
+const CHILD_DEFINITION: &str = delegation::SESSION_TURN_DEFINITION;
 
 /// How often a law re-reads the registry for a fact nothing ticks on. A
 /// cadence, not a deadline: a wait that never ends is a hang, which the
@@ -176,7 +176,7 @@ impl Script {
                     served::call(
                         &format!("declared-start-spawn-{index}"),
                         "spawn_agent",
-                        serde_json::json!({ "task": child_task(index), "capability": "default" }),
+                        serde_json::json!({ "task": child_task(index) }),
                     )
                 });
                 let echoes = (0..siblings).map(|index| {
@@ -201,12 +201,7 @@ impl Script {
             }
             Producer::PromiseAll => {
                 let spawns = (0..self.children)
-                    .map(|index| {
-                        format!(
-                            "agents.spawn({{ task: {:?}, capability: \"default\" }})",
-                            child_task(index)
-                        )
-                    })
+                    .map(|index| format!("agents.spawn({{ task: {:?} }})", child_task(index)))
                     .collect::<Vec<_>>()
                     .join(", ");
                 served::cell(&format!(
@@ -589,8 +584,8 @@ const PARENT_FACTS: &str = "recorded-by-the-parent";
 /// or runs under it took the node's default for a fact its parent recorded.
 const NODE_FACTS_DEFAULT: &str = "the-node-default";
 
-/// The owner of the [`FACTS`] namespace: a creator's value, else the
-/// parent's recorded value for a child, else this deployment's default.
+/// The owner of the [`FACTS`] namespace: a creator's value, else this
+/// deployment's default. No parent's value reaches it (ADR 0134).
 struct FactsOwner;
 
 /// Its recorded namespace is [`recorded_facts`]'s shape.
@@ -603,12 +598,9 @@ impl lash_core::ConfigOwner for FactsOwner {
     fn create(
         &self,
         input: Option<serde_json::Value>,
-        facts: lash_core::CreationFacts<'_, serde_json::Value>,
     ) -> Result<Option<serde_json::Value>, String> {
         Ok(Some(
-            input
-                .or_else(|| facts.parent.cloned())
-                .unwrap_or_else(|| recorded_facts(NODE_FACTS_DEFAULT)),
+            input.unwrap_or_else(|| recorded_facts(NODE_FACTS_DEFAULT)),
         ))
     }
 
@@ -700,7 +692,7 @@ fn recorded_facts(value: &str) -> serde_json::Value {
 
 // --- the world ---------------------------------------------------------------
 
-/// How a law's subagents live.
+/// How a law's delegated children live.
 #[derive(Clone, Copy)]
 enum Lifetimes {
     /// Until the turn that spawned them ends.
@@ -753,21 +745,25 @@ struct World {
     facts: Arc<FactsFactory>,
 }
 
-fn subagents(lifetimes: Lifetimes) -> Arc<dyn lash_core::facade_support::PluginFactory> {
-    let registry = Arc::new(lash::subagents::CapabilityRegistry::new().with(Arc::new(
-        lash::subagents::StaticCapability::new(
-            "default",
-            lash_core::facade_support::SessionSpec::inherit(),
-        ),
-    )));
-    Arc::new(match lifetimes {
+/// The host's delegation tool (`examples/delegation`): children are created
+/// from the parent's spec, stated explicitly, and run RLM when the parent does.
+fn delegation(
+    lifetimes: Lifetimes,
+    rlm: bool,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    let factory = match lifetimes {
         Lifetimes::Starter => {
-            lash::subagents::SubagentsPluginFactory::new(registry, lash_core::lifetime::starter)
+            delegation::DelegationPluginFactory::new(served::spec(64), lash_core::lifetime::starter)
         }
-        Lifetimes::Session => lash::subagents::SubagentsPluginFactory::new(registry, |cx| {
+        Lifetimes::Session => delegation::DelegationPluginFactory::new(served::spec(64), |cx| {
             cx.session()
                 .map_or(lash_core::Lifetime::Detached, lash_core::Lifetime::Until)
         }),
+    };
+    Arc::new(if rlm {
+        factory.with_rlm_children(lash::rlm::RlmFinalAnswerFormat::RawFinalValue)
+    } else {
+        factory
     })
 }
 
@@ -797,7 +793,12 @@ impl World {
                     } else {
                         lash::LashCore::standard_builder(backend.clone())
                     };
-                    let builder = builder.plugin(subagents(shape.lifetimes)).plugin(facts);
+                    let builder = builder
+                        .plugin(delegation(
+                            shape.lifetimes,
+                            shape.producer == Producer::PromiseAll,
+                        ))
+                        .plugin(facts);
                     if shape.producer == Producer::PromiseAll {
                         builder
                     } else {
@@ -868,7 +869,7 @@ impl World {
             .expect("the registry lists its processes")
     }
 
-    /// The subagent children the deployment registered.
+    /// The delegated children the deployment registered.
     async fn children(&self) -> Vec<ProcessRecord> {
         self.registered()
             .await
@@ -877,7 +878,7 @@ impl World {
                 matches!(
                     record.input.as_ref(),
                     lash_core::ProcessInput::SessionTurn { definition_key, .. }
-                        if definition_key == SUBAGENT_DEFINITION
+                        if definition_key == CHILD_DEFINITION
                 )
             })
             .collect()
@@ -1090,18 +1091,17 @@ async fn a_session_lifetime_subagent_survives_its_waiting_turn(tier: Tier) {
     world.shutdown().await;
 }
 
-/// A spawned child and the process that runs it run under the facts their
-/// parent recorded, not under the node's own default (FIG-4396).
+/// The process that runs a spawned child runs under the environment its
+/// start captured (FIG-4396), and the child session records only what its
+/// creator stated (ADR 0134).
 ///
 /// The parent's creator states [`PARENT_FACTS`]; the core installs the
 /// owner under [`NODE_FACTS_DEFAULT`]. The child's `SessionTurn` process
-/// captures the parent's recorded environment at its start, the node builds
-/// the process's own plugin runtime from it, and the child session it
-/// creates from that environment records, and runs under, the parent's
-/// value.
-async fn declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults(
-    tier: Tier,
-) {
+/// captures the parent's recorded environment at its start, and the node
+/// builds the process's own plugin runtime from it. The child session the
+/// process creates states no facts, so it records, and runs under, the
+/// owner's default: nothing of its parent's config reaches it.
+async fn declared_start_child_records_only_its_creators_facts(tier: Tier) {
     let Some(world) = World::new(
         tier,
         "recorded-facts",
@@ -1118,6 +1118,7 @@ async fn declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_d
     served::assert_answered("the parent", &output);
     assert_answered_the_child(&world, 0);
     let recorded = Some(recorded_facts(PARENT_FACTS));
+    let default = Some(recorded_facts(NODE_FACTS_DEFAULT));
 
     let child = world.only_child().await;
     let env_ref = child
@@ -1157,14 +1158,14 @@ async fn declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_d
     .expect("the child session recorded a head");
     assert_eq!(
         head.config.plugin_config.get(FACTS),
-        recorded.as_ref(),
-        "the child session recorded its parent's value, not the node's default"
+        default.as_ref(),
+        "the child session recorded the owner's default, not its parent's value"
     );
     let session_builds = world
         .facts
         .built_for(&lash_core::RuntimeOwner::Session(child_session).to_string());
     assert!(
-        !session_builds.is_empty() && session_builds.iter().all(|seen| *seen == recorded),
+        !session_builds.is_empty() && session_builds.iter().all(|seen| *seen == default),
         "the child session ran under its recorded value: {session_builds:?}"
     );
     world.shutdown().await;
@@ -1629,7 +1630,7 @@ async fn batch_of_spawns_overlaps(tier: Tier) {
 tiered_laws!(
     spawn_agent_record_carries_child_identity,
     a_session_lifetime_subagent_survives_its_waiting_turn,
-    declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults,
+    declared_start_child_records_only_its_creators_facts,
     declared_start_cancel_at_each_point,
     declared_start_discarded_retry_launches_nothing,
     declared_start_refusal_settles_the_call,

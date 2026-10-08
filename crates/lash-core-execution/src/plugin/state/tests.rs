@@ -283,8 +283,6 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
         .resolve_creation_plugin_config(
             None,
             &options,
-            None,
-            true,
             &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .unwrap_err();
@@ -669,15 +667,6 @@ fn plugin_formats_stamp_every_state_write() {
             encoded_config.namespace("inactive"),
             config.namespace("inactive")
         );
-        let init = crate::SessionPluginInit::captured(
-            encoded_state.clone(),
-            Default::default(),
-            Default::default(),
-        )
-        .unwrap();
-        let init: crate::SessionPluginInit =
-            rmp_serde::from_slice(&rmp_serde::to_vec_named(&init).unwrap()).unwrap();
-        assert_eq!(init.plugin_state, encoded_state);
         let options = crate::PluginOptions {
             plugins: encoded_config.namespaces().clone(),
         };
@@ -707,67 +696,6 @@ fn plugin_formats_stamp_every_state_write() {
         )
         .is_err()
     );
-}
-
-#[test]
-fn materialization_uses_spawn_capture_after_parent_changes_and_unregisters() {
-    use crate::plugin::*;
-
-    let host = PluginHost::empty();
-    let durable = PluginState {
-        plugins: BTreeMap::from([(
-            "absent-plugin".into(),
-            PluginNamespaceState {
-                format_version: lash_core_ids::FormatVersion::ONE,
-                generation: 17,
-                publication: Default::default(),
-                values: BTreeMap::from([("value".into(), serde_json::json!("at-spawn"))]),
-            },
-        )]),
-    };
-    let parent = host
-        .build_session(PluginSessionRequest {
-            tool_catalog_overlay: ToolCatalogContribution::remove_tools(["hidden-at-spawn"]),
-            tool_snapshot: Some(crate::ToolState::new(42, BTreeMap::new())),
-            ..PluginSessionRequest::rematerialization(
-                "parent",
-                &durable,
-                SessionAuthorityContext::default(),
-            )
-        })
-        .unwrap();
-    let init = parent.capture_fork_init().unwrap();
-    let mut later = parent.export_state();
-    let namespace = later.plugins.get_mut("absent-plugin").unwrap();
-    namespace.generation += 1;
-    namespace
-        .values
-        .insert("value".into(), serde_json::json!("after-spawn"));
-    parent.hydrate_state(&later).unwrap();
-    host.unregister_session(&"parent".into()).unwrap();
-    drop(parent);
-    let child = host
-        .isolated_registry()
-        .build_session(PluginSessionRequest {
-            parent_session_id: Some("parent".into()),
-            tool_catalog_overlay: init.tool_catalog_overlay.clone(),
-            tool_snapshot: Some(init.tool_state.clone()),
-            materialization: PluginSessionMaterializationRequest::Creation {
-                config: SessionAuthorityContext::default(),
-                seed_snapshot: Some(&init.plugin_state),
-            },
-            owner: crate::RuntimeOwner::Session("child".into()),
-        })
-        .unwrap();
-    assert!(child.forked_plugins());
-    let captured = child.capture_fork_init().unwrap();
-    assert_eq!(captured.plugin_state, init.plugin_state);
-    assert_eq!(
-        captured.tool_catalog_overlay.remove,
-        init.tool_catalog_overlay.remove
-    );
-    assert_eq!(captured.tool_state.generation, init.tool_state.generation);
-    assert_eq!(captured.tool_state.entries(), init.tool_state.entries());
 }
 
 #[test]

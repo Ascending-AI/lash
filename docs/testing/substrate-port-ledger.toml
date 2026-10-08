@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1595 rows over 866 files, 3963 laws.
-# By class: mechanical 164, semantic 111, delete 866, replace 454.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 7, P5 2.
-# By status: todo 403, ported 91, deleted 1101.
+# 1611 rows over 873 files, 3984 laws.
+# By class: mechanical 164, semantic 111, delete 871, replace 465.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 402, ported 91, deleted 1118.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -8439,9 +8439,9 @@ laws = [
   "rlm_spawn_defaults_single_capability_when_omitted",
   "spawn_agent_examples_render_as_parseable_typescript",
 ]
-disposition = "port"
-status = "todo"
-note = "the tests left run without an engine; the spawn laws run a child session turn: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail; ProcessActivation releases a kernel (session-turn) process idle without running it (runtime/actor/process/activation.rs pass)"
+disposition = "replaced-by:examples/delegation/src/tests.rs"
+status = "deleted"
+note = "FIG-5296 (ADR 0134) deleted the crate: lash ships no subagent implementation, and examples/delegation is a host's delegation tool on the facade alone (its own rows below name each test). The spawn laws this row owed run a child session turn through that tool: crates/lash-durable-test/tests/core_node_processes.rs::spawn_agent_child_runs_and_answers_its_parent on every tier, and the lash-sim agent.started_process_child_spawn and failed-child contracts; capability and live-parent-provider laws pinned inheritance the law forbids"
 
 [[row]]
 path = "crates/lash-subagents/tests/declared_start.rs"
@@ -24764,10 +24764,10 @@ lane = "L9t"
 laws = [
   "declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_child_runs_under_recorded_facts_on_a_worker_with_other_defaults"
+disposition = "replaced-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_child_records_only_its_creators_facts"
 status = "deleted"
 owed = "declared start child runs under recorded facts on a worker with other defaults, through send()"
-note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the recorded environment and the child session's builds carry the parent's facts over the node's other default; FIG-5251 restored the process-owner plugin half: the node builds the SessionTurn process's own plugin runtime under the recorded facts; FIG-5252 verified these restored assertions on both SQLite tiers"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: the recorded environment and the child session's builds carry the parent's facts over the node's other default; FIG-5251 restored the process-owner plugin half: the node builds the SessionTurn process's own plugin runtime under the recorded facts; FIG-5252 verified these restored assertions on both SQLite tiers; FIG-5296 (ADR 0134) inverted the facts half: a child records its own creator's facts, never its parent's, so the law is renamed declared_start_child_records_only_its_creators_facts"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -25467,3 +25467,243 @@ laws = [
 disposition = "covered-by:crates/lash-core-execution/src/direct.rs::direct_mid_conversation_system_messages_stay_feedback"
 status = "deleted"
 note = "FIG-5259 deleted DirectRequest.instructions; the instruction half is subject-deleted (a direct call's instructions are its purpose's sections, compaction_and_direct_calls_compose_only_their_own_purpose), and the feedback half is the renamed law"
+
+[[row]]
+path = "crates/lash-subagents/src/tests.rs"
+test = "static_capability_policy_fields_distinguish_inherit_set_and_clear"
+area = "subagents"
+needs = ["turn", "process"]
+class = "delete"
+lane = "P4"
+laws = [
+  "static_capability_policy_fields_distinguish_inherit_set_and_clear",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5296 (ADR 0134): capability policies inherited, set or cleared the parent's values; a child states its own spec and nothing inherits"
+
+[[row]]
+path = "crates/lash-subagents/src/tests.rs"
+test = "spawn_schema_is_strict_and_nameless"
+area = "subagents"
+needs = ["turn", "process"]
+class = "delete"
+lane = "P4"
+laws = [
+  "spawn_schema_is_strict_and_nameless",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5296 (ADR 0134): the schema belonged to the deleted spawn tool; the example's spawn_agent schema is the host's own, admitted like any tool's"
+
+[[row]]
+path = "crates/lash-subagents/src/tests.rs"
+test = "spawn_uses_live_parent_provider_when_selecting_subagent_model"
+area = "subagents"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "spawn_uses_live_parent_provider_when_selecting_subagent_model",
+]
+disposition = "replaced-by:examples/delegation/src/tests.rs::a_childs_request_states_only_the_hosts_configuration_and_the_call"
+status = "deleted"
+owed = "a child's create request states only the host's configuration and the call"
+note = "FIG-5296 (ADR 0134): a child reads nothing of its parent; its request states the host's configured spec and the call's arguments"
+
+[[row]]
+path = "crates/lash-subagents/src/tests.rs"
+test = "spawn_agent_examples_render_as_parseable_typescript"
+area = "subagents"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "spawn_agent_examples_render_as_parseable_typescript",
+]
+disposition = "replaced-by:examples/delegation/src/tests.rs::spawn_agent_examples_render_as_parseable_typescript"
+status = "deleted"
+owed = "spawn_agent examples render as parseable TypeScript"
+note = "FIG-5296 moved the law with the tool into the example"
+
+[[row]]
+path = "crates/lash-subagents/src/spawn_parent_tests.rs"
+test = "*"
+area = "subagents"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "a_process_spawn_parents_under_its_originator_session",
+  "a_host_originated_process_spawn_is_refused",
+  "a_parent_fork_spawn_inside_a_process_is_refused",
+  "a_session_spawn_parents_under_its_own_session",
+]
+disposition = "replaced-by:examples/delegation/src/tests.rs"
+status = "deleted"
+owed = "where a host's spawn parents its child"
+note = "FIG-5296 (ADR 0134) deleted the crate; where a spawn parents its child (ADR 0124 §6) is the host tool's rule, ported to the example"
+
+[[row]]
+path = "crates/lash-subagents/src/spawn_parent_tests.rs"
+test = "a_process_spawn_parents_under_its_originator_session"
+area = "subagents"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "a_process_spawn_parents_under_its_originator_session",
+]
+disposition = "replaced-by:examples/delegation/src/tests.rs::a_process_spawn_parents_under_its_originator_session"
+status = "deleted"
+owed = "a process spawn parents under its originator session"
+note = "FIG-5296 ported it to the example"
+
+[[row]]
+path = "crates/lash-subagents/src/spawn_parent_tests.rs"
+test = "a_host_originated_process_spawn_is_refused"
+area = "subagents"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "a_host_originated_process_spawn_is_refused",
+]
+disposition = "replaced-by:examples/delegation/src/tests.rs::a_host_originated_process_spawn_is_refused"
+status = "deleted"
+owed = "a host-originated process spawn is refused"
+note = "FIG-5296 ported it to the example"
+
+[[row]]
+path = "crates/lash-subagents/src/spawn_parent_tests.rs"
+test = "a_parent_fork_spawn_inside_a_process_is_refused"
+area = "subagents"
+needs = ["turn", "process"]
+class = "delete"
+lane = "P4"
+laws = [
+  "a_parent_fork_spawn_inside_a_process_is_refused",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5296 (ADR 0134): a spawn creates its child explicitly and never forks its parent; only a catalog fork clones (crates/lash-durable-test/tests/core_node_processes.rs::a_fork_starts_with_its_parents_full_configuration)"
+
+[[row]]
+path = "crates/lash-subagents/src/spawn_parent_tests.rs"
+test = "a_session_spawn_parents_under_its_own_session"
+area = "subagents"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "a_session_spawn_parents_under_its_own_session",
+]
+disposition = "replaced-by:examples/delegation/src/tests.rs::a_session_spawn_parents_under_its_own_session"
+status = "deleted"
+owed = "a session spawn parents under its own session"
+note = "FIG-5296 ported it to the example"
+
+[[row]]
+path = "crates/lash-subagents/src/outcome_tests.rs"
+test = "*"
+area = "subagents"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "spawn_rejects_child_depth_past_limit",
+]
+disposition = "replaced-by:examples/delegation/src/tests.rs::a_delegated_child_may_fail_its_task_and_may_not_delegate"
+status = "deleted"
+owed = "a delegated child may fail its task and may not delegate"
+note = "FIG-5296 (ADR 0134): the depth limit read the core subagent context, which is deleted; the example's child, marked by its plugin's own namespace, is never offered spawn_agent, so delegation cannot recurse"
+
+[[row]]
+path = "crates/lash-core-execution/src/plugin/session_types.rs"
+test = "*"
+area = "session-creation"
+needs = ["turn", "process"]
+class = "delete"
+lane = "P4"
+laws = [
+  "capture_refuses_payloads_beyond_the_bound",
+  "fig4669_creation_requires_an_explicit_complete_plugin_source",
+  "fig4669_subagent_context_cannot_record_parentage_or_a_second_depth_limit",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5296 (ADR 0134) deleted SessionPluginInit, SessionPluginSource and SubagentSessionContext: a create request states its plugin options, nothing captures another session's plugin state, and core has no subagent context; the file's other tests are not ledger subjects"
+
+[[row]]
+path = "crates/lash-core-execution/src/plugin/state/tests.rs"
+test = "*"
+area = "session-creation"
+needs = ["turn", "process"]
+class = "delete"
+lane = "P4"
+laws = [
+  "materialization_uses_spawn_capture_after_parent_changes_and_unregisters",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/core_node_processes.rs::a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent"
+status = "deleted"
+note = "FIG-5296 (ADR 0134): no child materializes from a capture of its parent; a linked child is built like an unlinked session with the same input; the file's other tests are not ledger subjects"
+
+[[row]]
+path = "crates/lash-core-execution/src/plugin/config/tests.rs"
+test = "*"
+area = "session-creation"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "creation_records_defaults_stated_values_and_what_a_child_inherits",
+]
+disposition = "replaced-by:crates/lash-core-execution/src/plugin/config/tests.rs::creation_records_defaults_and_stated_values"
+status = "deleted"
+owed = "creation records defaults and stated values"
+note = "FIG-5296 (ADR 0134): ConfigOwner::create sees only its creator's input; the inheritance half is deleted; the file's other tests are not ledger subjects"
+
+[[row]]
+path = "crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs"
+test = "*"
+area = "processes"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "a_subagent_session_replaces_the_inherited_session",
+]
+disposition = "replaced-by:crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs::a_child_session_replaces_the_inherited_session"
+status = "deleted"
+owed = "a child session replaces the inherited session"
+note = "FIG-5296 renamed it: core names no subagent; the file's other tests are not ledger subjects"
+
+[[row]]
+path = "crates/lash-core/src/runtime/session_manager/session_init.rs"
+test = "a_request_that_states_its_spec_records_it_whatever_its_starter_holds"
+area = "session-creation"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "a_request_that_states_its_spec_records_it_whatever_its_starter_holds",
+]
+disposition = "replaced-by:crates/lash-core/src/runtime/session_manager/session_init.rs::a_request_that_states_its_spec_records_it"
+status = "deleted"
+owed = "a request that states its spec records it"
+note = "FIG-5296 (ADR 0134): a child has no starter to fall back on; a_child_records_only_what_its_request_states pins the absence"
+
+[[row]]
+path = "crates/lash-protocol-rlm/src/plugin/config_owner.rs"
+test = "*"
+area = "rlm"
+needs = ["turn", "process"]
+class = "replace"
+lane = "P4"
+laws = [
+  "creation_defaults_the_format_by_lineage_and_records_the_pins",
+]
+disposition = "replaced-by:crates/lash-protocol-rlm/src/plugin/config_owner.rs::creation_defaults_the_format_and_records_the_pins"
+status = "deleted"
+owed = "creation defaults the format and records the pins"
+note = "FIG-5296 (ADR 0134): the final-answer format no longer depends on whether a session has a parent; the file's other tests are not ledger subjects"

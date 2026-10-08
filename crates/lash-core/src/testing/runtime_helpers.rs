@@ -695,8 +695,6 @@ impl TestRuntime {
             .resolve_creation_plugin_config(
                 None,
                 &crate::PluginOptions::default(),
-                None,
-                true,
                 &crate::store::plugin_writers::PluginAdmission::default(),
             )
             .unwrap_or_else(|refusal| {
@@ -1175,8 +1173,6 @@ pub fn record_creation_plugin_config(
         .resolve_creation_plugin_config(
             Some(protocol_plugin_id),
             &requested,
-            None,
-            true,
             &crate::store::plugin_writers::PluginAdmission::default(),
         )
         .unwrap_or_else(|refusal| {

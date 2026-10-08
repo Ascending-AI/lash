@@ -72,8 +72,6 @@ fn drain_area_witnesses() {
     let _ = lash::SessionCreateRequest::with_caused_by;
     // W0026: lash::SessionCreateRequest::with_initial_nodes [function]
     let _ = lash::SessionCreateRequest::with_initial_nodes;
-    // W0027: lash::SessionCreateRequest::with_subagent_context [function]
-    let _ = lash::SessionCreateRequest::with_subagent_context;
     // W0028: lash::SessionError::SessionCommandCancelled [variant]
     variant_witness(|value: &lash::SessionError| {
         matches!(value, lash::SessionError::SessionCommandCancelled(..))

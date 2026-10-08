@@ -71,9 +71,14 @@ The protocols' sections, with their default placements:
 - Standard (`standard_protocol`): `intro`, `execution` and `guidance`, all
   in the initial instructions;
 - RLM (`rlm_protocol`, both channels): `intro`, `guidance`, `execution`,
-  `declarations` (over exactly the offered callable surface) and `subagent`
-  in the initial instructions; `bound_variables`, `finalization`,
-  `required_output`, `final_answer_format` and `context_budget` late.
+  `declarations` (over exactly the offered callable surface) in the initial
+  instructions; `bound_variables`, `finalization`, `required_output`,
+  `final_answer_format` and `context_budget` late.
+
+No protocol renders text for a delegated child: core has no subagent concept
+([ADR 0134](0134-creating-a-session-is-explicit-only-a-fork-clones.md)). A
+plugin that delegates registers its own section, which reads its own
+namespace.
 
 Only `intro` and `guidance` render for a compaction. A protocol has no host
 prompt config: a host adds its text as its own sections and replaces or omits
@@ -160,7 +165,6 @@ A renderer or wrapper reads only a `PromptInput`. It holds:
 - the tools offered to this call;
 - the admitted model and the session's committed prompt usage, and history
   statistics measured before any section text is added;
-- the session's recorded subagent authority;
 - the protocol's facts, derived from its committed execution state (RLM's
   bound values), typed by the protocol and opaque to everything else.
 
@@ -174,7 +178,7 @@ a trusted-code contract, not a sandbox.
 A call records a `ResolvedPromptPlan`. It holds the purpose, every selected
 section in plan order with its owner revision and resolved placement, each
 wrapper chain with owner revisions and ordinals, the wrappers whose target is
-absent, the plan overrides whose sections are no longer registered, and the limits.
+absent, the plan overrides that name an unregistered section, and the limits.
 
 It also records a version-1 `PromptSnapshot`. For each section, the snapshot
 holds the base text, each applied wrapper's output in chain order, and the

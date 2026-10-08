@@ -256,7 +256,6 @@ MINIMUM_MEMORY_KB = {
     "lash-internal-remote-protocol/lash_remote_protocol": 2 * 1024 * 1024,
     "lash-internal-core-execution/lash_core_execution": 2 * 1024 * 1024,
     "lash-internal-core-execution/store_backed": 2 * 1024 * 1024,
-    "lash-internal-subagents/lash_subagents": 2 * 1024 * 1024,
     "lash-internal-core/runtime_turns": 2 * 1024 * 1024,
     "lash-internal-core-worker/lash_core_worker": 2 * 1024 * 1024,
 }

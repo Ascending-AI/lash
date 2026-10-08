@@ -1243,13 +1243,6 @@ impl ToolPrepareContext {
         self.sessions.snapshot_session(session_id).await
     }
 
-    /// Captures the spawn-time [`crate::SessionPluginInit`] payload a
-    /// `ParentFork` creation request must carry for a peer of the current
-    /// session.
-    pub async fn session_plugin_init(&self) -> Result<crate::SessionPluginInit, PluginError> {
-        self.sessions.session_plugin_init(self.session_id()?).await
-    }
-
     pub async fn tool_catalog(&self) -> Result<Vec<serde_json::Value>, PluginError> {
         match &self.owner {
             crate::RuntimeOwner::Session(session_id) => {

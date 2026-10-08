@@ -165,6 +165,7 @@ The generated region below is checked against the live filenames and headings.
 | 0131 | [Durable types declare their version surface](0131-durable-types-declare-their-version-surface.md) |
 | 0132 | [Durability is state-first over the lash store: actors, epoch fences, no replay](0132-durability-is-state-first-over-the-lash-store.md) |
 | 0133 | [Prompt sections are keyed, trusted, and placed by the host](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md) |
+| 0134 | [Creating a session is explicit; only a fork clones](0134-creating-a-session-is-explicit-only-a-fork-clones.md) |
 <!-- adr-index:end -->
 
 ## Replaced and retired decisions

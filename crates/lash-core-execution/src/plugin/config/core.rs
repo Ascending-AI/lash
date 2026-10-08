@@ -28,7 +28,7 @@
 
 use super::{
     CORE_CONFIG_OWNER, CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar,
-    ConfigRegistrationError, CoreConfig, CreationFacts, OwnerChange, RegisteredOwner,
+    ConfigRegistrationError, CoreConfig, OwnerChange, RegisteredOwner,
 };
 
 /// The owner of the session's core config.
@@ -64,6 +64,10 @@ pub enum CoreConfigRefusal {
     PromptPlanRefused {
         error: crate::prompt_sections::PromptPlanError,
     },
+    /// A creation states no policy. Creating a session is explicit: no
+    /// other session supplies the turn budget, tool-call limit or model a
+    /// request leaves unstated (ADR 0134).
+    PolicyUnstated,
 }
 
 impl std::fmt::Display for CoreConfigRefusal {
@@ -78,6 +82,9 @@ impl std::fmt::Display for CoreConfigRefusal {
                 "reasoning {reasoning:?} needs a model, and the session records none"
             ),
             Self::PromptPlanRefused { error } => write!(formatter, "prompt plan refused: {error}"),
+            Self::PolicyUnstated => formatter.write_str(
+                "the create request states no policy, and no other session supplies one",
+            ),
             Self::UnsafeRetriesAboveCeiling { requested, ceiling } => write!(
                 formatter,
                 "charge safety accepts {requested} unsafe retries, above the ceiling of {ceiling}"
@@ -126,11 +133,7 @@ impl ConfigOwner for CoreConfigOwner {
 
     /// The core config is created from the session's policy, never through
     /// the owner: this records nothing.
-    fn create(
-        &self,
-        _input: Option<CoreConfig>,
-        _facts: CreationFacts<'_, CoreConfig>,
-    ) -> Result<Option<CoreConfig>, CoreConfigRefusal> {
+    fn create(&self, _input: Option<CoreConfig>) -> Result<Option<CoreConfig>, CoreConfigRefusal> {
         Ok(None)
     }
 

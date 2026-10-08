@@ -2,11 +2,12 @@
 //!
 //! A session records its RLM namespace once, at creation: the creator's
 //! stated facts, the presentation format the prompt is written against
-//! (`Markdown` for a root session, `RawFinalValue` for a child) when the
-//! creator states none, the channel and dialect this host selected
-//! (ADR 0096), and its behaviour ([`RlmRecordedBehaviour`], FIG-4398): its
-//! parent's recorded behaviour for a child, this host's configured behaviour
-//! otherwise (FIG-4527). Every open delivers the namespace unchanged.
+//! (`Markdown` when the creator states none), the channel and dialect this
+//! host selected (ADR 0096), and this host's configured behaviour
+//! ([`RlmRecordedBehaviour`], FIG-4398). Creation reads no other session: a
+//! child records what its creator states, like a root, and only a fork copies
+//! a recorded namespace (ADR 0134). Every open delivers the namespace
+//! unchanged.
 //!
 //! A session may change one setting: its render preferences, through
 //! [`SetRlmRender`]. Its prompt is not config: the protocol contributes keyed
@@ -26,7 +27,7 @@ use std::sync::{Arc, OnceLock};
 use lash_core::facade_support::JsonSchema;
 use lash_core::plugin::{
     CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
-    CreationFacts, OwnerChange,
+    OwnerChange,
 };
 use lash_render::RenderParamsPatch;
 use lash_rlm_types::{
@@ -207,33 +208,23 @@ impl ConfigOwner for RlmConfigOwner {
     type Refusal = RlmConfigRefusal;
     type RunOptions = RlmRunOptions;
 
-    /// The creator's stated facts, the presentation format a run or child
-    /// session defaults to, this host's channel and dialect, and the
-    /// session's behaviour. A child inherits its parent's recorded behaviour,
-    /// whatever the host creating it is configured with (FIG-4527); a session
-    /// with no recorded parent behaviour records this host's.
+    /// The creator's stated facts, the presentation format a session
+    /// defaults to, this host's channel and dialect, and this host's
+    /// behaviour (FIG-4527). Nothing is read from another session.
     fn create(
         &self,
         input: Option<RlmCreateConfig>,
-        facts: CreationFacts<'_, RlmRecordedConfig>,
     ) -> Result<Option<RlmRecordedConfig>, RlmConfigRefusal> {
         let stated = input.unwrap_or_default().0;
-        let behaviour = match facts.parent {
-            Some(parent) => parent.behaviour.clone(),
-            None => self.config.recorded_behaviour(
-                *self
-                    .process_lifecycle
-                    .get()
-                    .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?,
-            ),
-        };
-        let final_answer_format = stated.final_answer_format.unwrap_or({
-            if facts.is_root_session {
-                RlmFinalAnswerFormat::Markdown
-            } else {
-                RlmFinalAnswerFormat::RawFinalValue
-            }
-        });
+        let behaviour = self.config.recorded_behaviour(
+            *self
+                .process_lifecycle
+                .get()
+                .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?,
+        );
+        let final_answer_format = stated
+            .final_answer_format
+            .unwrap_or(RlmFinalAnswerFormat::Markdown);
         Ok(Some(RlmRecordedConfig {
             render: stated.render,
             termination: stated.termination,
@@ -383,15 +374,9 @@ mod tests {
         owner_with(Some(false))
     }
 
-    fn created(input: Option<RlmCreateExtras>, is_root_session: bool) -> RlmRecordedConfig {
+    fn created(input: Option<RlmCreateExtras>) -> RlmRecordedConfig {
         owner()
-            .create(
-                input.map(RlmCreateConfig),
-                CreationFacts {
-                    parent: None,
-                    is_root_session,
-                },
-            )
+            .create(input.map(RlmCreateConfig))
             .expect("create")
             .expect("the RLM owner always records its namespace")
     }
@@ -408,11 +393,11 @@ mod tests {
         })
     }
 
-    /// A root session defaults to `Markdown` and a child to `RawFinalValue`,
-    /// and every session records this host's channel and dialect.
+    /// Every session defaults to `Markdown`, whatever its lineage, and
+    /// records this host's channel and dialect.
     #[test]
-    fn creation_defaults_the_format_by_lineage_and_records_the_pins() {
-        let run = created(None, true);
+    fn creation_defaults_the_format_and_records_the_pins() {
+        let run = created(None);
         assert_eq!(
             run.final_answer_format,
             Some(RlmFinalAnswerFormat::Markdown)
@@ -420,10 +405,6 @@ mod tests {
         assert_eq!(run.channel, Some(RlmChannel::Cell));
         assert_eq!(run.dialect.as_deref(), Some("typescript"));
         assert_eq!(run.behaviour, config().recorded_behaviour(false));
-        assert_eq!(
-            created(None, false).final_answer_format,
-            Some(RlmFinalAnswerFormat::RawFinalValue)
-        );
     }
 
     /// FIG-4652: the owner lays a run's options over its recorded namespace.
@@ -440,14 +421,11 @@ mod tests {
             },
             ..Default::default()
         };
-        let recorded = created(
-            Some(RlmCreateExtras {
-                render: Some(print(Some(5), None)),
-                termination: Some(RlmTermination::FinishRequired { schema: None }),
-                ..RlmCreateExtras::default()
-            }),
-            true,
-        );
+        let recorded = created(Some(RlmCreateExtras {
+            render: Some(print(Some(5), None)),
+            termination: Some(RlmTermination::FinishRequired { schema: None }),
+            ..RlmCreateExtras::default()
+        }));
         let applied = owner()
             .apply_run_options(
                 &recorded,
@@ -507,14 +485,11 @@ mod tests {
     /// the list is the recorded namespace's own keys.
     #[test]
     fn run_options_have_no_field_for_a_pin() {
-        let recorded = serde_json::to_value(created(
-            Some(RlmCreateExtras {
-                render: Some(RlmRenderPatch::default()),
-                termination: Some(RlmTermination::Natural { schema: None }),
-                ..RlmCreateExtras::default()
-            }),
-            true,
-        ))
+        let recorded = serde_json::to_value(created(Some(RlmCreateExtras {
+            render: Some(RlmRenderPatch::default()),
+            termination: Some(RlmTermination::Natural { schema: None }),
+            ..RlmCreateExtras::default()
+        })))
         .expect("the recorded namespace encodes");
         let stated: std::collections::BTreeSet<&str> = recorded
             .as_object()
@@ -571,8 +546,6 @@ mod tests {
                     },
                 )
                 .expect("options"),
-                None,
-                true,
                 &lash_core::store::plugin_writers::PluginAdmission::default(),
             )
             .expect("creation");
@@ -643,7 +616,7 @@ mod tests {
     /// is refused typed; one that keeps them is admitted.
     #[test]
     fn a_candidate_keeps_the_recorded_pins() {
-        let base = created(None, true);
+        let base = created(None);
         let owner = owner();
         facts_for(|facts| {
             owner
@@ -688,15 +661,7 @@ mod tests {
     /// declared it creates nothing.
     #[test]
     fn creation_records_the_deployments_behaviour() {
-        let created_under = |process_lifecycle| {
-            owner_with(process_lifecycle).create(
-                None,
-                CreationFacts {
-                    parent: None,
-                    is_root_session: true,
-                },
-            )
-        };
+        let created_under = |process_lifecycle| owner_with(process_lifecycle).create(None);
         let without = created_under(Some(false))
             .expect("create")
             .expect("recorded");

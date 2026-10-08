@@ -10,7 +10,7 @@ Lash has four scenario layers with explicit ownership. `lash-core` owns protocol
 
 ## Why
 
-Runtime invariants need narrow reproductions at their owning boundary. Protocol response classification, streaming, repair and history rendering also need direct scenarios. Agent Scenarios exercise builders, plugins, tools, subagents, process graphs and app-facing final values together.
+Runtime invariants need narrow reproductions at their owning boundary. Protocol response classification, streaming, repair and history rendering also need direct scenarios. Agent Scenarios exercise builders, plugins, tools, child sessions, process graphs and app-facing final values together.
 
 ## Harness homes
 

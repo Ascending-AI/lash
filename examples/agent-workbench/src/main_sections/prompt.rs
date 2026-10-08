@@ -31,7 +31,6 @@ Available host features:
     const research = async (task: unknown) => {
       return await agents.spawn({
         task: task,
-        capability: "explore",
         output: { summary: "str", key_metrics: "list[str]" }
       });
     };

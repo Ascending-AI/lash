@@ -480,12 +480,6 @@
       "p99_anon_peak_bytes": 71176192,
       "samples": 5
     },
-    "lash-internal-subagents/lash_subagents": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 122564608,
-      "samples": 25
-    },
     "lash-internal-tool-support/lash_tool_support": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1261,12 +1255,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 122822656,
       "samples": 7
-    },
-    "lash-internal-subagents/lash_subagents": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 744685568,
-      "samples": 148
     },
     "lash-internal-tool-support/lash_tool_support": {
       "legacy_peak_bytes": 0,

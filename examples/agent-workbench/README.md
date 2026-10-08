@@ -2,7 +2,9 @@
 
 A production-grade recoverable-chat host reference for RLM background
 processes, subagents, web tools, deferred-tool discovery, button triggers, and
-cron triggers.
+cron triggers. Its subagents are the host-written delegation tool of
+[`examples/delegation`](../delegation/README.md): each child is created with
+the workbench's own session defaults, never copied from its parent.
 
 Run the example from the repo root with the bundled entrypoint. The default
 command starts the workbench as a detached local service, waits for readiness,

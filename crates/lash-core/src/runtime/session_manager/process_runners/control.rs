@@ -525,7 +525,8 @@ impl ProcessCapability {
             .await
     }
 
-    /// Check the session child's creation facts against the parent's plugin set.
+    /// Check the session child's creation facts against this deployment's
+    /// plugin set.
     async fn admit_session_turn_start(
         &self,
         current: &CurrentOwnerCapability,
@@ -537,16 +538,15 @@ impl ProcessCapability {
             ..
         }) = registration.input.as_ref()
         {
-            let Some(env_spec) = env_spec else {
+            if env_spec.is_none() {
                 return Err(crate::PluginError::Session(format!(
                     "process `{}` requires a captured execution env",
                     registration.refusal_name()
                 )));
-            };
+            }
             super::super::session_init::admit_session_turn_child(
                 current,
                 create_request,
-                env_spec,
                 &registration.refusal_name(),
             )?;
         }
@@ -1042,7 +1042,7 @@ fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
 /// lineage is a recorded, immutable fact of that row, never re-derived. A
 /// process with no row is refused rather than recorded as a root.
 ///
-/// A turn or drain of a session a process runs as its own — a subagent's
+/// A turn or drain of a session a process runs as its own — a child
 /// session, executed by the host or the session's engine rather than lent the
 /// live body's lineage — reads its owner from the session's metadata
 /// (`owning_process_id`, recorded when the owner's start created the session)

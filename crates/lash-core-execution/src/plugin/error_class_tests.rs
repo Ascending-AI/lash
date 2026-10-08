@@ -144,7 +144,6 @@ plugin_error_samples! {
     StoreUnavailable { .. } => PluginError::StoreUnavailable {
         fault: crate::store::StoreFault::Contended,
     },
-    SessionInitTooLarge { .. } => PluginError::SessionInitTooLarge { bytes: 2, limit: 1 },
     MissingRecordedSessionConfig { .. } => PluginError::MissingRecordedSessionConfig {
         plugin_id: "sampled".to_string(),
         field: "sampled".to_string(),

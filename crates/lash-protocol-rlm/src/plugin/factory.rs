@@ -474,11 +474,9 @@ impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRe
             trace: None,
             owner: lash_core::RuntimeOwner::Process(lash_core::mint_process_id()),
             tool_access: Default::default(),
-            subagent: None,
             plugin_config: plugin_config.clone(),
             materialization: lash_core::plugin::PluginSessionMaterialization::Creation,
             extensions: self.plugin_host.extensions().clone(),
-            parent_session_id: None,
         };
         for factory in self.plugin_host.factories() {
             let plugin = factory.build(&context)?;

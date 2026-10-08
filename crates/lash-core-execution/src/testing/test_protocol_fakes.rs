@@ -6,9 +6,9 @@ use async_trait::async_trait;
 
 use super::*;
 use crate::plugin::{
-    CandidateFacts, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, CreationFacts,
-    PluginFactory, PluginRegistrar, PluginSessionContext, ProtocolDriverPlugin,
-    ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
+    CandidateFacts, ConfigOwner, ConfigRegistrar, ConfigRegistrationError, PluginFactory,
+    PluginRegistrar, PluginSessionContext, ProtocolDriverPlugin, ProtocolSessionContext,
+    ProtocolSessionPlugin, SessionPlugin,
 };
 use crate::sansio::{CompletedToolCall, PendingWork, ProtocolDriverHandle};
 use crate::{
@@ -190,7 +190,6 @@ impl ConfigOwner for TestCodeConfigOwner {
     fn create(
         &self,
         input: Option<TestCodeCreateExtras>,
-        _facts: CreationFacts<'_, TestCodeCreateExtras>,
     ) -> Result<Option<TestCodeCreateExtras>, TestCodeConfigRefusal> {
         Ok(input)
     }

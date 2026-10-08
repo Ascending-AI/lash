@@ -530,12 +530,10 @@ impl Session {
         &self,
         tool_registry: Arc<crate::ToolRegistry>,
         tool_access: crate::SessionToolAccess,
-        subagent: Option<crate::SubagentSessionContext>,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
         let tool_catalog = Arc::new(self.plugins().resolve_live_tool_catalog(
             Arc::clone(&tool_registry) as Arc<dyn ToolProvider>,
             tool_access,
-            subagent,
         )?);
         tool_registry.validate_resident_catalog_routes(&tool_catalog)?;
         let input = crate::ProtocolBuildInput {
@@ -568,16 +566,12 @@ impl Session {
     pub fn install_recorded_tool_surface(
         &self,
         tool_access: &crate::SessionToolAccess,
-        subagent: Option<&crate::SubagentSessionContext>,
         recorded: &[crate::ToolDefinition],
     ) -> Result<(), crate::PluginError> {
         let tool_registry = self.pin_live_tool_registry()?;
         let key = self.tool_catalog_cache_key(tool_access, tool_registry.generation());
-        let live = self.build_tool_catalog_entry(
-            Arc::clone(&tool_registry),
-            tool_access.clone(),
-            subagent.cloned(),
-        )?;
+        let live =
+            self.build_tool_catalog_entry(Arc::clone(&tool_registry), tool_access.clone())?;
         let live_tool_catalog = live.tool_catalog();
         let drift = recorded
             .iter()
@@ -641,7 +635,6 @@ impl Session {
 
     fn tool_catalog_cache_entry(&self) -> Result<ToolCatalogHandle, crate::PluginError> {
         let tool_access = self.plugins().tool_access();
-        let subagent = self.plugins().subagent_context();
         let key = self.tool_catalog_cache_key(&tool_access, self.tool_registry.generation());
         let mut cache = self.tool_catalog_cache.lock_recover();
         if let Some((entry_key, entry)) = cache.as_ref()
@@ -651,7 +644,7 @@ impl Session {
         }
         let tool_registry = self.pin_live_tool_registry()?;
         let key = self.tool_catalog_cache_key(&tool_access, tool_registry.generation());
-        let entry = self.build_tool_catalog_entry(tool_registry, tool_access, subagent)?;
+        let entry = self.build_tool_catalog_entry(tool_registry, tool_access)?;
         *cache = Some((key, entry.clone()));
         Ok(entry)
     }
@@ -678,27 +671,24 @@ impl Session {
     pub fn pin_tool_surface(
         &self,
         tool_access: &crate::SessionToolAccess,
-        subagent: Option<&crate::SubagentSessionContext>,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        self.pin_tool_surface_inner(tool_access, subagent)
+        self.pin_tool_surface_inner(tool_access)
     }
 
     #[cfg(not(feature = "testing"))]
     pub fn pin_tool_surface(
         &self,
         tool_access: &crate::SessionToolAccess,
-        subagent: Option<&crate::SubagentSessionContext>,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        self.pin_tool_surface_inner(tool_access, subagent)
+        self.pin_tool_surface_inner(tool_access)
     }
 
     fn pin_tool_surface_inner(
         &self,
         tool_access: &crate::SessionToolAccess,
-        subagent: Option<&crate::SubagentSessionContext>,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
         let tool_registry = self.pin_live_tool_registry()?;
-        self.build_tool_catalog_entry(tool_registry, tool_access.clone(), subagent.cloned())
+        self.build_tool_catalog_entry(tool_registry, tool_access.clone())
     }
 
     fn pin_live_tool_registry(&self) -> Result<Arc<crate::ToolRegistry>, crate::PluginError> {
@@ -1108,7 +1098,7 @@ mod tool_catalog_cache_tests {
         let reads_before_pin = manifest_reads.load(Ordering::SeqCst);
 
         let first = session
-            .pin_tool_surface(&crate::SessionToolAccess::default(), None)
+            .pin_tool_surface(&crate::SessionToolAccess::default())
             .expect("first request surface");
         assert_eq!(
             manifest_reads.load(Ordering::SeqCst),
@@ -1127,7 +1117,7 @@ mod tool_catalog_cache_tests {
         );
 
         let second = session
-            .pin_tool_surface(&crate::SessionToolAccess::default(), None)
+            .pin_tool_surface(&crate::SessionToolAccess::default())
             .expect("next request surface");
         assert_eq!(
             manifest_reads.load(Ordering::SeqCst),
@@ -1150,13 +1140,13 @@ mod tool_catalog_cache_tests {
             .with_hidden_tools(["alpha"])
             .expect("valid hidden name");
         let hidden = session
-            .pin_tool_surface(&hidden_access, None)
+            .pin_tool_surface(&hidden_access)
             .expect("authority-hidden request surface");
         assert!(!hidden.tool_catalog().has_callable_tool("alpha"));
         // Building a surface installs nothing; consumers read the surface a
         // sync recorded, once the shift installs it.
         session
-            .install_recorded_tool_surface(&hidden_access, None, &hidden.definitions())
+            .install_recorded_tool_surface(&hidden_access, &hidden.definitions())
             .expect("install the recorded hidden surface");
         assert!(
             !session
@@ -1176,7 +1166,7 @@ mod tool_catalog_cache_tests {
         );
 
         let unhidden = session
-            .pin_tool_surface(&crate::SessionToolAccess::default(), None)
+            .pin_tool_surface(&crate::SessionToolAccess::default())
             .expect("next request with broader authority");
         assert!(
             unhidden.tool_catalog().has_callable_tool("alpha"),
@@ -1240,7 +1230,7 @@ mod tool_catalog_cache_tests {
         .expect("runtime session");
 
         let old = session
-            .pin_tool_surface(&crate::SessionToolAccess::default(), None)
+            .pin_tool_surface(&crate::SessionToolAccess::default())
             .expect("request pinned while provider A owns the id");
         let old_entries = old
             .tool_catalog()
@@ -1263,7 +1253,7 @@ mod tool_catalog_cache_tests {
         a_active.store(false, Ordering::SeqCst);
         b_active.store(true, Ordering::SeqCst);
         let fresh = session
-            .pin_tool_surface(&crate::SessionToolAccess::default(), None)
+            .pin_tool_surface(&crate::SessionToolAccess::default())
             .expect("next request pinned after provider B owns the id");
         let fresh_entries = fresh
             .tool_catalog()
@@ -1394,7 +1384,7 @@ mod tool_catalog_cache_tests {
         }))
         .await;
 
-        let error = match session.pin_tool_surface(&crate::SessionToolAccess::default(), None) {
+        let error = match session.pin_tool_surface(&crate::SessionToolAccess::default()) {
             Ok(_) => panic!("missing resident contract must be refused before advertisement"),
             Err(error) => error,
         };
@@ -1431,7 +1421,6 @@ mod tool_catalog_cache_tests {
             .pin_tool_surface(
                 &crate::SessionToolAccess::restricted([renamed])
                     .expect("valid restricted definition"),
-                None,
             )
             .expect("the same ToolId retains its pinned route under an authority-owned alias");
         let entry = &renamed_surface.tool_catalog().tools[0];
@@ -1455,7 +1444,6 @@ mod tool_catalog_cache_tests {
         .expect("valid declared tool schemas");
         let error = match session.pin_tool_surface(
             &crate::SessionToolAccess::restricted([missing]).expect("valid restricted definition"),
-            None,
         ) {
             Ok(_) => panic!("missing resident route must be refused before advertisement"),
             Err(error) => error,

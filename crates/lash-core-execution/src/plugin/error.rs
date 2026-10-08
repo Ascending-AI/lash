@@ -488,15 +488,6 @@ define_plugin_errors! {
         => Self::StoreUnavailable { fault }
         => fault.code().as_str().to_string()
         => crate::ToolFailureClass::Unavailable;
-/// A captured plugin init payload exceeded the durable-request bound.
-    #[error("captured session init payload is {bytes} bytes, exceeding the {limit}-byte bound")]
-    SessionInitTooLarge { bytes: usize, limit: usize }
-        => PluginError::SessionInitTooLarge { bytes, limit }
-        => { bytes: usize, limit: usize }
-        => Self::SessionInitTooLarge { bytes: *bytes, limit: *limit }
-        => Self::SessionInitTooLarge { .. }
-        => "session_init_too_large"
-        => crate::ToolFailureClass::InvalidRequest;
 /// An existing plugin session cannot be reconstructed because a required
     /// protocol-owned field is absent from its durable record.
     #[error("recorded session config for plugin `{plugin_id}` is missing required field `{field}`")]
@@ -1062,7 +1053,6 @@ impl PluginError {
             | Self::ToolRegistrationRefused { .. }
             | Self::ResidentToolRouteUnavailable { .. }
             | Self::SessionAlreadyExists { .. }
-            | Self::SessionInitTooLarge { .. }
             | Self::MissingRecordedSessionConfig { .. }
             | Self::RecordedSessionConfigConflict { .. }
             | Self::AppendOperationIdentityConflict { .. }

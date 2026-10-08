@@ -27,7 +27,8 @@ tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]
 flate2 = "1"
-lash = { workspace = true, features = ["rlm", "subagents", "testing"] }
+delegation = { workspace = true }
+lash = { workspace = true, features = ["rlm", "testing"] }
 lash-core = { workspace = true }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }

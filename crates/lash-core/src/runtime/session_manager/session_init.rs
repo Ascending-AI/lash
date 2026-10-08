@@ -4,12 +4,12 @@
 //! turn through the shared session-turn path.
 //!
 //! This is one of two session-construction APIs, kept deliberately separate
-//! (ADR 0089): initialisation builds a *new* session from a request that
-//! carries policy, relation, tool access, subagent context, initial nodes,
-//! observer intents, and the spawn-time `SessionPluginInit` capture. Catalog
-//! `SessionCatalogStore::fork_session` materializes durable fork lineage and
-//! retained-frame content with different failure semantics and no live
-//! parent's plugin-init payload; neither API covers the other.
+//! (ADR 0089): initialisation builds a *new* session from exactly what its
+//! request states — policy, relation, tool access, prompt plan, plugin
+//! options, initial nodes and observer intents — and reads no other session
+//! (ADR 0134). Catalog `SessionCatalogStore::fork_session` is the one clone:
+//! it materializes durable fork lineage and retained-frame content with
+//! different failure semantics; neither API covers the other.
 //!
 //! Run-scoped child residency (FIG-3424): the child runtime a
 //! `ProcessInput::SessionTurn` initializes is owned by that process run, held
@@ -20,13 +20,12 @@
 
 use super::*;
 use crate::TurnId;
-use crate::plugin::{PluginSessionMaterializationRequest, PluginSessionRequest};
+use crate::plugin::PluginSessionRequest;
 use crate::runtime::host::EmbeddedRuntimeHost;
 
 /// A create request resolved into everything materialization needs. Nothing
-/// on the plan re-reads a live session: `SessionPluginInit` is the spawn-time
-/// capture the request carried, and the initial runtime state is fully built
-/// here.
+/// on the plan reads another session: the initial runtime state is fully
+/// built here from the request.
 pub(in crate::runtime::session_manager) struct SessionInitPlan {
     session_id: SessionId,
     relation: SessionRelation,
@@ -34,7 +33,6 @@ pub(in crate::runtime::session_manager) struct SessionInitPlan {
     policy: SessionPolicy,
     initial_runtime_state: RuntimeSessionState,
     plugin_config: crate::plugin::SessionAuthorityContext,
-    protocol_request: SessionCreateRequest,
     /// The `SessionTurn` process whose start creates this session, recorded
     /// on the session's metadata as its owner (FIG-3607 R1). `None` for a
     /// host create.
@@ -69,7 +67,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
 /// row. It is authoritative, so nothing it records is resolved again: no
 /// model key is minted and no plugin owner creates a namespace. Only what
 /// the head does not record comes from the recorded request: the initial
-/// nodes, the observer intents and the spawn-time plugin capture.
+/// nodes and the observer intents.
 fn recorded_creation_plan(
     current: &CurrentOwnerCapability,
     request: SessionCreateRequest,
@@ -78,7 +76,6 @@ fn recorded_creation_plan(
     let (session_id, mut request) = identified_create_request(request)?;
     let policy = created.policy.clone();
     request.tool_access = created.authority.tool_access.clone();
-    request.subagent = created.authority.subagent.clone();
     request.prompt_plan = Some(created.authority.prompt_plan.clone());
     let facts = ChildFacts {
         policy,
@@ -128,17 +125,17 @@ fn plan_session_init(
             ))
         })?;
     }
+    let ChildFacts {
+        policy,
+        plugin_config: recorded_plugin_config,
+    } = facts;
     // Every session initializes empty: `SessionStartPoint::Empty` is the only
     // start point initialisation admits. Durable forks and resumed sessions
     // get their state from the store, not from the create request.
     let start_state = RuntimeSessionState {
         session_id: session_id.clone(),
-        ..RuntimeSessionState::new(current.policy.clone())
+        ..RuntimeSessionState::new(policy.clone())
     };
-    let ChildFacts {
-        policy,
-        plugin_config: recorded_plugin_config,
-    } = facts;
     // The child records the minted binding in its policy; the request's key
     // has done its work.
     request.model = None;
@@ -154,7 +151,6 @@ fn plan_session_init(
     .map_err(|error| crate::PluginError::Session(error.to_string()))?;
     let plugin_config = crate::plugin::SessionAuthorityContext {
         tool_access: request.tool_access.clone(),
-        subagent: request.subagent.clone(),
         plugin_config: initial_runtime_state.admitted_plugin_config(),
     };
 
@@ -173,21 +169,14 @@ fn plan_session_init(
         policy,
         initial_runtime_state,
         plugin_config,
-        protocol_request: request,
         owning_process_id: None,
     })
 }
 
-/// The recorded facts a session is created from: its starter's recorded
-/// policy and plugin config, and the plugin set and models the deployment
-/// installs.
-///
-/// On a session's own runtime the starter is that session; on a process
-/// runtime it is the environment the process's start captured. Either way
-/// they are recorded facts, never a worker's defaults (FIG-4396).
+/// What a session's creation resolves against: the plugin set and models the
+/// deployment installs. Nothing of the session that starts the creation
+/// stands in for what its request leaves unstated (ADR 0134).
 pub(in crate::runtime::session_manager) struct StarterFacts<'a> {
-    pub(in crate::runtime::session_manager) policy: &'a SessionPolicy,
-    pub(in crate::runtime::session_manager) plugin_config: crate::AdmittedPluginConfig,
     pub(in crate::runtime::session_manager) plugin_host: &'a crate::PluginHost,
     pub(in crate::runtime::session_manager) protocol_plugin_id: Option<&'a str>,
     /// The plugin admission the starter runs under (FIG-4747): a session it
@@ -200,11 +189,9 @@ pub(in crate::runtime::session_manager) struct StarterFacts<'a> {
 }
 
 impl<'a> StarterFacts<'a> {
-    /// The facts of the runtime `current` serves.
+    /// The deployment facts of the runtime `current` serves.
     pub(in crate::runtime::session_manager) fn of(current: &'a CurrentOwnerCapability) -> Self {
         Self {
-            policy: &current.policy,
-            plugin_config: current.plugins.admitted_plugin_config(),
             plugin_host: current.plugins.host(),
             protocol_plugin_id: current.plugins.host().protocol_plugin_id(),
             plugin_admission: current.plugins.plugin_admission().unwrap_or_default(),
@@ -220,34 +207,41 @@ pub(in crate::runtime::session_manager) struct ChildFacts {
     pub(in crate::runtime::session_manager) plugin_config: crate::PluginConfig,
 }
 
-/// Resolve the complete facts `request` creates `session_id` with against
-/// its starter's recorded facts: the policy, and the plugin configuration
-/// every installed owner creates — a child's from its starter's recorded
-/// namespaces.
+/// Resolve the complete facts `request` creates `session_id` with: the
+/// policy it states and the plugin configuration every installed owner
+/// creates from its stated options. Creation is explicit (ADR 0134): a
+/// relation is lineage only, and no other session's policy, model, reasoning
+/// or namespace fills what the request leaves unstated.
 ///
-/// The policy is the request's, or the starter's when the request carries
-/// none. The child copies that policy's recorded model binding, never
-/// re-resolving its key; only a request that names a model key of its own
-/// mints one, here, through the deployment's models, and the child records
-/// it. A key they do not register is refused with
+/// A request that states no policy is refused with
+/// [`CoreConfigRefusal::PolicyUnstated`](crate::CoreConfigRefusal::PolicyUnstated)
+/// inside
+/// [`RuntimeErrorCode::SessionConfigRefused`](crate::RuntimeErrorCode::SessionConfigRefused).
+/// A request that names a model key of its own mints it, here, through the
+/// deployment's models, with the reasoning the request states or the
+/// default selection; otherwise the policy's recorded model is kept as
+/// recorded. A key they do not register is refused with
 /// [`RuntimeErrorCode::LlmProfileUnknown`](crate::RuntimeErrorCode::LlmProfileUnknown),
-/// and inherited reasoning the minted model's capability refuses with
+/// and a reasoning the minted model's capability refuses with
 /// [`RuntimeErrorCode::ReasoningRefused`](crate::RuntimeErrorCode::ReasoningRefused).
 /// A namespace no installed owner registers, or a value its owner refuses, is
 /// [`RuntimeErrorCode::SessionConfigRefused`](crate::RuntimeErrorCode::SessionConfigRefused)
 /// with the refusal typed as its cause
 /// ([`RuntimeErrorCause::ConfigRefused`](crate::RuntimeErrorCause::ConfigRefused)):
-/// this deployment's plugin set cannot run the session, on any attempt. A
-/// starter's recorded namespace its owner cannot read is corruption.
+/// this deployment's plugin set cannot run the session, on any attempt.
 pub(in crate::runtime::session_manager) fn resolve_child_facts(
     starter: &StarterFacts<'_>,
     request: &SessionCreateRequest,
     session_id: &SessionId,
 ) -> Result<ChildFacts, crate::PluginError> {
-    let mut policy = request
-        .policy
-        .clone()
-        .unwrap_or_else(|| starter.policy.clone());
+    let Some(mut policy) = request.policy.clone() else {
+        return Err(crate::PluginError::Runtime(
+            crate::RuntimeError::session_config_refused(
+                session_id,
+                crate::CoreConfigOwner::creation_refusal(crate::CoreConfigRefusal::PolicyUnstated),
+            ),
+        ));
+    };
     if let Some(key) = request.model.as_ref() {
         let recorded = starter.models.snapshot(key).map_err(|source| {
             crate::PluginError::Runtime(crate::RuntimeError::new(
@@ -259,19 +253,12 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
                 .to_string(),
             ))
         })?;
-        let reasoning = request.reasoning.clone().unwrap_or_else(|| {
-            policy
-                .model
-                .as_ref()
-                .map(|model| model.reasoning.clone())
-                .unwrap_or_default()
-        });
         let model = crate::LlmProfileConfig {
             model: recorded,
-            reasoning,
+            reasoning: request.reasoning.clone().unwrap_or_default(),
         };
-        // The reasoning the child states or inherits is judged against the
-        // capability of the model its key minted (FIG-4531).
+        // The reasoning the request states is judged against the capability
+        // of the model its key minted (FIG-4531).
         model.validate_reasoning().map_err(|refused| {
             crate::PluginError::Runtime(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::ReasoningRefused,
@@ -280,17 +267,13 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
         })?;
         policy.model = Some(model);
     }
-    let is_child = request.relation.parent_session_id().is_some();
-    // Every installed owner resolves its namespace from the request, the
-    // starter's recorded namespace standing as the parent's for a child
-    // (FIG-4379). The creation head records the result.
+    // Every installed owner creates its namespace from the request's options
+    // over its own defaults (FIG-4379). The creation head records the result.
     let plugin_config = starter
         .plugin_host
         .resolve_creation_plugin_config(
             starter.protocol_plugin_id,
             &request.plugin_options,
-            is_child.then_some(starter.plugin_config.config.as_ref()),
-            !is_child,
             &starter.plugin_admission,
         )
         .map_err(|error| match error {
@@ -312,25 +295,15 @@ pub(in crate::runtime::session_manager) fn resolve_child_facts(
 }
 
 /// Admit a session-turn start's child before its worker handoff
-/// (FIG-4396): its complete facts resolve against `environment` — the
-/// starter's recorded policy and plugin config the start captured — on this
-/// deployment's plugin set, the set every worker of its engine binding
-/// installs. A request this plugin set cannot create is refused here, before
-/// the start is registered.
+/// (FIG-4396): its complete facts resolve on this deployment's plugin set,
+/// the set every worker of its engine binding installs. A request this
+/// plugin set cannot create is refused here, before the start is
+/// registered.
 pub(in crate::runtime::session_manager) fn admit_session_turn_child(
     current: &CurrentOwnerCapability,
     create_request: &SessionCreateRequest,
-    environment: &crate::ProcessExecutionEnvSpec,
     start_name: &str,
 ) -> Result<(), crate::PluginError> {
-    let starter = StarterFacts {
-        policy: &environment.policy,
-        plugin_config: environment.plugin_config.clone(),
-        plugin_host: current.plugins.host(),
-        protocol_plugin_id: current.plugins.host().protocol_plugin_id(),
-        plugin_admission: current.plugins.plugin_admission().unwrap_or_default(),
-        models: current.host.core.providers.models.as_ref(),
-    };
     // A child whose request names no session takes the id the worker
     // derives from the minted process id (ADR 0107); before registration it
     // only names a refusal.
@@ -338,12 +311,11 @@ pub(in crate::runtime::session_manager) fn admit_session_turn_child(
         .session_id
         .clone()
         .unwrap_or_else(|| SessionId::prefixed("the child of ", start_name));
-    resolve_child_facts(&starter, create_request, &session_id).map(|_| ())
+    resolve_child_facts(&StarterFacts::of(current), create_request, &session_id).map(|_| ())
 }
 
 /// Whether `error` is the reasoning refusal [`resolve_child_facts`] mints:
-/// the recorded request's inherited reasoning does not fit the model its key
-/// mints.
+/// the recorded request's reasoning does not fit the model its key mints.
 fn reasoning_refused(error: &crate::PluginError) -> bool {
     matches!(
         error,
@@ -379,7 +351,6 @@ fn build_runtime_state(
     base.clear_plugin_admission_snapshot();
     base.policy = policy.clone();
     base.authority.tool_access = request.tool_access.clone();
-    base.authority.subagent = request.subagent.clone();
     base.authority.prompt_plan = request.prompt_plan.clone().unwrap_or_default();
     base.session_graph = crate::SessionGraph::default();
     base.agent_frames.clear();
@@ -403,16 +374,14 @@ async fn materialize_session_init(
     current: &CurrentOwnerCapability,
     plan: &SessionInitPlan,
 ) -> Result<MaterializedSession, crate::PluginError> {
-    let (plugins, plugin_init) = build_session_plugins(current, plan)?;
-    let mut initial_state = plan.initial_runtime_state.clone();
-    if let Some(init) = plugin_init {
-        // The captured tool state travels to the child's first Run, whose
-        // publication installs it through the shared restoration path.
-        initial_state.set_tool_state_snapshot(Some(init.tool_state.clone()));
-        // The creation request owns the captured seed. It is not a persisted
-        // postimage: the child's first Run records and publishes that view
-        // before constructing its capabilities.
-    }
+    let plugins = current
+        .plugins
+        .host()
+        .defer_session(PluginSessionRequest::creation(
+            &plan.session_id,
+            plan.plugin_config.clone(),
+        ))?;
+    let initial_state = plan.initial_runtime_state.clone();
     let store_binding = bind_session_store(current, plan).await?;
     // Session creation routes through the same assembler as live open and
     // worker-rebuild paths. A freshly created session has a single path, so it
@@ -438,44 +407,6 @@ async fn materialize_session_init(
         runtime,
         store_binding,
     })
-}
-
-fn build_session_plugins<'a>(
-    current: &CurrentOwnerCapability,
-    plan: &'a SessionInitPlan,
-) -> Result<
-    (
-        Arc<crate::PluginSession>,
-        Option<&'a crate::SessionPluginInit>,
-    ),
-    crate::PluginError,
-> {
-    match &plan.protocol_request.plugin_source {
-        crate::SessionPluginSource::CurrentHostFresh => Ok((
-            current.plugins.host().defer_session(PluginSessionRequest {
-                parent_session_id: plan.relation.parent_session_id().map(SessionId::from),
-                ..PluginSessionRequest::creation(&plan.session_id, plan.plugin_config.clone())
-            })?,
-            None,
-        )),
-        // The fork initializes from the spawn-time capture alone. There is
-        // deliberately no read of the running session that created this
-        // request — on a process worker that session is a synthetic runtime
-        // carrying fresh host plugins, not the real parent.
-        crate::SessionPluginSource::ParentFork(init) => {
-            let session = current.plugins.host().defer_session(PluginSessionRequest {
-                parent_session_id: plan.relation.parent_session_id().map(SessionId::from),
-                tool_catalog_overlay: init.tool_catalog_overlay.clone(),
-                tool_snapshot: Some(init.tool_state.clone()),
-                materialization: PluginSessionMaterializationRequest::Creation {
-                    config: plan.plugin_config.clone(),
-                    seed_snapshot: Some(&init.plugin_state),
-                },
-                owner: crate::RuntimeOwner::Session(plan.session_id.clone()),
-            })?;
-            Ok((session, Some(init)))
-        }
-    }
 }
 
 /// Admit the session's catalog row with the config its creation resolved
@@ -572,18 +503,6 @@ async fn commit_initialized_session(
         .export_persisted_state()
         .await
         .map_err(|err| crate::PluginError::Session(err.to_string()))?;
-    if matches!(
-        plan.protocol_request.plugin_source,
-        crate::SessionPluginSource::ParentFork(_)
-    ) && materialized.runtime.session.is_none()
-    {
-        // Construction retains a creation seed, not a persisted postimage.
-        // Record the forked registry's namespaces only now, so dropping this
-        // deferred runtime cannot discard the child's spawn-time capture.
-        persisted_state.set_plugin_state(Some(
-            materialized.runtime.services.plugins.committed_state()?,
-        ));
-    }
     let operation = super::super::state::boundary_operation(
         &persisted_state.session_id,
         &plan.session_id,
@@ -738,7 +657,7 @@ async fn initialize_session(
         && let Some(state) = recorded_session_state(session_id, &request.relation, &store).await?
     {
         if state.head_revision > 0 {
-            return reopen_committed_session(current, &request, session_id, store, state).await;
+            return reopen_committed_session(current, session_id, store, state).await;
         }
         // A head at revision zero is a partial create: a previous attempt
         // admitted the row, with the creation's complete config as its
@@ -866,29 +785,27 @@ async fn recorded_session_state(
 /// runtime under the resumed-session assembly.
 async fn reopen_committed_session(
     current: &CurrentOwnerCapability,
-    request: &SessionCreateRequest,
     session_id: &SessionId,
     store: crate::store::SessionStore,
     state: crate::RuntimeSessionState,
 ) -> Result<InitializedSession, crate::PluginError> {
-    let parent_session_id = request.relation.parent_session_id().map(SessionId::from);
     // The reopened session runs the configuration it recorded, never the
     // redelivered request's (FIG-4379).
     let authority = crate::plugin::SessionAuthorityContext {
         tool_access: state.authority.tool_access.clone(),
-        subagent: state.authority.subagent.clone(),
         plugin_config: state.admitted_plugin_config(),
     };
     let plugin_host = current.plugins.host();
     let plugins = match state.plugin_state() {
-        Some(snapshot) => plugin_host.defer_session(PluginSessionRequest {
-            parent_session_id: parent_session_id.clone(),
-            ..PluginSessionRequest::rematerialization(state.session_id.clone(), snapshot, authority)
-        }),
-        None => plugin_host.defer_session(PluginSessionRequest {
-            parent_session_id: parent_session_id.clone(),
-            ..PluginSessionRequest::creation(state.session_id.clone(), authority)
-        }),
+        Some(snapshot) => plugin_host.defer_session(PluginSessionRequest::rematerialization(
+            state.session_id.clone(),
+            snapshot,
+            authority,
+        )),
+        None => plugin_host.defer_session(PluginSessionRequest::creation(
+            state.session_id.clone(),
+            authority,
+        )),
     }?;
     let policy = state.effective_policy().clone();
     let runtime = LashRuntime::assemble_runtime(
@@ -1218,17 +1135,12 @@ mod tests {
         )
     }
 
-    /// Resolve `request`'s facts against a starter that records `policy`.
-    fn child_facts(
-        policy: &SessionPolicy,
-        request: &SessionCreateRequest,
-    ) -> Result<ChildFacts, crate::PluginError> {
+    /// Resolve `request`'s facts on a deployment of [`child_llm_profiles`].
+    fn child_facts(request: &SessionCreateRequest) -> Result<ChildFacts, crate::PluginError> {
         let plugin_host = crate::testing::test_plugin_host(Vec::new());
         let models = child_llm_profiles();
         resolve_child_facts(
             &StarterFacts {
-                policy,
-                plugin_config: crate::AdmittedPluginConfig::default(),
                 plugin_host: &plugin_host,
                 protocol_plugin_id: Some("test_protocol"),
                 plugin_admission: crate::store::plugin_writers::PluginAdmission::default(),
@@ -1253,32 +1165,30 @@ mod tests {
         )
     }
 
+    /// A stated policy with nothing else: the turn budget and tool-call
+    /// limit a creator must choose.
+    fn stated_policy() -> SessionPolicy {
+        SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
+    }
+
     /// FIG-4531: a child's model key is judged where the child's facts
-    /// resolve. The reasoning the child inherits must fit the capability its
+    /// resolve. The reasoning the request states must fit the capability its
     /// key mints, and a key the models do not register is typed: terminal at
     /// admission, and the retryable `LlmProfileUnavailable` on the worker of a
     /// start that was admitted with it.
     #[test]
     fn a_child_profile_key_is_judged_typed_when_its_facts_resolve() {
-        let models = child_llm_profiles();
-        let starter = SessionPolicy {
-            model: Some(
-                crate::LlmProfileConfig::new(
-                    crate::LlmProfiles::snapshot(
-                        models.as_ref(),
-                        &crate::LlmProfileKey::new(THINKER),
-                    )
-                    .expect("thinker mints"),
-                )
-                .with_reasoning(crate::ReasoningSelection::Effort("high".to_string())),
-            ),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
+        let high = crate::ReasoningSelection::Effort("high".to_string());
+        let request = |key: &str| {
+            let mut request = root_request().with_llm_profile(crate::LlmProfileKey::new(key));
+            request.policy = Some(stated_policy());
+            request.reasoning = Some(high.clone());
+            request
         };
 
-        let onto_plain = root_request().with_llm_profile(crate::LlmProfileKey::new(PLAIN));
-        let refused = child_facts(&starter, &onto_plain)
+        let refused = child_facts(&request(PLAIN))
             .err()
-            .expect("an inherited effort the key cannot take is refused");
+            .expect("a stated effort the key cannot take is refused");
         assert_eq!(
             runtime_code(&refused),
             Some(&crate::RuntimeErrorCode::ReasoningRefused),
@@ -1286,19 +1196,18 @@ mod tests {
         );
         assert!(reasoning_refused(&refused));
 
-        let onto_thinker = root_request().with_llm_profile(crate::LlmProfileKey::new(THINKER));
-        let facts = child_facts(&starter, &onto_thinker).expect("the effort fits the key");
+        let facts = child_facts(&request(THINKER)).expect("the effort fits the key");
         assert_eq!(
             facts
                 .policy
                 .model
                 .expect("the child records a model")
                 .reasoning,
-            crate::ReasoningSelection::Effort("high".to_string())
+            high
         );
 
-        let unknown = root_request().with_llm_profile(crate::LlmProfileKey::new("retired"));
-        let refused = child_facts(&starter, &unknown)
+        let unknown = request("retired");
+        let refused = child_facts(&unknown)
             .err()
             .expect("an unregistered key is refused");
         assert_eq!(
@@ -1337,11 +1246,9 @@ mod tests {
 
     /// FIG-4594: a request that states its whole config (a host session-turn
     /// start's spec) records exactly that: its policy's turn budget, and its
-    /// key minted with the reasoning it states. A starter's recorded policy
-    /// supplies nothing.
+    /// key minted with the reasoning it states.
     #[test]
-    fn a_request_that_states_its_spec_records_it_whatever_its_starter_holds() {
-        let models = child_llm_profiles();
+    fn a_request_that_states_its_spec_records_it() {
         let spec = crate::SessionSpec::new(
             THINKER,
             crate::TurnBudget::bounded(4),
@@ -1350,15 +1257,8 @@ mod tests {
         .reasoning(crate::ReasoningSelection::Effort("high".to_string()));
         let request = root_request().with_spec(&spec).expect("a root spec");
         assert_eq!(request.unstated_root_config(), None);
-        let starter = SessionPolicy {
-            model: Some(crate::LlmProfileConfig::new(
-                crate::LlmProfiles::snapshot(models.as_ref(), &crate::LlmProfileKey::new(PLAIN))
-                    .expect("plain mints"),
-            )),
-            ..SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024))
-        };
 
-        let facts = child_facts(&starter, &request).expect("the stated spec resolves");
+        let facts = child_facts(&request).expect("the stated spec resolves");
         assert_eq!(facts.policy.turn_budget, crate::TurnBudget::bounded(4));
         let model = facts.policy.model.expect("the child records a model");
         assert_eq!(model.key().as_str(), THINKER);
@@ -1379,19 +1279,73 @@ mod tests {
         );
     }
 
+    /// FIG-5296: creation is explicit (ADR 0134). A child request that
+    /// states no policy is refused typed, never filled from the session that
+    /// starts it; a key named without a reasoning runs the default
+    /// selection, not a reasoning carried from any other model; and the
+    /// plugin config is every owner's default, never a parent's namespace.
+    #[test]
+    fn a_child_records_only_what_its_request_states() {
+        let unstated = SessionCreateRequest::child_session(
+            "parent",
+            crate::SessionStartPoint::Empty,
+            crate::PluginOptions::default(),
+        );
+        let refused = child_facts(&unstated)
+            .err()
+            .expect("a request with no policy is refused");
+        let crate::PluginError::Runtime(runtime) = &refused else {
+            panic!("the refusal is a runtime error: {refused:?}");
+        };
+        assert_eq!(runtime.code, crate::RuntimeErrorCode::SessionConfigRefused);
+        assert_eq!(
+            runtime
+                .config_refusal()
+                .and_then(crate::ConfigRefusal::owner_refusal::<crate::CoreConfigRefusal>),
+            Some(crate::CoreConfigRefusal::PolicyUnstated),
+            "{runtime:?}"
+        );
+
+        let keyed = SessionCreateRequest::child(
+            "parent",
+            crate::SessionStartPoint::Empty,
+            stated_policy(),
+            crate::PluginOptions::default(),
+        )
+        .with_llm_profile(crate::LlmProfileKey::new(THINKER));
+        let facts = child_facts(&keyed).expect("a stated policy and key resolve");
+        assert_eq!(
+            facts.policy.model.expect("the key mints").reasoning,
+            crate::ReasoningSelection::default(),
+            "a key named alone runs the default reasoning"
+        );
+        assert_eq!(facts.policy.turn_budget, crate::TurnBudget::Unbounded);
+        assert_eq!(
+            facts.plugin_config,
+            child_facts(&SessionCreateRequest::child(
+                "another-parent",
+                crate::SessionStartPoint::Empty,
+                stated_policy(),
+                crate::PluginOptions::default(),
+            ))
+            .expect("an unrelated child resolves")
+            .plugin_config,
+            "the plugin config depends on the request alone"
+        );
+    }
+
     /// FIG-4652: a child whose creation config is refused fails with the
     /// refusal as its typed cause, not as message text, and the cause
     /// survives the plugin boundary's encoding.
     #[test]
     fn a_refused_child_creation_config_carries_its_typed_cause() {
-        let starter =
-            SessionPolicy::new(crate::TurnBudget::Unbounded, crate::MaxToolCalls::new(1024));
-        let request = SessionCreateRequest::root(
+        let mut request = SessionCreateRequest::root(
             crate::SessionStartPoint::Empty,
             crate::PluginOptions::typed("no-such-plugin", serde_json::json!({ "k": 1 }))
                 .expect("options"),
         );
-        let refused = child_facts(&starter, &request)
+        request.policy = Some(stated_policy());
+        let refused = child_facts(&request)
             .err()
             .expect("a namespace no installed plugin owns is refused");
         assert!(session_config_refused(&refused), "{refused:?}");

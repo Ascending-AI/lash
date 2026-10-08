@@ -297,7 +297,6 @@ pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteEx
 pub use tokio_util::sync::CancellationToken;
 // The vocabulary this module's signatures name (the facade-completeness rule).
 pub use lash_core::ConfigTransactionRecord;
-pub use lash_core::SessionPluginInit;
 pub use lash_core::runtime::ConfigTransactionSubmitError;
 pub use lash_core::runtime::obligations::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay,
@@ -998,15 +997,15 @@ pub mod plugins {
     /// and reads the recorded value on every open and in every scoped hook.
     pub use lash_core::{
         AdmittedPluginConfig, CandidateFacts, ConfigCommand, ConfigFault, ConfigOwner,
-        ConfigRegistrar, ConfigRegistrationError, ConfigWire, CreationConfigError, CreationFacts,
-        NoRunOptions, OwnerChange, PluginConfig, RecordedNamespaceCorrupt, RenderFault,
+        ConfigRegistrar, ConfigRegistrationError, ConfigWire, CreationConfigError, NoRunOptions,
+        OwnerChange, PluginConfig, RecordedNamespaceCorrupt, RenderFault,
     };
     /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
     pub use lash_core::{
         AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
         ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration, ProcessInfraError,
         ProcessRunOutcome, ProtocolBuildInput, ProtocolDriverState, ProtocolTurnOptionsError,
-        SessionPluginSource, TurnDriverPreamble,
+        TurnDriverPreamble,
     };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends
@@ -1015,7 +1014,6 @@ pub mod plugins {
     pub use lash_core::{
         AppendSessionNodesOutcome, AppendSessionNodesRequest, PluginExtensions, SessionAppendNode,
         SessionGraphService, SessionStateService, SessionToolAccess, SessionToolAccessError,
-        SubagentSessionContext,
     };
     /// Code-executor request, response, and runtime capability context.
     pub use lash_core::{
@@ -1410,12 +1408,6 @@ pub mod process_controls {
     pub use lash_plugin_process_controls::{
         ProcessControlTool, SessionProcessAdminPluginFactory, process_tool_definition,
     };
-}
-
-/// Subagent spawning plugin.
-#[cfg(feature = "subagents")]
-pub mod subagents {
-    pub use lash_subagents::*;
 }
 
 /// TypeScript process dialect.

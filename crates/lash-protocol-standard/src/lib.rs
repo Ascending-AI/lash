@@ -21,7 +21,7 @@ use lash_core::facade_support::JsonSchema;
 use lash_core::llm::types::{ProviderReasoningReplay, ProviderReplayMeta, ResponseTextMeta};
 use lash_core::plugin::{
     CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
-    CreationFacts, OwnerChange, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
+    OwnerChange, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
     ProtocolDriverPlugin, ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
 };
 use lash_core::sansio::{
@@ -325,21 +325,17 @@ impl ConfigOwner for StandardConfigOwner {
     type RunOptions = StandardRunOptions;
 
     /// Every session records its namespace: the creator's render options,
-    /// or none, under which the recorded render applies, and its
-    /// behaviour. A child inherits its parent's recorded behaviour, whatever
-    /// the host creating it is configured with (FIG-4527). Without a
-    /// recorded parent, this host's behaviour applies.
+    /// or none, under which the recorded render applies, and this host's
+    /// behaviour (FIG-4527). A child records what its creator states, like a
+    /// root; only a fork copies a recorded namespace (ADR 0134).
     fn create(
         &self,
         input: Option<StandardTurnOptions>,
-        facts: CreationFacts<'_, StandardRecordedConfig>,
     ) -> Result<Option<StandardRecordedConfig>, StandardConfigRefusal> {
         let input = input.unwrap_or_default();
         Ok(Some(StandardRecordedConfig {
             render: input.render,
-            behaviour: facts
-                .parent
-                .map_or_else(|| self.behaviour.clone(), |parent| parent.behaviour.clone()),
+            behaviour: self.behaviour.clone(),
         }))
     }
 

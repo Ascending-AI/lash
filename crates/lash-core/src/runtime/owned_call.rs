@@ -40,7 +40,6 @@ pub(in crate::runtime) struct OwnedPrompt {
     pub(in crate::runtime) plan: PromptPlan,
     pub(in crate::runtime) config: crate::AdmittedPluginConfig,
     pub(in crate::runtime) frame: Option<crate::FrameNodeId>,
-    pub(in crate::runtime) subagent: Option<crate::SubagentSessionContext>,
     pub(in crate::runtime) session: Option<crate::SessionReadView>,
 }
 
@@ -225,7 +224,6 @@ async fn compose(
         plan,
         config,
         frame,
-        subagent,
         session,
     } = prompt;
     let catalog = plugins.prompt_catalog();
@@ -258,7 +256,6 @@ async fn compose(
             },
             namespaces: plugins.committed_namespaces(),
         },
-        subagent,
         None,
     );
     match compose_prompt(

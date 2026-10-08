@@ -99,8 +99,6 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
         .resolve_creation_plugin_config(
             Some(lash_protocol_standard::STANDARD_PROTOCOL_PLUGIN_ID),
             &lash_core::PluginOptions::default(),
-            None,
-            true,
             &lash_core::store::plugin_writers::PluginAdmission::default(),
         )
         .expect("the creation config resolves");

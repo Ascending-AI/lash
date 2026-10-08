@@ -105,7 +105,6 @@ impl RuntimeTurnDriver<'static> {
                 },
                 namespaces: plugins.committed_namespaces(),
             },
-            state.authority.subagent.clone(),
             protocol_facts,
         );
         let plan = &state.authority.prompt_plan;

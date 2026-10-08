@@ -142,7 +142,6 @@ pub(crate) use runtime_error::{RuntimeError, RuntimeErrorCode};
 pub(crate) use session_identity::{
     AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, SessionLineage,
     SessionObserverIntent, SessionRelation, SessionSnapshot, SessionToolAccess,
-    SubagentSessionContext,
 };
 pub(crate) use session_policy::SessionPolicy;
 pub(crate) use session_read_view::SessionReadView;

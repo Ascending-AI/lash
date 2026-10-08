@@ -103,6 +103,14 @@ repos:
         entry: python3 scripts/check-no-restate.py
         pass_filenames: false
 
+      # Mirrors CI repo-gates: core and the facade have no subagent concept;
+      # creating a session is explicit and only a fork clones (ADR 0134, FIG-5296).
+      - id: no-subagent
+        name: No subagent in core
+        language: system
+        entry: python3 scripts/check-no-subagent.py
+        pass_filenames: false
+
       # Mirrors CI Lint "Check substrate stub lane tags": every substrate
       # `todo!`/`unimplemented!` names the lane that fills it (I0, FIG-5194).
       - id: substrate-todos

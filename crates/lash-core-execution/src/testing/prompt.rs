@@ -12,19 +12,17 @@ pub use crate::plugin::prompt::{
 };
 use crate::prompt_sections::{PromptPlan, PromptPurpose};
 
-/// The cut `parts` state, with no subagent authority and no protocol facts.
+/// The cut `parts` state, with no protocol facts.
 pub fn cut(parts: PromptCutParts) -> PromptCut {
     PromptCut::new(parts)
 }
 
-/// The cut `parts` state, for a session with `subagent` authority and a
-/// protocol stating `protocol` facts.
+/// The cut `parts` state, for a protocol stating `protocol` facts.
 pub fn cut_with(
     parts: PromptCutParts,
-    subagent: Option<crate::SubagentSessionContext>,
     protocol: Option<crate::plugin::prompt::ProtocolPromptFacts>,
 ) -> PromptCut {
-    crate::core_internal::prompt_cut(parts, subagent, protocol)
+    crate::core_internal::prompt_cut(parts, protocol)
 }
 
 /// A namespace frozen at `generation` with `values`.

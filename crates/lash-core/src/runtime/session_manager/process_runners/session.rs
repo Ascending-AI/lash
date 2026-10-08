@@ -163,8 +163,9 @@ impl RuntimeSessionServices {
     }
 
     /// The child session's create request as the process runs it: caused by
-    /// the process, in the session its id derives when the start named none
-    /// (ADR 0107), under the model its starter's environment recorded.
+    /// the process, and in the session its id derives when the start named
+    /// none (ADR 0107). Everything else is what its creator stated: nothing
+    /// is filled from the starter's environment (ADR 0134).
     fn child_create_request(
         &self,
         process_id: &crate::ProcessId,
@@ -177,13 +178,6 @@ impl RuntimeSessionServices {
             create_request = create_request
                 .with_session_id(crate::runtime::process_child_session_id(process_id));
         }
-        // The child is resolved against the environment this process's start
-        // captured — its starter's recorded policy and plugin config — the
-        // facts the start admitted before its handoff (FIG-4396). A
-        // `create_request` policy that selects no model runs that
-        // environment's recorded one, copied as recorded rather than
-        // re-resolved.
-        self.inherit_session_turn_llm_profile(&mut create_request);
         create_request
     }
 
@@ -274,15 +268,6 @@ impl RuntimeSessionServices {
             turn_input_acceptance: None,
             turn_cancel_input_outcome: Default::default(),
         })
-    }
-
-    fn inherit_session_turn_llm_profile(&self, create_request: &mut crate::SessionCreateRequest) {
-        let Some(policy) = create_request.policy.as_mut() else {
-            return;
-        };
-        if policy.model.is_none() {
-            policy.model = self.current.policy.model.clone();
-        }
     }
 }
 

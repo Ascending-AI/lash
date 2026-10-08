@@ -161,6 +161,9 @@ pub use lash_lashlang_runtime::{
 };
 /// Identifies the RLM protocol's durable output by its typed message origin.
 pub use lash_protocol_rlm::is_rlm_protocol_output;
+/// The initial nodes that bind a [`RlmSeed`] in a session being created: a
+/// creator states them on its create request (FIG-5296).
+pub use lash_protocol_rlm::rlm_seed_initial_nodes;
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound,
     MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmProtocolPluginConfig,

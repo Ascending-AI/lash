@@ -136,7 +136,6 @@ impl PluginSession {
         plugin_config.config = std::sync::Arc::new(config);
         let config = SessionAuthorityContext {
             tool_access: authority.tool_access,
-            subagent: authority.subagent,
             plugin_config,
         };
         let materialization = match self.materialization {
@@ -158,7 +157,6 @@ impl PluginSession {
             .isolated_registry()
             .defer_session(PluginSessionRequest {
                 owner: self.owner.clone(),
-                parent_session_id: self.parent_session_id.clone(),
                 materialization,
                 tool_catalog_overlay: self.tool_catalog_overlay.clone(),
                 tool_snapshot: self.tool_snapshot.clone(),

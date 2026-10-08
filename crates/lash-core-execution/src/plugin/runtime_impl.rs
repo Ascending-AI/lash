@@ -28,7 +28,6 @@ pub struct PluginHost {
 #[derive(Clone, Debug)]
 pub struct PluginSessionRequest<'a> {
     pub owner: RuntimeOwner,
-    pub parent_session_id: Option<SessionId>,
     pub materialization: PluginSessionMaterializationRequest<'a>,
     pub tool_catalog_overlay: ToolCatalogContribution,
     pub tool_snapshot: Option<crate::ToolState>,
@@ -38,7 +37,6 @@ impl<'a> PluginSessionRequest<'a> {
     pub fn creation(session_id: impl Into<SessionId>, config: SessionAuthorityContext) -> Self {
         Self {
             owner: RuntimeOwner::Session(session_id.into()),
-            parent_session_id: None,
             materialization: PluginSessionMaterializationRequest::Creation {
                 config,
                 seed_snapshot: None,
@@ -53,7 +51,6 @@ impl<'a> PluginSessionRequest<'a> {
     pub fn process_creation(process_id: crate::ProcessId, config: SessionAuthorityContext) -> Self {
         Self {
             owner: RuntimeOwner::Process(process_id),
-            parent_session_id: None,
             materialization: PluginSessionMaterializationRequest::Creation {
                 config,
                 seed_snapshot: None,
@@ -70,7 +67,6 @@ impl<'a> PluginSessionRequest<'a> {
     ) -> Self {
         Self {
             owner: RuntimeOwner::Session(session_id.into()),
-            parent_session_id: None,
             materialization: PluginSessionMaterializationRequest::Rematerialization {
                 snapshot,
                 config,
@@ -108,7 +104,6 @@ struct BuiltSessionContributions {
 #[derive(Clone, Debug, Default)]
 pub struct SessionAuthorityContext {
     pub tool_access: SessionToolAccess,
-    pub subagent: Option<SubagentSessionContext>,
     /// The recorded plugin configuration the session is built with
     /// (FIG-4379).
     pub plugin_config: super::AdmittedPluginConfig,
@@ -288,22 +283,13 @@ impl PluginHost {
         &self,
         protocol_plugin_id: Option<&str>,
         requested: &crate::PluginOptions,
-        parent: Option<&super::PluginConfig>,
-        is_root_session: bool,
         writers: &crate::store::plugin_writers::PluginAdmission,
     ) -> Result<super::PluginConfig, super::CreationConfigError> {
         let options = super::PluginConfig::from_recorded_parts(None, requested.plugins.clone());
         self.decode_config(&options)?;
-        if let Some(parent) = parent {
-            self.decode_config(parent)?;
-        }
-        Ok(self.config_registry()?.resolve_creation(
-            protocol_plugin_id,
-            requested,
-            parent,
-            is_root_session,
-            writers,
-        )?)
+        Ok(self
+            .config_registry()?
+            .resolve_creation(protocol_plugin_id, requested, writers)?)
     }
 
     /// Ask every factory for its process-engine contributions and register them
@@ -374,7 +360,6 @@ impl PluginHost {
     ) -> Result<Arc<PluginSession>, PluginError> {
         let PluginSessionRequest {
             owner,
-            parent_session_id,
             materialization,
             tool_catalog_overlay,
             tool_snapshot,
@@ -406,7 +391,6 @@ impl PluginHost {
             native_view: Arc::new(StdMutex::new(None)),
             host: self.clone(),
             owner,
-            parent_session_id,
             materialization,
             tool_snapshot,
             capabilities: Arc::new(std::sync::OnceLock::new()),
@@ -414,7 +398,6 @@ impl PluginHost {
             authority: Arc::new(std::sync::RwLock::new(
                 super::session_obj::LiveSessionAuthority {
                     tool_access: authority.tool_access,
-                    subagent: authority.subagent,
                     plugin_config: authority.plugin_config,
                 },
             )),
@@ -460,11 +443,9 @@ impl PluginHost {
                 trace: None,
                 owner: session.owner.clone(),
                 tool_access: authority.tool_access,
-                subagent: authority.subagent,
                 plugin_config: authority.plugin_config,
                 materialization: session.materialization,
                 extensions: self.extensions.clone(),
-                parent_session_id: session.parent_session_id.clone(),
             };
             let BuiltSessionContributions {
                 plugins,
@@ -529,7 +510,6 @@ impl PluginHost {
         &self,
         owner: RuntimeOwner,
         tool_access: crate::SessionToolAccess,
-        subagent: Option<crate::SubagentSessionContext>,
         plugin_config: super::AdmittedPluginConfig,
     ) -> Result<super::prompt::PromptCatalog, PluginError> {
         let ctx = PluginSessionContext {
@@ -537,11 +517,9 @@ impl PluginHost {
             trace: None,
             owner,
             tool_access,
-            subagent,
             plugin_config,
             materialization: PluginSessionMaterialization::Rematerialization,
             extensions: self.extensions.clone(),
-            parent_session_id: None,
         };
         let built = self.build_session_contributions(
             &ctx,

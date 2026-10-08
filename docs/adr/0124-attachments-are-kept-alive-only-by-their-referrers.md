@@ -225,9 +225,10 @@ a stand-in for its own id.
   both backends.
 - **A process-owned tool call** runs under its admitted process runtime and
   recorded environment, including after another node claims the process.
-- **A subagent spawned inside a process** parents under the session that
-  originated the process chain, read by name, and is caused by the process.
-  A host-originated chain and a `ParentFork` capability refuse (ADR 0116).
+- **A child spawned inside a process** by a host's delegation tool parents
+  under the session that originated the process chain, read by name, and is
+  caused by the process. A host-originated chain refuses (ADR 0116 §4). The
+  link is lineage only (ADR 0134).
 
 ## Consequences
 

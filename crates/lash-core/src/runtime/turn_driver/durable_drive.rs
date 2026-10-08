@@ -556,11 +556,7 @@ impl RuntimeTurnDriver<'static> {
             .map_err(|error| TurnError::Exec(format!("the tool surface did not pin: {error}")))?;
         let authority = &self.turn_pipeline.state().authority;
         self.session
-            .install_recorded_tool_surface(
-                &authority.tool_access,
-                authority.subagent.as_ref(),
-                &surface.tool_definitions,
-            )
+            .install_recorded_tool_surface(&authority.tool_access, &surface.tool_definitions)
             .map_err(|error| TurnError::Exec(format!("the tool surface did not install: {error}")))
     }
 }

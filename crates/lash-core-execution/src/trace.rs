@@ -154,7 +154,7 @@ fn merge_context(base: &mut TraceContext, overlay: TraceContext) {
 ///
 /// The tree is `session -> turn -> { llm call, tool call, … }`. A turn's parent
 /// is its causal origin (`caused_by` — e.g. the tool call in a parent session
-/// that spawned this subagent) when one is already on the context, otherwise
+/// that started this child session) when one is already on the context, otherwise
 /// the session root. Records that already carry their own node identity in the
 /// payload, and host-defined custom events, are left untouched.
 fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
@@ -790,7 +790,7 @@ mod span_identity_tests {
             context.parent_graph_node_id.as_deref(),
             Some("turn:sess:turn-1")
         );
-        // A subagent caused_by this tool call must resolve to the same node id.
+        // A child session caused_by this tool call must resolve to the same node id.
         assert_eq!(
             causal_node_id(&crate::CausalRef::ToolCall {
                 session_id: crate::SessionId::from("sess"),

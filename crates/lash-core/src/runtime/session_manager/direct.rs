@@ -168,7 +168,6 @@ impl CurrentOwnerCapability {
                     plan: state.authority.prompt_plan.clone(),
                     config,
                     frame: state.current_frame_node_id.clone(),
-                    subagent: state.authority.subagent.clone(),
                     session: Some(crate::SessionReadView::from_runtime_state(
                         &state,
                         state.effective_policy().clone(),
@@ -181,7 +180,6 @@ impl CurrentOwnerCapability {
                 plan: Default::default(),
                 config,
                 frame: None,
-                subagent: None,
                 session: None,
             },
         }

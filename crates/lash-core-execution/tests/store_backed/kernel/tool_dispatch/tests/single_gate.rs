@@ -26,7 +26,7 @@ async fn authority_hidden_tool_executes_on_pinned_registry_but_is_absent_from_ca
         .with_hidden_tools(["hidden"])
         .expect("valid hidden name");
     let pinned = session
-        .pin_tool_surface(&tool_access, None)
+        .pin_tool_surface(&tool_access)
         .expect("authority-hidden pinned surface");
 
     assert!(

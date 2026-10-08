@@ -75,7 +75,7 @@ pub const FIXED_AGENT_PRODUCT_CONTRACTS: &[&str] = &[
     "agent.foreground_tool_call_round_trip",
     "agent.started_process_tool_call_graph",
     "agent.durable_input_suspension_resolution",
-    "agent.started_process_subagent_spawn",
+    "agent.started_process_child_spawn",
     "agent.nested_process_start_await",
     "agent.session_turn_process_child",
     "agent.failed_child_preserves_failure_graph",
@@ -121,10 +121,10 @@ pub(super) const AGENT_CONTRACT_ROWS: &[AgentContractRow] = &[
         execute: run_agent_durable_input_suspension_resolution,
     },
     AgentContractRow {
-        semantic_oracle: "agent.started_process_subagent_spawn",
+        semantic_oracle: "agent.started_process_child_spawn",
         source_path: "crates/lash/src/tests/agent_scenarios/cases.rs",
-        source_scenario: "agent_scenario_started_process_labeled_subagent_spawn",
-        execute: run_agent_started_process_subagent_spawn,
+        source_scenario: "agent_scenario_started_process_labeled_child_spawn",
+        execute: run_agent_started_process_child_spawn,
     },
     AgentContractRow {
         semantic_oracle: "agent.nested_process_start_await",
@@ -189,10 +189,10 @@ fn run_agent_durable_input_suspension_resolution(
     runtime.block_on(agent_durable_input_suspension_resolution_execution())
 }
 
-fn run_agent_started_process_subagent_spawn(
+fn run_agent_started_process_child_spawn(
     runtime: &tokio::runtime::Runtime,
 ) -> Result<Value, FixedScriptRunnerError> {
-    runtime.block_on(agent_started_process_subagent_spawn_execution())
+    runtime.block_on(agent_started_process_child_spawn_execution())
 }
 
 fn run_agent_nested_process_start_await(
@@ -267,7 +267,6 @@ async fn agent_failed_child_preserves_failure_graph_execution()
             r#"<typescript>
 /** @label Spawn failing subagent */
 const result = await agents.spawn({
-  capability: "default",
   task: "Fail with reason child boom.",
   seed: {},
   output: { reason: "str" }
@@ -542,14 +541,14 @@ async fn facade_agent_process_execution_with_options(
     provider_responses: Vec<&'static str>,
     expected_final_value: &Value,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
-    install_subagents: bool,
+    install_delegation: bool,
     max_turns: Option<usize>,
 ) -> Result<Value, FixedScriptRunnerError> {
     let (core, graph_store, engine) = agent_process_contract_core_with_options(
         provider_kind,
         provider_responses,
         tools,
-        install_subagents,
+        install_delegation,
     )
     .await?;
     let session = crate::open_created_session_from(
@@ -726,7 +725,7 @@ async fn agent_process_contract_core_with_options(
     provider_kind: &'static str,
     provider_responses: Vec<&'static str>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
-    install_subagents: bool,
+    install_delegation: bool,
 ) -> Result<ContractCore, FixedScriptRunnerError> {
     let graph_store = Arc::new(lash::tracing::TraceLashlangGraphStore::default());
     let (engine, backend) = contract_world().await?;
@@ -760,8 +759,8 @@ async fn agent_process_contract_core_with_options(
     if let Some(tools) = tools {
         builder = builder.tools(tools);
     }
-    if install_subagents {
-        builder = builder.plugin(agent_contract_subagents_plugin());
+    if install_delegation {
+        builder = builder.plugin(agent_contract_delegation_plugin(provider_kind));
     }
     let core = builder
         .build(crate::sim_process_owner())
@@ -769,16 +768,23 @@ async fn agent_process_contract_core_with_options(
     Ok((core, graph_store, engine))
 }
 
-fn agent_contract_subagents_plugin() -> Arc<dyn lash_core::facade_support::PluginFactory> {
-    Arc::new(lash_subagents::SubagentsPluginFactory::new(
-        Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
-            lash_subagents::StaticCapability::new(
-                "default",
-                lash_core::facade_support::SessionSpec::inherit(),
+/// The host's delegation tool (`examples/delegation`): each child runs the
+/// contract's own model under the parent's budgets, stated explicitly, and
+/// lives until the turn that spawned it ends.
+fn agent_contract_delegation_plugin(
+    provider_kind: &'static str,
+) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+    Arc::new(
+        delegation::DelegationPluginFactory::new(
+            lash::SessionSpec::new(
+                provider_kind,
+                lash::TurnBudget::bounded(1),
+                lash::MaxToolCalls::new(1024),
             ),
-        ))),
-        lash_core::lifetime::starter,
-    ))
+            lash_core::lifetime::starter,
+        )
+        .with_rlm_children(lash::rlm::RlmFinalAnswerFormat::RawFinalValue),
+    )
 }
 
 async fn wait_for_contract_durable_input_key(

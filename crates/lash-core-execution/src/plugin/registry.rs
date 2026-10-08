@@ -4,7 +4,6 @@
 //! (`StaticPluginFactory`, `PluginSpecFactory`) + the `SpecPlugin`
 //! glue that walks a spec and wires each field into the registrar.
 
-use crate::SessionId;
 use std::sync::Arc;
 
 use super::{
@@ -13,9 +12,8 @@ use super::{
     ErasedPluginOperationInvokeFuture, HookKey, PluginCommand, PluginCommandHandler, PluginError,
     PluginHost, PluginLifecycleEventHook, PluginOperationOutcome, PluginOperationRegistration,
     PluginOperationSpec, PluginQuery, PluginQueryHandler, PluginQueryInvokeFuture, PluginRegistrar,
-    PluginTask, PluginTaskHandler, SessionToolAccess, SubagentSessionContext, ToolArgsCheckHook,
-    ToolArgsTransformHook, ToolCatalogContributor, ToolPresentationStep, ToolResultCheckHook,
-    ToolResultTransformHook,
+    PluginTask, PluginTaskHandler, SessionToolAccess, ToolArgsCheckHook, ToolArgsTransformHook,
+    ToolCatalogContributor, ToolPresentationStep, ToolResultCheckHook, ToolResultTransformHook,
 };
 use crate::ToolProvider;
 
@@ -484,7 +482,6 @@ pub struct PluginSessionContext {
     /// built from its captured execution environment.
     pub owner: crate::RuntimeOwner,
     pub tool_access: SessionToolAccess,
-    pub subagent: Option<SubagentSessionContext>,
     /// The session's recorded plugin configuration at this build (FIG-4379):
     /// what it was created with or last patched to, or a process's captured
     /// configuration. It is the value at build time only: a hook reads the
@@ -495,11 +492,6 @@ pub struct PluginSessionContext {
     /// whose plugin snapshot and configuration were already recorded.
     pub materialization: PluginSessionMaterialization,
     pub extensions: PluginExtensions,
-    /// Session id of the caller that created this one. `None` identifies
-    /// a root session; any subagent / forked-child session
-    /// carries the parent here so plugin factories can gate themselves
-    /// on root-only behavior (e.g. `update_plan`'s sticky plan dock).
-    pub parent_session_id: Option<SessionId>,
 }
 
 impl PluginSessionContext {
@@ -509,12 +501,6 @@ impl PluginSessionContext {
 
     pub fn trace_scope(&self) -> Option<&lash_trace::DurableTraceScope> {
         self.trace.as_ref()
-    }
-
-    /// Plugins that should only surface in user-facing top-level turns check this in their
-    /// `build`.
-    pub fn is_root_session(&self) -> bool {
-        self.parent_session_id.is_none()
     }
 }
 
@@ -735,7 +721,7 @@ impl<T: PluginDefinition> PluginMetadata for T {
 /// # Cheap-build / stateful-factory contract
 ///
 /// `build(ctx)` **must be cheap**. It runs on the hot path every time
-/// a new session is created (including subagents and forked children)
+/// a new session is created (children and forks included)
 /// and any latency here is paid per session.
 ///
 /// Specifically, `build` must **not**:
@@ -868,7 +854,7 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
     /// commands that change it (FIG-4379), before any session exists.
     ///
     /// The owner creates the namespace at every session's creation — from
-    /// the creator's input, its defaults and a child's parent — and
+    /// the creator's input and its defaults, never another session's — and
     /// validates every candidate; each command is one change the namespace
     /// admits, and a setting no command changes is immutable. Every open
     /// delivers the recorded namespace unchanged, in

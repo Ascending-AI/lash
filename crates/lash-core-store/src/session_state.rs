@@ -628,8 +628,6 @@ impl RuntimeCheckpointComponents {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSessionAuthority {
     pub tool_access: crate::SessionToolAccess,
-    #[serde(default)]
-    pub subagent: Option<crate::SubagentSessionContext>,
     /// The session's recorded plugin configuration (FIG-4379), as the
     /// installed config view states it: the head's, or a running run's
     /// admitted view. Every plugin session built for this state reads it.
@@ -1148,7 +1146,6 @@ pub fn adopt_session_config(
     config: &crate::PersistedSessionConfig,
 ) {
     state.authority.tool_access = config.tool_access.clone();
-    state.authority.subagent = config.subagent.clone();
     state.authority.plugin_config = config.plugin_config.clone();
     state.authority.prompt_plan = config.prompt_plan.clone();
     apply_persisted_session_config(state, config);

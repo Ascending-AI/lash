@@ -232,14 +232,11 @@ impl lash::plugins::ConfigOwner for WorkbenchConfigOwner {
     type Refusal = String;
     type RunOptions = lash::plugins::NoRunOptions;
 
-    /// A child session inherits its parent's prompt unless its creator
-    /// states one.
-    fn create(
-        &self,
-        input: Option<WorkbenchPrompt>,
-        facts: lash::plugins::CreationFacts<'_, WorkbenchPrompt>,
-    ) -> Result<Option<WorkbenchPrompt>, String> {
-        Ok(input.or_else(|| facts.parent.cloned()))
+    /// A session records the prompt its creator states, and none
+    /// otherwise: a delegated child starts from what the delegation tool
+    /// passes, never from its parent's prompt (ADR 0134).
+    fn create(&self, input: Option<WorkbenchPrompt>) -> Result<Option<WorkbenchPrompt>, String> {
+        Ok(input)
     }
 
     fn validate(

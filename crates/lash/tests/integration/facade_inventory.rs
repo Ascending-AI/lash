@@ -324,11 +324,6 @@ mod mcp_inventory {
     use lash::mcp::McpServerConfig as _;
 }
 
-#[cfg(feature = "subagents")]
-mod subagents_inventory {
-    use lash::subagents::SubagentsPluginFactory as _;
-}
-
 #[cfg(feature = "typescript")]
 mod typescript_inventory {
     use lash::typescript::{link as _, parse as _};

@@ -35,8 +35,8 @@ use super::{ProcessWorkWiring, RuntimeHostConfig, TerminationPolicy};
 ///
 /// Cloning is cheap — every field is either `Arc`-wrapped or small.
 /// Default values build an embedded runtime without process lifecycle
-/// support. Hosts that want long-running tools, async handles, subagents,
-/// or process admins must provide complete process work wiring.
+/// support. Hosts that want long-running tools, async handles, child
+/// sessions or process admins must provide complete process work wiring.
 #[derive(Clone)]
 pub struct RuntimeEnvironment {
     // Shared plugin infrastructure. Created once; every session's

@@ -664,7 +664,7 @@ mod tests {
         for refused in [
             "process-7",
             "p-7",
-            "process:subagent:call-1",
+            "process:child:call-1",
             "p_0192000000007000800000000000001",
             "p_019200000000700080000000000000011",
             "p_0192000000007000800000000000000G",

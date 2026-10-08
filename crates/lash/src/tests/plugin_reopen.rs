@@ -1,9 +1,8 @@
 //! L3 (FIG-4859): live extension data is a per-materialization input, not a
 //! recorded one. Changing a plugin's extension contribution after a
 //! session's creation must leave the session's recorded surfaces — its
-//! plugin state, its admitted config and the fork initialization a child
-//! would replay — byte-identical across reopen, while the reopened session
-//! sees the live data as its own.
+//! plugin state and its admitted config — byte-identical across reopen,
+//! while the reopened session sees the live data as its own.
 
 use super::*;
 
@@ -37,8 +36,6 @@ fn creation_authority(host: &PluginHost) -> SessionAuthorityContext {
         .resolve_creation_plugin_config(
             Some(lash_protocol_standard::STANDARD_PROTOCOL_PLUGIN_ID),
             &lash_core::PluginOptions::default(),
-            None,
-            true,
             &lash_core::store::plugin_writers::PluginAdmission::default(),
         )
         .expect("the creation config resolves");
@@ -64,7 +61,6 @@ fn live_extension_data_changed_after_creation_does_not_rewrite_the_record() -> R
     );
     let snapshot = created.export_state();
     let config = created.admitted_plugin_config();
-    let init = created.capture_fork_init().expect("fork initialization");
 
     // The reopened host's plugin contributes `{"v": 2}`: an extension
     // contribution is collected live, once per materialization.
@@ -84,14 +80,9 @@ fn live_extension_data_changed_after_creation_does_not_rewrite_the_record() -> R
         "the reopened session is served the live contribution"
     );
 
-    // Nothing the session recorded moved: not its state, not its admitted
-    // config, and not the initialization a forked child would replay.
+    // Nothing the session recorded moved: not its state and not its
+    // admitted config.
     assert_eq!(reopened.export_state(), snapshot);
     assert_eq!(reopened.admitted_plugin_config(), config);
-    assert_eq!(
-        rmp_serde::to_vec_named(&reopened.capture_fork_init().expect("fork init")).expect("encode"),
-        rmp_serde::to_vec_named(&init).expect("encode"),
-        "the forked-child record is identical across reopen"
-    );
     Ok(())
 }

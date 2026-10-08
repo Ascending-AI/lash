@@ -32,7 +32,6 @@ pub fn execution_session_config_from_state(
 ) -> crate::PersistedSessionConfig {
     let mut config = crate::PersistedSessionConfig::from(&state.policy);
     config.tool_access = state.authority.tool_access.clone();
-    config.subagent = state.authority.subagent.clone();
     config.plugin_config = state.authority.plugin_config.clone();
     config.prompt_plan = state.authority.prompt_plan.clone();
     config.config_revision = state.config_revision;

@@ -66,7 +66,6 @@ impl SessionPlugin for RlmSections {
 pub(crate) struct Call {
     pub(crate) catalog: lash_core::ToolCatalog,
     pub(crate) facts: Option<RlmPromptFacts>,
-    pub(crate) subagent: Option<lash_core::SubagentSessionContext>,
     pub(crate) options: RlmTurnOptions,
     pub(crate) committed_usage: Option<lash_core::TokenUsage>,
     pub(crate) context_window_tokens: Option<u64>,
@@ -80,7 +79,6 @@ impl Default for Call {
         Self {
             catalog: lash_core::ToolCatalog::default(),
             facts: None,
-            subagent: None,
             options: RlmTurnOptions::default(),
             committed_usage: None,
             context_window_tokens: None,
@@ -123,7 +121,6 @@ pub(crate) fn compose(plugins: &[Arc<dyn SessionPlugin>], call: Call) -> Compose
             history: Default::default(),
             namespaces: Default::default(),
         },
-        call.subagent,
         call.facts.map(|facts| Arc::new(facts) as _),
     );
     let catalog = PromptCatalog::of_plugins(plugins).expect("the sections register");

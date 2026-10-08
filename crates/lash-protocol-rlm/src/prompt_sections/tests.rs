@@ -83,13 +83,6 @@ fn facts() -> RlmPromptFacts {
     }
 }
 
-fn subagent() -> lash_core::SubagentSessionContext {
-    lash_core::SubagentSessionContext {
-        capability: "research".to_string(),
-        depth: 1,
-    }
-}
-
 fn turn(catalog: lash_core::ToolCatalog) -> Call {
     Call {
         catalog,
@@ -180,8 +173,8 @@ Read-only variables:
 const BUILTIN_GUIDANCE_SECTION: &str = "## Guidance\n\n- Be concise; no filler, hedging, or performative tone.\n- Act as soon as the next step is clear; do not restate conclusions.\n- Prefer the simplest correct solution.";
 
 /// The initial instructions, whole: the intro, the guidance, the execution
-/// prose, the declarations with the session's read-only variables, and the
-/// subagent description, in that order.
+/// prose and the declarations with the session's read-only variables, in
+/// that order.
 #[test]
 fn the_initial_sections_render_the_protocol_prompt_around_the_declarations() {
     let catalog = catalog();
@@ -189,7 +182,6 @@ fn the_initial_sections_render_the_protocol_prompt_around_the_declarations() {
         sections(&catalog),
         Call {
             facts: Some(facts()),
-            subagent: Some(subagent()),
             ..turn(catalog)
         },
     );
@@ -198,7 +190,7 @@ fn the_initial_sections_render_the_protocol_prompt_around_the_declarations() {
         format!(
             "{RLM_BUILTIN_INTRO}\n\n{BUILTIN_GUIDANCE_SECTION}\n\n\
              ## TypeScript execution\n\n{EXECUTION_PROSE}\n\n{DECLARATIONS}\n\n\
-             {READ_ONLY_VARIABLES}\n\nSubagent capability: research. Depth: 1/5."
+             {READ_ONLY_VARIABLES}"
         )
     );
 }
@@ -388,7 +380,6 @@ fn a_section_with_nothing_to_say_renders_nothing() {
     let composed = compose_rlm(sections(&catalog), turn(catalog));
     let rendered = initial(&composed);
     assert!(!rendered.contains("Read-Only Variables"));
-    assert!(!rendered.contains("Subagent capability"));
     assert!(!rendered.contains("\n\n\n"));
     // Late, only the finalization: no bound values, no required output, no
     // answer format and no budget.
@@ -412,7 +403,6 @@ fn the_compaction_prompt_keeps_intro_and_guidance_only() {
         Call {
             purpose: PromptPurpose::Compaction,
             facts: Some(facts()),
-            subagent: Some(subagent()),
             ..Call::default()
         },
     );

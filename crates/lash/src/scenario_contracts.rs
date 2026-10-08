@@ -28,9 +28,9 @@ pub const AGENT_SCENARIO_CONTRACTS: &[ScenarioContractSpec] = &[
     },
     ScenarioContractSpec {
         suite: "agent",
-        test_name: "agent_scenario_started_process_labeled_subagent_spawn",
-        owned_invariant: "Started process spawns a subagent and records child session execution graphs.",
-        semantic_oracle: "agent.started_process_subagent_spawn",
+        test_name: "agent_scenario_started_process_labeled_child_spawn",
+        owned_invariant: "Started process spawns a child session and records child session execution graphs.",
+        semantic_oracle: "agent.started_process_child_spawn",
         required_sim_evidence: &["multi_session"],
         oracle_id: "sim.oracle.scenario.agent-contract.v1",
     },

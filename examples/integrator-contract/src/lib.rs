@@ -122,11 +122,7 @@ impl ConfigOwner for IntegratorConfigOwner {
     type Refusal = lash::messages::JsonValue;
     type RunOptions = lash::plugins::NoRunOptions;
 
-    fn create(
-        &self,
-        input: Option<Self::Create>,
-        facts: CreationFacts<'_, Self::Recorded>,
-    ) -> Result<Option<Self::Recorded>, Self::Refusal> {
+    fn create(&self, input: Option<Self::Create>) -> Result<Option<Self::Recorded>, Self::Refusal> {
         unreachable!("external signature witness")
     }
     fn validate(

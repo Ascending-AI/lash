@@ -461,7 +461,6 @@ impl Processes {
             lash_core::AdmittedPluginConfig::default(),
             policy,
         );
-        let is_child = create_request.relation.parent_session_id().is_some();
         crate::support::build_plugin_host(
             self.core.protocol_factory.as_ref(),
             self.core.plugin_factories.as_ref(),
@@ -473,8 +472,6 @@ impl Processes {
                 .as_ref()
                 .map(|protocol_factory| protocol_factory.id()),
             &create_request.plugin_options,
-            is_child.then_some(environment.plugin_config.config.as_ref()),
-            !is_child,
             // The resolution only validates the request: nothing is written.
             &lash_core::store::plugin_writers::PluginAdmission::default(),
         )
@@ -500,34 +497,9 @@ impl Processes {
                 let env_store = core.env.core.durability.process_env_store.as_ref();
                 if fresh && let Some(key) = request.model.as_ref() {
                     // The reasoning the key's binding runs with: the
-                    // request's own, else the one the policy beneath it
-                    // records: the request's, the start's environment, or
-                    // the captured environment the start names. A start
-                    // carries one of them (`Processes::start`).
-                    let reasoning = match request.reasoning {
-                        Some(reasoning) => reasoning,
-                        None => {
-                            let policy = match (request.policy, environment.as_ref()) {
-                                (Some(policy), _) => Some(policy),
-                                (None, Some(environment)) => Some(environment.policy.clone()),
-                                (None, None) => match env_ref.as_ref() {
-                                    Some(env_ref) => Some(
-                                        lash_core::runtime::load_process_execution_env(
-                                            env_store, env_ref,
-                                        )
-                                        .await
-                                        .map_err(lash_core::PluginError::from)?
-                                        .policy,
-                                    ),
-                                    None => None,
-                                },
-                            };
-                            policy
-                                .and_then(|policy| policy.model)
-                                .map(|model| model.reasoning)
-                                .unwrap_or_default()
-                        }
-                    };
+                    // request's own, else the default selection. Nothing
+                    // beneath the request supplies one (ADR 0134).
+                    let reasoning = request.reasoning.clone().unwrap_or_default();
                     let model =
                         lash_core::LlmProfileConfig {
                             model: core.env.core.providers.models.snapshot(key).map_err(
@@ -1000,7 +972,8 @@ impl Processes {
     /// `filter` narrows *which* eligible retired rows this call reclaims (ADR
     /// 0023): retention is differentiated host policy, so a host expresses
     /// "reclaim the work this deleted session originated" and "reclaim terminal
-    /// subagent debris after a day" as two scheduled calls over the same lever.
+    /// child-session debris after a day" as two scheduled calls over the same
+    /// lever.
     /// `None` considers every retired row. Because retention only ever deletes
     /// retired rows, a nonempty set containing only running and waiting
     /// statuses cannot match and is refused. This includes the running
