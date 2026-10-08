@@ -42,9 +42,6 @@ CREATE TABLE IF NOT EXISTS session_runs (
             WHEN json_type(terminal_cause_json, '$.outcome.agent_frame_switch') IS NOT NULL THEN 'answered'
             WHEN json_type(terminal_cause_json, '$.outcome.stopped.cancelled') IS NOT NULL THEN 'cancelled'
             ELSE 'failed' END
-        WHEN 'substrate_lost' THEN CASE
-            WHEN json_type(terminal_cause_json, '$.cancelled_by') = 'text' THEN 'cancelled'
-            ELSE 'failed' END
         WHEN 'refused' THEN 'failed'
         WHEN 'commands_applied' THEN 'answered'
         WHEN 'cancelled' THEN 'cancelled'

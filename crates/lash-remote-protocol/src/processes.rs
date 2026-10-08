@@ -929,7 +929,6 @@ pub enum RemoteProcessResumeRefusal {
     RetiredGeneration {
         found: String,
     },
-    SubstrateLost,
 }
 
 /// Wire mirror of one lease holder incarnation. Fencing identity is the full

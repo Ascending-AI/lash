@@ -656,14 +656,12 @@ mod ddl_tests {
             )
         };
         let cancelled = r#"{"cause":"operator_cancelled","intent":1}"#;
-        let lost = r#"{"cause":"substrate_lost","cancelled_by":null}"#;
         let refused = r#"{"cause":"refused","code":"x","message":"m"}"#;
         assert!(end("a", "answered", cancelled).is_err());
-        assert!(end("b", "cancelled", lost).is_err());
         assert!(end("c", "answered", refused).is_err());
         assert!(end("d", "cancelled", r#"{"cause":"unknown"}"#).is_err());
         end("e", "cancelled", cancelled).expect("a cancelled cause ends cancelled");
-        end("f", "failed", lost).expect("an unclaimed loss fails");
+        end("f", "failed", refused).expect("a refused cause fails");
         end("g", "answered", r#"{"cause":"commands_applied"}"#).expect("applied commands answer");
     }
 }

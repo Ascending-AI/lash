@@ -58,8 +58,8 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
    for a turn that did not commit.
 
 6. **Stops stay typed.** `TurnStop`, its cancellation evidence with mode and
-   iteration, and `RunTerminalCause` (including `SubstrateLost {
-   cancelled_by }` and `Refused`) carry why a turn or run stopped.
+   iteration, and `RunTerminalCause` (including `Refused`) carry why a turn
+   or run stopped.
 
 ## Consequences
 

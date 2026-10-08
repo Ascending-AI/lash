@@ -141,11 +141,10 @@ pub fn allocate_process_event_sequence(
 /// Plan the write of an execution-started fact.
 ///
 /// The engine decides whether a start may run (ADR 0110): lash never re-runs
-/// started work from scratch, and an engine that cannot replay a started
-/// execution ends it `Abandoned` with `ResumeRefused { SubstrateLost }` before
-/// asking for this write. The registry only keeps the fact consistent: the
-/// same execution is idempotent, and a successor execution the engine
-/// resumes from its journal takes the next attempt.
+/// started work from scratch. Recovery continues from committed state; a
+/// started `Once` execution without an outcome is interrupted. The registry
+/// only keeps the fact consistent: the same execution is idempotent, and a
+/// successor execution resumed from committed state takes the next attempt.
 pub fn prepare_process_start(
     record: &ProcessRecord,
     started: &ProcessStarted,

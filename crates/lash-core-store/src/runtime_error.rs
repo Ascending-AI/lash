@@ -594,8 +594,6 @@ runtime_error_codes! {
         EngineProcessTerminalEncode = "engine_process_terminal_encode" => Terminal,
         // engine interaction failed; re-attaching is safe.
         EngineTurnTerminalAttach = "engine_turn_terminal_attach" => Retryable,
-        /// The engine ended a run's only run without a Lash outcome.
-        EngineRunSubstrateLost = "engine_run_substrate_lost" => Terminal,
         // the engine's control API did not carry out the ask; a later attempt asks again.
         /// A control verb or shift request did not reach the engine, or the engine
         /// did not carry it out. The refusal's disposition says whether asking

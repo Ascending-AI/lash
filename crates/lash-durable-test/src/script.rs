@@ -237,6 +237,12 @@ impl State {
     }
 }
 
+type CommitRefusal = Arc<
+    dyn Fn(CommitLabel, &[lash_durable::DomainWrite]) -> Option<lash_durable::DomainRefusal>
+        + Send
+        + Sync,
+>;
+
 /// What a law observes of every owner commit before it enters the store:
 /// its label and its domain writes.
 pub type CommitObserver = Arc<dyn Fn(CommitLabel, &[lash_durable::DomainWrite]) + Send + Sync>;
@@ -246,6 +252,7 @@ pub(crate) struct Shared {
     state: Mutex<State>,
     recorded: tokio::sync::Notify,
     observer: Mutex<Option<CommitObserver>>,
+    refusal: Mutex<Option<CommitRefusal>>,
 }
 
 /// A write about to enter the store, numbered and matched against the rules.
@@ -269,6 +276,15 @@ impl Entry {
 }
 
 impl Shared {
+    pub(crate) fn refusal(
+        &self,
+        label: CommitLabel,
+        writes: &[lash_durable::DomainWrite],
+    ) -> Option<lash_durable::DomainRefusal> {
+        let refusal = self.refusal.lock_recover().clone();
+        refusal.and_then(|refusal| refusal(label, writes))
+    }
+
     /// Hand an owner commit's writes to the law observing them, if any.
     pub(crate) fn observe(&self, label: CommitLabel, writes: &[lash_durable::DomainWrite]) {
         let observer = self.observer.lock_recover().clone();
@@ -417,6 +433,22 @@ impl Script {
     /// what each commit submits.
     pub fn observe_commits(&self, observer: CommitObserver) -> &Self {
         *self.shared.observer.lock_recover() = Some(observer);
+        self
+    }
+
+    /// Refuse selected owner commits at the store seam, before writing any
+    /// rows. The trace records the typed refusal just as a real store does.
+    pub fn refuse_commits(
+        &self,
+        refusal: impl Fn(
+            CommitLabel,
+            &[lash_durable::DomainWrite],
+        ) -> Option<lash_durable::DomainRefusal>
+        + Send
+        + Sync
+        + 'static,
+    ) -> &Self {
+        *self.shared.refusal.lock_recover() = Some(Arc::new(refusal));
         self
     }
 

@@ -68,10 +68,10 @@ pub(super) enum CommandCommit {
     /// The store refused an append whose required ancestor is not on the
     /// active path. Nothing was written.
     AncestorNotActive { required_node_id: crate::NodeId },
-    /// The commit exceeds the session's commit budget, which no redrive
-    /// changes: nothing of the command committed, and it settled failed with
-    /// the budget refusal, so the lane never waits on it.
-    OverBudget,
+    /// The store terminally refused the applying commit: nothing of the
+    /// command committed, and it settled failed with the typed refusal,
+    /// so the lane never waits on it.
+    Refused,
 }
 
 /// The frame a command's commit opens: the frame it leaves and the scope of
@@ -172,7 +172,7 @@ impl LashRuntime {
         ))
         .await?;
         match committed {
-            CommandCommit::Landed | CommandCommit::OverBudget => Ok(true),
+            CommandCommit::Landed | CommandCommit::Refused => Ok(true),
             CommandCommit::Withdrawn => Ok(false),
             // The required ancestor left the active path: the command settles
             // refused, over the durable head, with nothing appended.
@@ -560,9 +560,10 @@ impl LashRuntime {
     /// the command run's seal refuses the commit as superseded, with nothing
     /// of it durable: that admission's shift applies the command.
     ///
-    /// A commit over the session's commit budget settles the command failed
-    /// with the budget refusal instead, over the durable head; the budget
-    /// does not charge that refusal receipt (FIG-4471), so the settlement
+    /// A terminally refused applying commit settles the command failed with
+    /// its typed refusal over the durable head (FIG-5376). For a commit over
+    /// the session's commit budget, the budget does not charge that refusal
+    /// receipt (FIG-4471), so the settlement
     /// fits wherever the head's bare commit does. A head whose
     /// bare settlement exceeds the budget is one a host lowered the budget
     /// below (ADR 0058, FIG-4393): the settlement's typed refusal ends the
@@ -579,7 +580,7 @@ impl LashRuntime {
             &[crate::NodeId],
         ) -> crate::runtime::SessionCommandOutcome,
     ) -> Result<CommandCommit, RuntimeError> {
-        let over_budget = match Box::pin(self.commit_host_command_once(
+        let refusal = match Box::pin(self.commit_host_command_once(
             owner,
             completion,
             append_stamp,
@@ -589,31 +590,31 @@ impl LashRuntime {
         .await?
         {
             Ok(committed) => return Ok(committed),
-            Err(over_budget) => over_budget,
+            Err(refusal) => refusal,
         };
         let settled =
             Box::pin(
                 self.commit_host_command_once(owner, completion, None, None, |_, _| {
                     crate::runtime::SessionCommandOutcome::Failed {
-                        code: over_budget.code.clone(),
-                        message: over_budget.message.clone(),
+                        code: refusal.code.clone(),
+                        message: refusal.message.clone(),
                     }
                 }),
             )
             .await?;
         match settled {
-            Ok(CommandCommit::Landed) => Ok(CommandCommit::OverBudget),
+            Ok(CommandCommit::Landed) => Ok(CommandCommit::Refused),
             Ok(committed) => Ok(committed),
-            // Even the bare settlement exceeds the budget: the live head
-            // itself is over it (ADR 0058), and its refusal names the size
-            // the host must raise the budget to.
-            Err(bare_over_budget) => Err(bare_over_budget),
+            // A refusal of the bare settlement leaves it open: a host must
+            // repair the head or raise its budget (ADR 0058) before it can settle.
+            Err(bare_refusal) => Err(bare_refusal),
         }
     }
 
-    /// One attempt at the command's commit: `Err` carries a commit-budget
-    /// refusal. Nothing of the commit stays resident either way: the resident
-    /// session reloads the durable head, which a landed commit moved.
+    /// One attempt at the command's commit: the inner `Err` carries a
+    /// terminal refusal of its content. Nothing of the commit stays resident
+    /// either way: the resident session reloads the durable head, which a
+    /// landed commit moved.
     async fn commit_host_command_once(
         &mut self,
         owner: &crate::ActorContext,
@@ -685,6 +686,10 @@ impl LashRuntime {
                     SESSION_COMMAND_COMMITTED_PHASE,
                 ));
                 Ok(Ok(CommandCommit::Landed))
+            }
+            Err(HeadCommitError::Refused(error)) if error.is_terminal() => {
+                self.reload_invalidated_resident_session_state().await?;
+                Ok(Err(error))
             }
             Err(HeadCommitError::Store(error)) => match error {
                 crate::StoreError::SessionCommandWithdrawn { .. } => {

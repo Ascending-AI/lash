@@ -601,10 +601,8 @@ mod ddl_tests {
             .await
         };
         let cancelled = r#"{"cause":"operator_cancelled","intent":1}"#;
-        let lost = r#"{"cause":"substrate_lost","cancelled_by":null}"#;
         let refused_cause = r#"{"cause":"refused","code":"x","message":"m"}"#;
         assert!(refused(end("a", "answered", cancelled).await));
-        assert!(refused(end("b", "cancelled", lost).await));
         assert!(refused(end("c", "answered", refused_cause).await));
         assert!(refused(
             end("d", "cancelled", r#"{"cause":"unknown"}"#).await
@@ -612,9 +610,9 @@ mod ddl_tests {
         end("e", "cancelled", cancelled)
             .await
             .expect("a cancelled cause ends cancelled");
-        end("f", "failed", lost)
+        end("f", "failed", refused_cause)
             .await
-            .expect("an unclaimed loss fails");
+            .expect("a refused cause fails");
         end("g", "answered", r#"{"cause":"commands_applied"}"#)
             .await
             .expect("applied commands answer");

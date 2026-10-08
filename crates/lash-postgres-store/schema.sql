@@ -423,9 +423,6 @@ CREATE TABLE IF NOT EXISTS lash_session_runs (
             WHEN (terminal_cause_json::jsonb #> '{outcome,agent_frame_switch}') IS NOT NULL THEN 'answered'
             WHEN (terminal_cause_json::jsonb #> '{outcome,stopped,cancelled}') IS NOT NULL THEN 'cancelled'
             ELSE 'failed' END
-        WHEN 'substrate_lost' THEN CASE
-            WHEN jsonb_typeof(terminal_cause_json::jsonb -> 'cancelled_by') = 'string' THEN 'cancelled'
-            ELSE 'failed' END
         WHEN 'refused' THEN 'failed'
         WHEN 'commands_applied' THEN 'answered'
         WHEN 'cancelled' THEN 'cancelled'

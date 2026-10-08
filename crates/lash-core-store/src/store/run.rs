@@ -187,9 +187,6 @@ pub enum RunTerminalCause {
     },
     /// The session was deleted (its `CloseSession` intent).
     SessionDeleted { intent: ControlIntentId },
-    /// The engine ended this run's only run without a Lash outcome. A
-    /// cancellation request already recorded for it makes the end cancelled.
-    SubstrateLost { cancelled_by: Option<String> },
     /// The run's execution ended with a typed refusal no retry could change (a
     /// superseded commit, a finalize refusal): the run's own end, written
     /// before the engine records its outcome (FIG-4018). It keeps the
@@ -244,13 +241,6 @@ impl RunTerminalCause {
             | Self::OperatorCancelled { .. }
             | Self::Forked { .. }
             | Self::SessionDeleted { .. } => RunTerminalKind::Cancelled,
-            Self::SubstrateLost { cancelled_by } => {
-                if cancelled_by.is_some() {
-                    RunTerminalKind::Cancelled
-                } else {
-                    RunTerminalKind::Failed
-                }
-            }
             Self::Refused { .. } => RunTerminalKind::Failed,
             Self::CommandsApplied => RunTerminalKind::Answered,
         }

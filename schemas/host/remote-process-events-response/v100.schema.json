@@ -1358,12 +1358,6 @@
       "description": "Wire mirror of why a started process cannot be resumed safely.",
       "oneOf": [
         {
-          "enum": [
-            "substrate_lost"
-          ],
-          "type": "string"
-        },
-        {
           "additionalProperties": false,
           "properties": {
             "stored_artifact_corrupt": {

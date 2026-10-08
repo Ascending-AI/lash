@@ -122,10 +122,6 @@ pub enum ProcessResumeRefusal {
         artifact_ref: String,
         source: crate::ModuleArtifactCorruption,
     },
-    /// The process already started under an execution whose journal this run
-    /// cannot read, so resuming would re-run effects that execution recorded
-    /// (FIG-3588). Lash never restarts started work from scratch.
-    SubstrateLost,
 }
 
 /// Evidence attached to an [`ProcessStatus::Abandoned`] terminal: which
@@ -353,12 +349,6 @@ impl ProcessAwaitOutput {
                     } => format!(
                         "process abandoned: stored artifact `{artifact_ref}` is corrupt: {source}"
                     ),
-                    AbandonWriter::ResumeRefused {
-                        reason: ProcessResumeRefusal::SubstrateLost,
-                    } => {
-                        "process abandoned: the substrate lost the journal of its started execution"
-                            .to_string()
-                    }
                 };
                 let mut failure = crate::ToolFailure::tool(
                     crate::ToolFailureClass::External,

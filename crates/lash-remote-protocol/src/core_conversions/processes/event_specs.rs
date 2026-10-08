@@ -173,7 +173,6 @@ impl From<lash_core::ProcessResumeRefusal> for RemoteProcessResumeRefusal {
                 artifact_ref,
                 source,
             },
-            lash_core::ProcessResumeRefusal::SubstrateLost => Self::SubstrateLost,
         }
     }
 }
@@ -191,7 +190,6 @@ impl From<RemoteProcessResumeRefusal> for lash_core::ProcessResumeRefusal {
                 artifact_ref,
                 source,
             },
-            RemoteProcessResumeRefusal::SubstrateLost => Self::SubstrateLost,
         }
     }
 }

@@ -14,6 +14,8 @@
 
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::Arc;
 
@@ -209,3 +211,229 @@ tiered_laws!(
     a_merging_config_command_composes_with_the_head_another_writer_committed,
     opening_a_historical_frame_is_refused_and_keeps_the_changed_config,
 );
+
+/// ADR 0101 §4 / FIG-5376: a terminal refusal of the applying commit
+/// settles that command with its typed code, discards its head changes,
+/// and lets the next command apply without a failed activation.
+#[tokio::test]
+async fn a_terminally_refused_command_commit_settles_and_the_lane_continues() {
+    use lash_core::runtime::durable::session::SessionActivation;
+    use lash_durable::{ActorKey, ActorState, CommitLabel, DomainRefusal, DomainWrite};
+    use lash_durable_test::{Matrix, Script, SimClock, SimNodes, SimNodesConfig, Stored, Tripwire};
+    use lash_sansio::sync::MutexExt as _;
+    use std::sync::Mutex;
+
+    let clock = SimClock::new();
+    let stores = Arc::new(sim::memory(Arc::clone(&clock)).await);
+    let backend = sim::backend(stores);
+    let core = lash::LashCore::standard_builder(backend.clone())
+        .serve_sessions(false)
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .serve_test_llm_profile(served::model(Arc::default()), served::metadata())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "command-refusal",
+            "boot",
+        ))
+        .unwrap();
+    let id = lash::SessionId::try_from("command-refusal".to_owned()).unwrap();
+    let durable = core
+        .session(id.clone())
+        .create(lash::SessionCreation::root(served::spec(8)))
+        .await
+        .unwrap();
+    let live = core.session(id.clone()).open().await.unwrap();
+    let commands = live.admin().commands();
+    let script = Script::new();
+    let nodes = SimNodes::new(
+        Arc::clone(backend.durable()),
+        clock,
+        script,
+        SimNodesConfig {
+            lease: Matrix::test_lease(),
+            decodes: backend.formats().decodes(),
+            max_active: 1,
+        },
+        Arc::new(SessionActivation::new(
+            backend.clone(),
+            lash::testing::session_turn_services(&core),
+            Arc::new(Tripwire::default()),
+        )),
+    );
+    nodes.start("owner");
+    let actor = ActorKey::session(id.as_str()).unwrap();
+    let initial = commands
+        .submit(
+            lash_core::facade_support::SessionCommand::OpenAgentFrame {
+                request: Box::new(frame("initial-frame")),
+            },
+            "initial-frame",
+        )
+        .await
+        .unwrap();
+    let catalog = backend.stores().session_store_factory();
+    for _ in 0..100 {
+        nodes.step().await;
+        if catalog
+            .queued_work_batch_completion(&id, initial.batch_id.as_str())
+            .await
+            .unwrap()
+            .is_some()
+        {
+            break;
+        }
+    }
+    assert!(
+        catalog
+            .queued_work_batch_completion(&id, initial.batch_id.as_str())
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let before = catalog.load_session_head_meta(&id).await.unwrap().unwrap();
+    let receipt = commands
+        .submit(
+            lash_core::facade_support::SessionCommand::OpenAgentFrame {
+                request: Box::new(frame("refused-frame")),
+            },
+            "refused-frame",
+        )
+        .await
+        .unwrap();
+    let refusal = lash_core::StoreError::NodeIdCollision {
+        node_id: lash_core::NodeId::try_from("command-node".to_owned()).unwrap(),
+    };
+    let expected_code = refusal.runtime_code();
+    let expected_message = refusal.to_string();
+    let seen = Arc::new(Mutex::new(0));
+    let refused_attempts = Arc::clone(&seen);
+    nodes.script().refuse_commits(move |label, writes| {
+        if label != CommitLabel::SESSION_COMMAND {
+            return None;
+        }
+        writes.iter().find_map(|write| {
+            let DomainWrite::SessionCommit(write) = write else {
+                return None;
+            };
+            let commit = lash_core::store::decode_session_commit(&write.commit_json).unwrap();
+            if !commit.command_outcomes.values().any(|outcome| {
+                matches!(
+                    outcome,
+                    lash_core::runtime::SessionCommandOutcome::OpenAgentFrame { .. }
+                )
+            }) {
+                return None;
+            }
+            *refused_attempts.lock_recover() += 1;
+            Some(DomainRefusal::session_commit_refused(
+                write.session.clone(),
+                &refusal,
+            ))
+        })
+    });
+    for _ in 0..100 {
+        nodes.step().await;
+        nodes.quiesce().await;
+        let state = nodes.database().actor(&actor).await.unwrap().unwrap().state;
+        if matches!(state, ActorState::Idle | ActorState::Parked) {
+            break;
+        }
+    }
+    let completion = catalog
+        .queued_work_batch_completion(&id, receipt.batch_id.as_str())
+        .await
+        .unwrap();
+    assert!(
+        completion.is_some(),
+        "the refused command never settled; applying attempts: {}",
+        *seen.lock_recover()
+    );
+    let settled = commands.settle(receipt.clone()).await.unwrap();
+    assert!(
+        matches!(settled, lash_core::runtime::SessionCommandSettlement::Applied {
+        outcome: lash_core::runtime::SessionCommandOutcome::Failed { code, message }, ..
+    } if code == expected_code && message == expected_message),
+        "the settlement keeps the store's typed refusal"
+    );
+    assert_eq!(
+        *seen.lock_recover(),
+        1,
+        "a terminal refusal never retries the applying commit"
+    );
+    assert_eq!(
+        nodes.database().actor(&actor).await.unwrap().unwrap().state,
+        ActorState::Idle,
+        "the refusal settles without parking the command run"
+    );
+    let after = catalog.load_session_head_meta(&id).await.unwrap().unwrap();
+    assert_eq!(
+        after.current_frame_node_id, before.current_frame_node_id,
+        "the refused frame never opens"
+    );
+    assert_eq!(
+        after.leaf_node_id, before.leaf_node_id,
+        "the refused head changes are discarded"
+    );
+    assert_eq!(
+        nodes
+            .script()
+            .trace()
+            .iter()
+            .filter(|write| matches!(write.stored, Stored::Refused(_)))
+            .count(),
+        1
+    );
+
+    let next = commands
+        .submit(
+            lash_core::facade_support::SessionCommand::OpenAgentFrame {
+                request: Box::new(frame("next-frame")),
+            },
+            "next-frame",
+        )
+        .await
+        .unwrap();
+    // The same fault would refuse another frame open: stop injecting after
+    // proving that the first command's applying commit was attempted once.
+    nodes.script().refuse_commits(|_, _| None);
+    for _ in 0..100 {
+        nodes.step().await;
+        nodes.quiesce().await;
+        if catalog
+            .queued_work_batch_completion(&id, next.batch_id.as_str())
+            .await
+            .unwrap()
+            .is_some()
+        {
+            break;
+        }
+    }
+    assert!(
+        catalog
+            .queued_work_batch_completion(&id, next.batch_id.as_str())
+            .await
+            .unwrap()
+            .is_some(),
+        "the next command settles"
+    );
+    assert!(matches!(
+        commands.settle(next).await.unwrap(),
+        lash_core::runtime::SessionCommandSettlement::Applied {
+            outcome: lash_core::runtime::SessionCommandOutcome::OpenAgentFrame { .. },
+            ..
+        }
+    ));
+    assert!(
+        matches!(
+            commands.settle(receipt).await.unwrap(),
+            lash_core::runtime::SessionCommandSettlement::Applied {
+                outcome: lash_core::runtime::SessionCommandOutcome::Failed { .. },
+                ..
+            }
+        ),
+        "reattaching keeps the first refusal"
+    );
+    nodes.kill("owner");
+    core.shutdown().await.unwrap();
+    drop(durable);
+}

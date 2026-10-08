@@ -551,6 +551,7 @@ impl DurableStore for FaultStore {
     async fn commit(&self, tx: ActorTx, label: CommitLabel) -> Result<ActorCommit, DurableError> {
         let actor = tx.actor().clone();
         self.script.observe(label, tx.domain());
+        let refusal = self.script.refusal(label, tx.domain());
         let starts = tx
             .domain()
             .iter()
@@ -574,7 +575,13 @@ impl DurableStore for FaultStore {
             label,
             Some(&actor),
             starts,
-            self.call(|store| async move { store.commit(tx, label).await }),
+            self.call(|store| async move {
+                if let Some(refusal) = refusal {
+                    Err(DurableError::Domain(refusal))
+                } else {
+                    store.commit(tx, label).await
+                }
+            }),
             keep,
         )
         .await

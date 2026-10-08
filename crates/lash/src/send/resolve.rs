@@ -196,19 +196,8 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
                 RunTerminalCause::Cancelled { .. }
                 | RunTerminalCause::OperatorCancelled { .. }
                 | RunTerminalCause::Forked { .. }
-                | RunTerminalCause::SessionDeleted { .. }
-                | RunTerminalCause::SubstrateLost {
-                    cancelled_by: Some(_),
-                },
+                | RunTerminalCause::SessionDeleted { .. },
             ) => Some(PluginOperationCommandOutcome::Cancelled),
-            Some(RunTerminalCause::SubstrateLost { cancelled_by: None }) => {
-                Some(PluginOperationCommandOutcome::Refused {
-                    error: Box::new(lash_core::RuntimeError::new(
-                        lash_core::RuntimeErrorCode::EngineRunSubstrateLost,
-                        format!("the operation Run `{run}` lost its invocation"),
-                    )),
-                })
-            }
             Some(RunTerminalCause::Refused {
                 code,
                 message,
@@ -258,15 +247,14 @@ pub(super) async fn resolve_run(parts: &SendParts, run: &TurnId) -> Result<Resol
             refusal.cause = refusal_cause;
             Some(refusal)
         }
-        // An operator's end, the session's deletion or a lost run carries no
+        // An operator's end or the session's deletion carries no
         // answer of its own, and a command run answers no send: its
         // commands settle through their own receipts.
         Some(
             RunTerminalCause::CommandsApplied
             | RunTerminalCause::OperatorCancelled { .. }
             | RunTerminalCause::Forked { .. }
-            | RunTerminalCause::SessionDeleted { .. }
-            | RunTerminalCause::SubstrateLost { .. },
+            | RunTerminalCause::SessionDeleted { .. },
         )
         | None => None,
     };
