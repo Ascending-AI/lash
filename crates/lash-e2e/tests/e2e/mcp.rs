@@ -4,6 +4,7 @@
 //! case runs and attaches through the operator routes.
 
 use anyhow::{Context as _, Result, ensure};
+use lash::tools::{ToolCallOutcome, ToolCallOutput};
 use lash_e2e::{Case, Host, Leg, NodeOptions};
 use serde_json::{Value, json};
 
@@ -218,21 +219,27 @@ fn one_call(report: &Value, name: &str) -> Result<Value> {
 
 /// The structured success value of `name`'s one call.
 fn structured(report: &Value, name: &str) -> Result<Value> {
-    let output = one_call(report, name)?;
-    ensure!(
-        output["outcome"]["status"] == "success",
-        "{name} failed: {output}"
-    );
-    Ok(output["outcome"]["payload"]["structuredContent"].clone())
+    let output: ToolCallOutput = serde_json::from_value(one_call(report, name)?)
+        .with_context(|| format!("{name}'s output is not a typed tool output"))?;
+    let ToolCallOutcome::Success(value) = &output.outcome else {
+        anyhow::bail!("{name} failed: {output:?}")
+    };
+    value
+        .to_json_value()
+        .get("structuredContent")
+        .cloned()
+        .with_context(|| format!("{name}'s success has no structured content"))
 }
 
 /// Whether an admitted badge call interrupted by its peer's death resolved,
 /// or failed with the MCP plugin's typed transport failure.
-fn resolved_or_typed(outcome: &Value) -> bool {
-    match outcome["status"].as_str() {
-        Some("success") => true,
-        Some("failure") => {
-            let failure = &outcome["payload"];
+fn resolved_or_typed(outcome: &Value) -> Result<bool> {
+    let outcome: ToolCallOutcome = serde_json::from_value(outcome.clone())
+        .context("the badge call has no typed tool outcome")?;
+    Ok(match outcome {
+        ToolCallOutcome::Success(_) => true,
+        ToolCallOutcome::Failure(failure) => {
+            let failure = failure.to_json_value();
             let raw = &failure["raw"];
             let timeout = raw["kind"] == "call_timeout"
                 && failure["class"] == "timeout"
@@ -252,8 +259,8 @@ fn resolved_or_typed(outcome: &Value) -> bool {
                 );
             failure["source"] == "plugin" && raw["server"] == "workspace_http" && (timeout || lost)
         }
-        _ => false,
-    }
+        ToolCallOutcome::Cancelled(_) => false,
+    })
 }
 
 /// The scripted provider's requests for the turn whose input names
@@ -392,7 +399,7 @@ async fn s28(case: &mut Case) -> Result<()> {
             // The live node's own report has the call's native outcome.
             let badge_call = one_call(&outcome["output"], BADGE_TOOL)?;
             ensure!(
-                resolved_or_typed(&badge_call["outcome"]),
+                resolved_or_typed(&badge_call["outcome"])?,
                 "the interrupted badge call neither resolved nor failed typed: {badge_call}"
             );
             let resolved = badge_call["outcome"]["status"] == "success";
