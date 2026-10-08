@@ -1,6 +1,8 @@
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+#[cfg(test)]
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::PoolError;
 use lash_vm_client::RunContext;
@@ -129,15 +131,22 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         bootstrap: Bootstrap,
         frontend: &'frontend dyn crate::Frontend,
     ) -> Result<Self, PoolError> {
+        frontend.configure(&bootstrap.tuning);
+        let tuning = bootstrap.tuning;
         let mut server = Self {
             frontend,
             timing: ExchangeTiming::default(),
             pipe,
-            inbound: Arc::default(),
+            inbound: Arc::new(Mutex::new(FrameSource::with_capacity(
+                tuning.inbound_buffer_bytes,
+            ))),
             wire: None,
             codec,
             bootstrap,
-            instance: VmInstance::pristine(),
+            instance: VmInstance::with_cache_capacities(
+                tuning.linked_program_cache_capacity,
+                tuning.compiled_process_cache_capacity,
+            ),
             fences: Arc::new(Mutex::new(Fences {
                 incoming: None,
                 outgoing: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0)),
@@ -166,7 +175,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         write_frame(
             &mut self.pipe,
             &bytes,
-            Instant::now() + Duration::from_secs(30),
+            Instant::now() + self.bootstrap.serialization,
         )
     }
     /// Tells the parent why the worker stops, where that is the worker's to
@@ -220,7 +229,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 .read_frame(
                     &mut self.pipe,
                     &self.codec,
-                    Instant::now() + Duration::from_secs(86_400),
+                    Instant::now() + self.bootstrap.tuning.parent_wait,
                 );
             let bytes = match received {
                 Ok(bytes) => bytes,
@@ -408,6 +417,8 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             self.inbound.clone(),
             self.codec.clone(),
             self.fences.clone(),
+            self.bootstrap.serialization,
+            self.bootstrap.tuning.parent_wait,
         ));
         self.wire = Some(wire.clone());
         Ok(wire)
@@ -532,7 +543,18 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                         Entry::Process(&process_ref)
                     }
                 };
-                lashlang::compile(&artifact, entry, None).map_err(compile_refusal)?
+                match entry {
+                    Entry::Main => {
+                        lashlang::compile(&artifact, entry, None).map_err(compile_refusal)?
+                    }
+                    Entry::Process(process_ref) => self
+                        .instance
+                        .compiled_processes_mut()
+                        .get_or_compile(&artifact, process_ref, artifact.host_requirements_ref())
+                        .map_err(compile_refusal)?
+                        .as_ref()
+                        .clone(),
+                }
             }
         };
         let bound = |v: Option<u64>| -> Result<ExecutionBound<std::num::NonZeroU64>, PoolError> {
@@ -553,6 +575,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             )
             .with_max_frame_depth(depth),
         );
+        config.pacing = self.bootstrap.tuning.vm_pacing;
         config.observe_execution = context.observe_execution;
         config.trace_runtime_errors = true;
         for description in context.projected {
@@ -698,7 +721,12 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 responding
             }
         };
-        write_frames(&mut self.pipe, responding, &bytes, Duration::from_secs(30))?;
+        write_frames(
+            &mut self.pipe,
+            responding,
+            &bytes,
+            self.bootstrap.serialization,
+        )?;
         Ok(message)
     }
     fn deliver(&mut self, step: VmStep) -> Result<(), PoolError> {
@@ -1011,6 +1039,36 @@ fn materialize(value: lashlang::Value, depth: usize) -> Result<lashlang::Value, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FIG-5497: the worker must obey the parent's response IO deadline.
+    #[test]
+    fn parent_serialization_deadline_bounds_worker_response_write() {
+        let mut config =
+            lash_vm_client::PoolConfig::standard(lash_vm_client::WorkerEntry::helper("unused"));
+        config.deadlines.serialization = Duration::from_millis(5);
+        let codec = FrameCodec::new(config.protocol.decode);
+        let (pipe, mut parent) = UnixStream::pair().expect("pipe");
+        let frontend = crate::frontend::TypeScriptFrontend::default();
+        let mut server =
+            Server::<false>::new(pipe, codec.clone(), Bootstrap::from(&config), &frontend)
+                .expect("server");
+        read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1)).expect("ready");
+        let drain = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            // Releasing backpressure lets the unfixed write finish too, so
+            // this regression fails promptly instead of waiting thirty seconds.
+            let _ = read_frame(&mut parent, &codec, Instant::now() + Duration::from_secs(1));
+        });
+        let result = server.send(WorkerMessage::Prepared {
+            response: EncodedPayload(vec![0; 1024 * 1024]),
+        });
+        drop(server);
+        drain.join().expect("drain");
+        assert!(
+            result.is_err(),
+            "the host's five-millisecond IO deadline must refuse the write"
+        );
+    }
 
     #[test]
     fn an_oversized_non_observation_frame_preserves_its_fence_and_typed_cause() {

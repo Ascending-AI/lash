@@ -269,7 +269,7 @@ fn rlm_termination_options(
 pub use lash_vm_client::service::Service as WorkerService;
 /// Host-selected worker entry, pool bounds, and execution deadlines.
 pub use lash_vm_client::{
-    Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerEntry,
+    Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerEntry, WorkerTuning,
 };
 /// The worker pool [`WorkerService::pool`] starts, which a host prewarms at
 /// startup, and the counts it reports.
@@ -297,3 +297,9 @@ pub use lash_vm_client::{
 };
 
 pub use lash_protocol_rlm::recorded_extraction_decisions;
+
+/// VM segment retry/latency policy and working cadence, independent of decoder ceilings.
+pub use lash_lashlang_runtime::{LashlangEngineSteps, VmSegmentPolicy};
+
+#[cfg(all(test, feature = "sqlite", feature = "typescript"))]
+mod worker_policy_tests;

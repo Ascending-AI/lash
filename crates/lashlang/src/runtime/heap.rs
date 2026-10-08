@@ -66,6 +66,7 @@ pub(crate) struct Heap {
     pub(crate) allocations: u64,
     pub(crate) live_logical_bytes: u64,
     next_collection_at: u64,
+    gc_allocation_interval: u64,
     collect_every_allocation: bool,
     stress_pins: Vec<Value>,
     // Boundary identity is indexed both ways: exported tree identity to object
@@ -149,6 +150,7 @@ impl Default for Heap {
             allocations: 0,
             live_logical_bytes: 0,
             next_collection_at: HEAP_GC_ALLOCATION_INTERVAL,
+            gc_allocation_interval: HEAP_GC_ALLOCATION_INTERVAL,
             collect_every_allocation: false,
             stress_pins: Vec::new(),
             boundary_refs: FxHashMap::default(),
@@ -168,6 +170,11 @@ impl Default for Heap {
 }
 
 impl Heap {
+    pub(crate) fn set_gc_allocation_interval(&mut self, interval: std::num::NonZeroU64) {
+        self.gc_allocation_interval = interval.get();
+        self.restore_collection_schedule();
+    }
+
     pub(crate) fn with_limit(logical_byte_limit: u64) -> Self {
         Self {
             logical_byte_limit,
@@ -1301,9 +1308,9 @@ impl Heap {
         if self.allocations >= self.next_collection_at {
             self.next_collection_at = self
                 .allocations
-                .checked_div(HEAP_GC_ALLOCATION_INTERVAL)
+                .checked_div(self.gc_allocation_interval)
                 .and_then(|period| period.checked_add(1))
-                .and_then(|period| period.checked_mul(HEAP_GC_ALLOCATION_INTERVAL))
+                .and_then(|period| period.checked_mul(self.gc_allocation_interval))
                 .unwrap_or(u64::MAX);
         }
     }
@@ -1315,9 +1322,9 @@ impl Heap {
     pub(crate) fn restore_collection_schedule(&mut self) {
         self.next_collection_at = self
             .allocations
-            .checked_div(HEAP_GC_ALLOCATION_INTERVAL)
+            .checked_div(self.gc_allocation_interval)
             .and_then(|period| period.checked_add(1))
-            .and_then(|period| period.checked_mul(HEAP_GC_ALLOCATION_INTERVAL))
+            .and_then(|period| period.checked_mul(self.gc_allocation_interval))
             .unwrap_or(u64::MAX);
     }
 }
@@ -1388,6 +1395,7 @@ impl Clone for Heap {
             allocations: self.allocations,
             live_logical_bytes: self.live_logical_bytes,
             next_collection_at: self.next_collection_at,
+            gc_allocation_interval: self.gc_allocation_interval,
             collect_every_allocation: self.collect_every_allocation,
             stress_pins: Vec::new(),
             boundary_refs: FxHashMap::default(),

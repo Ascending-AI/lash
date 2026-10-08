@@ -65,6 +65,7 @@ pub struct RlmProtocolPluginFactory {
     /// parses, spells tools and prompts in it, and records its language id.
     dialect: Arc<dyn Dialect>,
     workers: lash_vm_client::service::Service,
+    segment_policy: lash_lashlang_runtime::VmSegmentPolicy,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     artifact_store: LashlangArtifacts,
     /// The binding identity of the backend `artifact_store` belongs to: a
@@ -107,6 +108,7 @@ impl RlmProtocolPluginFactory {
             config,
             dialect,
             workers,
+            segment_policy: lash_lashlang_runtime::VmSegmentPolicy::standard(),
             deferred_tool_resolver: None,
             artifact_store: LashlangArtifacts::of_backend(backend),
             artifact_backend: Arc::from(backend.binding_identity().as_str()),
@@ -120,6 +122,12 @@ impl RlmProtocolPluginFactory {
         self.workers = workers;
         self
     }
+    /// Set the VM segment policy used by this factory's process engine.
+    pub fn with_segment_policy(mut self, policy: lash_lashlang_runtime::VmSegmentPolicy) -> Self {
+        self.segment_policy = policy;
+        self
+    }
+
     pub fn worker_service(&self) -> &lash_vm_client::service::Service {
         &self.workers
     }
@@ -351,6 +359,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
             process_lifecycle,
         });
         let engine = LashlangProcessEngine::new(self.artifact_store.clone(), surface)
+            .with_segment_policy(self.segment_policy)
             .with_trace_runtime(ctx.trace_runtime().clone())
             .with_worker_service(self.workers.clone())
             .with_execution_bounds(config.execution_bounds().into_engine())

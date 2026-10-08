@@ -97,7 +97,7 @@ impl Worker {
             measurements: None,
             process_epoch,
             used: false,
-            inbound: FrameSource::default(),
+            inbound: FrameSource::with_capacity(config.tuning.inbound_buffer_bytes),
             pipe,
             codec: FrameCodec::new(config.protocol.decode),
             cpu_nanos: 0,
@@ -285,6 +285,8 @@ pub struct Bootstrap {
     pub effect: u64,
     pub source: u64,
     pub cpu_nanos: u64,
+    pub serialization: Duration,
+    pub tuning: crate::WorkerTuning,
 }
 impl From<&PoolConfig> for Bootstrap {
     fn from(c: &PoolConfig) -> Self {
@@ -296,6 +298,8 @@ impl From<&PoolConfig> for Bootstrap {
             state: c.protocol.max_vm_state_bytes,
             effect: c.protocol.max_effect_value_bytes,
             source: c.protocol.max_source_bytes,
+            serialization: c.deadlines.serialization,
+            tuning: c.tuning,
             cpu_nanos: c
                 .deadlines
                 .cumulative_cpu
@@ -334,9 +338,17 @@ pub struct FrameSource {
     /// The unread bytes are `buffer[start..end]`.
     start: usize,
     end: usize,
+    capacity: Option<std::num::NonZeroUsize>,
 }
 
 impl FrameSource {
+    pub fn with_capacity(capacity: std::num::NonZeroUsize) -> Self {
+        Self {
+            capacity: Some(capacity),
+            ..Self::default()
+        }
+    }
+
     /// The next whole frame. The deadline bounds the wait for all of it, and
     /// a deadline already past refuses a frame that has already arrived.
     pub fn read_frame(
@@ -347,7 +359,12 @@ impl FrameSource {
     ) -> Result<Vec<u8>, PoolError> {
         remaining(deadline)?;
         if self.buffer.is_empty() {
-            self.buffer = vec![0; INBOUND_BUFFER_BYTES];
+            self.buffer = vec![
+                0;
+                self.capacity
+                    .map_or(INBOUND_BUFFER_BYTES, std::num::NonZeroUsize::get)
+                    .max(FRAME_HEADER_BYTES)
+            ];
         }
         while self.end - self.start < FRAME_HEADER_BYTES {
             if self.start > 0 {

@@ -113,7 +113,7 @@ pub use runtime::{
     State, StringValue, UnawaitedToolCall, VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete,
     VmContinuation, VmExecutionStart, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmGuestError, VmHandlerContinuation, VmHeapContinuation, VmInstance, VmInterrupt,
-    VmIteratorContinuation, VmIteratorCursor, VmLoopPhase, VmParkReason, VmParked,
+    VmIteratorContinuation, VmIteratorCursor, VmLoopPhase, VmPacing, VmParkReason, VmParked,
     VmPendingErrorOriginContinuation, VmProfileContinuation, VmRequest, VmResume, VmResumePoint,
     VmRunConfig, VmRunOutcome, VmStep, VmStepError, VmSuspended, VmSuspendedOperation,
     cancel_checkpoint_reached, compile, execute, from_json, is_javascript_builtin_global,

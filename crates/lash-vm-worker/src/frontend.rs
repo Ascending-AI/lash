@@ -3,6 +3,9 @@ use lashlang::{LashlangHostEnvironment, ModuleCompileError, Program};
 /// A source frontend compiled into a worker entry. The parent sends source
 /// text and host vocabulary; lowering and diagnostics run in the child.
 pub trait Frontend: Send + Sync {
+    /// Called once with the parent's working policy, before any source is read.
+    fn configure(&self, _tuning: &lash_vm_client::WorkerTuning) {}
+
     fn language_id(&self) -> &'static str;
 
     fn parse(
@@ -23,6 +26,17 @@ pub(crate) struct TypeScriptFrontend {
 }
 
 impl Frontend for TypeScriptFrontend {
+    fn configure(&self, tuning: &lash_vm_client::WorkerTuning) {
+        let mut parser = self
+            .parser
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *parser = lash_typescript::Parser::with_stack(lash_typescript::ParserStack {
+            base_bytes: tuning.parser_stack_base_bytes,
+            bytes_per_source_byte: tuning.parser_stack_bytes_per_source_byte,
+        });
+    }
+
     fn language_id(&self) -> &'static str {
         "typescript"
     }

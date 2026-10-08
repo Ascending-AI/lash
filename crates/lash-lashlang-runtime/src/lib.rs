@@ -946,6 +946,7 @@ pub struct LashlangProcessEngine {
     workers: lash_vm_client::service::Service,
     surface: LashlangSurface,
     execution_bounds: lashlang::ExecutionBounds,
+    segment_policy: engine::VmSegmentPolicy,
     run_settings_recorder: Option<Arc<dyn LashlangRunSettingsRecorder>>,
     trace_runtime: Option<lash_core::trace::TraceRuntime>,
 }
@@ -957,9 +958,16 @@ impl LashlangProcessEngine {
             workers: lash_vm_client::service::Service::default(),
             surface,
             execution_bounds: lashlang::ExecutionBounds::unbounded(),
+            segment_policy: engine::VmSegmentPolicy::standard(),
             run_settings_recorder: None,
             trace_runtime: None,
         }
+    }
+
+    /// Set the segment policy used by the registered VM step bodies.
+    pub fn with_segment_policy(mut self, policy: engine::VmSegmentPolicy) -> Self {
+        self.segment_policy = policy;
+        self
     }
 
     pub fn with_worker_service(mut self, workers: lash_vm_client::service::Service) -> Self {
@@ -1186,7 +1194,7 @@ mod bridge;
 #[cfg(test)]
 mod catalog_tests;
 pub mod engine;
-pub use engine::LashlangEngineSteps;
+pub use engine::{LashlangEngineSteps, VmSegmentPolicy};
 mod catalogue_preview;
 mod deferred;
 mod process;

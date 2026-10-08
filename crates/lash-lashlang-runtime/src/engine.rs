@@ -41,14 +41,32 @@ impl LashlangEngineSteps {
     }
 }
 
-/// The lashlang engine's bound on one run of a step it issues, a VM run
-/// segment: the engine sets it, as a host sets its tools' bounds.
-const LASHLANG_STEP_EXECUTION: std::time::Duration = std::time::Duration::from_secs(2 * 60);
-
-/// How many times a `vm_run` may run before its failure ends the process:
-/// a VM segment is a recomputation from the committed snapshot with no
-/// effect of its own, so a worker fault or a crash runs it again at once.
-const VM_RUN_ATTEMPTS: std::num::NonZeroU32 = std::num::NonZeroU32::MIN.saturating_add(2);
+/// Host-selected policy for a VM segment, separate from recorded process bounds.
+#[derive(Clone, Copy, Debug)]
+pub struct VmSegmentPolicy {
+    pub execution: std::time::Duration,
+    pub attempts: std::num::NonZeroU32,
+    pub retry_initial_ms: u64,
+    pub retry_max_ms: u64,
+}
+impl VmSegmentPolicy {
+    /// Existing provisional preset: 120 seconds, three attempts, immediate retries.
+    /// No workload measurement backs these values. The VM segment recomputes
+    /// only effect-free work from the last committed snapshot.
+    pub const fn standard() -> Self {
+        Self {
+            execution: std::time::Duration::from_secs(120),
+            attempts: std::num::NonZeroU32::MIN.saturating_add(2),
+            retry_initial_ms: 0,
+            retry_max_ms: 0,
+        }
+    }
+}
+impl Default for VmSegmentPolicy {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
 
 #[async_trait::async_trait]
 impl lash_core::EngineSteps for LashlangEngineSteps {
@@ -57,11 +75,15 @@ impl lash_core::EngineSteps for LashlangEngineSteps {
     }
 
     fn execution(&self, _kind: &EngineStepKind) -> std::time::Duration {
-        LASHLANG_STEP_EXECUTION
+        self.engine.segment_policy.execution
     }
 
     fn retry(&self, _kind: &EngineStepKind) -> lash_core::ExecutionPolicy {
-        lash_core::ExecutionPolicy::repeatable(VM_RUN_ATTEMPTS, 0, 0)
+        lash_core::ExecutionPolicy::repeatable(
+            self.engine.segment_policy.attempts,
+            self.engine.segment_policy.retry_initial_ms,
+            self.engine.segment_policy.retry_max_ms,
+        )
     }
 
     async fn run(&self, run: EngineStepRun, cancel: CancellationToken) -> SettledOutput {

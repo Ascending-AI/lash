@@ -164,6 +164,9 @@ impl ExecutionScratch {
     }
 }
 
+mod pacing;
+pub use pacing::VmPacing;
+
 pub(crate) const COOPERATIVE_YIELD_INSTRUCTION_BUDGET: usize = 1024;
 
 /// The instruction accounting a run's cancel checkpoints are placed by
@@ -211,10 +214,6 @@ pub const CANCEL_CHECKPOINT_INSTRUCTIONS: u64 = 1 << 20;
 /// before it, from [`CANCEL_CHECKPOINT_INSTRUCTIONS`], until it reaches this.
 pub const CANCEL_CHECKPOINT_INTERVAL_CAP: u64 = 1 << 28;
 
-/// The doublings from the first gap to the cap.
-const CANCEL_CHECKPOINT_DOUBLINGS: u32 = CANCEL_CHECKPOINT_INTERVAL_CAP.trailing_zeros()
-    - CANCEL_CHECKPOINT_INSTRUCTIONS.trailing_zeros();
-
 /// How many cancel checkpoints a run has reached after `instructions`
 /// executed instructions.
 ///
@@ -227,14 +226,7 @@ const CANCEL_CHECKPOINT_DOUBLINGS: u32 = CANCEL_CHECKPOINT_INTERVAL_CAP.trailing
 /// The schedule is a pure function of the deterministic instruction count, so
 /// a replay reaches the same checkpoints at the same points.
 pub fn cancel_checkpoint_reached(instructions: u64) -> u64 {
-    let first = CANCEL_CHECKPOINT_INSTRUCTIONS;
-    let doubling_span = first * ((1 << (CANCEL_CHECKPOINT_DOUBLINGS + 1)) - 1);
-    if instructions < doubling_span {
-        // Checkpoint `n` sits at `first * (2^n - 1)`.
-        return u64::from((instructions / first + 1).ilog2());
-    }
-    u64::from(CANCEL_CHECKPOINT_DOUBLINGS + 1)
-        + (instructions - doubling_span) / CANCEL_CHECKPOINT_INTERVAL_CAP
+    VmPacing::standard().checkpoints_reached(instructions)
 }
 
 #[derive(Clone)]

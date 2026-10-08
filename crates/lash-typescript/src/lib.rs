@@ -11,7 +11,7 @@ mod regex;
 mod signatures;
 pub mod workflow_graph;
 
-pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH};
+pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack};
 
 /// Exists so a test can demonstrate that the no-abort guarantee does not depend on the
 /// preflight.
@@ -80,6 +80,13 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// Select native stack reservation before the parser thread starts.
+    pub fn with_stack(stack: ParserStack) -> Self {
+        Self {
+            parser: adapter::Parser::with_stack(stack),
+        }
+    }
+
     /// Parses a standalone source or a cell with the supplied live environment.
     pub fn parse(
         &mut self,

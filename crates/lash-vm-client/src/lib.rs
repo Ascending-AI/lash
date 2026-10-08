@@ -11,7 +11,7 @@ pub mod service;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
 pub use broker::PoolSlots;
-pub use config::{Deadlines, PoolConfig, WorkerEntry};
+pub use config::{Deadlines, PoolConfig, WorkerEntry, WorkerTuning};
 pub use context::{ProjectionAnswer, ProjectionDescription, ProjectionRead, RunContext};
 pub use error::PoolError;
 /// The VM-protocol vocabulary a worker pool's configuration and outcomes

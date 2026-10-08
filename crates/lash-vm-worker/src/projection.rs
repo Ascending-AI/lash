@@ -24,6 +24,8 @@ pub(crate) struct Wire {
     inbound: Arc<Mutex<FrameSource>>,
     codec: FrameCodec,
     fences: Arc<Mutex<Fences>>,
+    serialization: Duration,
+    parent_wait: Duration,
 }
 impl Wire {
     pub fn new(
@@ -31,12 +33,16 @@ impl Wire {
         inbound: Arc<Mutex<FrameSource>>,
         codec: FrameCodec,
         fences: Arc<Mutex<Fences>>,
+        serialization: Duration,
+        parent_wait: Duration,
     ) -> Self {
         Self {
             pipe: Mutex::new(pipe),
             inbound,
             codec,
             fences,
+            serialization,
+            parent_wait,
         }
     }
     fn send(&self, pipe: &mut UnixStream, message: WorkerMessage) -> Result<(), PoolError> {
@@ -45,7 +51,7 @@ impl Wire {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .encode(&self.codec, message)?;
-        write_frame(pipe, &bytes, Instant::now() + Duration::from_secs(30))
+        write_frame(pipe, &bytes, Instant::now() + self.serialization)
     }
     /// Every request of `resource` in one frame, answered in order.
     pub(crate) fn read(
@@ -98,11 +104,7 @@ impl Wire {
             .inbound
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .read_frame(
-                &mut pipe,
-                &self.codec,
-                Instant::now() + Duration::from_secs(86_400),
-            )?;
+            .read_frame(&mut pipe, &self.codec, Instant::now() + self.parent_wait)?;
         let frame = self.codec.decode_parent(&bytes)?;
         self.fences
             .lock()
@@ -207,7 +209,14 @@ mod tests {
             next_effect: 0,
         }));
         let reader = RemoteProjection {
-            wire: Arc::new(Wire::new(pipe, Arc::default(), codec.clone(), fences)),
+            wire: Arc::new(Wire::new(
+                pipe,
+                Arc::default(),
+                codec.clone(),
+                fences,
+                config.deadlines.serialization,
+                config.tuning.parent_wait,
+            )),
         };
         let resource = ResourceRef {
             projection: ProjectionType::new("rows"),

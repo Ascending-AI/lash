@@ -245,12 +245,7 @@ pub struct Service {
 impl Service {
     /// Select the helper executable explicitly, using the RLM/process bounds.
     pub fn subprocess(executable: impl Into<std::path::PathBuf>) -> Self {
-        let mut config = PoolConfig::standard(WorkerEntry::helper(executable));
-        config.protocol.max_vm_state_bytes = 64 * 1024 * 1024;
-        config.protocol.decode.max_frame_bytes = 128 * 1024 * 1024;
-        config.protocol.decode.max_allocation_bytes = 256 * 1024 * 1024;
-        config.max_queue_bytes = 128 * 1024 * 1024;
-        Self::new(config)
+        Self::new(PoolConfig::rlm(WorkerEntry::helper(executable)))
     }
 
     pub fn new(config: PoolConfig) -> Self {

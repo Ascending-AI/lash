@@ -50,6 +50,7 @@ pub enum VmExecutionStart {
 /// How a run executes. Owned configuration only: no host object.
 #[derive(Clone)]
 pub struct VmRunConfig {
+    pub pacing: crate::VmPacing,
     pub mode: ExecutionMode,
     pub bounds: ExecutionBounds,
     /// Descriptors owned by this execution, including worker-local IPC views.
@@ -66,6 +67,7 @@ impl std::fmt::Debug for VmRunConfig {
         f.debug_struct("VmRunConfig")
             .field("mode", &self.mode)
             .field("bounds", &self.bounds)
+            .field("pacing", &self.pacing)
             .field("projected", &self.projected.names().collect::<Vec<_>>())
             .field("observe_execution", &self.observe_execution)
             .field("trace_runtime_errors", &self.trace_runtime_errors)
@@ -81,6 +83,7 @@ impl std::fmt::Debug for VmRunConfig {
 impl VmRunConfig {
     pub fn new(mode: ExecutionMode, bounds: ExecutionBounds) -> Self {
         Self {
+            pacing: crate::VmPacing::standard(),
             mode,
             bounds,
             projected: ProjectedBindings::new(),
@@ -392,6 +395,10 @@ impl ExecutionHost for StepHost {
 
     fn profile_execution(&self) -> bool {
         self.config.profile
+    }
+
+    fn vm_pacing(&self) -> crate::VmPacing {
+        self.config.pacing
     }
 
     fn execution_bounds(&self) -> ExecutionBounds {

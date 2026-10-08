@@ -43,7 +43,9 @@ pub struct Deadlines {
 
 impl Deadlines {
     /// Bounded host defaults, retained after the FIG-4162 integrated matrix.
-    /// Synthetic service times do not bound arbitrary guest computation;
+    /// Checkout 5 s, compute 30 s, serialization 5 s, cancel grace 100 ms,
+    /// cumulative CPU 10 s, and three attempts. These are provisional:
+    /// synthetic service times do not bound arbitrary guest computation;
     /// hosts should select deadlines for their admitted workload.
     pub const fn standard() -> Self {
         Self {
@@ -57,6 +59,42 @@ impl Deadlines {
     }
 }
 
+/// Worker-local transport and execution working policy.
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkerTuning {
+    /// Parent reads while idle or awaiting a host projection. This is not compute spend.
+    pub parent_wait: Duration,
+    pub inbound_buffer_bytes: std::num::NonZeroUsize,
+    pub linked_program_cache_capacity: usize,
+    pub compiled_process_cache_capacity: usize,
+    pub parser_stack_base_bytes: usize,
+    pub parser_stack_bytes_per_source_byte: usize,
+    pub vm_pacing: lashlang::VmPacing,
+}
+impl WorkerTuning {
+    /// Existing presets: parent wait 86,400 s; inbound buffer 16 KiB; both
+    /// caches 64 entries; parser stack 8 MiB plus 40,000 bytes/source byte;
+    /// [`lashlang::VmPacing::standard`]. Parser slope is measured at 1.8x the
+    /// worst observed frames; the other working values have no workload measurements.
+    pub const fn standard() -> Self {
+        Self {
+            parent_wait: Duration::from_secs(86_400),
+            inbound_buffer_bytes: std::num::NonZeroUsize::MIN.saturating_add(16 * 1024 - 1),
+            linked_program_cache_capacity: 64,
+            compiled_process_cache_capacity: 64,
+            parser_stack_base_bytes: 8 * 1024 * 1024,
+            parser_stack_bytes_per_source_byte: 40_000,
+            vm_pacing: lashlang::VmPacing::standard(),
+        }
+    }
+}
+impl Default for WorkerTuning {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
     pub entry: WorkerEntry,
@@ -67,14 +105,18 @@ pub struct PoolConfig {
     pub protocol: ProtocolBounds,
     pub vm_limits: VmLimits,
     pub deadlines: Deadlines,
+    pub tuning: WorkerTuning,
     pub restart_window: Duration,
     pub max_restarts: usize,
 }
 
 impl PoolConfig {
     /// Prewarm one process, admit at most four, and bound waiting input to
-    /// two items and eight MiB. See ADR 0123 for the measurement contract and
-    /// the larger state profile used by the RLM/process service.
+    /// two items and eight MiB. Protocol bounds use `ProtocolBounds::standard`;
+    /// VM bounds are 50 million instructions, 64 MiB and 1,024 frames;
+    /// deadlines use `Deadlines::standard`; restarts allow eight per 60 seconds;
+    /// working policy uses `WorkerTuning::standard`. FIG-4157/4162 measured
+    /// synthetic workloads, not optimal concurrency or arbitrary guest spend.
     pub fn standard(entry: WorkerEntry) -> Self {
         Self {
             entry,
@@ -89,13 +131,34 @@ impl PoolConfig {
                 max_frame_depth: 1024,
             },
             deadlines: Deadlines::standard(),
+            tuning: WorkerTuning::standard(),
             restart_window: Duration::from_secs(60),
             max_restarts: 8,
         }
     }
 
+    /// RLM/process preset: 64 MiB state, 128 MiB frames and queued bytes,
+    /// 256 MiB decode allocations; other values follow `standard`.
+    /// These larger allowances have no workload measurement behind them.
+    pub fn rlm(entry: WorkerEntry) -> Self {
+        let mut config = Self::standard(entry);
+        config.protocol.max_vm_state_bytes = 64 * 1024 * 1024;
+        config.protocol.decode.max_frame_bytes = 128 * 1024 * 1024;
+        config.protocol.decode.max_allocation_bytes = 256 * 1024 * 1024;
+        config.max_queue_bytes = 128 * 1024 * 1024;
+        config
+    }
+
     pub(crate) fn validate(&self) -> Result<(), PoolError> {
-        if self.protocol.decode.max_frame_bytes < lash_vm_protocol::FRAME_HEADER_BYTES as u32
+        if self.tuning.parent_wait.is_zero()
+            || self.tuning.inbound_buffer_bytes.get() < lash_vm_protocol::FRAME_HEADER_BYTES
+            || self
+                .tuning
+                .parser_stack_bytes_per_source_byte
+                .checked_mul(64 * 1024)
+                .and_then(|size| size.checked_add(self.tuning.parser_stack_base_bytes))
+                .is_none_or(|size| size == 0)
+            || self.protocol.decode.max_frame_bytes < lash_vm_protocol::FRAME_HEADER_BYTES as u32
             || self.protocol.decode.max_depth == 0
             || self.protocol.decode.max_nodes == 0
             || self.protocol.decode.max_allocation_bytes == 0

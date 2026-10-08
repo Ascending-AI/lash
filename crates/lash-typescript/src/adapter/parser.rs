@@ -1,6 +1,6 @@
 use super::{
-    Diagnostic, DiagnosticCode, MAX_SOURCE_BYTES, Program, guard_source_nesting, guard_source_size,
-    parse_source, parse_stack_size,
+    Diagnostic, DiagnosticCode, MAX_SOURCE_BYTES, ParserStack, Program, guard_source_nesting,
+    guard_source_size, parse_source,
 };
 
 /// One parser thread per frontend, with a stack sufficient for every admitted
@@ -9,6 +9,7 @@ use super::{
 pub(crate) struct Parser {
     thread: Option<ParseThread>,
     pub(crate) spawns: usize,
+    stack: ParserStack,
 }
 
 struct ParseThread {
@@ -18,6 +19,13 @@ struct ParseThread {
 }
 
 impl Parser {
+    pub(crate) fn with_stack(stack: ParserStack) -> Self {
+        Self {
+            stack,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn parse(&mut self, source: &str) -> Result<Program, Diagnostic> {
         guard_source_size(source)?;
         guard_source_nesting(source)?;
@@ -25,7 +33,17 @@ impl Parser {
             // Keep the same arithmetic no-abort guarantee as the standalone
             // parser, reserving once for the largest source instead of once
             // per cell. Untouched stack pages consume address space, not RSS.
-            let stack_size = parse_stack_size(MAX_SOURCE_BYTES);
+            let stack_size = self
+                .stack
+                .size(MAX_SOURCE_BYTES)
+                .filter(|size| *size > 0)
+                .ok_or_else(|| {
+                    Diagnostic::new(
+                        DiagnosticCode::ParseResourcesUnavailable,
+                        "parser stack reservation is zero or overflows",
+                        None,
+                    )
+                })?;
             let (requests, incoming) = std::sync::mpsc::sync_channel::<String>(0);
             let (outgoing, responses) = std::sync::mpsc::sync_channel(0);
             let handle = std::thread::Builder::new()

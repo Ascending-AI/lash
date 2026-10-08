@@ -1,9 +1,8 @@
 use lash_sansio::profile::ProfileMark;
 
 use super::super::{
-    COOPERATIVE_YIELD_INSTRUCTION_BUDGET, ExecutionBound, ExecutionHost, ExecutionHostError,
-    ExecutionMode, ExecutionOutcome, RuntimeError, RuntimeFailure, Value,
-    cancel_checkpoint_reached,
+    ExecutionBound, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
+    RuntimeError, RuntimeFailure, Value,
 };
 use super::effects::VmEffect;
 use super::heap_plan::{
@@ -295,8 +294,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
     ///
     /// The loop checks its bounds only at the fixed points that already
     /// schedule cooperative work, and never per instruction (FIG-3734):
-    /// around an effect, at each cooperative yield (every
-    /// [`COOPERATIVE_YIELD_INSTRUCTION_BUDGET`] dispatched instructions),
+    /// around an effect, at each configured cooperative yield,
     /// after every intrinsic (whose charged work can exceed one dispatch),
     /// and when the loop ends. Where the loop checks its bounds, and so the
     /// instruction a cancellation lands on, is unchanged.
@@ -315,16 +313,18 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // A whole-run loop resumed from a park on an operation picks up the
         // yield phase it parked in (FIG-4159), so its cancel checkpoints fall
         // where an unparked run's do.
+        let pacing = self.host.vm_pacing();
+        let yield_budget = pacing.cooperative_yield_instructions.get();
         let (mut budget, mut checkpoint) = match self.resume_loop_phase.take() {
             Some(phase) => (
                 usize::try_from(phase.yield_budget)
-                    .unwrap_or(COOPERATIVE_YIELD_INSTRUCTION_BUDGET)
-                    .clamp(1, COOPERATIVE_YIELD_INSTRUCTION_BUDGET),
+                    .unwrap_or(yield_budget)
+                    .clamp(1, yield_budget),
                 phase.announced_checkpoint,
             ),
             None => (
-                COOPERATIVE_YIELD_INSTRUCTION_BUDGET,
-                cancel_checkpoint_reached(self.instructions_executed),
+                yield_budget,
+                pacing.checkpoints_reached(self.instructions_executed),
             ),
         };
         // Whether VM state held no inline compound after the last instruction:
@@ -483,7 +483,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 // count crosses a position of the checkpoint schedule: a fact
                 // of the run, so a replay reaches it at the same point
                 // (FIG-3672 P9).
-                let reached = cancel_checkpoint_reached(self.instructions_executed);
+                let reached = pacing.checkpoints_reached(self.instructions_executed);
                 if reached > checkpoint {
                     checkpoint = reached;
                     self.host.cancel_checkpoint(reached).await;
@@ -495,7 +495,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         span: None,
                     });
                 }
-                budget = COOPERATIVE_YIELD_INSTRUCTION_BUDGET;
+                budget = yield_budget;
             }
         }
         self.finish_run_loop(Ok(VmOutcome::Continued), self.ip.saturating_sub(1))

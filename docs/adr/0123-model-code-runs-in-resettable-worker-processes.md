@@ -40,8 +40,10 @@ guest-derived lives in a `static`, `thread_local!`, `OnceLock` or
 
 ### 2. A reset is a drop and replace
 
-`VmInstance::reset` drops the instance and installs `VmInstance::pristine()`,
-the one constructor every fresh and every reset instance comes from. It
+`VmInstance::reset` drops the instance and constructs fresh guest state under
+its configured cache capacities. `VmInstance::pristine()` selects the standard
+64-entry capacities; `with_cache_capacities` selects others, including zero to
+disable residency. Reset preserves this host policy and drops every cache entry. It
 constructs a fresh instance rather than cloning a template. It clears nothing
 field by field, so state added to the instance later is covered by the same
 drop. The laws:
@@ -357,6 +359,20 @@ million instructions, 64 MiB guest memory and 1,024 frames. Checkout and IPC
 silence are five seconds, compute thirty seconds, serialization five seconds,
 cancellation grace 100 ms, cumulative CPU ten seconds, and attempts three.
 The restart window admits eight failed replacements per minute.
+
+The facade's `WorkerTuning::standard()` retains the working preset: 16 KiB
+inbound buffering, 64 entries per linked-cell and compiled-process cache,
+8 MiB parser stack base plus 40,000 bytes per source byte, GC every 1,024
+allocations, cooperative yields every 1,024 instructions and an initial
+adaptive cancellation gap of 2^20 instructions. The immutable 2^28 gap
+backstop and decoder structural refusal limits remain. Parser stack slope is
+measured; the other cadence/capacity values have no workload measurements.
+The parent sends this resolved policy in the worker bootstrap. Worker response
+and projection writes use the parent's serialization deadline, and worker
+reads use the configured parent wait (standard 86,400 seconds), including
+projection responses. The factory and hand-built process engine accept
+`VmSegmentPolicy::standard()` overrides: the provisional preset is 120 seconds,
+three attempts and immediate retries, with no workload measurement.
 
 These bounds limit resource admission; the synthetic service-time matrix does
 not prove an arbitrary-guest deadline or optimal host concurrency. Existing RLM

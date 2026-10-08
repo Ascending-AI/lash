@@ -8,9 +8,9 @@
 //! pending handles and parked continuations. Nothing guest-derived lives in a
 //! static; `scripts/check-vm-static-state.py` refuses one.
 //!
-//! [`VmInstance::reset`] drops the instance and installs a pristine one. It
-//! clears nothing field by field, so state added to the instance later is
-//! covered by the same drop.
+//! [`VmInstance::reset`] drops the instance and constructs fresh guest state
+//! with its host-selected cache capacities. It clears nothing field by field,
+//! so state added to the instance later is covered by the same drop.
 //!
 //! The instance is also the worker side of the parent-worker split: decoding
 //! VM state semantically — a parked continuation, a snapshot, a durable
@@ -45,6 +45,8 @@ pub struct VmInstance {
     linked_programs: LinkedProgramCache,
     /// The run in flight, if any: its VM, pending handles and suspension.
     running: Option<step::VmExecution>,
+    compiled_processes: super::CompiledProcessCache,
+    cache_capacities: (usize, usize),
 }
 
 impl VmInstance {
@@ -52,10 +54,17 @@ impl VmInstance {
     /// instance comes from. It builds the instance fresh, which FIG-4157
     /// measured faster than cloning a prebuilt template.
     pub fn pristine() -> Self {
+        Self::with_cache_capacities(64, 64)
+    }
+
+    /// Fresh worker state with host-selected cache capacities. Zero disables residency.
+    pub fn with_cache_capacities(linked: usize, processes: usize) -> Self {
         Self {
             state: State::new(),
             scratch: ExecutionScratch::new(),
-            linked_programs: LinkedProgramCache::new(),
+            linked_programs: LinkedProgramCache::with_capacity(linked),
+            compiled_processes: super::CompiledProcessCache::with_capacity(processes),
+            cache_capacities: (linked, processes),
             running: None,
         }
     }
@@ -63,7 +72,7 @@ impl VmInstance {
     /// Drops this instance and installs a pristine one: the globals, heap,
     /// scratch, compiled cells and any run in flight go with the drop.
     pub fn reset(&mut self) {
-        *self = Self::pristine();
+        *self = Self::with_cache_capacities(self.cache_capacities.0, self.cache_capacities.1);
     }
 
     pub fn state(&self) -> &State {
@@ -77,6 +86,10 @@ impl VmInstance {
     /// Replaces the session state, as a cancelled cell's rollback does.
     pub fn replace_state(&mut self, state: State) -> State {
         std::mem::replace(&mut self.state, state)
+    }
+
+    pub fn compiled_processes_mut(&mut self) -> &mut super::CompiledProcessCache {
+        &mut self.compiled_processes
     }
 
     pub fn linked_programs(&self) -> &LinkedProgramCache {

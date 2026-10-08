@@ -480,6 +480,11 @@ pub trait ExecutionHost: Sync {
         false
     }
 
+    /// Operational cadence; the standard preset has no workload measurement.
+    fn vm_pacing(&self) -> super::VmPacing {
+        super::VmPacing::standard()
+    }
+
     /// Deterministic GC stress mode used by the conformance suite.
     fn collect_heap_every_allocation(&self) -> bool {
         false
@@ -611,6 +616,10 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
 
     fn profile_execution(&self) -> bool {
         self.profile_execution
+    }
+
+    fn vm_pacing(&self) -> super::VmPacing {
+        self.host.vm_pacing()
     }
 
     fn execution_bounds(&self) -> ExecutionBounds {
