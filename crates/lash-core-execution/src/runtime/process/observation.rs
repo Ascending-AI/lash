@@ -449,6 +449,10 @@ impl ObservedProcess {
         let lifecycle = record.status();
         let outcome = record.outcome();
         let wait = record.wait().cloned();
+        let child_session_id = match record.input.as_ref() {
+            ProcessInput::SessionTurn { .. } => record.lineage().session().cloned(),
+            ProcessInput::Engine { .. } => None,
+        };
         let input = record.input.as_ref().clone();
         let identity = record.identity;
         let process_id = record.id;
@@ -471,7 +475,7 @@ impl ObservedProcess {
             caused_by: record.provenance.caused_by,
             external_ref: record.external_ref,
             wait,
-            child_session_id: child_session_id(&input),
+            child_session_id,
             input,
         }
     }
@@ -553,12 +557,5 @@ fn terminal_error(outcome: Option<&ProcessAwaitOutput>) -> Option<String> {
         // Abandonment is not a reported failure; the status label conveys it and
         // the evidence rides the terminal event. No derived error string here.
         ProcessAwaitOutput::Abandoned { .. } | ProcessAwaitOutput::NoLongerRetained { .. } => None,
-    }
-}
-
-fn child_session_id(input: &ProcessInput) -> Option<SessionId> {
-    match input {
-        ProcessInput::SessionTurn { create_request, .. } => create_request.session_id.clone(),
-        ProcessInput::Engine { .. } => None,
     }
 }

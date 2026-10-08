@@ -111,6 +111,85 @@ async fn deploy(
     Ok(core)
 }
 
+/// FIG-5547: observation links the session the process actually ran, even
+/// when its creator left the child id for the process to derive. The
+/// recorded request keeps the creator's optional id unchanged.
+async fn observed_child_session_matches_execution(named: bool) -> Result<()> {
+    let sessions = Arc::new(StdMutex::new(Vec::new()));
+    let ran_in = Arc::clone(&sessions);
+    let provider = crate::testing::TestProvider::builder()
+        .kind("observed-child-session")
+        .complete(move |request| {
+            ran_in.lock_recover().push(
+                request
+                    .session_id()
+                    .expect("the child's model call names its session")
+                    .clone(),
+            );
+            async { Ok(text_response("child answered")) }
+        })
+        .build()
+        .into_handle();
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(provider, mock_llm_profile_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let mut request = request("mock-model");
+    let lash_core::ProcessStartTarget::Input(lash_core::ProcessInput::SessionTurn {
+        create_request,
+        ..
+    }) = &mut request.input
+    else {
+        panic!("the fixture starts a child session turn");
+    };
+    let stated_id = named.then(|| crate::SessionId::fixture(CHILD.to_owned()));
+    create_request.session_id = stated_id.clone();
+    let started = core.processes().start(request, core.effect_host()).await?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        core.processes().await_output(&started.process_id),
+    )
+    .await
+    .expect("the child's turn settles")?;
+    assert!(
+        matches!(&output, lash_core::ProcessAwaitOutput::Settled { output }
+            if output.is_success()),
+        "the child ran successfully: {output:?}"
+    );
+    let observed = core
+        .processes()
+        .get(&started.process_id)
+        .await?
+        .expect("the completed process remains observable");
+    let lash_core::ProcessInput::SessionTurn { create_request, .. } = &observed.input else {
+        panic!("the observed process is a session turn");
+    };
+    assert_eq!(create_request.session_id, stated_id);
+    let ran_in = sessions.lock_recover().clone();
+    assert_eq!(ran_in.len(), 1, "the child ran one model call");
+    if let Some(stated_id) = stated_id {
+        assert_eq!(ran_in[0], stated_id, "a named child keeps its id");
+    }
+    core.shutdown().await?;
+    assert_eq!(
+        observed.child_session_id.as_ref(),
+        Some(&ran_in[0]),
+        "observation names the session the child actually ran"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn observation_names_the_child_session_of_an_unnamed_start() -> Result<()> {
+    observed_child_session_matches_execution(false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn observation_names_the_child_session_of_a_named_start() -> Result<()> {
+    observed_child_session_matches_execution(true).await
+}
+
 /// A child turn that panics ends its process with a typed failure, never a
 /// success and never a hang, and the parent's session lives on: its next
 /// turn answers.
