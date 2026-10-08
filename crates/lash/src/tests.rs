@@ -471,6 +471,7 @@ mod standard_compaction_persistence;
 mod standard_protocol_turns;
 mod stream_evidence;
 mod round_cancel_state;
+mod session_turn_process;
 mod store_faults;
 mod tool_check_control;
 mod tool_intent_ingress;
