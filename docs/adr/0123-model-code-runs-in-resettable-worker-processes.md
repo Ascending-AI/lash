@@ -122,7 +122,7 @@ policy.
   unchanged fragments). Both deny unknown fields, so a capture that names a
   grant is refused. Deferred tool outcomes have one durable home in the
   recorded resolution. The parent keeps an in-memory `DeferredLink`
-  while executing the cell; the snapshot carries no copy. Product event records remain in host storage under ADR 0136.
+  while executing the cell; the snapshot carries no copy. Product event records remain in host storage under ADR 0137.
 - A process body's worker returns the VM bytes of its continuation only;
   the body's ledgers stay in the parent's envelope.
 - Laws: `rlm_worker_envelope_carries_no_grant_or_binding` (a sentinel in an
@@ -262,7 +262,7 @@ belongs to the transport, which reports a silent worker as
   broker does not serve yet. A refused request takes no ordinal. The broker
   serves resource operations, batches, awaits, sleeps and cancel
   checkpoints. The shipped adapters also serve prints, finishes, failures,
-  admitted host tool calls for product events under ADR 0136.
+  admitted host tool calls for product events under ADR 0137.
 - **The parent owns every counter.** `ParentLedger` gives each admitted
   request the next ordinal and derives its `ToolCallId`s through
   `CodeCallIdentities` (ADR 0117 §2), the one derivation both Lashlang
@@ -551,4 +551,4 @@ The native laws in `crates/lash-vm-worker/tests/pool_laws.rs`
 `crates/lash-protocol-rlm/src/executor/tests/one_slot_process_await.rs`
 pin this behaviour.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

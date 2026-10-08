@@ -20,7 +20,7 @@ The host keeps registrations and source provisioning in its own durable
 storage. It applies desired source state idempotently, persists its cursor
 after applying each page, and reconciles a snapshot if its own history is
 released. Lash supplies lifecycle cursor reads rather than a registration
-feed. [ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns this host pattern.
+feed. [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns this host pattern.
 
 ## Turn and session terminals
 

@@ -2,7 +2,7 @@
 
 Lash records a closed vocabulary of lifecycle facts. Hosts own product events,
 routing and scheduling under
-[ADR 0136](adr/0136-the-host-owns-events-routing-and-scheduling.md). Approvals,
+[ADR 0137](adr/0137-the-host-owns-events-routing-and-scheduling.md). Approvals,
 callbacks and triggers are host patterns built on durable calls, keyed sends
 and starts, and lifecycle cursors.
 

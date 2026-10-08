@@ -50,7 +50,7 @@ Evidence: `crates/lash-core-store/src/store/admission_plan.rs:1`, `:31`, `:67`,
 ### 2. What stays separate, and why
 
 Product routing and schedules belong to the host under
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md). A host sends a notice only after its source fact commits,
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md). A host sends a notice only after its source fact commits,
 using `send().id(TurnId)` to make retries idempotent. Its event ledger is not
 another turn ingress. Internal actor wakes notify runtime work; they carry no
 product event or routing decision. Turn cancellation follows
@@ -280,7 +280,7 @@ answer.
 
 Admitted input and generic work keep their recorded presentation order.
 A host process notice is ordinary sent input and carries the options its host
-submitted. Product formatting belongs to that host under ADR 0136.
+submitted. Product formatting belongs to that host under ADR 0137.
 
 ### 7. Admission, deferral and resume
 
@@ -336,7 +336,7 @@ Evidence: `crates/lash-core-store/src/store/ingress_terminal.rs`,
 
 A product delivery uses a stable send id or host start key. The host records its result
 before pruning can remove start-key evidence. A cursor is acknowledged only
-after its page is recorded or its keyed deliveries complete. ADR 0136 owns
+after its page is recorded or its keyed deliveries complete. ADR 0137 owns
 this contract; queue ordering remains the session's ingress sequence.
 
 ### 10. Cancel by author

@@ -116,7 +116,7 @@ start returns its retained process and refuses changed start content. The
 host records the returned binding before it permits pruning, and answers
 later duplicate deliveries from that record. Once the process is pruned,
 the start key can register a fresh lifetime; Lash keeps no host-delivery
-receipt table. [ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns this retention contract.
+receipt table. [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns this retention contract.
 
 ### 6. Durable identity shapes
 
@@ -143,4 +143,4 @@ carry another identity. A minted id names the lifetime directly. Host-key
 content checks make retries explicit without turning submitted content into
 the idempotency key.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

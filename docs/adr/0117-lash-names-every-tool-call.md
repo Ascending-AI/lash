@@ -138,7 +138,7 @@ attempt number. Intent identities add the intent index; final-emission
 attribution remains separate evidence. Completion keys are opaque bearer
 capabilities. Hosts keep their association
 with `call_id` in a durable record or read it through `Completions::parked`;
-ADR 0136 owns that delivery contract.
+ADR 0137 owns that delivery contract.
 
 Commit records retain both lash identity and provider correlation.
 Run operand slots govern ordering independently of identity.
@@ -218,4 +218,4 @@ responses without improving tool idempotency; repairing correlation keeps the
 provider boundary tolerant. A new id per retry would defeat deduplication
 when an error follows a successful external write.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

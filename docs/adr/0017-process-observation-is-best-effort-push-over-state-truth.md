@@ -34,4 +34,4 @@ A durable push feed is rejected because it duplicates the durable log's bufferin
 
 [Watched registry and registrations](../../crates/lash-core-execution/src/runtime/process/awaiter.rs), [event emission](../../crates/lash-core-execution/src/runtime/process/awaiter/registry_support.rs) and [retention contract](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs) implement the split.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

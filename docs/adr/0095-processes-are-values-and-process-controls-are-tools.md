@@ -19,7 +19,7 @@ TypeScript async arrows are the source process literals under
 [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md).
 
 Hosts supply event and registration tools through ordinary tool contracts.
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns their routing, input checks and keyed delivery.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns their routing, input checks and keyed delivery.
 
 Process handles retain identity in nested containers through suspension and
 snapshots. Process lifetime and identity follow
@@ -120,7 +120,7 @@ one only where the expected type contains `Process`, then hoists its declaration
 using canonical body and AST path. Other slots receive a typed refusal.
 Immutable, durably representable captured locals become hidden parameters.
 Host callbacks and approvals are deferring tool calls with checked schemas
-under ADR 0136. No call-site marker owns literal lifting.
+under ADR 0137. No call-site marker owns literal lifting.
 
 Evidence: `crates/lashlang/src/linker/process_literal.rs`, and `crates/lash-typescript/src/lower`.
 
@@ -172,4 +172,4 @@ children use durable wait rows and one recorded settlement order.
 - Engine authority protects registration from forged signature claims.
 - Definition names and versions are host data; content and retention are Lash data.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

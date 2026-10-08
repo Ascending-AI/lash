@@ -17,7 +17,7 @@ modules remain hidden.
 
 Teaching follows the selected catalog, host environment, and prompt features.
 Process teaching depends on process catalog membership. Sleep depends on its
-host ability. Host event teaching follows the host tools actually enabled under ADR 0136. Image,
+host ability. Host event teaching follows the host tools actually enabled under ADR 0137. Image,
 decomposition, and continuation instructions follow their configured features
 and catalog. The features and abilities a prompt teaches are the ones the
 session recorded at creation, not the opening deployment's (FIG-4398, ADR
@@ -58,4 +58,4 @@ Prompt rendering does not change the catalog's dispatch or durable identity.
 - `crates/lash-protocol-rlm/src/rlm_support.rs:320` explains actual variable truncation.
 - `crates/lash-protocol-rlm/src/prompt_contract_tests.rs` pins capability and transport teaching.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

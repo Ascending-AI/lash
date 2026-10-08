@@ -64,7 +64,7 @@ base winner's undelivered disposition. Hosts own escalation timers.
 The disposition applies to host-authored items addressed to the cancelled
 turn that it never delivers. Deferred items retain their immutable addressing;
 an ended turn's items are next-turn items by rule. Other held input defers with its position preserved. Host product delivery
-records follow the host's own cancellation and retention policy under ADR 0136. Affected items carry closed reasons (ADR 0101).
+records follow the host's own cancellation and retention policy under ADR 0137. Affected items carry closed reasons (ADR 0101).
 
 An accepted checkpoint publishes `CheckpointRecorded` after its included
 activity and before an after-step stop at that boundary. It is live
@@ -141,4 +141,4 @@ adds a second coordination protocol beside the fenced commit.
 - [Cancellation evidence](../../crates/lash-core-store/src/turn_control_vocabulary.rs).
 - [Cancel modes and input policy](../../crates/lash-sansio/src/session_model/mod.rs).
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

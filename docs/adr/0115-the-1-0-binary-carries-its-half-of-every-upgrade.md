@@ -232,7 +232,7 @@ session's config, and a process execution environment's config. The guarded
 transaction admits them before its first write, and a stamp outside its
 plugin's range refuses `PluginWriterOutsideRange` with nothing published. A
 malformed range refuses `PluginWriterRangeMalformed`. Process rows hold an environment's content reference, never a namespace.
-Host registrations choose tools and pin definitions explicitly under ADR 0136.
+Host registrations choose tools and pin definitions explicitly under ADR 0137.
 
 Ranges are provisioned from plugin registrations. Inside a rollback window a
 provisioned plugin is permitted its oldest writable format; once `F` is the
@@ -493,4 +493,4 @@ only nodes that decode the stored formats. Operators use one binary with
 stable DTOs and exit codes. A compatibility release carries its predecessor's
 readers, writer pins and recovery operations before it uses newer formats.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

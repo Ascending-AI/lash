@@ -29,7 +29,7 @@ binder hides and restores its outer binding. Body and catch results join before
 has the `any` binding while all paths lower for validation, scope effects, and
 completion. Index expressions lower both target and index operands.
 
-Product registration keys belong to the host under ADR 0136. Lowering checks
+Product registration keys belong to the host under ADR 0137. Lowering checks
 ordinary tool contracts and carries no static product-routing facts.
 
 Evidence: `crates/lashlang/src/linker/lower_expr.rs` and
@@ -48,4 +48,4 @@ the stack bound.
 - Expression variants have one structural implementation point.
 - Product routing does not add a separate lowering walk.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

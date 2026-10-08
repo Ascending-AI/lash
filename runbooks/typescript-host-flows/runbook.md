@@ -32,7 +32,7 @@ tool the catalogue declares
 `defineProcess`, a bare `start` and `wake` are **deleted**, and lash has no
 process signals, emitted progress or triggers: a decision reaches a process as
 the result of a deferring host tool call, which the host resolves through its
-completion key ([ADR 0136](../../docs/adr/0136-the-host-owns-events-routing-and-scheduling.md)).
+completion key ([ADR 0137](../../docs/adr/0137-the-host-owns-events-routing-and-scheduling.md)).
 
 `processes.start` answers the one handle kind — `{"__handle__": "lash", "id":
 "p.<incarnation>.<process id>", "process_id": "<process id>"}`. The `id` is

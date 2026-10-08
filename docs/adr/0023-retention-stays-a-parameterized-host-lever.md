@@ -4,7 +4,7 @@
 
 Hosts schedule differentiated retention through `prune_terminal_processes(cutoff, filter, watermark)`. `ProcessListFilter` selects provenance, identity and creation ranges; `ProjectionWatermark::UpTo(cursor)` limits deletion to acknowledged changes under ADR 0020, while `NoProjector` explicitly states there is no projector. The public `Processes::prune` forwards the filter and refuses filters selecting non-terminal work.
 
-Eligibility protects cleanup obligations and consumer holds. Pruning retains typed tombstone evidence. Hosts record a keyed start's process binding before pruning under ADR 0136. Hosts retain process evidence beyond every reader that still awaits it; Lash supplies no finite maximum waiter lifetime.
+Eligibility protects cleanup obligations and consumer holds. Pruning retains typed tombstone evidence. Hosts record a keyed start's process binding before pruning under ADR 0137. Hosts retain process evidence beyond every reader that still awaits it; Lash supplies no finite maximum waiter lifetime.
 
 ## Running-process event release
 
@@ -66,7 +66,7 @@ SQLite and PostgreSQL delete eligible receipts and dependent usage in one fenced
 
 `vacuum` cleans eligible tombstoned graph and terminal ingress rows without a
 receipt horizon. Blob GC uses its separate explicit policy. Host event
-records and delivery retention belong to the host under ADR 0136.
+records and delivery retention belong to the host under ADR 0137.
 
 The host tool-intent submission ledger is evidence under the same lever (FIG-1509). Each row is the first-outcome idempotency fence of one host-submitted intent identity and belongs to the identity's owner session; the store stamps its admission time. A row admitted before the bound is reclaimed once its owner session is durably deleted, and the same transaction fences that owner in `tool_intent_retired_owners`. The fence is permanent identity evidence: every later submission under the owner answers `Reclaimed`, so a reclaimed identity is refused instead of realized again. A live owner's rows are never eligible, whatever their age. The proof is a join with `deleted_sessions` inside the sweep's transaction on both backends. On PostgreSQL submissions take the sweep's advisory key shared, so a claim cannot slip between the fence and the delete; SQLite serializes them on its one writer.
 
@@ -76,4 +76,4 @@ Producer-declared retention classes are rejected because retention windows are h
 
 [Process retention contract](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs), [SQLite receipt retention](../../crates/lash-sqlite-store/src/retention.rs) and [PostgreSQL receipt retention](../../crates/lash-postgres-store/src/postgres/evidence_retention.rs) implement these levers.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

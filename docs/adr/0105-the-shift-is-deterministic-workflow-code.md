@@ -320,4 +320,4 @@ the current intent and the selected cancellation request. Its cancellation
 decision is derived from durable intent and commits in the same transaction;
 observer gates are notified after the commit and cannot change its decision.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

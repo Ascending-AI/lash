@@ -194,7 +194,7 @@ The pre-1.0 freeze governs changes in place.
 | `TypeExpr` | Its graph or facet carrier | Decoded only in an admitted carrier | Unknown variant fields and variants refused |
 | Trace records and events | `TRACE_SCHEMA_VERSION = 36` | Exact trace record version before event decode | Additive known fields tolerated; closed variants refused |
 | `TraceLashlangGraph` | `TRACE_SCHEMA_VERSION = 36` | Exact snapshot version before shape | Additive fields tolerated; closed status, observation, wait, node, and completeness variants refused |
-| Durable effect-summary events | `PROCESS_EVENT_VOCABULARY_VERSION = 1` | Fleet read window and registered upcaster before strict payload decode | Unknown summary fields and lifecycle kinds refused; the vocabulary is closed under ADR 0136 |
+| Durable effect-summary events | `PROCESS_EVENT_VOCABULARY_VERSION = 1` | Fleet read window and registered upcaster before strict payload decode | Unknown summary fields and lifecycle kinds refused; the vocabulary is closed under ADR 0137 |
 
 The owners and fences are in `crates/lashlang/src/workflow_graph.rs:61`, `:129`,
 `crates/lashlang/src/workflow_graph/facets.rs:12`,
@@ -233,4 +233,4 @@ Usage is data on the model call's recorded result. Hosts meter spend at the
 `Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
 Lash has no accounting ledger or delivery dependency.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

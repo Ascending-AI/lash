@@ -110,4 +110,4 @@ to null would hide capture failures, so unsupported values fail at the writer.
 - [Budget measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L267).
 - [Content hash](../../crates/lash-core-store/src/store/mod.rs#L329).
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

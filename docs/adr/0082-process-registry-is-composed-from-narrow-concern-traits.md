@@ -33,7 +33,7 @@ decorator delegates unintercepted concerns wholesale.
 Process execution and recovery belong to the durable engine under ADR 0110 and
 [ADR 0132](0132-durability-is-state-first-over-the-lash-store.md); registry
 concerns are persistence reads and writes. Product routing belongs to the
-host under ADR 0136.
+host under ADR 0137.
 
 The runtime-store decorator follows the same ownership rule. Its default
 forwarder and component implementations derive from one `runtime_store_operations!`
@@ -61,4 +61,4 @@ ownership to storage.
 - `crates/lash-core-execution/src/runtime/process/registry.rs:703-729` composes the registry and fleet format.
 - `crates/lash-core-store/src/store/runtime_store_decorator.rs` defines the generated forwarding contract.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

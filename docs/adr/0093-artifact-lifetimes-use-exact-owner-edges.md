@@ -60,4 +60,4 @@ inputs; cleanup requires reader end evidence.
 - Compilation and publication have separate responsibilities.
 - Every backend implements atomic publication and cleanup.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

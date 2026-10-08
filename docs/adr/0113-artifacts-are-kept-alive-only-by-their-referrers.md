@@ -47,7 +47,7 @@ malformed ids are `StoredDataCorrupt`. A store never treats an undecodable
 edge as absent (`crates/lash-core-store/src/artifact_referrer.rs:176-279,621-633`).
 
 A frame id combines the session and the admitted frame node. Host registrations
-hold their definitions with an explicit `host_pin` under ADR 0136; a host
+hold their definitions with an explicit `host_pin` under ADR 0137; a host
 record or copied definition id alone acquires no artifact edge.
 
 SQLite stores exact edges in `artifact_referrer_edges` and permanent fences
@@ -370,7 +370,7 @@ A host registration owns a host pin for every definition and environment it
 needs between starts. It publishes or acquires that closure before making its
 registration usable and releases the pin when its own delivery obligations
 permit it. Starts acquire their own protection under §3.3. There is no
-implicit capture of the registering agent's environment; ADR 0136 owns tool
+implicit capture of the registering agent's environment; ADR 0137 owns tool
 selection and host delivery retention.
 
 #### 3.5 `host_pin`: host release
@@ -489,7 +489,7 @@ terminal refusal races use §3.3's rescue acquisition
 A host pin retains the definition independently of the caller's frame or
 session. Before a start registers, it acquires its own protected inputs under
 §3.3. The host selects the tools and environment explicitly, and releases its
-registration pin only when its own obligations allow it (ADR 0136).
+registration pin only when its own obligations allow it (ADR 0137).
 
 #### 4.5 A cancelling child still reading its inputs
 
@@ -612,7 +612,7 @@ A coalesced start carries the retained record's content
 
 Host registration artifacts follow the host-pin laws in §7.14 and the
 start-protection laws in §7.6 and §7.8. Product delivery retention is the
-host's contract under ADR 0136.
+host's contract under ADR 0137.
 
 #### 7.10 Prune racing start rescue
 
@@ -695,4 +695,4 @@ switches clear execution state and retain only the definitions their seed
 carries; forks of ended frames start without those execution components
 (§2.6, §3.1, §3.6).
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

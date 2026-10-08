@@ -19,8 +19,11 @@ The harness is the internal crate
 [`crates/lash-postgres-workers`](../../crates/lash-postgres-workers): it drives
 the production runner with scripted services, as `lash-durable-test` does in
 process, so it is a substrate harness, not a facade host (the facade-only
-rule for `runbooks/*/src` does not apply to it). A facade-host version of this
-proof follows once the facade serves durable nodes (L13, FIG-5193).
+rule for `runbooks/*/src` does not apply to it). The facade's `LashCore`
+already serves both session and process actors with its production process
+worker ([host process engines](../../docs/operations/durable-hosting.md#4-host-process-engines)).
+This harness assembles its activations directly to inject faults and record
+store evidence.
 
 It is the cross-process proof of ADR 0132 §3 (actors, node liveness, the
 epoch fence) and of L8's notifier, liveness lock and failover bound

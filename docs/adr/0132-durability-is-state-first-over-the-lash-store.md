@@ -197,7 +197,7 @@ The execution record splits into a start and an outcome.
   (FIG-5217). The key carries no scope or kind. Hosts resolve only the `tool_completion` and `engine_key` kinds; a
   host resolution of any other kind answers `ReservedKind` and writes nothing.
   Turn cancellation and process terminals have their own admission paths.
-  Host events settle deferring calls through completion keys under ADR 0136.
+  Host events settle deferring calls through completion keys under ADR 0137.
 - **Timers are due times.** A durable sleep is a timer wait row, a backoff is
   a retry record, and every deadline is a column. A waiting actor carries the
   earliest due time; the ordinary claim picks it up and commits the timer
@@ -222,7 +222,7 @@ journal-engine window.
   An expired deadline found on load settles at once.
 - `ExecutionBudgets` holds model, control-phase, stop-grace and provider
   attempt limits. Tool execution and park bounds are explicit host-provided
-  manifest data under ADR 0136, with no Lash default or ceiling. Engine waits
+  manifest data under ADR 0137, with no Lash default or ceiling. Engine waits
   likewise require their own bound.
 - Long work is a process tool, an isolated tool on a host engine, or a Pending
   tool. Body and park bounds are independent. A bounded park's deadline is
@@ -436,4 +436,4 @@ format does, under [ADR 0106](0106-durable-formats-upgrade-by-migration-or-drain
 - `/workspace/notes/lash/prospect-substrate/framing.md`
 - `/workspace/notes/lash/prospect-longwork/spec-v3.md` Parts B, C and E
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

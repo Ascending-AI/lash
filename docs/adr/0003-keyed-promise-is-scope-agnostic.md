@@ -32,7 +32,7 @@ that carries no scope or kind. Lash keeps no completion secret; the host
 authorizes who may resolve and hands keys only to those callers. Hosts resolve only the
 `tool_completion` and `engine_key` kinds; turn cancellation and process
 terminals have their own admission paths. Host events resolve deferring calls
-under ADR 0136. Waiting is a facet on a running process, mirrored
+under ADR 0137. Waiting is a facet on a running process, mirrored
 by wait and resume events, rather than a lifecycle status.
 
 ## Alternatives and consequences
@@ -48,4 +48,4 @@ The current implementation is in
 [durable wait identities](../../crates/lash-core-store/src/await_event_identity.rs);
 the substrate lanes implement wait rows under ADR 0132 §6.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

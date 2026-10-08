@@ -10,7 +10,7 @@ Accepted.
 
 Completion authority belongs to the runtime, not the bearer of a completion
 key. A host resolves a parked call; the process engine consumes that result
-and decides its typed terminal under ADR 0136. Resolution does not authorize
+and decides its typed terminal under ADR 0137. Resolution does not authorize
 `complete_process`.
 
 The authority names who writes the terminal:
@@ -28,4 +28,4 @@ Caller convention alone cannot establish who may write a terminal. The required 
 
 Terminal construction shares `terminal_append_request` helpers. [Completion authority](../../crates/lash-core-execution/src/runtime/process/events.rs), [invocation authority](../../crates/lash-core-execution/src/runtime/process/model/execution.rs) and [registry transitions](../../crates/lash-core-execution/src/runtime/process/registry_transitions.rs) define the contract.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

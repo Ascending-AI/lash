@@ -22,4 +22,4 @@ Per-backend wait loops duplicate lost-wakeup handling and force stores to know t
 
 [Shared awaiter](../../crates/lash-core-execution/src/runtime/work/awaiter.rs) and [cadence](../../crates/lash-core-execution/src/runtime/work/cadence.rs) implement the host-side read; the substrate lanes implement `process_terminal` wait rows under ADR 0132 §11.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

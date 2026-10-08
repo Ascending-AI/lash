@@ -93,7 +93,7 @@ Each row names the deletion commit, not merely the ADR that proposed it.
 | PostgreSQL effect engine | Retired in `4f03596847`. PostgreSQL keeps storage, with no engine journal tables or await-event engine. |
 | SQLite effect engine and store-journal turn host | Retired in `476264fbea`. SQLite file and memory remain storage. |
 | SQL session-execution leases | Retired in `1ea8fcff75`. Writes use the sealed shift fence and session-head compare-and-set. |
-| Process leases and native recovery sweeps | Retired in `33e7ebc44d`. The engine owns execution and lost-run reconciliation; the process registry retains lifecycle and events; product notice delivery belongs to the host under ADR 0136. |
+| Process leases and native recovery sweeps | Retired in `33e7ebc44d`. The engine owns execution and lost-run reconciliation; the process registry retains lifecycle and events; product notice delivery belongs to the host under ADR 0137. |
 | Turn-input and queued-work claim tokens, `queued_runs` ledger | Retired in `671a616419`. Admission binds inputs and work; run identity keys settlement. |
 | Await-event signing material | Retired in `7ab7707a8f`. Wait keys are identities; a host owns any authorization policy. |
 | Runtime-owned tool-intent admission | Retired in `0417b7f48b`. The engine realizes intents and the submission ledger retains their binding and outcome. |

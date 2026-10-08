@@ -253,12 +253,17 @@ version or route before resuming.
 Rollback is safe until `F` moves, and only until then: the move fences N's
 writers, and recovery then rolls forward.
 
-## Client and server version skew
+## Host transport version skew
 
-Each remote connection begins with a version-range `Hello`. The server picks
-the highest version both sides support. N+1 and N select N's wire version
-while their ranges overlap. A disjoint range is refused before a request is
-decoded or has an effect. Every request carries the selected version; replies,
-errors and stream events use that request's version, including when a load
-balancer sends it to a server that did not see the original `Hello`. Keep
-both builds' endpoints available while their recorded routes remain live.
+Lash ships no client/server wire protocol or version negotiation. A host
+owns its transport's DTOs, version skew and compatibility policy
+([ADR 0136](../adr/0136-hosts-own-their-wire-contracts.md)). Lash's Rust types
+carry no wire-stability promise.
+
+Across N and N+1, lash owns compatibility of its stored formats and recorded
+routes. Keep the recorded config and model routes available to the builds
+resuming that work, and use the store read/write ranges, fleet epoch `F` and
+actor format sets to decide which build can serve it. A typed incompatibility
+stops traffic to that build until its recorded version or route is resolved.
+Host endpoint availability and client transport compatibility follow the
+host's own contract.

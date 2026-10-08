@@ -102,7 +102,7 @@ These classes refine I0's routing table in `substrate-seams.md` (which method ow
 | 29 | `SyncExecutionEnvironment` | pure (V0); needs a phase record (L3) for plugin-driven syncs | the sync result lands in the checkpoint's `environment`; `turn.prepare` |
 | 30 | `LoadExecutionEnv` | needs a phase record | L6: admitted execution |
 | 31 | `Sleep` | needs a phase record | L5: a pinned timer row |
-| 32 | `AwaitEvent` | deleted | FIG-5216: no path issued it; outside events settle host-resolvable waits under ADR 0136 |
+| 32 | `AwaitEvent` | deleted | FIG-5216: no path issued it; outside events settle host-resolvable waits under ADR 0137 |
 | 33 | `PeekAwaitEvent` | deleted | FIG-5216, with `AwaitEvent` |
 | 34 | `LanguageRuntimeValue` | deleted | values live in the VM heap snapshot (`cell.snapshot`) |
 

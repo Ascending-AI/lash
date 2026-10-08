@@ -160,4 +160,4 @@ upcasters or compatibility readers (FIG-3846). ADR 0115 governs the 1.0 cut.
 - `shared_binding_list_and_record_literals_stay_shared_after_snapshot_round_trip`
   in [the continuation tests](../../crates/lashlang/src/runtime/tests/continuation_wire_cases.rs).
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

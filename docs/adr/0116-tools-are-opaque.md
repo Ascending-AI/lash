@@ -39,7 +39,7 @@ The Run records Pending as a Deferred X: no rank, final decision, presentation
 or `ToolCompletion` occurs until its source supplies a terminal. A Pending
 result carries no general intents. It may name `PendingResolver::ProcessTerminal`
 or one sealed `DeclaredStart`; a plain Pending call reserves a key for an
-external completion. Hosts keep progress metadata in their own records under ADR 0136.
+external completion. Hosts keep progress metadata in their own records under ADR 0137.
 
 #### 1.3 Declaration and admission
 
@@ -74,7 +74,7 @@ retry. Lash-owned effects use declared intents and their exactly-once fences.
 
 Every tool manifest declares a host-set `execution` bound for its body. A
 Pending-capable tool also declares a separate `park` bound, `Within(Duration)`
-or `UntilScopeEnd`, under ADR 0136. Admission records both; takeover refreshes
+or `UntilScopeEnd`, under ADR 0137. Admission records both; takeover refreshes
 neither. Lash supplies no default or tool ceiling. Long work is a process
 tool, an isolated tool on a host engine, or a Pending tool, each with an
 explicit body bound and, when it can defer, a park bound. A body also owns its transport
@@ -334,4 +334,4 @@ dispatch. `batch` costs no executable wrapper execution, while its model
 presentation remains one call and result. A host's delegation tool uses the same
 declared start path as any other start.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

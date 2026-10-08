@@ -79,7 +79,7 @@ remains retained. The batch that finishes the cascade arms the marker
 atomically (ADR 0132 §11).
 
 Host product records follow the host's own delivery and retention contract
-under ADR 0136. Lash retains lifecycle and call settlement evidence; it does
+under ADR 0137. Lash retains lifecycle and call settlement evidence; it does
 not own the product's event ledger.
 
 ### 3. Scope-split storage topology
@@ -98,7 +98,7 @@ silently become a whole-catalog blob sweep.
 
 Host event records and their retention are outside this storage topology.
 The host records a process binding before pruning may remove a keyed start's
-result, and explicitly holds any definition needed between starts (ADR 0136).
+result, and explicitly holds any definition needed between starts (ADR 0137).
 
 #### Host tool-intent ledger
 
@@ -280,4 +280,4 @@ coverage at the reclamation boundary.
 - [Reclamation enumeration witnesses and partial-scan laws](../../crates/lash-core-store/src/store/enumeration.rs).
 - [Skipped-kind and truncated-page laws](../../crates/lash-conformance/src/conformance/attachment_referrers.rs).
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

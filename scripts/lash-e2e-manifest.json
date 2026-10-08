@@ -839,7 +839,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: the declaration this case counted was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0136) deleted process event emission. The surviving declared intents (process start and cancel) commit with the call's outcome; a cancel before that commit realizes none: crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point."
+          "disposition": "Retired, subject deleted: the declaration this case counted was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0137) deleted process event emission. The surviving declared intents (process start and cancel) commit with the call's outcome; a cancel before that commit realizes none: crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point."
         },
         {
           "variant": "default",
@@ -867,7 +867,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: the declaration this case counted was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0136) deleted process event emission. The surviving declared intents (process start and cancel) commit with the call's outcome; a cancel before that commit realizes none: crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point."
+          "disposition": "Retired, subject deleted: the declaration this case counted was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0137) deleted process event emission. The surviving declared intents (process start and cancel) commit with the call's outcome; a cancel before that commit realizes none: crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point."
         },
         {
           "variant": "default",
@@ -895,7 +895,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: the declaration this case counted was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0136) deleted process event emission. The surviving declared intents (process start and cancel) commit with the call's outcome; a cancel before that commit realizes none: crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point."
+          "disposition": "Retired, subject deleted: the declaration this case counted was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0137) deleted process event emission. The surviving declared intents (process start and cancel) commit with the call's outcome; a cancel before that commit realizes none: crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point."
         },
         {
           "variant": "default",
@@ -923,7 +923,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: the declaration this case counted was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0136) deleted process event emission. The surviving declared intents (process start and cancel) commit with the call's outcome; a cancel before that commit realizes none: crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point."
+          "disposition": "Retired, subject deleted: the declaration this case counted was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0137) deleted process event emission. The surviving declared intents (process start and cancel) commit with the call's outcome; a cancel before that commit realizes none: crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point."
         }
       ],
       "setup": "Tool held before D; declared keyed external intent.",
@@ -997,7 +997,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: the protected declaration was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0136) deleted process event emission. A declared start that committed with its call's outcome stays realized across a cut at every label: crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome."
+          "disposition": "Retired, subject deleted: the protected declaration was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0137) deleted process event emission. A declared start that committed with its call's outcome stays realized across a cut at every label: crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome."
         },
         {
           "variant": "before-intent",
@@ -1053,7 +1053,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: the protected declaration was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0136) deleted process event emission. A declared start that committed with its call's outcome stays realized across a cut at every label: crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome."
+          "disposition": "Retired, subject deleted: the protected declaration was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0137) deleted process event emission. A declared start that committed with its call's outcome stays realized across a cut at every label: crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome."
         },
         {
           "variant": "before-intent",
@@ -1109,7 +1109,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: the protected declaration was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0136) deleted process event emission. A declared start that committed with its call's outcome stays realized across a cut at every label: crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome."
+          "disposition": "Retired, subject deleted: the protected declaration was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0137) deleted process event emission. A declared start that committed with its call's outcome stays realized across a cut at every label: crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome."
         },
         {
           "variant": "before-intent",
@@ -1165,7 +1165,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: the protected declaration was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0136) deleted process event emission. A declared start that committed with its call's outcome stays realized across a cut at every label: crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome."
+          "disposition": "Retired, subject deleted: the protected declaration was a process-event emission intent appended to a receiver process, and the host-events cutover (FIG-5421, ADR 0137) deleted process event emission. A declared start that committed with its call's outcome stays realized across a cut at every label: crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome."
         }
       ],
       "setup": "D final durable; declaration blocked, then presentation.",

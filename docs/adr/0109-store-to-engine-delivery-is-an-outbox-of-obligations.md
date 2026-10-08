@@ -334,4 +334,4 @@ Usage is data on the model call's recorded result. Hosts meter spend at the
 `Provider` seam under [ADR 0127](0127-usage-is-result-data-hosts-meter-spend.md).
 Lash has no accounting ledger or delivery dependency.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

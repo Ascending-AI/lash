@@ -94,4 +94,4 @@ or identify an admitted artifact by itself.
 - `crates/lashlang/src/workflow_graph/facets.rs:12-45,389-430` defines and derives facets.
 - `crates/lashlang/src/workflow_graph.rs:174-184` discards incompatible facet data.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

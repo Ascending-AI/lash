@@ -3,7 +3,7 @@
 FIG-3482 investigates retained history across execution segments. The
 post-1.0 sweep authorizes implementing a necessary stored horizon before
 the 1.0 cut. This inventory describes lifecycle history under
-[ADR 0136](../adr/0136-the-host-owns-events-routing-and-scheduling.md). SQLite file, SQLite memory and PostgreSQL are
+[ADR 0137](../adr/0137-the-host-owns-events-routing-and-scheduling.md). SQLite file, SQLite memory and PostgreSQL are
 storage tiers.
 
 Hosts call `Processes::release_events(process_id, through)` to release an
@@ -98,7 +98,7 @@ admission, pending summaries, Run aggregates and source seals, cancellation
 state, parked calls, process work and holds are outside release. Recorded
 engine steps read their committed answers. A resumed phase retrying an
 uncommitted append still has its digest fence. Product records and notice
-delivery belong to the host under ADR 0136 and are outside this event log. Hosts
+delivery belong to the host under ADR 0137 and are outside this event log. Hosts
 submit work through `send()` and the engine; release executes no turn.
 
 Deleting rows would require proof that every writer stopped replaying its

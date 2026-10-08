@@ -147,7 +147,7 @@ terminal output needs the row anyway.
   refuses the enqueue. A pending input therefore resolves its bytes when its
   turn commits however long it waited, even past the upload expiry of the
   put that produced it. Host notices use ordinary sent input and the same
-  attachment admission rules under ADR 0136.
+  attachment admission rules under ADR 0137.
 - **Terminal publication.** Before a registry records an output, the caller
   acquires `ProcessRecord(p)` on the output's stored ids. An engine terminal
   whose source was already swept is recorded as the typed failure

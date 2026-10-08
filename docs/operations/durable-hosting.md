@@ -12,20 +12,6 @@ applies this guide to one host, site by site.
 Type names below are the ones on main. Paths are facade paths (`lash::...`)
 unless they say otherwise.
 
-## What has not landed yet
-
-One host-facing part is still open.
-
-- **Processes on the core's node** (FIG-5216). A `LashCore` runs one node,
-  and that node serves its backend's session actors only: it claims no
-  process actor. A process that a session or the host starts is written and
-  woken, but nothing served through the facade runs it. A node that runs
-  processes is served today by `lash_core::runtime::durable::node::serve`
-  with a `ProcessActivation` over the host's `ProcessSteps`, as the
-  [`lash-postgres-workers` runbook](../../runbooks/lash-postgres-workers/README.md)
-  does. The facade does not re-export them. [§4](#4-host-process-engines)
-  describes the end state.
-
 ## 1. What a host runs
 
 ### No engine server
@@ -345,6 +331,30 @@ Lash calls `advance(state, event)` with the process's committed state and one
 event. The engine answers its next state and one action. The new state and
 the action's admission commit in one `process.advance` transaction before the
 action runs.
+
+### Running through the facade
+
+Register a host engine with `lash::durable::DurableBackendBuilder::process_engine`
+before building the backend, as in [§1](#build-the-backend). A plugin factory
+can contribute `lash::plugins::ProcessEngineRegistration` values through
+`process_engine_contributions`; pair an engine's own step bodies with
+`ProcessEngineRegistration::with_engine_steps` (`lash::plugins::EngineSteps`).
+The core installs the contributed engines alongside the backend's engines.
+
+A serving `LashCore` runs both session and process actors on its node. Its
+production process worker dispatches catalog tool steps through the tool
+execution path and engine steps through the registered `EngineSteps`.
+A `SessionTurn` process submits its turn to its child session; the node's
+session actor drives that turn. The RLM plugin contributes the Lashlang
+engine and its VM step bodies through the same registration path.
+
+Hosts start processes through
+`core.processes().start(request, core.effect_host()).await` or send input
+through `LashSession::send`; they observe the resulting receipts, handles
+and lifecycle facts. The core's node advances the processes. Hosts need no
+separate runner or process activation. With `serve_sessions(false)`, the
+core runs no node, and other serving cores in the deployment run both its
+sessions and its processes.
 
 ### The contract
 
@@ -838,7 +848,7 @@ from independent producers.
 
 ## 9. Events, routing and scheduling
 
-[ADR 0136](../adr/0136-the-host-owns-events-routing-and-scheduling.md) defines
+[ADR 0137](../adr/0137-the-host-owns-events-routing-and-scheduling.md) defines
 the host-events contract. Approvals and callbacks use deferring tools with
 completion keys, a stable `call_id` and caller context. Process-end notices use
 committed lifecycle cursor reads followed by `send().id(TurnId)`. Hosts own

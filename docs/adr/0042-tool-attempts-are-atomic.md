@@ -97,4 +97,4 @@ preparation or execution; it is not a store-dependent start-admission verdict.
 - [Final recording and intent drain](../../crates/lash-core-execution/src/tool_dispatch/run_coordinator/drain.rs).
 - [Run final-or-cancel arbitration](../../crates/lash-core-store/src/tool_run/run_event.rs).
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

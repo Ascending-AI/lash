@@ -80,7 +80,7 @@ the deferred tool-resolution path. ADR 0087 owns runtime promise arrays.
 Durable work is a `Process` value. A top-level const-bound uncalled async arrow
 or an inline arrow in a catalogue slot typed as `Process` lifts to an admitted
 process body. Process controls are catalogue tools under ADR 0095.
-Approvals and outside callbacks use host tools that can defer under ADR 0136;
+Approvals and outside callbacks use host tools that can defer under ADR 0137;
 `sleep` is available in a cell too. Tools return
 declared work for runtime realization under ADR 0116.
 
@@ -383,4 +383,4 @@ that each entry is a limit taken knowingly.
 - [Durable shared heap](../../crates/lashlang/src/runtime/state.rs#L699) and
   [fragment partition](../../crates/lashlang/src/runtime/heap/partition.rs#L1).
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -23,7 +23,7 @@ persistence, local observation streams, and optional durable execution.
 The agent workbench is the product E2E host: it owns its UI and product state,
 opens a Lash session per chat, and resumes browser observation with durable
 cursors. It carries Standard and RLM turns, durable processes. Hosts own events, routing and scheduling
-([ADR 0136](docs/adr/0136-the-host-owns-events-routing-and-scheduling.md)).
+([ADR 0137](docs/adr/0137-the-host-owns-events-routing-and-scheduling.md)).
 The upgrade node and external consumer remain structural harness adapters for
 upgrade and public API proofs.
 

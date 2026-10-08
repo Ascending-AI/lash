@@ -127,4 +127,4 @@ import scanning, the feature-plan check and compile-fail fixtures.
   [feature plan](../../scripts/check_feature_coverage.py), and
   [compile-fail fixtures](../../crates/lash/tests/ui.rs).
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -63,4 +63,4 @@ those contradictions.
 - Host schemas can describe a callable without fabricating a shape.
 - A forged claim cannot authorize registration of a different executable.
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

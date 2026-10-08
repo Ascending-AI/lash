@@ -18,7 +18,7 @@ order as individual appends would, then saves the record once.
 Observers are edge state, not lifecycle fields. Observer-added and
 observer-removed events audit the `process_observers(session_id, process_id)`
 relation without changing lifecycle or extending retention. The closed
-lifecycle vocabulary is defined by ADR 0136.
+lifecycle vocabulary is defined by ADR 0137.
 
 Session deletion removes its observer edges while retaining process execution.
 It is a bulk session-lifecycle fact, not a fan-out of per-edge events for a
@@ -52,7 +52,7 @@ filter.
 
 The host chooses destinations and sends process notices only after their
 source facts commit. It deduplicates each send with a stable turn identity;
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns delivery and retention. Observer relationships do not
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns delivery and retention. Observer relationships do not
 route a notice or start a turn.
 
 Pruning and tombstone compaction require an explicit
@@ -84,4 +84,4 @@ rejected because visibility does not own process retention.
 - [Registry concerns, visibility and retention](../../crates/lash-core-execution/src/runtime/process/registry_concerns.rs).
 - [Record-fold law](../../crates/lash-conformance/src/conformance/process_registry.rs).
 
-[ADR 0136](0136-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
+[ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.
