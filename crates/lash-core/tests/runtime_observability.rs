@@ -64,6 +64,7 @@ mod runtime {
         pub(crate) use tokio_util::sync::CancellationToken;
 
         mod assembler;
+        mod session_freshness;
         mod stream_accumulator;
         mod tracing;
     }

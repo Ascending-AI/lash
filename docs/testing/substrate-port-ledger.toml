@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1621 rows over 873 files, 3994 laws.
-# By class: mechanical 170, semantic 115, delete 871, replace 465.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 89, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 370, ported 102, deleted 1149.
+# 1631 rows over 873 files, 4004 laws.
+# By class: mechanical 175, semantic 120, delete 871, replace 465.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 78, L9c 347, L9d 89, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 367, ported 104, deleted 1160.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -1454,9 +1454,9 @@ laws = [
   "recording_response_hook_terminal_error_replays",
   "phase_two_on_another_worker_derives_from_the_journaled_stream_state",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): turn_effect (assistant-response, sync and plugin-checkpoint hooks) is a todo!, and the phase runner delivers no plugin checkpoint; a paid completion commits at model.done and a resumed call re-sends only under its pin (crates/lash-durable-test/tests/turn_phases.rs)"
+disposition = "subject-deleted"
+status = "deleted"
+note = "ADR 0132 §4 replaced the two-phase journaled LLM effect (FIG-1276): nothing is journaled between a model call and its next checkpoint, AssistantResponseHooks runs in place (FIG-5172, 42f2c9f1d4), the completed response commits with model.done or turn.commit, and a failure or crash before that re-sends the pinned request as the next attempt, its stream and response hooks running again (hooks are repeat-safe); crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay pins the re-send, and the journal and its replay went with Restate (FIG-5190, 5ad9641f9e)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect_response_hook.rs"
@@ -1617,7 +1617,78 @@ laws = [
   "live_policy_override_then_invalidation_reload_yields_the_head_values",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5309 re-wrote the file's head-read, fallback, hydration and adoption laws on a store-backed runtime over SQLite memory, another writer moving the head through a real commit (advance_session_head) in place of the double's commands; every other law listed here has a row of its own"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/session_freshness.rs"
+test = "historical_frame_refusal_keeps_the_changed_policy_and_current_frame"
+area = "session-freshness"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "historical_frame_refusal_keeps_the_changed_policy_and_current_frame",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/open_session_commands.rs::opening_a_historical_frame_is_refused_and_keeps_the_changed_config"
+status = "deleted"
+note = "FIG-5309 re-wrote the law through an open session's admin on the core's node; it exposed a bug: a session actor's runtime gave the historical-frame check no store, so the open staged a frame node its history held and its commit collided on every pass, the command never settling. FIG-5309 hands the check the runtime's own store (LashRuntime::stage_agent_frame)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/session_freshness.rs"
+test = "a_config_command_composes_with_the_reloaded_config_on_the_invalidated_resident_path"
+area = "session-freshness"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "a_config_command_composes_with_the_reloaded_config_on_the_invalidated_resident_path",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/open_session_commands.rs::a_merging_config_command_composes_with_the_head_another_writer_committed"
+status = "deleted"
+note = "a store-backed config command applies on the session actor over the committed head (FIG-5196, FIG-5208); FIG-5309 re-wrote the law through two open sessions, one stale"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/session_freshness.rs"
+test = "resident_refresh_publishes_the_durable_head_subagent_context_to_live_plugins"
+area = "session-freshness"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "resident_refresh_publishes_the_durable_head_subagent_context_to_live_plugins",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5296 (35b70ca82b) deleted SubagentSessionContext and the subagent field of the session authority: there is no subagent context to adopt or publish"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/session_freshness.rs"
+test = "a_plugin_config_command_before_an_invalidation_reload_survives_via_the_head"
+area = "session-freshness"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "a_plugin_config_command_before_an_invalidation_reload_survives_via_the_head",
+]
+disposition = "replaced-by:crates/lash-core/tests/runtime/tests/session_freshness.rs::an_invalidation_reload_restores_the_heads_plugin_config"
+status = "deleted"
+note = "the head's plugin config is written by another writer's commit, as the actor's command commit writes it, in place of the double's command"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/session_freshness.rs"
+test = "live_policy_override_then_invalidation_reload_yields_the_head_values"
+area = "session-freshness"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = [
+  "live_policy_override_then_invalidation_reload_yields_the_head_values",
+]
+disposition = "replaced-by:crates/lash-core/tests/runtime/tests/session_freshness.rs::an_invalidation_reload_adopts_the_heads_model_and_generation"
+status = "deleted"
+note = "the runtime adopts one model and generation from the head, another writer advances both, and the invalidation reload adopts the advance"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/stream_evidence.rs"
@@ -9360,8 +9431,78 @@ laws = [
   "response_phase_replay_laws! generates: owed_unavailable_callback_parks_sqlite_memory, owed_unavailable_callback_parks_sqlite_file, completed_callback_state_survives_cold_replay_sqlite_memory, completed_callback_state_survives_cold_replay_sqlite_file, completed_callback_state_survives_cold_replay_postgres, removed_hook_sqlite_memory, removed_hook_sqlite_file, removed_hook_postgres, added_hook_sqlite_memory, added_hook_sqlite_file, added_hook_postgres, removed_hook_sqlite_memory_always_replay, removed_hook_sqlite_file_always_replay, removed_hook_postgres_always_replay, added_hook_sqlite_memory_always_replay, added_hook_sqlite_file_always_replay, added_hook_postgres_always_replay",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): turn_effect (assistant-response, sync and plugin-checkpoint hooks) is a todo!, and the phase runner delivers no plugin checkpoint; the always_replay legs are forced replay, deleted machinery; the four recorded-callback laws left in the file run without an engine"
+status = "ported"
+note = "the four recorded-callback laws run in the file over a plugin session's response plan, with no engine (FIG-5190, 5ad9641f9e); every other law listed here has a row of its own"
+
+[[row]]
+path = "crates/lash/src/tests/response_phase_replay.rs"
+test = "owed_presentation_keeps_recorded_callback_order"
+area = "response-phase"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "owed_presentation_keeps_recorded_callback_order",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "ADR 0132 §4: no response or presentation plan is recorded ahead of its phase commit. A turn resumed before model.done or turn.commit re-sends its pinned call and derives and presents with the hooks its session's committed config builds (FIG-5172, 42f2c9f1d4), a recorded plugin it cannot build ending the turn typed (plugin_build_refusal.rs, FIG-5246); once committed, the checkpoint carries the response and no hook runs again (crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay)"
+
+[[row]]
+path = "crates/lash/src/tests/response_phase_replay.rs"
+test = "owed_presentation_missing_callback_parks_before_any_callback"
+area = "response-phase"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "owed_presentation_missing_callback_parks_before_any_callback",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "ADR 0132 §4: no response or presentation plan is recorded ahead of its phase commit. A turn resumed before model.done or turn.commit re-sends its pinned call and derives and presents with the hooks its session's committed config builds (FIG-5172, 42f2c9f1d4), a recorded plugin it cannot build ending the turn typed (plugin_build_refusal.rs, FIG-5246); once committed, the checkpoint carries the response and no hook runs again (crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay)"
+
+[[row]]
+path = "crates/lash/src/tests/response_phase_replay.rs"
+test = "owed_presentation_changed_revision_parks_before_any_callback"
+area = "response-phase"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "owed_presentation_changed_revision_parks_before_any_callback",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "ADR 0132 §4: no response or presentation plan is recorded ahead of its phase commit. A turn resumed before model.done or turn.commit re-sends its pinned call and derives and presents with the hooks its session's committed config builds (FIG-5172, 42f2c9f1d4), a recorded plugin it cannot build ending the turn typed (plugin_build_refusal.rs, FIG-5246); once committed, the checkpoint carries the response and no hook runs again (crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay)"
+
+[[row]]
+path = "crates/lash/src/tests/response_phase_replay.rs"
+test = "owed_presentation_empty_plan_ignores_new_steps"
+area = "response-phase"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "owed_presentation_empty_plan_ignores_new_steps",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "ADR 0132 §4: no response or presentation plan is recorded ahead of its phase commit. A turn resumed before model.done or turn.commit re-sends its pinned call and derives and presents with the hooks its session's committed config builds (FIG-5172, 42f2c9f1d4), a recorded plugin it cannot build ending the turn typed (plugin_build_refusal.rs, FIG-5246); once committed, the checkpoint carries the response and no hook runs again (crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay)"
+
+[[row]]
+path = "crates/lash/src/tests/response_phase_replay.rs"
+test = "on_the_double"
+area = "response-phase"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = [
+  "on_the_double",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "ADR 0132 §4: no response or presentation plan is recorded ahead of its phase commit. A turn resumed before model.done or turn.commit re-sends its pinned call and derives and presents with the hooks its session's committed config builds (FIG-5172, 42f2c9f1d4), a recorded plugin it cannot build ending the turn typed (plugin_build_refusal.rs, FIG-5246); once committed, the checkpoint carries the response and no hook runs again (crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay); the row covers a_changed_response_hook_set_does_not_change_the_served_response and its response_phase_replay_laws! legs, the always_replay ones forced journal replay"
 
 [[row]]
 path = "crates/lash/src/tests/response_phase_replay.rs"
