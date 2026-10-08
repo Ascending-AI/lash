@@ -164,9 +164,10 @@ pub use lash_protocol_rlm::is_rlm_protocol_output;
 pub use lash_protocol_rlm::rlm_seed_initial_nodes;
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound,
-    MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmProtocolPluginConfig,
-    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
-    TypeExpr, TypeField, UnsetBound, format_type_expr, rlm_protocol_event,
+    MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmPresentationConfig,
+    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
+    RlmSessionConfigDecodeError, TypeExpr, TypeField, UnsetBound, format_type_expr,
+    rlm_protocol_event,
 };
 /// The code-mode dialect seam: a host selects one [`Dialect`] where it
 /// constructs the RLM protocol; [`TypescriptDialect`] is the shipped one.

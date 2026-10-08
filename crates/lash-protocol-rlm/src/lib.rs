@@ -51,10 +51,10 @@ pub use plugin::{
     ExecutionBounds, InstructionBound, LashlangCompileSurface, LashlangCompileSurfaceRequest,
     LashlangModuleCompileError, LashlangModuleCompileRequest, MemoryBound, ModuleCompileOutput,
     RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmConfigOwner, RlmConfigRefusal,
-    RlmCreateConfig, RlmLanguageFeatures, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
-    RlmProtocolPluginFactory, RlmRecordedBehaviour, RlmRecordedConfig, RlmRenderRefusal,
-    RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender, UnsetBound, UnsetChannel,
-    rlm_lashlang_surface, rlm_protocol_config, rlm_session_config,
+    RlmCreateConfig, RlmLanguageFeatures, RlmPresentationConfig, RlmProtocolPluginConfig,
+    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,
+    RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender,
+    UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_session_config,
 };
 pub use projection::{
     HISTORY_PROJECTION, RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed,
@@ -74,3 +74,5 @@ pub use rlm_support::format_budget_suffix;
 mod prompt_contract_tests;
 
 pub use projection::recorded_extraction_decisions;
+
+mod tool_records;

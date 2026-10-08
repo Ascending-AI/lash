@@ -21,7 +21,7 @@ use super::RuntimeTurnDriver;
 use super::tool_catalog::SyncFailure;
 use crate::plugin::prompt::{
     ComposedPrompt, OfferedTools, ProjectedHistoryStats, PromptCall, PromptCatalog,
-    PromptCompositionError, PromptCutParts, PromptModel, PromptRenderPool,
+    PromptCompositionError, PromptCutParts, PromptModel,
 };
 use crate::prompt_sections::{PromptPlan, PromptPurpose};
 use crate::sansio::ExecutionEnvironmentSyncFailureKind as SyncFailureKind;
@@ -114,7 +114,7 @@ impl RuntimeTurnDriver<'static> {
             plan,
             &PromptPurpose::Turn,
             Arc::new(cut),
-            PromptRenderPool::shared(),
+            plugins.prompt_render_pool(),
         )
         .await
         {

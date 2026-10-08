@@ -373,6 +373,7 @@ pub mod observe {
 pub mod tools {
     #[cfg(feature = "rlm")]
     pub use lash_llm_tools::LlmToolsPluginFactory;
+    pub use lash_sansio::ToolPresentationConfig;
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{GetDefinitionIntent, PublishDefinitionIntent};
     pub use lash_sansio::{ModelTool, ToolCallStatus};
@@ -785,6 +786,7 @@ pub mod plugins {
     /// `#[derive(lash::plugins::schemars::JsonSchema)]` with
     /// `#[schemars(crate = "lash::plugins::schemars")]`.
     pub use lash_core::facade_support::schemars;
+    pub use lash_core::plugin::prompt::PromptRenderPoolConfig;
     /// Prompt sections (ADR 0133): a plugin registers keyed sections and
     /// trusted wrappers through `reg.prompt()`. A renderer reads only a
     /// [`PromptInput`]: the call's committed cut, its own frozen namespace
@@ -993,6 +995,9 @@ pub mod plugins {
     /// idempotent output and schedule reconciliation independently of hooks.
     pub use lash_core::{
         facade_support::PluginLifecycleEvent, facade_support::SessionConfigChangedContext,
+    };
+    pub use lash_plugin_standard_compaction::{
+        StandardCompactionConfig, StandardCompactionPluginFactory,
     };
     pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};
     /// Default chat projector installed by [`TurnDriverConfig::chat`].
@@ -1440,3 +1445,6 @@ pub mod transcript {
         TranscriptRole,
     };
 }
+
+/// Presentation cuts for runtime value replies and raw transcript errors.
+pub use lash_core::session_model::RuntimeOutputCuts;

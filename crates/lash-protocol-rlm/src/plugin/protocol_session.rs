@@ -486,7 +486,7 @@ mod tests {
                 termination: None,
                 channel: Some(crate::RlmChannel::Cell),
                 dialect: Some("typescript".to_string()),
-                behaviour: creating.recorded_behaviour(false),
+                behaviour: creating.recorded_behaviour(),
             })
             .expect("recorded namespace"),
         );

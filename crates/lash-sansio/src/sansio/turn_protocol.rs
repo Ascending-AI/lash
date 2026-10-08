@@ -1028,6 +1028,7 @@ pub fn stored_history_refusal_actions<M: TurnProtocol>(
             ))),
             error.to_string(),
             Some(error.to_string()),
+            crate::session_model::RuntimeOutputCuts::standard(),
         )),
         DriverAction::Finish(crate::TurnOutcome::Stopped(crate::TurnStop::RuntimeError)),
     ]

@@ -371,6 +371,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     Some(lash_sansio::session_model::TurnFailureCode::EmptyResponse.into()),
                     "Model returned no assistant text or tool calls.",
                     None,
+                    lash_sansio::session_model::RuntimeOutputCuts::standard(),
                 )));
                 actions.push(DriverAction::Finish(TurnOutcome::Stopped(
                     TurnStop::ProviderError,

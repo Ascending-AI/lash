@@ -195,7 +195,8 @@ pub use tool_contract::{
     ShapeConstraints, ShapeField, ShapeKind, ShapeRow, TOOL_BINDING_KEY,
     ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds, ToolContract, ToolDefinition,
     ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolModule, ToolOutputContract,
-    X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType, is_named_type_reference, schema_for,
+    ToolPresentationConfig, X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType,
+    is_named_type_reference, schema_for,
 };
 pub use tool_declaration::{
     DeclarationRefusal, OutcomeShape, ToolAdmissionRefusal, ToolDeclaration,

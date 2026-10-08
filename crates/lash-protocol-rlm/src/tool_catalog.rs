@@ -42,8 +42,8 @@ pub(crate) fn rlm_prompt_tool_docs(
         let call_path = dialect
             .tool_call_path(&tool.manifest)
             .expect("RLM tool catalog registration validates the session dialect's binding");
-        let input = contract.input_shape();
-        let output = contract.output_shape();
+        let input = contract.input_shape_with(&dialect.presentation().tools);
+        let output = contract.output_shape_with(&dialect.presentation().tools);
         let signature = dialect
             .language()
             .tool_signature(&call_path, &input, &output);
@@ -63,7 +63,7 @@ pub(crate) fn rlm_prompt_tool_docs(
         // Authored examples are Lashlang source; the dialect spells them,
         // and leaves out the ones it cannot.
         let examples = contract
-            .compact_examples()
+            .compact_examples_with(&dialect.presentation().tools)
             .iter()
             .filter_map(|example| dialect.render_tool_example(example))
             .collect::<Vec<_>>();

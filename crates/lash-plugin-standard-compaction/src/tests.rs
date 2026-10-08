@@ -24,7 +24,12 @@ fn standard_compaction_decisions(
     max_context_tokens: Option<usize>,
 ) -> (bool, bool) {
     ContextPressure::derive(usage, max_context_tokens)
-        .map(|pressure| (pressure.pruning_needed(), pressure.compaction_needed()))
+        .map(|pressure| {
+            (
+                pressure.pruning_needed(&StandardCompactionConfig::standard()),
+                pressure.compaction_needed(&StandardCompactionConfig::standard()),
+            )
+        })
         .unwrap_or((false, false))
 }
 
@@ -264,7 +269,7 @@ async fn pressure_hook_decides_a_summary_frame_at_the_threshold() {
         &traces,
         RecordingLlmCompletions::client(&direct),
     );
-    let decision = StandardCompactionPressureHook::new(StandardCompactionConfig)
+    let decision = StandardCompactionPressureHook::new(StandardCompactionConfig::standard())
         .decide(&ctx)
         .await
         .expect("the pressure hook decides");
@@ -338,7 +343,7 @@ async fn pressure_hook_continues_below_the_threshold() {
             RecordingLlmCompletions::client(&direct),
         );
         assert_eq!(
-            StandardCompactionPressureHook::new(StandardCompactionConfig)
+            StandardCompactionPressureHook::new(StandardCompactionConfig::standard())
                 .decide(&ctx)
                 .await
                 .expect("the pressure hook decides"),
@@ -362,7 +367,7 @@ async fn pressure_without_committed_history_records_the_need_and_opens_nothing()
         &traces,
         RecordingLlmCompletions::client(&direct),
     );
-    let decision = StandardCompactionPressureHook::new(StandardCompactionConfig)
+    let decision = StandardCompactionPressureHook::new(StandardCompactionConfig::standard())
         .decide(&ctx)
         .await
         .expect("a frame with nothing to summarize still runs its turn");
@@ -396,7 +401,7 @@ fn standard_compaction_policy_at_compaction_pressure_only_omits_old_attachments(
         text_message("u2", MessageRole::User, "recent"),
         text_message("u3", MessageRole::User, "latest request"),
     ];
-    let omissions = StandardCompactionAttachmentPolicy
+    let omissions = StandardCompactionAttachmentPolicy(StandardCompactionConfig::standard())
         .omissions(&ctx, &messages)
         .expect("the policy decides");
     assert_eq!(
@@ -501,8 +506,11 @@ async fn recovery_invocation_faults_preserve_their_typed_cause_without_spending_
                     "injected summarizer fault",
                 )))
             });
-        for _ in 0..OVERFLOW_RECOVERY_MAX_ATTEMPTS {
-            let error = StandardCompactionPressureHook::new(StandardCompactionConfig)
+        for _ in 0..StandardCompactionConfig::standard()
+            .overflow_max_attempts
+            .get() as usize
+        {
+            let error = StandardCompactionPressureHook::new(StandardCompactionConfig::standard())
                 .decide(&ctx)
                 .await
                 .expect_err("an invocation fault returns no durable decision");
@@ -614,7 +622,7 @@ fn recovery_ctx(
 }
 
 async fn decide_recovery(ctx: &ContextPressureContext<'_>) -> ContextPressureDecision {
-    StandardCompactionPressureHook::new(StandardCompactionConfig)
+    StandardCompactionPressureHook::new(StandardCompactionConfig::standard())
         .decide(ctx)
         .await
         .expect("the recovery decides over these journaled inputs")
@@ -694,7 +702,8 @@ fn snapshot_with_nodes(nodes: &[lash_core::SessionAppendNode]) -> SessionSnapsho
 }
 
 fn recovery_history(pending: bool) -> (Vec<lash_core::SessionAppendNode>, SessionSnapshot) {
-    let oversized = "x".repeat(OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS * 4);
+    let oversized =
+        "x".repeat(StandardCompactionConfig::standard().overflow_elide_part_threshold_tokens * 4);
     let mut nodes = vec![
         conversation_node(text_message("s1", MessageRole::System, "session policy")),
         conversation_node(text_message(
@@ -741,9 +750,10 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         sessions: sessions.clone(),
         plugin_config: Default::default(),
     };
-    let contributions = overflow_recovery_after_turn(&overflow)
-        .await
-        .expect("hook runs");
+    let contributions =
+        overflow_recovery_after_turn(&overflow, &StandardCompactionConfig::standard())
+            .await
+            .expect("hook runs");
     assert_eq!(contributions.records.len(), 1);
     let record = &contributions.records[0];
     assert_eq!(record.plugin_type, OVERFLOW_RECOVERY_PLUGIN_TYPE);
@@ -763,7 +773,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         plugin_config: Default::default(),
     };
     assert!(
-        overflow_recovery_after_turn(&provider_error)
+        overflow_recovery_after_turn(&provider_error, &StandardCompactionConfig::standard())
             .await
             .expect("hook runs")
             .records
@@ -785,7 +795,7 @@ async fn overflow_after_turn_queues_marker_for_context_overflow_outcome_only() {
         plugin_config: Default::default(),
     };
     assert!(
-        overflow_recovery_after_turn(&guided)
+        overflow_recovery_after_turn(&guided, &StandardCompactionConfig::standard())
             .await
             .expect("hook runs")
             .records
@@ -936,7 +946,10 @@ async fn recovery_failure_is_bounded_and_explicit() {
     let empty = empty_direct();
     let (mut history, _) = recovery_history(true);
 
-    for attempt in 1..=OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+    for attempt in 1..=StandardCompactionConfig::standard()
+        .overflow_max_attempts
+        .get() as usize
+    {
         let traces = Arc::new(RecordingTraces::default());
         let decision = decide_recovery(&recovery_ctx(
             snapshot_with_nodes(&history),
@@ -952,7 +965,11 @@ async fn recovery_failure_is_bounded_and_explicit() {
             attempt: attempt as u32,
             cause: RecoveryFailureCause::EmptySummary,
         }];
-        if attempt == OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+        if attempt
+            == StandardCompactionConfig::standard()
+                .overflow_max_attempts
+                .get() as usize
+        {
             expected.push(OverflowRecoveryRecord::Exhausted {});
         }
         assert_eq!(decided_record_kinds(&nodes), expected, "attempt {attempt}");
@@ -965,7 +982,12 @@ async fn recovery_failure_is_bounded_and_explicit() {
             },
         );
     }
-    assert_eq!(empty.requests().len(), OVERFLOW_RECOVERY_MAX_ATTEMPTS);
+    assert_eq!(
+        empty.requests().len(),
+        StandardCompactionConfig::standard()
+            .overflow_max_attempts
+            .get() as usize
+    );
 
     let captured = Arc::new(RecordingLlmCompletions::default());
     let traces = Arc::new(RecordingTraces::default());
@@ -1078,7 +1100,7 @@ async fn standard_compactor_refuses_incomplete_terminal_reasons_as_frame_seed() 
             &Arc::new(RecordingTraces::default()),
             RecordingLlmCompletions::client(&captured),
         );
-        let err = StandardContextCompactor::new(StandardCompactionConfig)
+        let err = StandardContextCompactor::new(StandardCompactionConfig::standard())
             .compact(&ctx)
             .await
             .expect_err("an incomplete completion must not seed a durable frame");

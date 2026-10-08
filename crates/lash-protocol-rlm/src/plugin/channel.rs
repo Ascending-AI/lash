@@ -110,7 +110,7 @@ mod tests {
                 .instruction_limit(super::super::InstructionBound::unbounded())
                 .memory_limit(super::super::MemoryBound::unbounded())
                 .build()
-                .recorded_behaviour(false),
+                .recorded_behaviour(),
         }
     }
 

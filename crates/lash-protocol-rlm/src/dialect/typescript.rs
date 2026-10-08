@@ -392,6 +392,7 @@ mod tests {
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
             LashlangSurface::default(),
             RlmDialectServices {
+                presentation: crate::RlmPresentationConfig::standard(),
                 workers: lash_vm_client::service::Service::default(),
                 artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,

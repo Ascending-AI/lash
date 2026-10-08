@@ -195,6 +195,11 @@ impl DeltaCoalescing {
 
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
+    /// Readable transcript copies; defaults to the named standard preset.
+    pub output_cuts: lash_sansio::session_model::RuntimeOutputCuts,
+    /// Optional host pool; absence uses the shared standard pool. Every model
+    /// call, including direct compaction, uses the selected pool.
+    pub prompt_render_pool: Option<Arc<crate::plugin::prompt::PromptRenderPool>>,
     pub effect_host: ActorContext,
     /// Every execution bound this runtime enforces (spec v3 Part C): the
     /// tool default and inline ceiling, the model call's hard total, the
@@ -304,6 +309,8 @@ impl RuntimeHostConfig {
                 run_definitions: crate::RunDefinitions::default(),
             },
             control: RuntimeControlConfig {
+                output_cuts: lash_sansio::session_model::RuntimeOutputCuts::standard(),
+                prompt_render_pool: None,
                 execution_budgets,
                 delta_coalescing,
                 effect_host,

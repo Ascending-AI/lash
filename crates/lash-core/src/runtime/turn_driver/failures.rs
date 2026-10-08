@@ -8,6 +8,7 @@ impl RuntimeTurnDriver<'_> {
     /// retirement refusal (FIG-3630): the retirement owns the turn, and there
     /// is no head left to record a failed turn on.
     pub(super) fn fail_or_abort_runtime_effect_controller(
+        &self,
         machine: &mut TurnMachine,
         err: RuntimeEffectControllerError,
     ) -> Result<(), RuntimeError> {
@@ -24,6 +25,7 @@ impl RuntimeTurnDriver<'_> {
             Some(crate::FailureCode::from(&err.code)),
             err.message,
             raw,
+            self.host.core.control.output_cuts,
         ));
         Ok(())
     }

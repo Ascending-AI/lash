@@ -1,5 +1,35 @@
 use super::{ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures};
 
+/// Prompt and transcript presentation. These choices are pinned with protocol behaviour.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RlmPresentationConfig {
+    pub tools: lash_sansio::ToolPresentationConfig,
+    pub binding_summary: lashlang::BindingSummaryConfig,
+    pub max_inline_keys: usize,
+    pub max_tool_call_records: usize,
+    pub max_inline_scalar_bytes: usize,
+}
+impl Default for RlmPresentationConfig {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+impl RlmPresentationConfig {
+    /// Standard preset: standard tool/schema and heap summaries, 12 inline
+    /// catalogue keys, 128 tool-call records and 64 KiB inline scalar bodies.
+    /// These historical presentation cuts have no universal workload measurement.
+    pub const fn standard() -> Self {
+        Self {
+            tools: lash_sansio::ToolPresentationConfig::standard(),
+            binding_summary: lashlang::BindingSummaryConfig::standard(),
+            max_inline_keys: 12,
+            max_tool_call_records: 128,
+            max_inline_scalar_bytes: 64 * 1024,
+        }
+    }
+}
+
 /// A host's RLM protocol configuration.
 ///
 /// The physical slots (the code renderer) are bound live. Every behavioural
@@ -18,6 +48,8 @@ pub struct RlmProtocolPluginConfig {
     pub code_renderer: crate::render::CodeRendererSlot,
     #[serde(default)]
     pub render: lash_rlm_types::RlmRenderPatch,
+    #[serde(default)]
+    pub presentation: RlmPresentationConfig,
     /// The discovery operation a new session records, if any.
     #[serde(skip)]
     pub discovery: Option<lash_core::ToolDiscovery>,
@@ -73,14 +105,18 @@ pub struct RlmRecordedBehaviour {
     pub max_output_chars: usize,
     /// The prompt-token threshold of the soft context-budget warning, or
     /// `None` for no warning.
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     pub continue_as_soft_warn_tokens: Option<usize>,
     /// The host operation the model discovers tools omitted from the prompt
     /// with, or `None` when every tool is inline.
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     pub discovery_operation: Option<String>,
     /// The render the creating deployment configured: the base a run's
     /// render is resolved over, under the session's own render preferences
     /// (FIG-4527).
+    #[serde(deserialize_with = "deserialize_recorded_render")]
     pub render: lash_rlm_types::RlmRenderPatch,
+    pub presentation: RlmPresentationConfig,
 }
 
 /// A builder slot that has not been filled in yet. [`RlmProtocolPluginConfigBuilder::build`]
@@ -144,7 +180,8 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
     pub fn build(self) -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig {
             code_renderer: crate::render::CodeRendererSlot::default(),
-            render: lash_rlm_types::RlmRenderPatch::default(),
+            render: crate::render::ResolvedRlmRender::standard().as_patch(),
+            presentation: RlmPresentationConfig::standard(),
             discovery: None,
             channel: self.channel,
             instruction_limit: self.instruction_limit,
@@ -167,6 +204,15 @@ impl RlmProtocolPluginConfig {
     /// Every execution bound is named and separately typed; there is no positional constructor
     /// to get them in the wrong order.
     pub fn builder() -> RlmProtocolPluginConfigBuilder {
+        Self::standard()
+    }
+
+    /// Standard preset builder: complete standard print/preview render, images
+    /// and decomposition on, sleep off, label annotations on, 10,000 output
+    /// characters, soft warning at 100,000 tokens, no discovery, and standard
+    /// presentation. The historical values have no universal workload measurement.
+    /// Execution budgets and channel are still explicit named inputs.
+    pub fn standard() -> RlmProtocolPluginConfigBuilder {
         RlmProtocolPluginConfigBuilder {
             instruction_limit: UnsetBound,
             memory_limit: UnsetBound,
@@ -179,14 +225,9 @@ impl RlmProtocolPluginConfig {
     }
 
     /// The behaviour a session created under this configuration records:
-    /// every behavioural choice it states, with durable sleep enabled when
-    /// the deployment has process lifecycle.
-    pub fn recorded_behaviour(&self, process_lifecycle: bool) -> RlmRecordedBehaviour {
-        let lashlang_abilities = if process_lifecycle {
-            self.lashlang_abilities.with_sleep()
-        } else {
-            self.lashlang_abilities
-        };
+    /// every behavioural choice it states, including an authored sleep opt-out.
+    pub fn recorded_behaviour(&self) -> RlmRecordedBehaviour {
+        let lashlang_abilities = self.lashlang_abilities;
         RlmRecordedBehaviour {
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
@@ -199,7 +240,9 @@ impl RlmProtocolPluginConfig {
                 .discovery
                 .as_ref()
                 .map(|discovery| discovery.operation.clone()),
-            render: self.render.clone(),
+            render: crate::render::ResolvedRlmRender::resolve(&self.render, &Default::default())
+                .as_patch(),
+            presentation: self.presentation,
         }
     }
 
@@ -218,6 +261,7 @@ impl RlmProtocolPluginConfig {
             .clone()
             .map(|operation| lash_core::ToolDiscovery { operation });
         self.render = behaviour.render.clone();
+        self.presentation = behaviour.presentation;
         self
     }
 
@@ -233,4 +277,16 @@ impl RlmProtocolPluginConfig {
         self.lashlang_language_features = language_features.into();
         self
     }
+}
+
+fn deserialize_recorded_render<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<lash_rlm_types::RlmRenderPatch, D::Error> {
+    let render = <lash_rlm_types::RlmRenderPatch as serde::Deserialize>::deserialize(deserializer)?;
+    if crate::ResolvedRlmRender::resolve(&render, &Default::default()).as_patch() != render {
+        return Err(serde::de::Error::custom(
+            "recorded RLM render must state a complete base",
+        ));
+    }
+    Ok(render)
 }

@@ -1,4 +1,10 @@
+#[cfg(test)]
+use crate::tool_records::bounded_tool_call_record;
+use crate::tool_records::{bounded_exec_tool_call_records, executed_call_ledger};
+#[cfg(test)]
+use lash_core::{OmittedToolCalls, ToolCallOutput, ToolFailure, ToolValue};
 use lash_sansio::TurnId;
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -11,14 +17,12 @@ use lash_core::session_model::{
 };
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmOutputPart, LlmResponse,
-    LlmTerminalReason, OmittedToolCalls, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-    ToolControl, ToolFailure, ToolValue, facade_support::TurnFinish, facade_support::TurnOutcome,
-    facade_support::TurnStop, facade_support::append_assistant_text_part,
-    facade_support::normalized_response_parts,
+    LlmTerminalReason, ToolCallOutcome, ToolCallRecord, facade_support::TurnFinish,
+    facade_support::TurnOutcome, facade_support::TurnStop,
+    facade_support::append_assistant_text_part, facade_support::normalized_response_parts,
 };
 use lash_rlm_types::{
-    CellOutcome, RlmDiagnosticEvent, RlmExecutedCall, RlmProtocolEvent, RlmTermination,
-    RlmTrajectoryEntry,
+    CellOutcome, RlmDiagnosticEvent, RlmProtocolEvent, RlmTermination, RlmTrajectoryEntry,
 };
 use serde_json::Value;
 
@@ -235,9 +239,6 @@ impl RlmDriver {
     }
 }
 
-const MAX_EXEC_TOOL_CALL_RECORDS: usize = 128;
-const MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES: usize = 64 * 1024;
-
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
     fn project_visible_assistant_prose(&self, text: &str) -> String {
         super::cell::project_visible_assistant_prose_with_tags(text, self.dialect.cell_tags())
@@ -352,6 +353,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                 Some(TurnFailureCode::EmptyResponse.into()),
                 "Model returned no assistant text.",
                 None,
+                lash_sansio::session_model::RuntimeOutputCuts::standard(),
             )));
             actions.push(DriverAction::Finish(TurnOutcome::Stopped(
                 TurnStop::ProviderError,
@@ -549,7 +551,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                     .iter()
                     .filter_map(|call| call.host_record.as_ref())
                     .find_map(terminal_outcome_from_tool_result);
-                let (host_records, omitted) = bounded_exec_tool_call_records(&response.calls);
+                let (host_records, omitted) =
+                    bounded_exec_tool_call_records(&response.calls, &self.dialect.presentation());
                 actions.extend(
                     host_records
                         .into_iter()
@@ -561,7 +564,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
                         summary,
                     }));
                 }
-                (state.calls, state.calls_omitted) = executed_call_ledger(&response.calls);
+                (state.calls, state.calls_omitted) =
+                    executed_call_ledger(&response.calls, &self.dialect.presentation());
                 state.images.extend(response.printed_images);
                 state.output_archive = response.output_archive;
                 for observation in response.observations {
@@ -899,169 +903,6 @@ fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {
     }
 }
 
-fn bounded_exec_tool_call_records(
-    calls: &[lash_core::ExecutedCall],
-) -> (Vec<ToolCallRecord>, Option<OmittedToolCalls>) {
-    // HostBridge supplies execution-index order, so concurrent dispatch keeps a
-    // deterministic host-record order and first-128 retention boundary.
-    let records = calls
-        .iter()
-        .filter_map(|call| call.host_record.as_ref())
-        .collect::<Vec<_>>();
-    let retained_count = records.len().min(MAX_EXEC_TOOL_CALL_RECORDS);
-    let bounded = records[..retained_count]
-        .iter()
-        .map(|record| bounded_tool_call_record(record))
-        .collect::<Vec<_>>();
-    let omitted = &records[retained_count..];
-    let summary = (!omitted.is_empty()).then(|| OmittedToolCalls {
-        count: omitted.len(),
-        failures: omitted
-            .iter()
-            .filter(|record| !record.output.is_success())
-            .count(),
-        attachments: omitted
-            .iter()
-            .flat_map(|record| tool_output_attachments(&record.output))
-            .collect(),
-    });
-    (bounded, summary)
-}
-
-fn executed_call_ledger(records: &[lash_core::ExecutedCall]) -> (Vec<RlmExecutedCall>, usize) {
-    let omitted = records.len().saturating_sub(MAX_EXEC_TOOL_CALL_RECORDS);
-    let calls = records
-        .iter()
-        .skip(omitted)
-        .map(|call| lash_core::ExecutedCallRecord {
-            operation: call.operation.clone(),
-            outcome: call.outcome,
-        })
-        .collect();
-    (calls, omitted)
-}
-
-fn bounded_tool_call_record(record: &ToolCallRecord) -> ToolCallRecord {
-    ToolCallRecord {
-        call_id: record.call_id.clone(),
-        provider_call_id: record.provider_call_id.clone(),
-        tool: record.tool.clone(),
-        args: record.args.clone(),
-        output: bounded_tool_call_output(&record.output),
-    }
-}
-
-fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
-    let outcome = match &output.outcome {
-        ToolCallOutcome::Success(value) => ToolCallOutcome::Success(bounded_tool_value(value)),
-        ToolCallOutcome::Failure(failure) => {
-            ToolCallOutcome::Failure(bounded_tool_failure(failure))
-        }
-        ToolCallOutcome::Cancelled(cancellation) => {
-            let mut bounded = cancellation.clone();
-            bounded.raw = bounded.raw.as_ref().map(bounded_tool_value);
-            ToolCallOutcome::Cancelled(bounded)
-        }
-    };
-    let control = output.control.as_ref().map(|control| match control {
-        ToolControl::SwitchAgentFrame {
-            frame_key,
-            initial_nodes,
-            task,
-        } => ToolControl::SwitchAgentFrame {
-            frame_key: frame_key.clone(),
-            initial_nodes: initial_nodes.clone(),
-            task: task.clone(),
-        },
-        ToolControl::Finish { value } => ToolControl::Finish {
-            value: bounded_tool_value(value),
-        },
-        ToolControl::Fail { failure } => ToolControl::Fail {
-            failure: bounded_tool_failure(failure),
-        },
-        ToolControl::AbortRun { code, message } => ToolControl::AbortRun {
-            code: code.clone(),
-            message: message.clone(),
-        },
-    });
-    ToolCallOutput {
-        outcome,
-        control,
-        view: None,
-        projection_value: None,
-    }
-}
-
-fn bounded_tool_failure(failure: &ToolFailure) -> ToolFailure {
-    let mut bounded = failure.clone();
-    bounded.raw = bounded.raw.as_ref().map(bounded_tool_value);
-    bounded
-}
-
-fn bounded_tool_value(value: &ToolValue) -> ToolValue {
-    match value {
-        ToolValue::String(value) if value.len() > MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES => {
-            omitted_bytes_marker(value.len())
-        }
-        ToolValue::Array(values) => {
-            ToolValue::Array(values.iter().map(bounded_tool_value).collect())
-        }
-        ToolValue::Object(entries) => ToolValue::Object(
-            entries
-                .iter()
-                .map(|(key, value)| (key.clone(), bounded_tool_value(value)))
-                .collect(),
-        ),
-        ToolValue::UntrustedJson(value) => ToolValue::untrusted_json(bounded_untrusted_json(value)),
-        ToolValue::Null
-        | ToolValue::Bool(_)
-        | ToolValue::Number(_)
-        | ToolValue::String(_)
-        | ToolValue::Attachment(_) => value.clone(),
-    }
-}
-
-fn bounded_untrusted_json(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::String(value) if value.len() > MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES => {
-            serde_json::json!({ "omitted_bytes": value.len() })
-        }
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.iter().map(bounded_untrusted_json).collect())
-        }
-        serde_json::Value::Object(entries) => serde_json::Value::Object(
-            entries
-                .iter()
-                .map(|(key, value)| (key.clone(), bounded_untrusted_json(value)))
-                .collect(),
-        ),
-        _ => value.clone(),
-    }
-}
-
-fn omitted_bytes_marker(omitted_bytes: usize) -> ToolValue {
-    ToolValue::Object(BTreeMap::from([(
-        "omitted_bytes".to_string(),
-        ToolValue::untrusted_json(serde_json::json!(omitted_bytes)),
-    )]))
-}
-
-fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::AttachmentRef> {
-    let mut attachments = output.attachments();
-    match output.control.as_ref() {
-        Some(ToolControl::Finish { value }) => attachments.extend(value.attachments()),
-        Some(ToolControl::Fail { failure }) => attachments.extend(
-            failure
-                .raw
-                .as_ref()
-                .map(ToolValue::attachments)
-                .unwrap_or_default(),
-        ),
-        Some(ToolControl::SwitchAgentFrame { .. } | ToolControl::AbortRun { .. }) | None => {}
-    }
-    attachments
-}
-
 fn trajectory_entry(
     turn_id: &TurnId,
     protocol_iteration: usize,
@@ -1382,7 +1223,8 @@ mod tests {
     #[test]
     fn bounded_output_replaces_oversized_scalars_without_losing_structure_or_attachments() {
         let attachment = image_ref("nested-attachment");
-        let oversized = "x".repeat(MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES + 17);
+        let oversized =
+            "x".repeat(crate::RlmPresentationConfig::standard().max_inline_scalar_bytes + 17);
         let output = ToolCallOutput::success_tool_value(ToolValue::Object(BTreeMap::from([
             (
                 "nested".to_string(),
@@ -1395,7 +1237,10 @@ mod tests {
             ("sibling".to_string(), ToolValue::Bool(true)),
         ])));
 
-        let bounded = bounded_tool_call_record(&record(0, output));
+        let bounded = bounded_tool_call_record(
+            &record(0, output),
+            &crate::RlmPresentationConfig::standard(),
+        );
         assert_eq!(bounded.args, serde_json::json!({ "index": 0 }));
         let attachment_json = ToolValue::Attachment(attachment.clone()).to_json_value();
         assert_eq!(
@@ -1416,7 +1261,8 @@ mod tests {
     fn bounded_output_recurses_through_failure_and_cancellation_raw_values() {
         let failure_attachment = image_ref("failure-attachment");
         let cancellation_attachment = image_ref("cancellation-attachment");
-        let oversized = "x".repeat(MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES + 1);
+        let oversized =
+            "x".repeat(crate::RlmPresentationConfig::standard().max_inline_scalar_bytes + 1);
         let mut failure = ToolFailure::tool(
             ToolFailureClass::Execution,
             "failed",
@@ -1437,10 +1283,13 @@ mod tests {
             forced: false,
         };
 
-        let (bounded, omitted) = bounded_exec_tool_call_records(&[
-            call(0, ToolCallOutput::failure(failure)),
-            call(1, ToolCallOutput::cancelled(cancellation)),
-        ]);
+        let (bounded, omitted) = bounded_exec_tool_call_records(
+            &[
+                call(0, ToolCallOutput::failure(failure)),
+                call(1, ToolCallOutput::cancelled(cancellation)),
+            ],
+            &crate::RlmPresentationConfig::standard(),
+        );
 
         assert!(omitted.is_none());
         assert_eq!(bounded[0].output.attachments(), vec![failure_attachment]);
@@ -1462,25 +1311,29 @@ mod tests {
     #[test]
     fn typed_omission_preserves_counts_failures_and_attachments() {
         let attachment = image_ref("overflow-attachment");
-        let mut calls = (0..MAX_EXEC_TOOL_CALL_RECORDS + 3)
+        let mut calls = (0..crate::RlmPresentationConfig::standard().max_tool_call_records + 3)
             .map(|index| call(index, ToolCallOutput::success(serde_json::json!(index))))
             .collect::<Vec<_>>();
-        calls[MAX_EXEC_TOOL_CALL_RECORDS + 1] = call(
-            MAX_EXEC_TOOL_CALL_RECORDS + 1,
+        calls[crate::RlmPresentationConfig::standard().max_tool_call_records + 1] = call(
+            crate::RlmPresentationConfig::standard().max_tool_call_records + 1,
             ToolCallOutput::failure(ToolFailure::tool(
                 ToolFailureClass::Execution,
                 "recovered_failure",
                 "failure recovered by the cell program",
             )),
         );
-        calls[MAX_EXEC_TOOL_CALL_RECORDS + 2] = call(
-            MAX_EXEC_TOOL_CALL_RECORDS + 2,
+        calls[crate::RlmPresentationConfig::standard().max_tool_call_records + 2] = call(
+            crate::RlmPresentationConfig::standard().max_tool_call_records + 2,
             ToolCallOutput::success_tool_value(ToolValue::Attachment(attachment.clone())),
         );
 
-        let (bounded, omitted) = bounded_exec_tool_call_records(&calls);
+        let (bounded, omitted) =
+            bounded_exec_tool_call_records(&calls, &crate::RlmPresentationConfig::standard());
 
-        assert_eq!(bounded.len(), MAX_EXEC_TOOL_CALL_RECORDS);
+        assert_eq!(
+            bounded.len(),
+            crate::RlmPresentationConfig::standard().max_tool_call_records
+        );
         assert_eq!(
             omitted,
             Some(OmittedToolCalls {
@@ -1493,10 +1346,12 @@ mod tests {
 
     #[test]
     fn executed_call_ledger_elides_arguments_and_keeps_the_diagnostic_tail() {
-        let records = (0..MAX_EXEC_TOOL_CALL_RECORDS + 3)
+        let records = (0..crate::RlmPresentationConfig::standard().max_tool_call_records + 3)
             .map(|index| lash_core::ExecutedCall {
                 operation: format!("module.call_{index}"),
-                outcome: if index == MAX_EXEC_TOOL_CALL_RECORDS + 2 {
+                outcome: if index
+                    == crate::RlmPresentationConfig::standard().max_tool_call_records + 2
+                {
                     lash_core::ExecutedCallOutcome::Err
                 } else {
                     lash_core::ExecutedCallOutcome::Ok
@@ -1505,14 +1360,21 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let (calls, omitted) = executed_call_ledger(&records);
+        let (calls, omitted) =
+            executed_call_ledger(&records, &crate::RlmPresentationConfig::standard());
 
-        assert_eq!(calls.len(), MAX_EXEC_TOOL_CALL_RECORDS);
+        assert_eq!(
+            calls.len(),
+            crate::RlmPresentationConfig::standard().max_tool_call_records
+        );
         assert_eq!(omitted, 3);
         assert_eq!(calls[0].operation, "module.call_3");
         assert_eq!(
             calls.last().expect("retained tail").operation,
-            format!("module.call_{}", MAX_EXEC_TOOL_CALL_RECORDS + 2)
+            format!(
+                "module.call_{}",
+                crate::RlmPresentationConfig::standard().max_tool_call_records + 2
+            )
         );
         assert_eq!(calls[0].outcome, lash_rlm_types::RlmExecutedCallOutcome::Ok);
         assert_eq!(

@@ -307,3 +307,5 @@ pub fn unwrap_type_value(value: &Value) -> Option<&Value> {
 
 #[cfg(test)]
 mod tests;
+
+pub use heap::BindingSummaryConfig;

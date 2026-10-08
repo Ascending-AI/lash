@@ -57,6 +57,14 @@ pub struct CataloguePreviewOptions {
 
 impl Default for CataloguePreviewOptions {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl CataloguePreviewOptions {
+    /// Standard preset: "Catalogued Capabilities", search via `tools.search`,
+    /// at most 100 modules and 50 call names. Historical, unmeasured cuts.
+    pub fn standard() -> Self {
         Self {
             title: "Catalogued Capabilities".to_string(),
             search_call_path: "tools.search".to_string(),

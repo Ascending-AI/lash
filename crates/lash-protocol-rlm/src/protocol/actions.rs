@@ -28,6 +28,7 @@ pub(crate) fn runtime_error_actions(
             Some(code.into()),
             error.clone(),
             Some(error),
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         )),
         DriverAction::Finish(TurnOutcome::Stopped(TurnStop::RuntimeError)),
     ]

@@ -303,10 +303,17 @@ impl Session {
         crate::rlm_support::render_bound_variables(
             &mut crate::rlm_support::BoundVariableRenderCache::default(),
             &self.state.bound_variable_values(&none),
-            &self.state.opaque_bound_variables(&none),
+            &self
+                .runtime
+                .block_on(
+                    self.state
+                        .opaque_bound_variables(&none, &lashlang::BindingSummaryConfig::standard()),
+                )
+                .expect("opaque summaries"),
             &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
+            crate::RlmPresentationConfig::standard().max_inline_keys,
         )
         .to_string()
     }

@@ -63,7 +63,7 @@ fn standard_compaction_provider_counted(
 
 /// A scripted provider that also records the messages of every request it
 /// answers, serialized, so a test can read what the model was shown.
-fn standard_compaction_provider_recorded(
+pub(super) fn standard_compaction_provider_recorded(
     responses: Vec<LlmResponse>,
 ) -> (ProviderHandle, Arc<StdMutex<Vec<String>>>) {
     let requests = Arc::new(StdMutex::new(Vec::new()));
@@ -293,7 +293,13 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
     }];
     // Each recovering turn: an empty summary, then
     // the turn's own answer on the frame it stayed in.
-    for attempt in 1..=lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+    for attempt in 1..=usize::try_from(
+        crate::plugins::StandardCompactionConfig::standard()
+            .overflow_max_attempts
+            .get(),
+    )
+    .expect("attempts fit host")
+    {
         responses.push(response_with_usage("", 1));
         responses.push(response_with_usage(&format!("answer {attempt}"), 1));
     }
@@ -336,7 +342,13 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
         .to_snapshot()
         .current_frame_node_id;
 
-    for attempt in 1..=lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+    for attempt in 1..=usize::try_from(
+        crate::plugins::StandardCompactionConfig::standard()
+            .overflow_max_attempts
+            .get(),
+    )
+    .expect("attempts fit host")
+    {
         let turn = session
             .send(TurnInput::text(format!("try again {attempt}")))
             .id(lash_core::TurnId::fixture(format!(
@@ -363,7 +375,12 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
 
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        2 + 2 * lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS,
+        2 + 2 * usize::try_from(
+            crate::plugins::StandardCompactionConfig::standard()
+                .overflow_max_attempts
+                .get()
+        )
+        .expect("attempts fit host"),
         "the overflow, a summarizer call and an answer per attempt, and one answer after the cap"
     );
     let records = sqlite_recovery_records(store_factory.as_ref(), session_id);
@@ -374,8 +391,12 @@ async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame
             .collect::<Vec<_>>(),
         ["pending", "failed", "failed", "failed", "exhausted"]
     );
-    for (attempt, (_, _, body)) in records
-        [1..=lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS]
+    for (attempt, (_, _, body)) in records[1..=usize::try_from(
+        crate::plugins::StandardCompactionConfig::standard()
+            .overflow_max_attempts
+            .get(),
+    )
+    .expect("attempts fit host")]
         .iter()
         .enumerate()
     {
@@ -911,5 +932,74 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         "the threshold-crossing continue_as turn must extend the leaf from before the frame switch"
     );
 
+    Ok(())
+}
+
+/// D-DEFAULTS2: a facade-selected pressure buffer and summary instruction
+/// reach the running compactor, even when the standard preset would continue.
+#[tokio::test]
+async fn facade_compaction_settings_control_pressure_and_summary() -> Result<()> {
+    let config: crate::plugins::StandardCompactionConfig =
+        serde_json::from_value(serde_json::json!({
+            "compaction_buffer_tokens": 39_000,
+            "retained_user_turns": 1,
+            "summary_instructions": "Keep the host's incident identifiers verbatim."
+        }))?;
+    let (provider, requests) = standard_compaction_provider_recorded(vec![
+        response_with_usage("first answer", 100),
+        response_with_usage("recent answer", 2000),
+        response_with_usage("host summary", 1),
+        response_with_usage("second answer", 1),
+    ]);
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(provider, llm_profile_spec("host-compaction", None, 40_000))
+    .plugin(Arc::new(
+        crate::plugins::StandardCompactionPluginFactory::new(config),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(crate::SessionId::from("host-compaction"))
+        .created_with(session_spec_for(&llm_profile_spec(
+            "host-compaction",
+            None,
+            40_000,
+        )))
+        .await
+        .open()
+        .await?;
+    session
+        .send(TurnInput::text("first request"))
+        .output()
+        .await?;
+    session
+        .send(TurnInput::text("recent request"))
+        .output()
+        .await?;
+    let switched = session
+        .send(TurnInput::text("second request"))
+        .output()
+        .await?;
+    if let lash_core::facade_support::TurnOutcome::AgentFrameSwitch { frame_key, .. } =
+        &switched.result.outcome
+    {
+        session
+            .attach_id(lash_core::runtime::durable::session_mail::frame_task_run(
+                frame_key,
+            ))
+            .output()
+            .await?;
+    }
+    let captured = requests.lock_recover().clone();
+    assert_eq!(
+        captured.len(),
+        4,
+        "the non-default buffer triggers one summary"
+    );
+    assert!(captured[2].contains("Keep the host's incident identifiers verbatim."));
+    assert!(!captured[2].contains("recent request"));
+    assert!(captured[3].contains("host summary") && captured[3].contains("recent request"));
+    core.shutdown().await?;
     Ok(())
 }

@@ -114,7 +114,10 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
         plugin_failures: Vec::new(),
     }];
 
-    let failure = failure_from_process_turn(&turn);
+    let failure = failure_from_process_turn(
+        &turn,
+        lash_sansio::session_model::RuntimeOutputCuts::standard(),
+    );
     assert_eq!(failure.code, "process_session_turn_provider_error");
     assert_eq!(failure.class, crate::ToolFailureClass::External);
     assert_eq!(
@@ -129,6 +132,30 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
     assert_eq!(raw["kind"], serde_json::json!("llm_provider"));
     assert_eq!(raw["code"], serde_json::json!("lash:context_overflow"));
     assert_eq!(raw["retryable"], serde_json::json!(false));
+
+    // D-DEFAULTS2: the parent's readable message obeys the runtime cut,
+    // while the classified cause and diagnostic payload stay typed.
+    let bounded = output_from_process_turn(
+        &crate::ProcessId::fixture("bounded-child-process"),
+        &SessionId::from("failing-child"),
+        turn,
+        crate::ProcessStatus::Failed,
+        &crate::SessionTurnOutcome::Turn,
+        lash_sansio::session_model::RuntimeOutputCuts {
+            raw_error_max_chars: 3,
+            ..lash_sansio::session_model::RuntimeOutputCuts::standard()
+        },
+    );
+    let bounded = projected_failure(bounded);
+    assert!(
+        bounded.message.starts_with("b\n\n... ("),
+        "{}",
+        bounded.message
+    );
+    assert!(bounded.message.ends_with("\n\nw"), "{}", bounded.message);
+    assert_eq!(bounded.code, failure.code);
+    assert_eq!(bounded.class, failure.class);
+    assert_eq!(bounded.raw, failure.raw);
 }
 
 /// Run one stopped child turn through the runner's own projection, so the
@@ -154,6 +181,7 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
         turn,
         state,
         &crate::SessionTurnOutcome::Turn,
+        lash_sansio::session_model::RuntimeOutputCuts::standard(),
     );
     let crate::ToolCallOutcome::Failure(failure) = output.outcome else {
         panic!("a failed child turn must project a tool failure");
@@ -289,6 +317,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         turn,
         crate::ProcessStatus::Cancelled,
         &crate::SessionTurnOutcome::FinalValue { schema: None },
+        lash_sansio::session_model::RuntimeOutputCuts::standard(),
     );
     assert_child_turn_cancellation(&runner_output, &evidence);
 
@@ -347,6 +376,7 @@ fn project_turn(
         turn,
         state,
         result,
+        lash_sansio::session_model::RuntimeOutputCuts::standard(),
     )
 }
 

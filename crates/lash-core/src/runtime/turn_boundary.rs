@@ -78,6 +78,7 @@ struct ProgressBoundarySnapshot<'a> {
 }
 
 pub(super) struct TurnBoundary {
+    output_cuts: lash_sansio::session_model::RuntimeOutputCuts,
     fleet_format: crate::FleetFormat,
     /// `Some` at every point outside `final_state_mut`'s transition, which
     /// takes the stage, rewrites `Drafting` into `Finalized`, and puts it
@@ -114,6 +115,13 @@ struct FinalizedTurnCommitStage {
 }
 
 impl TurnBoundary {
+    pub(super) fn with_output_cuts(
+        mut self,
+        cuts: lash_sansio::session_model::RuntimeOutputCuts,
+    ) -> Self {
+        self.output_cuts = cuts;
+        self
+    }
     pub(super) fn with_fleet_format(mut self, fleet: crate::FleetFormat) -> Self {
         self.fleet_format = fleet;
         self
@@ -186,6 +194,7 @@ impl TurnBoundary {
     ) -> Self {
         let draft_clock = Arc::clone(&clock);
         Self {
+            output_cuts: lash_sansio::session_model::RuntimeOutputCuts::standard(),
             fleet_format: crate::FleetFormat::current(),
             stage: Some(TurnCommitStage::Drafting(Box::new(
                 TurnCommitDraft::from_state_with_graph_appends(

@@ -81,6 +81,10 @@ impl LashCoreBuilder {
         if let Some(context) = self.trace_context.take() {
             core.tracing = core.tracing.clone().with_base_context(context);
         }
+        if let Some(cuts) = self.output_cuts.take() {
+            core.control.output_cuts = cuts;
+        }
+        core.control.prompt_render_pool = self.prompt_render_pool.take();
         // The host's delivery bound is the one relay-policy source: the
         // recovery pass's relays and every immediate `deliver_now` derive
         // theirs from it (FIG-4246).

@@ -683,7 +683,6 @@
     "plugin::config_owner::tests::a_candidate_may_change_the_prompt": 1,
     "plugin::config_owner::tests::a_child_session_copies_its_parents_prompt": 1,
     "plugin::config_owner::tests::creation_input_naming_a_dialect_does_not_decode": 1,
-    "plugin::config_owner::tests::creation_records_the_deployments_behaviour": 1,
     "plugin::config_owner::tests::run_options_apply_over_the_recorded_namespace_field_by_field": 1,
     "plugin::config_owner::tests::run_options_have_no_field_for_a_pin_or_the_prompt": 1,
     "plugin::config_owner::tests::set_render_replaces_the_render_and_keeps_the_facts": 33,

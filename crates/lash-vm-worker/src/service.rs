@@ -163,6 +163,13 @@ pub(crate) fn perform(
             environment,
             cell,
         } => compile_module(frontend, &source, &environment, cell)?,
+        Request::OpaqueBindings { snapshot, config } => {
+            let snapshot = vm
+                .open_snapshot(&snapshot)
+                .map_err(|error| undecodable_state(VmStateKind::Snapshot, error))?;
+            vm.replace_state(lashlang::State::from_snapshot(snapshot));
+            Response::OpaqueBindings(vm.state().opaque_bindings_with(&config))
+        }
         Request::State { snapshot, action } => {
             if let Some(snapshot) = snapshot {
                 let snapshot = vm

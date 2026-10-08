@@ -9,6 +9,7 @@ use super::*;
 
 #[derive(Clone)]
 pub struct PluginHost {
+    prompt_render_pool: Option<Arc<super::prompt::PromptRenderPool>>,
     trace_runtime: crate::trace::TraceRuntime,
     factories: Arc<Vec<Arc<dyn PluginFactory>>>,
     protocol_factory: Option<Arc<dyn PluginFactory>>,
@@ -121,6 +122,19 @@ impl Default for SessionAuthorityContext {
 }
 
 impl PluginHost {
+    pub fn with_prompt_render_pool(
+        mut self,
+        pool: Option<Arc<super::prompt::PromptRenderPool>>,
+    ) -> Self {
+        self.prompt_render_pool = pool;
+        self
+    }
+    pub fn prompt_render_pool(&self) -> &super::prompt::PromptRenderPool {
+        self.prompt_render_pool
+            .as_deref()
+            .unwrap_or_else(|| super::prompt::PromptRenderPool::shared())
+    }
+
     fn plugin_view(&self) -> Self {
         Self {
             export_plugin_namespaces: false,
@@ -147,6 +161,7 @@ impl PluginHost {
         );
         let config_registry = Arc::new(std::sync::OnceLock::new());
         Self {
+            prompt_render_pool: None,
             factories: Arc::new(all_factories),
             protocol_factory: None,
             export_plugin_namespaces: true,
@@ -204,6 +219,7 @@ impl PluginHost {
 
     pub fn isolated_registry(&self) -> Self {
         Self {
+            prompt_render_pool: self.prompt_render_pool.clone(),
             factories: Arc::clone(&self.factories),
             protocol_factory: self.protocol_factory.clone(),
             export_plugin_namespaces: self.export_plugin_namespaces,

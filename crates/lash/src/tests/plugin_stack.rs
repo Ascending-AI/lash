@@ -138,7 +138,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
 #[tokio::test]
 async fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -> Result<()> {
     {
-        let mut standard_config = crate::plugins::StandardProtocolConfig::default();
+        let mut standard_config = crate::plugins::StandardProtocolConfig::standard();
         standard_config.render.defaults.value.max_chars = Some(32);
         let observed_tool_results = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
         let observed_tool_results_provider = Arc::clone(&observed_tool_results);
@@ -386,4 +386,272 @@ async fn builder_configured_tools_and_hooks_are_never_discarded_on_postgres() ->
     let (stores, _database, _attachments) = postgres_store_parts().await;
     let backend = lash_conformance::backend_over(stores);
     builder_configured_tools_and_hooks_are_never_discarded(backend).await
+}
+
+/// D-DEFAULTS2: compact contracts and catalogue advertisements use the facade's
+/// non-default presentation values, including their cached render identity.
+#[test]
+fn facade_compact_and_catalogue_policies_change_the_rendered_view() {
+    let definition = crate::tools::ToolDefinition::raw(
+        "display", "display", "display contract",
+        serde_json::json!({"type":"object", "properties":{"nested":{"type":"object", "properties":{"deep":{"type":"string"}}}}}),
+        serde_json::json!({"type":"string"}),
+    ).expect("schemas").with_examples(vec!["abcdefghijklmnopqrstuvwxyz".into(), "second".into()]);
+    let contract = definition.contract();
+    let manifest = definition.manifest();
+    let base = contract.compact_contract_with_presentation(
+        &manifest,
+        "display",
+        &crate::tools::ToolPresentationConfig::standard(),
+    );
+    let selected = crate::tools::ToolPresentationConfig {
+        example_limit: 1,
+        example_chars: 8,
+        schema_depth: 0,
+    };
+    let compact = contract.compact_contract_with_presentation(&manifest, "display", &selected);
+    assert_eq!(compact.examples.len(), 1);
+    assert!(compact.examples[0].chars().count() <= 8);
+    assert_ne!(compact.signature, base.signature);
+    assert_eq!(
+        contract.compact_contract_with_presentation(&manifest, "display", &selected),
+        compact
+    );
+    let preview = crate::tools::catalogue_preview(
+        [crate::tools::CataloguePreviewEntry::new(
+            ["tools", "hidden_module"],
+            "hidden_call",
+        )],
+        &crate::tools::CataloguePreviewOptions {
+            title: "Host catalogue".into(),
+            search_call_path: "tools.find".into(),
+            module_limit: 0,
+            call_name_limit: 0,
+        },
+    )
+    .expect("nonempty catalogue");
+    assert!(preview.contains("Host catalogue") && preview.contains("tools.find"));
+    assert!(!preview.contains("hidden_module") && !preview.contains("hidden_call"));
+}
+
+/// D-DEFAULTS2: the facade's RLM presentation reaches the running worker and
+/// both its prompt and transcript projections; the value reply uses the
+/// independently selected runtime output cut while the outcome stays whole.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Result<()> {
+    let backend = sqlite_memory_store_backend().await;
+    let mut config = crate::rlm::RlmProtocolPluginConfig::standard()
+        .channel(crate::rlm::RlmChannel::Cell)
+        .instruction_limit(crate::rlm::InstructionBound::instructions(1_000_000))
+        .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
+        .build();
+    config.presentation.binding_summary = crate::rlm::lang::BindingSummaryConfig {
+        members: 1,
+        depth: 1,
+        max_chars: 18,
+    };
+    config.presentation.max_tool_call_records = 0;
+    config.presentation.max_inline_scalar_bytes = 2;
+    config.presentation.max_inline_keys = 0;
+    config.prompt_features.decomposition = false;
+    config.continue_as_soft_warn_tokens = None;
+    config.render.print.max_chars = Some(9);
+    config.max_output_chars = 500;
+    let recorded = config.recorded_behaviour();
+    assert_eq!(recorded.presentation, config.presentation);
+    assert_eq!(
+        recorded.lashlang_abilities,
+        crate::rlm::RlmAbilities::default()
+    );
+    let factory = crate::rlm::RlmProtocolPluginFactory::new(
+        config,
+        Arc::new(crate::rlm::TypescriptDialect),
+        &backend,
+    )
+    .with_worker_service(untimed_fixture_workers());
+    let (provider, requests) =
+        super::standard_compaction_persistence::standard_compaction_provider_recorded(vec![
+            text_response(&typescript_block(
+                r#"const opaque = new Map([["a", 1], ["b", 2], ["c", 3]]);
+const object = { first: 1, second: 2 };
+await tools.app_lookup({});
+console.log("abcdefghijklmnopqrstuvwxyz");"#,
+            )),
+            text_response(&typescript_block(r#"finish("complete-value");"#)),
+        ]);
+    let cuts = crate::RuntimeOutputCuts {
+        value_reply_max_chars: 3,
+        raw_error_max_chars: 2,
+    };
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
+        .output_cuts(cuts)
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .tools(Arc::new(AppTools))
+        .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(SessionId::from("host-rlm-presentation"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let output = session
+        .send(TurnInput::text("use the host presentation"))
+        .output()
+        .await?;
+    assert_eq!(
+        output.final_value(),
+        Some(&serde_json::json!("complete-value"))
+    );
+    {
+        let captured = requests.lock_recover();
+        assert_eq!(captured.len(), 2);
+        let messages: Vec<lash_core::llm::types::LlmMessage> = serde_json::from_str(&captured[1])?;
+        let text = messages
+            .iter()
+            .flat_map(|message| message.blocks.iter())
+            .filter_map(|block| match block {
+                LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let summary = text
+            .lines()
+            .find_map(|line| line.strip_prefix("- `opaque`: "))
+            .expect("opaque binding in the next real prompt");
+        assert!(
+            summary.contains("Map(3)") && summary.chars().count() <= 18,
+            "{summary}"
+        );
+    }
+    let read = committed(&session).await;
+    assert!(
+        read.messages()
+            .iter()
+            .any(|message| message.parts.iter().any(|part| part.content() == "com…"))
+    );
+    let snapshot = read.to_snapshot();
+    let admitted: crate::rlm::RlmRecordedConfig = serde_json::from_value(
+        snapshot
+            .plugin_config
+            .get(crate::rlm::RLM_PROTOCOL_PLUGIN_ID)
+            .expect("recorded RLM namespace")
+            .clone(),
+    )?;
+    assert_eq!(
+        admitted.behaviour, recorded,
+        "creation preserves the authored sleep opt-out and full presentation"
+    );
+    let mut omission = serde_json::to_value(&recorded)?;
+    omission
+        .as_object_mut()
+        .expect("behaviour object")
+        .remove("presentation");
+    assert!(
+        serde_json::from_value::<crate::rlm::RlmRecordedBehaviour>(omission).is_err(),
+        "cold reopen cannot invent an omitted presentation choice"
+    );
+    let protocol = read
+        .active_events()
+        .iter()
+        .filter_map(|event| match event {
+            lash_core::SessionHistoryRecord::Protocol(event) => Some(event.payload.to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(protocol.contains("\"calls_omitted\":1"), "{protocol}");
+    assert!(
+        protocol.contains("within 9;"),
+        "the selected print cut rendered the running cell: {protocol}"
+    );
+    assert!(
+        protocol.contains("\"value\":\"abcdefghijklmnopqrstuvwxyz\""),
+        "the typed print stays whole"
+    );
+    let envelope = lash_core::session_model::make_error_envelope(
+        lash_core::TurnFailureKind::RuntimeEffectController,
+        None,
+        None,
+        "host error",
+        Some("abcdef".into()),
+        cuts,
+    );
+    assert!(envelope.raw.expect("raw").contains("4 chars omitted"));
+    core.shutdown().await?;
+    Ok(())
+}
+
+/// Replay requires resolved bases; an empty authored patch remains inheritance.
+#[test]
+fn facade_recorded_render_refuses_omitted_base_choices() {
+    let recorded = crate::plugins::StandardProtocolConfig::standard().recorded_behaviour();
+    let mut omission = serde_json::to_value(&recorded).expect("behaviour");
+    omission["render"]["defaults"]["value"]
+        .as_object_mut()
+        .expect("patch")
+        .remove("max_chars");
+    assert!(
+        serde_json::from_value::<crate::standard::StandardRecordedBehaviour>(omission).is_err()
+    );
+    let mut omission = serde_json::to_value(&recorded).expect("behaviour");
+    omission
+        .as_object_mut()
+        .expect("behaviour")
+        .remove("discovery_operation");
+    assert!(
+        serde_json::from_value::<crate::standard::StandardRecordedBehaviour>(omission).is_err()
+    );
+    assert!(
+        crate::render::StandardRenderConfig::default()
+            .defaults
+            .value
+            .is_empty()
+    );
+    #[cfg(feature = "rlm")]
+    {
+        let recorded = crate::rlm::RlmProtocolPluginConfig::standard()
+            .channel(crate::rlm::RlmChannel::Cell)
+            .instruction_limit(crate::rlm::InstructionBound::unbounded())
+            .memory_limit(crate::rlm::MemoryBound::unbounded())
+            .build()
+            .recorded_behaviour();
+        let mut omission = serde_json::to_value(&recorded).expect("behaviour");
+        omission["render"]["print"]
+            .as_object_mut()
+            .expect("patch")
+            .remove("max_chars");
+        assert!(serde_json::from_value::<crate::rlm::RlmRecordedBehaviour>(omission).is_err());
+        for field in ["continue_as_soft_warn_tokens", "discovery_operation"] {
+            let mut omission = serde_json::to_value(&recorded).expect("behaviour");
+            omission.as_object_mut().expect("behaviour").remove(field);
+            assert!(serde_json::from_value::<crate::rlm::RlmRecordedBehaviour>(omission).is_err());
+        }
+    }
+}
+
+/// Recording the base must preserve a per-tool patch's inheritance from run defaults.
+#[test]
+fn facade_recording_preserves_per_tool_inheritance() {
+    let id = crate::tools::ToolId::new("host-tool");
+    let mut host = crate::plugins::StandardProtocolConfig::standard();
+    host.render.per_tool.insert(
+        id.clone(),
+        crate::render::ToolRenderPatch {
+            max_lines: Some(2),
+            ..Default::default()
+        },
+    );
+    let recorded = host.recorded_behaviour();
+    let mut run = crate::render::StandardRenderConfig::default();
+    run.defaults.value.max_chars = Some(11);
+    let resolved = crate::render::resolve(
+        &crate::render::StandardRenderConfig::standard(),
+        &recorded.render,
+        &run,
+    )
+    .expect("valid run preference");
+    assert_eq!(resolved.for_tool(&id).value.max_chars, 11);
+    assert_eq!(resolved.for_tool(&id).max_lines, 2);
 }

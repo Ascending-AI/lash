@@ -50,6 +50,10 @@ pub enum Request {
         environment: LashlangHostEnvironment,
         cell: bool,
     },
+    OpaqueBindings {
+        snapshot: serde_bytes::ByteBuf,
+        config: lashlang::BindingSummaryConfig,
+    },
     State {
         snapshot: Option<serde_bytes::ByteBuf>,
         action: StateAction,
@@ -134,6 +138,7 @@ pub enum Response {
         bytes: Vec<u8>,
         closure_root: bool,
     },
+    OpaqueBindings(Vec<(String, String)>),
     State(StateView),
     Captured(Capture),
     Restored {

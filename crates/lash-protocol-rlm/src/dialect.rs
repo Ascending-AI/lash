@@ -202,6 +202,7 @@ impl DialectPromptVocabulary {
 /// configuration, bounds and transport belong to the execution session.
 #[derive(Clone)]
 pub(crate) struct RlmDialectServices {
+    pub(crate) presentation: crate::RlmPresentationConfig,
     pub(crate) workers: lash_vm_client::service::Service,
     pub(crate) code_renderer: crate::render::CodeRendererSlot,
     pub(crate) artifact_store: LashlangArtifacts,
@@ -274,8 +275,13 @@ impl SessionDialect {
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
+                presentation: crate::RlmPresentationConfig::standard(),
             },
         }
+    }
+
+    pub(crate) fn presentation(&self) -> crate::RlmPresentationConfig {
+        self.services.presentation
     }
 
     pub(crate) fn renderer(&self) -> crate::render::CodeRendererSlot {
@@ -416,7 +422,10 @@ impl SessionDialect {
     /// The value a turn's `finish` must carry, as its type and the rows of the
     /// fields that carry notes.
     pub(crate) fn required_output_contract(&self, schema: &serde_json::Value) -> String {
-        let shape = SchemaShape::from_json_schema(schema);
+        let shape = SchemaShape::from_json_schema_with_depth(
+            schema,
+            self.services.presentation.tools.schema_depth,
+        );
         let head = self.dialect.schema_type(&shape);
         let rows = self.noted_field_rows(&shape);
         if rows.is_empty() {
@@ -837,16 +846,20 @@ impl DialectSession {
     /// with no host view, by summary. A front end's private
     /// slots never reach them (the VM drops every private binding at the end
     /// of its cell), so every global is a binding the model wrote.
-    pub(crate) fn prepare_bound_variables_prompt(
+    pub(crate) async fn prepare_bound_variables_prompt(
         &self,
         exclude: &BTreeSet<String>,
         params: lash_render::RenderParams,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
         let globals = self.state.bound_variable_values(exclude);
-        let opaque = self.state.opaque_bound_variables(exclude);
+        let opaque = self
+            .state
+            .opaque_bound_variables(exclude, &self.services.presentation.binding_summary)
+            .await?;
         let cache = Arc::clone(&self.bound_variable_render_cache);
         let renderer = self.services.code_renderer.clone();
         let dialect = Arc::clone(&self.dialect);
+        let max_inline_keys = self.services.presentation.max_inline_keys;
         Ok(BoundVariablesPromptRender::new(move || {
             let mut cache = cache
                 .lock()
@@ -858,6 +871,7 @@ impl DialectSession {
                 dialect.as_ref(),
                 renderer.0.as_ref(),
                 &params,
+                max_inline_keys,
             )
         }))
     }
@@ -948,6 +962,7 @@ mod tests {
             .expect("bind a value to render through the session");
         let prompt = session
             .prepare_bound_variables_prompt(&BTreeSet::new(), lash_render::RenderParams::default())
+            .await
             .expect("render the extension session's bindings")
             .render();
         assert!(prompt.contains("bound in Extension fixture"), "{prompt}");
@@ -970,6 +985,7 @@ mod tests {
             &ExtensionFixture,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
+            crate::RlmPresentationConfig::standard().max_inline_keys,
         );
         let read_only = crate::rlm_support::render_read_only_variables(
             vec![crate::rlm_support::ReadOnlyVariableDoc {
@@ -1106,6 +1122,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) fn test_dialect_services() -> RlmDialectServices {
     RlmDialectServices {
+        presentation: crate::RlmPresentationConfig::standard(),
         workers: lash_vm_client::service::Service::default(),
         artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
         deferred_tool_resolver: None,

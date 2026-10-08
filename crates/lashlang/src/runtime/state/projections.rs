@@ -12,6 +12,14 @@ impl State {
     /// rendering cut to a few members, two levels and
     /// [`BINDING_SUMMARY_MAX_CHARS`] characters (FIG-3629).
     pub fn opaque_bindings(&self) -> Vec<(String, String)> {
+        self.opaque_bindings_with(&super::super::BindingSummaryConfig::standard())
+    }
+
+    /// Opaque binding summaries under the host's presentation policy.
+    pub fn opaque_bindings_with(
+        &self,
+        config: &super::super::BindingSummaryConfig,
+    ) -> Vec<(String, String)> {
         let StateMode::HeapBacked(backed) = &self.mode else {
             return Vec::new();
         };
@@ -19,7 +27,7 @@ impl State {
             .runtime_globals
             .iter()
             .filter(|(name, _)| backed.projected.get(name).is_none())
-            .map(|(name, value)| (name.to_string(), backed.heap.summarize(value)))
+            .map(|(name, value)| (name.to_string(), backed.heap.summarize(value, config)))
             .collect()
     }
 

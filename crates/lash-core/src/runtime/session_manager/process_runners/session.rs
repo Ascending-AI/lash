@@ -158,7 +158,14 @@ impl RuntimeSessionServices {
         let turn = self.child_turn(&session_id, outcome).await?;
         let state = process_terminal_state_for_turn(&turn);
         Ok(crate::ProcessAwaitOutput::from_tool_output(
-            output_from_process_turn(process_id, &session_id, turn, state, result),
+            output_from_process_turn(
+                process_id,
+                &session_id,
+                turn,
+                state,
+                result,
+                self.current.host.core.control.output_cuts,
+            ),
         ))
     }
 
@@ -375,7 +382,10 @@ fn first_blocking_issue(turn: &crate::AssembledTurn) -> Option<&crate::TurnIssue
 /// stop's code keeps the categories apart, and the typed diagnostics — the
 /// child's [`crate::TurnFailureKind`]/[`crate::TurnFailureCode`] and the
 /// stop's projected value — ride the existing `raw` channel, bounded.
-fn failure_from_process_turn(turn: &crate::AssembledTurn) -> crate::ToolFailure {
+fn failure_from_process_turn(
+    turn: &crate::AssembledTurn,
+    cuts: lash_sansio::session_model::RuntimeOutputCuts,
+) -> crate::ToolFailure {
     let crate::TurnOutcome::Stopped(stop) = &turn.outcome else {
         return crate::ToolFailure::tool(
             crate::ToolFailureClass::Internal,
@@ -409,7 +419,7 @@ fn failure_from_process_turn(turn: &crate::AssembledTurn) -> crate::ToolFailure 
     let mut failure = crate::ToolFailure::tool(
         class,
         code,
-        lash_sansio::session_model::truncate_raw_error(&message),
+        lash_sansio::session_model::truncate_raw_error(&message, cuts.raw_error_max_chars),
     );
     failure.raw = process_turn_failure_raw(stop_value, issue).map(crate::ToolValue::untrusted_json);
     failure
@@ -427,6 +437,7 @@ fn process_turn_failure_raw(
             "stop".to_string(),
             serde_json::Value::String(lash_sansio::session_model::truncate_raw_error(
                 &value.to_string(),
+                lash_sansio::session_model::RuntimeOutputCuts::standard().raw_error_max_chars,
             )),
         );
     }
@@ -442,6 +453,7 @@ fn process_turn_failure_raw(
             "issue".to_string(),
             serde_json::Value::String(lash_sansio::session_model::truncate_raw_error(
                 issue.message.trim(),
+                lash_sansio::session_model::RuntimeOutputCuts::standard().raw_error_max_chars,
             )),
         );
     }
@@ -459,6 +471,7 @@ fn output_from_process_turn(
     turn: crate::AssembledTurn,
     state: crate::ProcessStatus,
     result: &crate::SessionTurnOutcome,
+    cuts: lash_sansio::session_model::RuntimeOutputCuts,
 ) -> crate::ToolCallOutput {
     if state == crate::ProcessStatus::Cancelled {
         let cancellation = match &turn.outcome {
@@ -481,7 +494,7 @@ fn output_from_process_turn(
         return crate::ToolCallOutput::cancelled(cancellation);
     }
     if state == crate::ProcessStatus::Failed {
-        return crate::ToolCallOutput::failure(failure_from_process_turn(&turn));
+        return crate::ToolCallOutput::failure(failure_from_process_turn(&turn, cuts));
     }
     match result {
         crate::SessionTurnOutcome::Turn => crate::ToolCallOutput::success(serde_json::json!({

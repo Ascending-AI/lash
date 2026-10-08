@@ -521,3 +521,118 @@ async fn an_rlm_run_options_prompt_is_refused() -> Result<()> {
     core.shutdown().await?;
     Ok(())
 }
+
+#[derive(Clone)]
+struct PoolProbe(Arc<std::sync::Mutex<Vec<std::thread::ThreadId>>>);
+impl crate::plugins::PluginDefinition for PoolProbe {
+    fn declaration() -> crate::plugins::PluginDeclaration {
+        crate::plugins::PluginDeclaration::initial("pool-probe")
+    }
+}
+impl PluginFactory for PoolProbe {
+    fn id(&self) -> &'static str {
+        "pool-probe"
+    }
+    fn build(
+        &self,
+        _: &crate::plugins::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn crate::plugins::SessionPlugin>, lash_core::PluginError> {
+        Ok(Arc::new(self.clone()))
+    }
+}
+impl crate::plugins::SessionPlugin for PoolProbe {
+    fn id(&self) -> &'static str {
+        "pool-probe"
+    }
+    fn register(
+        &self,
+        reg: &mut crate::plugins::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        let threads = Arc::clone(&self.0);
+        reg.prompt().section(
+            crate::plugins::PromptSectionSpec::new(
+                PromptSectionKey::new("thread").expect("key"),
+                PromptPlacement::Excluded,
+            ),
+            Arc::new(move |_: &crate::plugins::PromptInput<'_>| {
+                threads.lock_recover().push(std::thread::current().id());
+                Ok::<_, crate::plugins::PromptRenderError>(crate::plugins::SectionText::text(
+                    "host render pool probe",
+                ))
+            }),
+        )
+    }
+}
+
+/// D-DEFAULTS2: a facade-selected pool executes renderers, and a recorded
+/// non-default composition limit refuses before the provider is called.
+#[tokio::test]
+async fn facade_prompt_pool_and_limits_control_real_composition() -> Result<()> {
+    let threads = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let served: Served = Arc::default();
+    let script = Arc::new(Script::default());
+    let pool = crate::plugins::PromptRenderPoolConfig {
+        workers: std::num::NonZeroUsize::MIN,
+        queue: std::num::NonZeroUsize::new(4).expect("queue"),
+    };
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .prompt_render_pool(pool)
+    .plugin(Arc::new(PoolProbe(Arc::clone(&threads))))
+    .serve_test_llm_profile(scripted_provider(&served, &script), mock_llm_profile_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let mut plan = PromptPlan::default();
+    plan.placements.push(crate::prompt::PromptSectionPlacement {
+        section: PromptSectionId::new("pool-probe", PromptSectionKey::new("thread").expect("key")),
+        placement: PromptPlacement::InitialInstructions,
+    });
+    plan.limits.max_section_bytes = std::num::NonZeroU32::new(20_000).expect("limit");
+    core.session(SessionId::from("pool-admitted"))
+        .create(
+            crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            )
+            .with_prompt_plan(plan.clone()),
+        )
+        .await?;
+    let caller = std::thread::current().id();
+    run(&core, "pool-admitted", "render on the host pool").await?;
+    assert_eq!(threads.lock_recover().len(), 1);
+    assert_ne!(threads.lock_recover()[0], caller);
+    run(&core, "pool-admitted", "render on the same host worker").await?;
+    assert_eq!(threads.lock_recover().len(), 2);
+    {
+        let threads = threads.lock_recover();
+        assert_eq!(threads[0], threads[1]);
+    }
+    assert_eq!(served.lock_recover().len(), 2);
+    plan.limits.max_section_bytes = std::num::NonZeroU32::MIN;
+    core.session(SessionId::from("pool-refused"))
+        .create(
+            crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            )
+            .with_prompt_plan(plan),
+        )
+        .await?;
+    let result = core
+        .session(SessionId::from("pool-refused"))
+        .durable()
+        .await?
+        .send(TurnInput::text("refuse oversize composition"))
+        .output()
+        .await;
+    assert!(
+        !matches!(result, Ok(ref output) if matches!(output.result.outcome, lash_core::facade_support::TurnOutcome::Finished(_)))
+    );
+    assert_eq!(
+        served.lock_recover().len(),
+        2,
+        "the tighter recorded limit calls no provider"
+    );
+    core.shutdown().await?;
+    Ok(())
+}

@@ -988,16 +988,20 @@ impl RlmExecutionState {
     /// The bindings the "Bound Variables" section shows by summary: the ones
     /// with no host view (ADR 0076), each with its bounded runtime summary,
     /// under the same exclusions as [`Self::bound_variable_values`].
-    pub(crate) fn opaque_bound_variables(
+    pub(crate) async fn opaque_bound_variables(
         &self,
         exclude: &BTreeSet<String>,
-    ) -> Vec<(String, String)> {
-        self.vm
+        config: &lashlang::BindingSummaryConfig,
+    ) -> Result<Vec<(String, String)>, SessionError> {
+        Ok(self
+            .vm
             .state()
-            .opaque_bindings()
+            .opaque_bindings_with(config)
+            .await
+            .map_err(worker_session_error)?
             .into_iter()
             .filter(|(name, _)| name != "history" && !exclude.contains(name))
-            .collect()
+            .collect())
     }
 
     /// The live top-level variable namespace as JSON for the "Bound Variables"

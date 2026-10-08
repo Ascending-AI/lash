@@ -92,6 +92,14 @@ pub enum BatchSugar {
 
 impl Default for BatchSugar {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl BatchSugar {
+    /// Standard preset: batch enabled with 64 members. The immutable member
+    /// ceiling is 64; no workload measurement establishes the preset for all hosts.
+    pub fn standard() -> Self {
         Self::Enabled {
             max_members: std::num::NonZeroUsize::MIN.saturating_add(BATCH_MEMBER_CEILING - 1),
         }
@@ -109,7 +117,7 @@ pub struct StandardProtocolPluginFactory {
 /// live; the discovery operation and the batch choice are this deployment's
 /// creation defaults, which a session records at creation and runs under on
 /// every open, whichever deployment opens it (FIG-4398).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StandardProtocolConfig {
     pub discovery: Option<lash_core::ToolDiscovery>,
     pub render: StandardRenderConfig,
@@ -117,7 +125,25 @@ pub struct StandardProtocolConfig {
     pub batch: BatchSugar,
 }
 
+impl Default for StandardProtocolConfig {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 impl StandardProtocolConfig {
+    /// Standard protocol preset: no discovery, built-in renderer, the complete
+    /// standard tool render and batch presets. Cuts have no universal workload
+    /// measurement. All settings remain optional host overrides.
+    pub fn standard() -> Self {
+        Self {
+            discovery: None,
+            render: StandardRenderConfig::standard(),
+            renderer: ToolOutputRendererSlot::default(),
+            batch: BatchSugar::standard(),
+        }
+    }
+
     /// Offer or withhold the `batch` sugar. A maximum above
     /// [`BATCH_MEMBER_CEILING`] is refused when the plugin builds.
     pub fn batch(mut self, sugar: BatchSugar) -> Self {
@@ -133,7 +159,7 @@ impl StandardProtocolConfig {
                 .as_ref()
                 .map(|discovery| discovery.operation.clone()),
             batch: self.batch,
-            render: self.render.clone(),
+            render: self.render.recorded_base(),
         }
     }
 
@@ -160,12 +186,26 @@ impl StandardProtocolConfig {
 pub struct StandardRecordedBehaviour {
     /// The host operation the model discovers tools omitted from the prompt
     /// with, or `None` when every tool is inline.
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
     pub discovery_operation: Option<String>,
     pub batch: BatchSugar,
     /// The render the creating deployment configured: the base a run's
     /// render is resolved over, under the session's own render options
     /// (FIG-4527).
+    #[serde(deserialize_with = "deserialize_recorded_render")]
     pub render: StandardRenderConfig,
+}
+
+fn deserialize_recorded_render<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<StandardRenderConfig, D::Error> {
+    let render = <StandardRenderConfig as serde::Deserialize>::deserialize(deserializer)?;
+    if render.recorded_base() != render {
+        return Err(serde::de::Error::custom(
+            "recorded standard render must state a complete base",
+        ));
+    }
+    Ok(render)
 }
 
 /// The standard protocol's recorded session namespace (FIG-4379,

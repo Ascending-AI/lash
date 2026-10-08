@@ -102,7 +102,7 @@ impl RlmRecordedConfig {
                 .instruction_limit(super::InstructionBound::unbounded())
                 .memory_limit(super::MemoryBound::unbounded())
                 .build()
-                .recorded_behaviour(false),
+                .recorded_behaviour(),
         })
         .expect("the recorded namespace encodes")
     }
@@ -132,8 +132,8 @@ pub enum RlmConfigRefusal {
         candidate: Option<String>,
     },
     /// The creating deployment has not declared whether it has process
-    /// lifecycle, so the durable-sleep ability a new session records is
-    /// unknown: a wiring fault of the deployment, never a default.
+    /// lifecycle: a wiring fault of the deployment, independent of the
+    /// host-authored sleep choice.
     ProcessLifecycleUndeclared,
 }
 
@@ -206,12 +206,10 @@ impl ConfigOwner for RlmConfigOwner {
         input: Option<RlmCreateConfig>,
     ) -> Result<Option<RlmRecordedConfig>, RlmConfigRefusal> {
         let stated = input.unwrap_or_default().0;
-        let behaviour = self.config.recorded_behaviour(
-            *self
-                .process_lifecycle
-                .get()
-                .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?,
-        );
+        self.process_lifecycle
+            .get()
+            .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?;
+        let behaviour = self.config.recorded_behaviour();
         Ok(Some(RlmRecordedConfig {
             render: stated.render,
             termination: stated.termination,
@@ -626,26 +624,13 @@ mod tests {
         });
     }
 
-    /// A session records the deployment's behaviour, durable sleep included
-    /// when the deployment has process lifecycle; a deployment that never
-    /// declared it creates nothing.
+    /// Creation cannot record behaviour before the deployment surface is declared.
     #[test]
-    fn creation_records_the_deployments_behaviour() {
-        let created_under = |process_lifecycle| owner_with(process_lifecycle).create(None);
-        let without = created_under(Some(false))
-            .expect("create")
-            .expect("recorded");
-        assert!(!without.behaviour.lashlang_abilities.sleep);
+    fn creation_refuses_an_undeclared_deployment_surface() {
         assert_eq!(
-            without.behaviour.instruction_limit,
-            crate::InstructionBound::instructions(1000)
-        );
-        let with = created_under(Some(true))
-            .expect("create")
-            .expect("recorded");
-        assert!(with.behaviour.lashlang_abilities.sleep);
-        assert_eq!(
-            created_under(None).expect_err("undeclared lifecycle"),
+            owner_with(None)
+                .create(None)
+                .expect_err("undeclared lifecycle"),
             RlmConfigRefusal::ProcessLifecycleUndeclared
         );
     }
@@ -657,7 +642,7 @@ mod tests {
     fn the_configured_render_is_recorded_behaviour() {
         let mut creating = config();
         creating.render.print.max_chars = Some(11);
-        let recorded = creating.recorded_behaviour(false);
+        let recorded = creating.recorded_behaviour();
         assert_eq!(recorded.render, creating.render);
         let opened = config().under_recorded_behaviour(&recorded);
         assert_eq!(opened.render, creating.render);

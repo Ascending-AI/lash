@@ -1114,6 +1114,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
+            crate::RlmPresentationConfig::standard().max_inline_keys,
         )
         .to_string();
 

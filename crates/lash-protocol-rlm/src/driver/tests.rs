@@ -115,6 +115,7 @@ pub(crate) fn rendered_bound_variables(
         &crate::dialect::TypescriptDialect,
         &crate::render::BuiltinCodeRenderer,
         &lash_render::RenderParams::preview(),
+        crate::RlmPresentationConfig::standard().max_inline_keys,
     )
 }
 

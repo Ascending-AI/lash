@@ -42,10 +42,6 @@ use lash_core::plugin::{
 };
 use lash_core::{Message, MessageOrigin, MessageRole, Part, PartKind, SessionSnapshot, TokenUsage};
 
-const PRUNE_RECENT_USER_TURNS: usize = 2;
-pub const STANDARD_COMPACTION_BUFFER_TOKENS: usize = 20_000;
-const COMPACTION_KEEP_RECENT_TOKENS: usize = 20_000;
-const PRUNE_CONTEXT_THRESHOLD: f64 = 0.6;
 /// Marker `plugin_id` stamped on compaction summary messages so the
 /// history pipeline can recognize them on subsequent turns.
 pub(crate) const STANDARD_COMPACTION_PLUGIN_ID: &str = "standard_compaction";
@@ -58,19 +54,6 @@ struct SummaryInstruction(String);
 
 const COMPACTED_ATTACHMENT_PLACEHOLDER: &str = "[Attachment omitted during compaction]";
 
-/// Maximum summarization attempts one open context-overflow recovery may
-/// spend before the third context policy records an explicit recoverable
-/// failure. Only deterministic refusals spend attempts; invocation faults
-/// leave recovery pending for a healthy shift.
-pub const OVERFLOW_RECOVERY_MAX_ATTEMPTS: usize = 3;
-/// Approximate token size above which a single part is elided before an
-/// out-of-band summarization request so the summarizer prompt itself fits the
-/// model's context window.
-pub const OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS: usize = 16_000;
-/// Characters retained from an elided part's head so the summary can still
-/// name what it dropped.
-pub const OVERFLOW_RECOVERY_ELIDED_RETAINED_CHARS: usize = 400;
-
 const OVERFLOW_RECOVERY_INSTRUCTIONS: &str = "Recover a task whose turn stopped because the provider refused the request as too long. The oversized tool result has been elided from the history below.\n\nSummarize precisely what the user asked for, what was already accomplished, and what remains, so a fresh continuation can finish the task without re-running any tool.";
 const OVERFLOW_ELIDED_PART_PLACEHOLDER: &str =
     "[oversized part elided before context-overflow summarization]";
@@ -81,8 +64,78 @@ const PRESSURE_COMPACTION_TASK: &str = "context-pressure compaction";
 /// The task a context-overflow recovery frame names.
 const OVERFLOW_RECOVERY_TASK: &str = "context-overflow recovery";
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct StandardCompactionConfig;
+/// Host-selected context policies. All cuts affect the request view only;
+/// durable history keeps the original parts. Defaults use [`Self::standard`].
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StandardCompactionConfig {
+    pub pressure_compaction: bool,
+    pub attachment_pruning: bool,
+    pub overflow_recovery: bool,
+    pub compaction_buffer_tokens: usize,
+    /// Eligibility bound for explicit compaction; the cut lands on a user turn.
+    pub keep_recent_tokens: usize,
+    /// Recent user turns copied into the fresh frame alongside the summary.
+    pub retained_user_turns: usize,
+    pub prune_recent_user_turns: usize,
+    pub prune_context_percent: u8,
+    pub token_bytes: std::num::NonZeroUsize,
+    pub attachment_tokens: usize,
+    pub recovery_request_overhead_tokens: usize,
+    pub overflow_max_attempts: std::num::NonZeroU32,
+    pub overflow_elide_part_threshold_tokens: usize,
+    pub overflow_elided_retained_chars: usize,
+    pub summary_instructions: String,
+    /// Template whose `{previous_summary}` slot is replaced with the last summary.
+    pub update_instructions: String,
+    pub overflow_instructions: String,
+}
+
+impl Default for StandardCompactionConfig {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl StandardCompactionConfig {
+    /// The standard preset: pressure, pruning and recovery on; a 20,000-token
+    /// buffer and eligibility bound; no copied history; two recent user turns
+    /// protected from attachment pruning; pruning at 60%;
+    /// one token per four text bytes and 1,200 per attachment; 512 tokens of
+    /// request overhead; three overflow attempts; elide parts at 16,000 tokens
+    /// keeping 400 characters. Instructions use the Goal/Instructions/
+    /// Discoveries/Accomplished/Files template and preserve the prior summary.
+    /// These historical choices have no workload measurement establishing them
+    /// as universal defaults. Every field can be changed before installation.
+    pub fn standard() -> Self {
+        Self {
+            pressure_compaction: true,
+            attachment_pruning: true,
+            overflow_recovery: true,
+            compaction_buffer_tokens: 20_000,
+            keep_recent_tokens: 20_000,
+            retained_user_turns: 0,
+            prune_recent_user_turns: 2,
+            prune_context_percent: 60,
+            token_bytes: std::num::NonZeroUsize::MIN.saturating_add(3),
+            attachment_tokens: 1_200,
+            recovery_request_overhead_tokens: 512,
+            overflow_max_attempts: std::num::NonZeroU32::MIN.saturating_add(2),
+            overflow_elide_part_threshold_tokens: 16_000,
+            overflow_elided_retained_chars: 400,
+            summary_instructions: COMPACTION_PROMPT.into(),
+            update_instructions: compaction_update_prompt("{previous_summary}"),
+            overflow_instructions: OVERFLOW_RECOVERY_INSTRUCTIONS.into(),
+        }
+    }
+
+    pub(crate) fn approx_token_count(&self, text: &str) -> usize {
+        text.len().div_ceil(self.token_bytes.get())
+    }
+    pub(crate) fn compaction_threshold(&self, max_context_tokens: usize) -> usize {
+        max_context_tokens.saturating_sub(self.compaction_buffer_tokens)
+    }
+}
 
 fn compaction_update_prompt(previous_summary: &str) -> String {
     format!(
@@ -117,13 +170,12 @@ pub(crate) fn leading_system_prefix_len(msgs: &[Message]) -> usize {
         .count()
 }
 
-pub(crate) fn approx_token_count(text: &str) -> usize {
-    text.len().div_ceil(4)
-}
-
 /// The attachment parts of `messages` older than the recent user turns,
 /// back to the latest compaction summary.
-fn old_attachment_parts(messages: &[Message]) -> std::collections::BTreeSet<HistoryPartId> {
+fn old_attachment_parts(
+    messages: &[Message],
+    config: &StandardCompactionConfig,
+) -> std::collections::BTreeSet<HistoryPartId> {
     let mut parts = std::collections::BTreeSet::new();
     let mut recent_user_turns = 0usize;
     for message in messages.iter().rev() {
@@ -133,7 +185,7 @@ fn old_attachment_parts(messages: &[Message]) -> std::collections::BTreeSet<Hist
         if message.role == MessageRole::User {
             recent_user_turns += 1;
         }
-        if recent_user_turns < PRUNE_RECENT_USER_TURNS {
+        if recent_user_turns < config.prune_recent_user_turns {
             continue;
         }
         for (index, part) in message.parts.iter().enumerate() {
@@ -180,7 +232,11 @@ pub(crate) fn latest_user_index(messages: &[Message]) -> Option<usize> {
 
 /// Returns the index of the first message in the "keep" region — everything before it gets
 /// The cut always lands on a user-message boundary so we never split a turn.
-pub(crate) fn find_compaction_cut_point(messages: &[Message], prefix_len: usize) -> usize {
+pub(crate) fn find_compaction_cut_point(
+    messages: &[Message],
+    prefix_len: usize,
+    config: &StandardCompactionConfig,
+) -> usize {
     let start = messages[prefix_len..]
         .iter()
         .rposition(is_compaction_summary_message)
@@ -190,11 +246,15 @@ pub(crate) fn find_compaction_cut_point(messages: &[Message], prefix_len: usize)
     let mut accumulated = 0usize;
     for idx in (start..messages.len()).rev() {
         for part in messages[idx].parts.iter() {
-            accumulated += approx_token_count(&part.content());
+            accumulated = accumulated.saturating_add(config.approx_token_count(&part.content()));
             // approximate binary attachment token cost
-            accumulated += 1200 * part.attachments().count();
+            accumulated = accumulated.saturating_add(
+                config
+                    .attachment_tokens
+                    .saturating_mul(part.attachments().count()),
+            );
         }
-        if accumulated >= COMPACTION_KEEP_RECENT_TOKENS && messages[idx].role == MessageRole::User {
+        if accumulated >= config.keep_recent_tokens && messages[idx].role == MessageRole::User {
             return idx;
         }
     }
@@ -221,12 +281,15 @@ impl ContextPressure {
         })
     }
 
-    fn pruning_needed(&self) -> bool {
-        (self.used_tokens as f64 / self.max_context_tokens as f64) >= PRUNE_CONTEXT_THRESHOLD
+    fn pruning_needed(&self, config: &StandardCompactionConfig) -> bool {
+        config.attachment_pruning
+            && (self.used_tokens as f64 / self.max_context_tokens as f64)
+                >= f64::from(config.prune_context_percent) / 100.0
     }
 
-    fn compaction_needed(&self) -> bool {
-        self.used_tokens >= compaction_threshold(self.max_context_tokens)
+    fn compaction_needed(&self, config: &StandardCompactionConfig) -> bool {
+        config.pressure_compaction
+            && self.used_tokens >= config.compaction_threshold(self.max_context_tokens)
     }
 }
 
@@ -243,10 +306,6 @@ fn extract_previous_summary(messages: &[Message]) -> Option<String> {
                 .to_string()
         })
     })
-}
-
-pub(crate) fn compaction_threshold(max_context_tokens: usize) -> usize {
-    max_context_tokens.saturating_sub(STANDARD_COMPACTION_BUFFER_TOKENS.min(max_context_tokens))
 }
 
 fn append_identity_field(identity: &mut Vec<u8>, value: &str) {
@@ -454,6 +513,7 @@ pub(crate) fn prepare_compaction_request(
     state: &SessionSnapshot,
     mut prefix_messages: Vec<Message>,
     instructions: Option<&str>,
+    config: &StandardCompactionConfig,
 ) -> Result<(SessionSnapshot, String), ContextError> {
     let mut snapshot = lash_core::runtime::RuntimeSessionState::from_snapshot(state.clone());
     snapshot.policy.turn_budget = lash_core::TurnBudget::bounded(1);
@@ -463,8 +523,10 @@ pub(crate) fn prepare_compaction_request(
     let previous_summary = extract_previous_summary(&prefix_messages);
     snapshot.replace_active_read_state(&prefix_messages);
     let base_prompt = match previous_summary {
-        Some(previous_summary) => compaction_update_prompt(&previous_summary),
-        None => COMPACTION_PROMPT.to_string(),
+        Some(previous_summary) => config
+            .update_instructions
+            .replace("{previous_summary}", &previous_summary),
+        None => config.summary_instructions.clone(),
     };
     Ok((
         snapshot.to_snapshot(),
@@ -480,6 +542,7 @@ pub(crate) fn prepare_compaction_request(
 #[doc(hidden)]
 pub fn pressure_compaction_request_ids(
     ctx: &ContextPressureContext<'_>,
+    config: &StandardCompactionConfig,
 ) -> Result<Option<(SessionId, TurnId)>, ContextError> {
     let history = ctx.state.messages();
     let summarized = history[leading_system_prefix_len(history)..].to_vec();
@@ -487,7 +550,7 @@ pub fn pressure_compaction_request_ids(
         return Ok(None);
     }
     let state = ctx.state.to_snapshot();
-    let (snapshot, prompt_text) = prepare_compaction_request(&state, summarized, None)?;
+    let (snapshot, prompt_text) = prepare_compaction_request(&state, summarized, None, config)?;
     compaction_request_ids(
         &ctx.session_id,
         &state,
@@ -510,6 +573,7 @@ async fn summarize_compaction_prefix(
     state: &SessionSnapshot,
     prefix_messages: Vec<Message>,
     instructions: Option<&str>,
+    config: &StandardCompactionConfig,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
     scoped_effect_controller: &lash_core::ActorContext,
 ) -> Result<Option<String>, ContextError> {
@@ -517,7 +581,8 @@ async fn summarize_compaction_prefix(
         return Ok(None);
     }
 
-    let (snapshot, prompt_text) = prepare_compaction_request(state, prefix_messages, instructions)?;
+    let (snapshot, prompt_text) =
+        prepare_compaction_request(state, prefix_messages, instructions, config)?;
 
     let (compaction_session_id, turn_id) = compaction_request_ids(
         session_id,
@@ -611,25 +676,57 @@ pub(crate) fn compaction_summary_seed(summary: &str) -> lash_core::SessionAppend
     lash_core::SessionAppendNode::message(compaction_summary_message(summary))
 }
 
+fn retained_history_start(messages: &[Message], config: &StandardCompactionConfig) -> usize {
+    if config.retained_user_turns == 0 {
+        return messages.len();
+    }
+    messages
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, message)| message.role == MessageRole::User)
+        .nth(config.retained_user_turns - 1)
+        .map_or(leading_system_prefix_len(messages), |(index, _)| index)
+}
+
+fn compaction_seed(summary: &str, retained: &[Message]) -> Vec<lash_core::SessionAppendNode> {
+    let mut seed = vec![compaction_summary_seed(summary)];
+    seed.extend(retained.iter().map(|message| {
+        lash_core::SessionAppendNode::message(lash_core::PluginMessage {
+            id: None,
+            role: message.role,
+            origin: message.origin.clone(),
+            parts: message.parts.to_vec(),
+        })
+    }));
+    seed
+}
+
 async fn compact_messages_core(
     session_id: &SessionId,
     state: &SessionSnapshot,
     messages: &[Message],
     instructions: Option<&str>,
+    config: &StandardCompactionConfig,
     direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
     scoped_effect_controller: &lash_core::ActorContext,
 ) -> Result<Option<ContextCompaction>, ContextError> {
     let prefix_len = leading_system_prefix_len(messages);
-    let cut_point = find_compaction_cut_point(messages, prefix_len);
+    let cut_point = find_compaction_cut_point(messages, prefix_len, config);
     if cut_point <= prefix_len {
         return Ok(None);
     }
-    let prefix_messages = messages[prefix_len..].to_vec();
+    let retained_start = retained_history_start(messages, config);
+    if retained_start <= prefix_len {
+        return Ok(None);
+    }
+    let prefix_messages = messages[prefix_len..retained_start].to_vec();
     let Some(summary) = summarize_compaction_prefix(
         session_id,
         state,
         prefix_messages,
         instructions,
+        config,
         direct_completions,
         scoped_effect_controller,
     )
@@ -637,9 +734,10 @@ async fn compact_messages_core(
     else {
         return Ok(None);
     };
-    Ok(Some(ContextCompaction::new(vec![compaction_summary_seed(
+    Ok(Some(ContextCompaction::new(compaction_seed(
         &summary,
-    )])))
+        &messages[retained_start..],
+    ))))
 }
 
 pub struct StandardCompactionPluginFactory {
@@ -654,7 +752,7 @@ impl StandardCompactionPluginFactory {
 
 impl Default for StandardCompactionPluginFactory {
     fn default() -> Self {
-        Self::new(StandardCompactionConfig)
+        Self::new(StandardCompactionConfig::standard())
     }
 }
 
@@ -664,6 +762,11 @@ impl PluginFactory for StandardCompactionPluginFactory {
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        if self.config.prune_context_percent > 100 {
+            return Err(PluginError::Registration(
+                "prune_context_percent must be at most 100".into(),
+            ));
+        }
         Ok(Arc::new(StandardCompactionPlugin {
             config: self.config.clone(),
         }))
@@ -712,14 +815,17 @@ impl SessionPlugin for StandardCompactionPlugin {
             100,
             Arc::new(StandardCompactionPressureHook::new(config.clone())),
         )?;
+        reg.context().attachment_omissions(
+            100,
+            Arc::new(StandardCompactionAttachmentPolicy(config.clone())),
+        )?;
         reg.context()
-            .attachment_omissions(100, Arc::new(StandardCompactionAttachmentPolicy))?;
-        reg.context()
-            .compact(100, Arc::new(StandardContextCompactor::new(config)))?;
+            .compact(100, Arc::new(StandardContextCompactor::new(config.clone())))?;
         reg.turn().after(
             lash_core::hook_key!("overflow-recovery"),
-            Arc::new(|ctx: lash_core::plugin::TurnResultHookContext| {
-                Box::pin(async move { overflow_recovery_after_turn(&ctx).await })
+            Arc::new(move |ctx: lash_core::plugin::TurnResultHookContext| {
+                let config = config.clone();
+                Box::pin(async move { overflow_recovery_after_turn(&ctx, &config).await })
             }),
         )?;
         Ok(())
@@ -730,11 +836,13 @@ impl SessionPlugin for StandardCompactionPlugin {
 /// policies: a pending context-overflow recovery first (the third
 /// context policy), then the context-pressure threshold. Each returns a
 /// decision; core writes it and opens the frame (FIG-4110).
-struct StandardCompactionPressureHook;
+struct StandardCompactionPressureHook {
+    config: StandardCompactionConfig,
+}
 
 impl StandardCompactionPressureHook {
-    fn new(_config: StandardCompactionConfig) -> Self {
-        Self
+    fn new(config: StandardCompactionConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -771,8 +879,8 @@ impl ContextPressureHook for StandardCompactionPressureHook {
                 })
             })?,
         );
-        if recovery_state.pending() {
-            return overflow_recovery_decision(ctx, recovery_state).await;
+        if self.config.overflow_recovery && recovery_state.pending() {
+            return overflow_recovery_decision(ctx, recovery_state, &self.config).await;
         }
 
         let Some(pressure) =
@@ -780,7 +888,7 @@ impl ContextPressureHook for StandardCompactionPressureHook {
         else {
             return Ok(ContextPressureDecision::Continue);
         };
-        if !pressure.compaction_needed() {
+        if !pressure.compaction_needed(&self.config) {
             return Ok(ContextPressureDecision::Continue);
         }
         ctx.traces.emit(
@@ -788,7 +896,9 @@ impl ContextPressureHook for StandardCompactionPressureHook {
             lash_core::TraceEvent::CompactionNeeded {
                 used_tokens: pressure.used_tokens,
                 max_context_tokens: pressure.max_context_tokens,
-                threshold_tokens: compaction_threshold(pressure.max_context_tokens),
+                threshold_tokens: self
+                    .config
+                    .compaction_threshold(pressure.max_context_tokens),
             },
         );
 
@@ -797,7 +907,8 @@ impl ContextPressureHook for StandardCompactionPressureHook {
         // is summarized, the summary seeds a fresh compaction frame, and this
         // turn runs inside it.
         let history = ctx.state.messages();
-        let summarized = history[leading_system_prefix_len(history)..].to_vec();
+        let retained_start = retained_history_start(history, &self.config);
+        let summarized = history[leading_system_prefix_len(history)..retained_start].to_vec();
         if summarized.is_empty() {
             return Ok(ContextPressureDecision::Continue);
         }
@@ -806,6 +917,7 @@ impl ContextPressureHook for StandardCompactionPressureHook {
             &ctx.state.to_snapshot(),
             summarized,
             None,
+            &self.config,
             &ctx.direct_completions,
             &ctx.scoped_effect_controller,
         )
@@ -816,14 +928,14 @@ impl ContextPressureHook for StandardCompactionPressureHook {
         Ok(ContextPressureDecision::OpenFrame {
             records: Vec::new(),
             task: PRESSURE_COMPACTION_TASK.to_string(),
-            seed: vec![compaction_summary_seed(&summary)],
+            seed: compaction_seed(&summary, &history[retained_start..]),
         })
     }
 }
 
 /// Old-attachment pruning: the one ephemeral policy, an attachment-omission
 /// history policy (ADR 0133). It names attachments; it writes nothing.
-struct StandardCompactionAttachmentPolicy;
+struct StandardCompactionAttachmentPolicy(StandardCompactionConfig);
 
 impl AttachmentOmissionPolicy for StandardCompactionAttachmentPolicy {
     fn id(&self) -> &'static str {
@@ -840,10 +952,10 @@ impl AttachmentOmissionPolicy for StandardCompactionAttachmentPolicy {
         else {
             return Ok(Default::default());
         };
-        if !pressure.pruning_needed() {
+        if !pressure.pruning_needed(&self.0) {
             return Ok(Default::default());
         }
-        let omissions = old_attachment_parts(history);
+        let omissions = old_attachment_parts(history, &self.0);
         if !omissions.is_empty() {
             ctx.traces.emit(
                 ctx.trace_context.clone(),
@@ -858,11 +970,13 @@ impl AttachmentOmissionPolicy for StandardCompactionAttachmentPolicy {
     }
 }
 
-struct StandardContextCompactor;
+struct StandardContextCompactor {
+    config: StandardCompactionConfig,
+}
 
 impl StandardContextCompactor {
-    fn new(_config: StandardCompactionConfig) -> Self {
-        Self
+    fn new(config: StandardCompactionConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -895,6 +1009,7 @@ impl ContextCompactor for StandardContextCompactor {
             &ctx.state.to_snapshot(),
             ctx.state.messages(),
             ctx.instructions.as_deref(),
+            &self.config,
             &ctx.direct_completions,
             &ctx.scoped_effect_controller,
         )

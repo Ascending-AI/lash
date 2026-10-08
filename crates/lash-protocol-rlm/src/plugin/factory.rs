@@ -19,30 +19,8 @@ use super::{
 };
 use crate::dialect::{Dialect, RlmDialectServices, SessionDialect};
 
-/// Apply the RLM protocol config transformation: enable, when process lifecycle
-/// is available, the process and sleep abilities.
-///
-/// This is protocol logic; it lives here rather than in the facade because both
-/// the plugin surface and the contributed Lashlang process engine derive from
-/// it.
-///
-/// Language features are NOT transformed here. The default (label annotations
-/// on) is decided once, where every config is born — `RlmProtocolPluginConfig`'s
-/// builder and serde default — so a host that turns a feature off keeps it off
-/// end to end, as ADR 0085 promises (FIG-2768).
-pub fn rlm_protocol_config(
-    config: RlmProtocolPluginConfig,
-    process_lifecycle: bool,
-) -> RlmProtocolPluginConfig {
-    let mut config = config;
-    if process_lifecycle {
-        config.lashlang_abilities = config.lashlang_abilities.with_sleep();
-    }
-    config
-}
-
-/// Build the Lashlang surface for the contributed process engine from an
-/// (already [`rlm_protocol_config`]-transformed) config.
+/// Build the process engine's Lashlang surface under the host's stated
+/// abilities; process lifecycle never enables an authored-disabled ability.
 pub fn rlm_lashlang_surface(
     config: &RlmProtocolPluginConfig,
     process_lifecycle: bool,
@@ -204,7 +182,10 @@ impl RlmProtocolPluginFactory {
                     field: "behaviour".to_string(),
                 })
             }
-            None => Ok(self.config.recorded_behaviour(self.process_lifecycle()?)),
+            None => {
+                self.process_lifecycle()?;
+                Ok(self.config.recorded_behaviour())
+            }
         }
     }
 
@@ -349,7 +330,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         // session is built on this (shared) factory.
         self.record_process_lifecycle(process_lifecycle)
             .map_err(PluginError::Registration)?;
-        let config = rlm_protocol_config(self.config.clone(), process_lifecycle);
+        let config = self.config.clone();
         let surface = rlm_lashlang_surface(&config, process_lifecycle)
             .with_plugin_extensions(ctx.extensions())
             .map_err(|err| PluginError::Registration(err.to_string()))?;
@@ -393,6 +374,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         .with_plugin_extensions(&ctx.extensions)
         .map_err(|err| PluginError::Registration(err.to_string()))?;
         let services = RlmDialectServices {
+            presentation: config.presentation,
             workers: self.workers.clone(),
             code_renderer: config.code_renderer.clone(),
             artifact_store: self.artifact_store.clone(),
@@ -453,10 +435,7 @@ impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRe
             })?;
         let behaviour = captured
             .map(|recorded| recorded.behaviour)
-            .unwrap_or_else(|| {
-                self.deployment_config
-                    .recorded_behaviour(self.process_lifecycle)
-            });
+            .unwrap_or_else(|| self.deployment_config.recorded_behaviour());
         let config = self
             .deployment_config
             .clone()
@@ -562,7 +541,7 @@ impl SessionPlugin for RlmProtocolPlugin {
 
 #[cfg(test)]
 mod label_annotation_tests {
-    use super::{rlm_lashlang_surface, rlm_protocol_config};
+    use super::rlm_lashlang_surface;
     use crate::plugin::{InstructionBound, MemoryBound, RlmProtocolPluginConfig};
 
     fn base_config() -> RlmProtocolPluginConfig {
@@ -574,7 +553,6 @@ mod label_annotation_tests {
     }
 
     fn rendered_surface(config: RlmProtocolPluginConfig) -> lashlang::LashlangHostEnvironment {
-        let config = rlm_protocol_config(config, false);
         rlm_lashlang_surface(&config, false)
             .host_environment(&lash_core::ToolCatalog::from_tool_definitions(Vec::new()))
             .expect("host environment")

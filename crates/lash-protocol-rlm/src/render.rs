@@ -67,6 +67,14 @@ pub struct ResolvedRlmRender {
 
 impl Default for ResolvedRlmRender {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl ResolvedRlmRender {
+    /// Standard print and preview presets from `RenderParams`; no workload
+    /// measurement establishes these cuts for every host.
+    pub fn standard() -> Self {
         Self {
             print: RenderParams::default(),
             preview: RenderParams::preview(),
@@ -75,6 +83,15 @@ impl Default for ResolvedRlmRender {
 }
 
 impl ResolvedRlmRender {
+    /// A complete base, explicitly stating every resolved field. An empty
+    /// `RlmRenderPatch` instead inherits this base.
+    pub fn as_patch(&self) -> RlmRenderPatch {
+        RlmRenderPatch {
+            print: (&self.print).into(),
+            preview: (&self.preview).into(),
+        }
+    }
+
     pub fn resolve(host: &RlmRenderPatch, options: &RlmRenderPatch) -> Self {
         let base = Self::default();
         Self {

@@ -162,6 +162,7 @@ pub async fn run_phases(
                     Some(crate::TurnFailureCode::AgentFrameSwitchLimit.into()),
                     format!("logical turn reached the limit of {limit} agent frame switches"),
                     None,
+                    lash_sansio::session_model::RuntimeOutputCuts::standard(),
                 )),
             )
             .await?;

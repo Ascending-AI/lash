@@ -92,6 +92,16 @@ pub struct RenderParams {
 
 impl Default for RenderParams {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl RenderParams {
+    /// Standard render: 8,000 characters, auto layout, 80 columns, indent 2,
+    /// depth 3, arrays collapse above 10 with 3 head/2 tail items, minimum
+    /// item budget 80, stack 3 head/1 tail. Historical choices, not measured
+    /// universal workload limits; every field is configurable.
+    pub fn standard() -> Self {
         Self {
             max_chars: 8_000,
             layout: Layout::Auto,
@@ -117,6 +127,8 @@ impl RenderParams {
         }
     }
 
+    /// Preview preset: compact layout, 1,000 characters and depth 2 over
+    /// the standard preset. These historical cuts have no workload measurement.
     pub fn preview() -> Self {
         Self {
             max_chars: 1_000,
@@ -152,6 +164,24 @@ pub struct RenderParamsPatch {
     pub stack_head: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stack_tail: Option<usize>,
+}
+
+impl From<&RenderParams> for RenderParamsPatch {
+    fn from(params: &RenderParams) -> Self {
+        Self {
+            max_chars: Some(params.max_chars),
+            layout: Some(params.layout),
+            line_width: Some(params.line_width),
+            indent: Some(params.indent),
+            max_depth: Some(params.max_depth),
+            array_threshold: Some(params.array_threshold),
+            array_head: Some(params.array_head),
+            array_tail: Some(params.array_tail),
+            min_item_chars: Some(params.min_item_chars),
+            stack_head: Some(params.stack_head),
+            stack_tail: Some(params.stack_tail),
+        }
+    }
 }
 
 impl RenderParamsPatch {

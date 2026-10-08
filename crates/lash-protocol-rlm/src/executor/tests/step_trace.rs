@@ -252,7 +252,10 @@ fn oversized_link_failure_diagnostic_is_bounded_without_changing_feedback() {
         assert_eq!(event["outcome"], "failure");
         assert_eq!(
             event["diagnostic"],
-            lash_sansio::session_model::truncate_raw_error(&diagnostic)
+            lash_sansio::session_model::truncate_raw_error(
+                &diagnostic,
+                lash_sansio::session_model::RuntimeOutputCuts::standard().raw_error_max_chars
+            )
         );
         assert!(event["diagnostic"].as_str().unwrap().chars().count() < 4100);
     });

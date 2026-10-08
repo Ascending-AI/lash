@@ -39,6 +39,7 @@ impl RlmRuntimeState {
         deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     ) -> Result<Self, SessionError> {
         let services = crate::dialect::RlmDialectServices {
+            presentation: crate::RlmPresentationConfig::standard(),
             workers: lash_vm_client::service::Service::default(),
             artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
             deferred_tool_resolver,
@@ -88,7 +89,8 @@ impl RlmRuntimeState {
             .execution
             .lock()
             .await
-            .prepare_bound_variables_prompt(&exclude, params.preview)?
+            .prepare_bound_variables_prompt(&exclude, params.preview)
+            .await?
             .render();
         Ok(crate::prompt_sections::RlmPromptFacts {
             history_binding: Arc::from(

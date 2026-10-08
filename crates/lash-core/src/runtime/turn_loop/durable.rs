@@ -278,6 +278,7 @@ impl LashRuntime {
             self.host.core.durability.commit_budget,
             turn_graph_appends.clone(),
         )
+        .with_output_cuts(self.host.core.control.output_cuts)
         .with_fleet_format(self.fleet_format())
         .with_definition_engines(self.host.core.process_engines.clone())
         .with_metrics(self.host.core.tracing.metrics().clone())

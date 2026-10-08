@@ -9,10 +9,10 @@ use crate::{LlmProfileConfig, LlmProfileKey, LlmProfileUnavailable, LlmProfiles}
 pub use lash_sansio::format_tool_output_content;
 pub use lash_sansio::session_model::{
     ConversationRecord, ErrorEnvelope, FailureCode, MaxToolCalls, Message, MessageRole, Namespace,
-    NoProgressBudget, Part, PartKind, ProtocolEvent, SessionStreamEvent, StreamMessageKind,
-    TokenUsage, TokenUsageOverflow, ToolCallLimitExceeded, ToolCallLimitScope, TurnBudget,
-    TurnFailureCode, TurnFailureKind, make_error_envelope, make_error_event, reassign_part_ids,
-    render_prompt, render_transcript_prompt, shared_parts,
+    NoProgressBudget, Part, PartKind, ProtocolEvent, RuntimeOutputCuts, SessionStreamEvent,
+    StreamMessageKind, TokenUsage, TokenUsageOverflow, ToolCallLimitExceeded, ToolCallLimitScope,
+    TurnBudget, TurnFailureCode, TurnFailureKind, make_error_envelope, make_error_event,
+    reassign_part_ids, render_prompt, render_transcript_prompt, shared_parts,
 };
 
 pub type SessionHistoryRecord = lash_sansio::session_model::SessionHistoryRecord<ProtocolEvent>;

@@ -13,8 +13,8 @@ pub(crate) mod runtime_state;
 pub(crate) mod tool_args;
 
 pub use config::{
-    RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmRecordedBehaviour, UnsetBound,
-    UnsetChannel,
+    RlmPresentationConfig, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder,
+    RlmRecordedBehaviour, UnsetBound, UnsetChannel,
 };
 pub use config_owner::{
     RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig, RlmRenderRefusal,
@@ -26,7 +26,7 @@ pub use config_types::{
 pub use factory::{
     LashlangCompileSurface, LashlangCompileSurfaceRequest, LashlangModuleCompileError,
     LashlangModuleCompileRequest, ModuleCompileOutput, RlmProtocolPluginFactory,
-    rlm_lashlang_surface, rlm_protocol_config,
+    rlm_lashlang_surface,
 };
 pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};
 

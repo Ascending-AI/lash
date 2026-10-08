@@ -45,6 +45,31 @@ impl RemoteState {
     pub fn opaque_bindings(&self) -> Vec<(String, String)> {
         self.view.metadata.opaque.clone()
     }
+    /// Render opaque guest values in the worker with the host's presentation policy.
+    pub async fn opaque_bindings_with(
+        &self,
+        config: &lashlang::BindingSummaryConfig,
+    ) -> Result<Vec<(String, String)>, crate::PoolError> {
+        let Some(snapshot) = self.bytes() else {
+            return Ok(Vec::new());
+        };
+        if self.view.metadata.opaque.is_empty() {
+            return Ok(Vec::new());
+        }
+        match self
+            .service
+            .request_accounted(Request::OpaqueBindings {
+                snapshot: snapshot.to_vec().into(),
+                config: *config,
+            })
+            .await?
+        {
+            Response::OpaqueBindings(bindings) => Ok(bindings),
+            _ => Err(crate::PoolError::breach(
+                lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
+            )),
+        }
+    }
     pub fn referenced_definition_ids(&self) -> BTreeSet<lash_core_execution::ProcessDefinitionId> {
         self.view.metadata.definition_ids.clone()
     }

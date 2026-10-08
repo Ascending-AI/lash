@@ -230,6 +230,7 @@ pub(crate) fn render_bound_variables(
     dialect: &dyn Dialect,
     renderer: &dyn CodeRenderer,
     params: &RenderParams,
+    max_inline_keys: usize,
 ) -> Arc<str> {
     let vocabulary = dialect.prompt_vocabulary();
     let mut lines = vec![
@@ -254,7 +255,7 @@ pub(crate) fn render_bound_variables(
     // the win for globals that are stable across prompt builds.
     let mut rows: Vec<WorkRow> = Vec::with_capacity(globals.len());
     for (name, value) in globals {
-        let hash = value_hash(value, params, renderer.id());
+        let hash = value_hash(value, params, renderer.id(), max_inline_keys);
         match cache.entries.get(name) {
             Some(entry) if entry.value_hash == hash => rows.push(WorkRow {
                 name: name.clone(),
@@ -265,7 +266,7 @@ pub(crate) fn render_bound_variables(
                 preview: entry.preview.clone(),
             }),
             _ => {
-                let built = build_bound_variable_row(value, renderer, params);
+                let built = build_bound_variable_row(value, renderer, params, max_inline_keys);
                 rows.push(WorkRow {
                     name: name.clone(),
                     value_hash: hash,
@@ -438,6 +439,7 @@ fn build_bound_variable_row(
     value: &FlowValue,
     renderer: &dyn CodeRenderer,
     params: &RenderParams,
+    max_inline_keys: usize,
 ) -> BuiltRow {
     let result = truncate_chars(renderer.variable_preview(value, params), params.max_chars);
     if result.cuts.is_empty() {
@@ -453,7 +455,7 @@ fn build_bound_variable_row(
     BuiltRow {
         inline: None,
         shape: Some(infer_value_shape(&json)),
-        size_hint: render_value_size_hint(&json),
+        size_hint: render_value_size_hint(&json, max_inline_keys),
         preview: Some(result.body),
     }
 }
@@ -461,8 +463,14 @@ fn build_bound_variable_row(
 /// Cheap structural hash of a JSON value for change detection. Walks the value
 /// but allocates nothing — unlike serializing it or inferring its shape, which
 /// is exactly the work this lets us skip when the value is unchanged.
-fn value_hash(value: &FlowValue, params: &RenderParams, renderer_id: &str) -> u64 {
+fn value_hash(
+    value: &FlowValue,
+    params: &RenderParams,
+    renderer_id: &str,
+    max_inline_keys: usize,
+) -> u64 {
     let mut hasher = DefaultHasher::new();
+    max_inline_keys.hash(&mut hasher);
     renderer_id.hash(&mut hasher);
     serde_json::to_vec(params)
         .unwrap_or_default()
@@ -511,7 +519,7 @@ fn hash_render_value<H: Hasher>(value: &FlowValue, hasher: &mut H) {
     }
 }
 
-fn render_value_size_hint(value: &serde_json::Value) -> Option<String> {
+fn render_value_size_hint(value: &serde_json::Value, max_inline_keys: usize) -> Option<String> {
     match value {
         serde_json::Value::Null => None,
         serde_json::Value::Bool(_) => None,
@@ -532,7 +540,7 @@ fn render_value_size_hint(value: &serde_json::Value) -> Option<String> {
         // further down. Wide records keep the count and rely on that block:
         // past a dozen names the row stops being scannable, which is the one
         // thing it is for.
-        serde_json::Value::Object(map) => Some(if map.len() <= MAX_INLINE_KEY_SET {
+        serde_json::Value::Object(map) => Some(if map.len() <= max_inline_keys {
             format!(
                 "keys={} ({})",
                 map.len(),
@@ -543,9 +551,6 @@ fn render_value_size_hint(value: &serde_json::Value) -> Option<String> {
         }),
     }
 }
-
-/// How many keys a row will name before deferring to the `Schema:` block.
-const MAX_INLINE_KEY_SET: usize = 12;
 
 #[derive(Default)]
 struct SchemaRegistry {
@@ -857,6 +862,7 @@ mod bound_variable_tests {
             &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
+            crate::RlmPresentationConfig::standard().max_inline_keys,
         )
         .to_string()
     }
@@ -897,6 +903,7 @@ mod bound_variable_tests {
             &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
+            crate::RlmPresentationConfig::standard().max_inline_keys,
         )
         .to_string();
         assert!(s.contains("len=40"), "{s}");
@@ -957,6 +964,7 @@ mod bound_variable_tests {
             &crate::dialect::TypescriptDialect,
             &crate::render::BuiltinCodeRenderer,
             &lash_render::RenderParams::preview(),
+            crate::RlmPresentationConfig::standard().max_inline_keys,
         );
         assert!(
             rendered.contains("keys=2 (__projected__payload, body)")
@@ -1014,8 +1022,18 @@ mod bound_variable_tests {
         }
         let params = RenderParams::preview();
         assert_ne!(
-            value_hash(&lashlang::from_json(first), &params, "lash.ax.v1"),
-            value_hash(&lashlang::from_json(second), &params, "lash.ax.v1")
+            value_hash(
+                &lashlang::from_json(first),
+                &params,
+                "lash.ax.v1",
+                crate::RlmPresentationConfig::standard().max_inline_keys
+            ),
+            value_hash(
+                &lashlang::from_json(second),
+                &params,
+                "lash.ax.v1",
+                crate::RlmPresentationConfig::standard().max_inline_keys
+            )
         );
     }
 }

@@ -625,6 +625,8 @@ impl LashCore {
 
 /// Builder for configuring lash core over one [`Backend`].
 pub struct LashCoreBuilder {
+    output_cuts: Option<crate::RuntimeOutputCuts>,
+    prompt_render_pool: Option<Arc<lash_core::plugin::prompt::PromptRenderPool>>,
     pub(crate) protocol_factory: Option<Arc<dyn PluginFactory>>,
     models: Option<Arc<dyn lash_core::LlmProfiles>>,
     /// The run definitions sent inputs' specs may name (FIG-3838).
@@ -672,8 +674,27 @@ impl LashCoreBuilder {
     /// This is the historical product choice, without workload measurements;
     /// `.serve_sessions(false)` selects an observer and producer only.
     pub const STANDARD_SERVE_SESSIONS: bool = true;
+
+    /// Select readable value and raw-error transcript cuts. Omission uses
+    /// `RuntimeOutputCuts::standard()`; retained output remains independently governed.
+    pub fn output_cuts(mut self, cuts: crate::RuntimeOutputCuts) -> Self {
+        self.output_cuts = Some(cuts);
+        self
+    }
+
+    /// Select prompt composition workers and queue capacity for every model call.
+    /// Omission uses `PromptRenderPoolConfig::standard()` in the shared pool.
+    pub fn prompt_render_pool(mut self, config: crate::plugins::PromptRenderPoolConfig) -> Self {
+        self.prompt_render_pool = Some(Arc::new(
+            lash_core::plugin::prompt::PromptRenderPool::from_config(config),
+        ));
+        self
+    }
+
     fn new(backend: Backend) -> Self {
         Self {
+            output_cuts: None,
+            prompt_render_pool: None,
             protocol_factory: None,
             models: None,
             run_definitions: lash_core::RunDefinitions::default(),
@@ -1237,6 +1258,7 @@ pub(crate) fn build_plugin_host(
     }
     factories.extend(plugin_factories.iter().cloned());
     let mut host = PluginHost::new(factories)
+        .with_prompt_render_pool(core.control.prompt_render_pool.clone())
         .with_trace_runtime(core.tracing.clone())
         .with_execution_budgets(core.control.execution_budgets.clone());
     if let Some(protocol) = protocol_factory {

@@ -157,8 +157,8 @@ impl OverflowRecoveryState {
         }
     }
 
-    pub(crate) fn exhausted(&self) -> bool {
-        matches!(self, Self::Pending { attempts } if *attempts >= OVERFLOW_RECOVERY_MAX_ATTEMPTS)
+    pub(crate) fn exhausted(&self, config: &StandardCompactionConfig) -> bool {
+        matches!(self, Self::Pending { attempts } if *attempts >= config.overflow_max_attempts.get() as usize)
     }
 }
 
@@ -181,17 +181,20 @@ pub(crate) fn history_recovery_records(
 /// Elide each oversized part's body so the out-of-band summarization request
 /// itself fits the model's window. Decision-local: durable history keeps the
 /// original body, and the summary prompt names what was dropped.
-pub(crate) fn elide_oversized_parts(messages: &mut [Message]) -> usize {
+pub(crate) fn elide_oversized_parts(
+    messages: &mut [Message],
+    config: &StandardCompactionConfig,
+) -> usize {
     let mut elided = 0usize;
     for message in messages {
         for part in std::sync::Arc::make_mut(&mut message.parts).iter_mut() {
             let mut text = part.content().into_owned();
-            if approx_token_count(&text) < OVERFLOW_RECOVERY_ELIDE_PART_THRESHOLD_TOKENS {
+            if config.approx_token_count(&text) < config.overflow_elide_part_threshold_tokens {
                 continue;
             }
             if let Some((index, _)) = text
                 .char_indices()
-                .nth(OVERFLOW_RECOVERY_ELIDED_RETAINED_CHARS)
+                .nth(config.overflow_elided_retained_chars)
             {
                 text.truncate(index);
             }
@@ -212,12 +215,16 @@ pub(crate) fn elide_oversized_parts(messages: &mut [Message]) -> usize {
     elided
 }
 
-pub(crate) fn recovery_instructions(elided_parts: usize) -> String {
+pub(crate) fn recovery_instructions(
+    elided_parts: usize,
+    config: &StandardCompactionConfig,
+) -> String {
     if elided_parts == 0 {
-        OVERFLOW_RECOVERY_INSTRUCTIONS.to_string()
+        config.overflow_instructions.clone()
     } else {
         format!(
-            "{OVERFLOW_RECOVERY_INSTRUCTIONS}\n\n{n} part(s) in the history below were elided for size; their bodies are intentionally absent.",
+            "{}\n\n{n} part(s) in the history below were elided for size; their bodies are intentionally absent.",
+            config.overflow_instructions,
             n = elided_parts
         )
     }
@@ -264,8 +271,9 @@ fn recovery_failure_decision(
     attempt_no: usize,
     cause: RecoveryFailureCause,
     schema_version: u32,
+    config: &StandardCompactionConfig,
 ) -> Result<ContextPressureDecision, ContextError> {
-    let exhausted = attempt_no >= OVERFLOW_RECOVERY_MAX_ATTEMPTS;
+    let exhausted = attempt_no >= config.overflow_max_attempts.get() as usize;
     let outcome = if exhausted {
         "exhausted:recoverable_failure".to_string()
     } else {
@@ -305,9 +313,10 @@ fn recovery_failure_decision(
 pub(crate) async fn overflow_recovery_decision(
     ctx: &ContextPressureContext<'_>,
     state: OverflowRecoveryState,
+    config: &StandardCompactionConfig,
 ) -> Result<ContextPressureDecision, ContextError> {
     let trace_context = lash_core::TraceContext::default().for_session(ctx.session_id.clone());
-    if state.exhausted() {
+    if state.exhausted(config) {
         emit_recovery_trace(
             &ctx.traces,
             trace_context,
@@ -348,6 +357,7 @@ pub(crate) async fn overflow_recovery_decision(
                 "OVERFLOW_RECOVERY_FORMAT_VERSION",
                 OVERFLOW_RECOVERY_FORMAT_VERSION,
             ),
+            config,
         );
     }
 
@@ -355,29 +365,29 @@ pub(crate) async fn overflow_recovery_decision(
     // must never be the rejected oversized request with an instruction
     // appended.
     let mut summarizer_prefix = summary_prefix;
-    let elided_parts = elide_oversized_parts(&mut summarizer_prefix);
+    let elided_parts = elide_oversized_parts(&mut summarizer_prefix, config);
 
-    let summarizer_budget_tokens = compaction_threshold(ctx.max_context_tokens.unwrap_or(0));
-    let projected_tokens: usize = summarizer_prefix
+    let summarizer_budget_tokens = config.compaction_threshold(ctx.max_context_tokens.unwrap_or(0));
+    let projected_tokens = summarizer_prefix
         .iter()
-        .map(|message| {
-            message
-                .parts
-                .iter()
-                .map(|part| {
-                    approx_token_count(&part.content()) + 1_200 * part.attachments().count()
-                })
-                .sum::<usize>()
+        .flat_map(|message| message.parts.iter())
+        .map(|part| {
+            config.approx_token_count(&part.content()).saturating_add(
+                config
+                    .attachment_tokens
+                    .saturating_mul(part.attachments().count()),
+            )
         })
-        .sum::<usize>()
-        + approx_token_count(OVERFLOW_RECOVERY_INSTRUCTIONS)
-        + 512;
+        .fold(0usize, usize::saturating_add)
+        .saturating_add(config.approx_token_count(&config.overflow_instructions))
+        .saturating_add(config.recovery_request_overhead_tokens);
     let (_, prompt_text) = prepare_compaction_request(
         &history_snapshot,
         summarizer_prefix.clone(),
-        Some(&recovery_instructions(elided_parts)),
+        Some(&recovery_instructions(elided_parts, config)),
+        config,
     )?;
-    let request_tokens = projected_tokens + approx_token_count(&prompt_text);
+    let request_tokens = projected_tokens.saturating_add(config.approx_token_count(&prompt_text));
     if request_tokens > summarizer_budget_tokens {
         return recovery_failure_decision(
             &ctx.traces,
@@ -388,6 +398,7 @@ pub(crate) async fn overflow_recovery_decision(
                 "OVERFLOW_RECOVERY_FORMAT_VERSION",
                 OVERFLOW_RECOVERY_FORMAT_VERSION,
             ),
+            config,
         );
     }
 
@@ -399,7 +410,8 @@ pub(crate) async fn overflow_recovery_decision(
         &ctx.session_id,
         &history_snapshot,
         summarizer_prefix,
-        Some(&recovery_instructions(elided_parts)),
+        Some(&recovery_instructions(elided_parts, config)),
+        config,
         &ctx.direct_completions,
         &ctx.scoped_effect_controller,
     )
@@ -416,6 +428,7 @@ pub(crate) async fn overflow_recovery_decision(
                     "OVERFLOW_RECOVERY_FORMAT_VERSION",
                     OVERFLOW_RECOVERY_FORMAT_VERSION,
                 ),
+                config,
             );
         }
         Err(error) if error.aborts_invocation() => return Err(error),
@@ -433,6 +446,7 @@ pub(crate) async fn overflow_recovery_decision(
                     "OVERFLOW_RECOVERY_FORMAT_VERSION",
                     OVERFLOW_RECOVERY_FORMAT_VERSION,
                 ),
+                config,
             );
         }
     };
@@ -463,13 +477,16 @@ pub(crate) async fn overflow_recovery_decision(
 /// Appends the pending recovery node with the overflowing turn's commit.
 pub(crate) async fn overflow_recovery_after_turn(
     ctx: &lash_core::plugin::TurnResultHookContext,
+    config: &StandardCompactionConfig,
 ) -> Result<lash_core::plugin::AfterTurnContributions, PluginError> {
     use lash_core::facade_support::{TurnOutcome, TurnStop};
     use lash_core::plugin::{AfterTurnContributions, PluginRecordContribution};
-    if !matches!(
-        ctx.turn.outcome,
-        TurnOutcome::Stopped(TurnStop::ContextOverflow)
-    ) {
+    if !config.overflow_recovery
+        || !matches!(
+            ctx.turn.outcome,
+            TurnOutcome::Stopped(TurnStop::ContextOverflow)
+        )
+    {
         return Ok(AfterTurnContributions::default());
     }
     let body = recovery_body(

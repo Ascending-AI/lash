@@ -93,7 +93,7 @@ pub use linker::{
 #[cfg(test)]
 pub(crate) use runtime::compile_ast;
 pub use runtime::{
-    AbilityOp, AbilityOutcome, AggregateConsumer, BINDING_SUMMARY_MAX_CHARS,
+    AbilityOp, AbilityOutcome, AggregateConsumer, BINDING_SUMMARY_MAX_CHARS, BindingSummaryConfig,
     CANCEL_CHECKPOINT_INSTRUCTIONS, CANCEL_CHECKPOINT_INTERVAL_CAP, CompiledLinkedProgram,
     CompiledProcessCache, CompiledProcessCacheKey, CompiledProgram, CompiledProgramCacheStats,
     ContinuationError, DurableBaseline, DurableFragment, DurableParts, EcmaErrorClass, Entry,

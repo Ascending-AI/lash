@@ -223,6 +223,13 @@ const fn nonzero(value: u32) -> NonZeroU32 {
 }
 
 impl PromptLimits {
+    /// Standard preset: 128 sections, 256 wrappers, 32 KiB per section,
+    /// 256 KiB total, 2,000 ms rendering. These historical choices have no
+    /// universal workload measurement; every plan can override them.
+    pub const fn standard() -> Self {
+        Self::DEFAULT
+    }
+
     pub const DEFAULT: Self = Self {
         max_sections: nonzero(128),
         max_wrappers: nonzero(256),

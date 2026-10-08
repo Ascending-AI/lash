@@ -105,6 +105,7 @@ impl TurnBoundary {
         let terminal_message_id = format!("m_turn_{turn_id}_assistant");
         let operation = self.final_operation();
         let commit_budget = self.commit_budget;
+        let output_cuts = self.output_cuts;
         let state = self.final_state_mut();
         if let Some(plugins) = plugins.as_deref() {
             let captured = match after_turn {
@@ -129,6 +130,7 @@ impl TurnBoundary {
             &turn_id,
             &terminal_message_id,
             &protocol_terminal_output,
+            output_cuts,
         );
         graph_appends
             .fold_into_final_state(state)

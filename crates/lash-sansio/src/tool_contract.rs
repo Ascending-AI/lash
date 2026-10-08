@@ -526,7 +526,7 @@ impl Eq for ShapeCache {}
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct CompactContractKey {
     signature_name: String,
-    example_limit: usize,
+    presentation: ToolPresentationConfig,
     description: String,
 }
 
@@ -597,25 +597,42 @@ impl ToolContract {
         }))
     }
 
+    /// The input schema under the host's prompt depth bound.
+    pub fn input_shape_with(&self, config: &ToolPresentationConfig) -> Arc<SchemaShape> {
+        if config.schema_depth == ToolPresentationConfig::standard().schema_depth {
+            return self.input_shape();
+        }
+        Arc::new(SchemaShape::from_json_schema_with_depth(
+            self.input_schema.canonical(),
+            config.schema_depth,
+        ))
+    }
+    /// The output schema under the host's prompt depth bound.
+    pub fn output_shape_with(&self, config: &ToolPresentationConfig) -> Arc<SchemaShape> {
+        if config.schema_depth == ToolPresentationConfig::standard().schema_depth {
+            return self.output_shape();
+        }
+        Arc::new(SchemaShape::from_json_schema_with_depth(
+            self.output_schema.canonical(),
+            config.schema_depth,
+        ))
+    }
+    /// Authored examples under the host's prompt cuts.
+    pub fn compact_examples_with(&self, config: &ToolPresentationConfig) -> Vec<String> {
+        schema_docs::compact_examples_with_chars(
+            &self.examples,
+            config.example_limit,
+            config.example_chars,
+        )
+    }
+
     /// The authored examples a prompt shows: the first few, each bounded.
     pub fn compact_examples(&self) -> Vec<String> {
         compact_examples(&self.examples, COMPACT_TOOL_EXAMPLE_LIMIT)
     }
 
     pub fn compact_contract(&self, manifest: &ToolManifest) -> CompactToolContract {
-        self.compact_contract_with_example_limit(manifest, COMPACT_TOOL_EXAMPLE_LIMIT)
-    }
-
-    pub fn compact_contract_with_example_limit(
-        &self,
-        manifest: &ToolManifest,
-        example_limit: usize,
-    ) -> CompactToolContract {
-        self.compact_contract_with_signature_name_and_example_limit(
-            manifest,
-            &manifest.name,
-            example_limit,
-        )
+        (*self.compact_contract_shared(manifest)).clone()
     }
 
     pub fn compact_contract_with_signature_name(
@@ -623,61 +640,36 @@ impl ToolContract {
         manifest: &ToolManifest,
         signature_name: &str,
     ) -> CompactToolContract {
-        self.compact_contract_with_signature_name_and_example_limit(
-            manifest,
-            signature_name,
-            COMPACT_TOOL_EXAMPLE_LIMIT,
-        )
+        (*self.compact_contract_shared_with_signature_name(manifest, signature_name)).clone()
     }
 
-    pub fn compact_contract_with_signature_name_and_example_limit(
-        &self,
-        manifest: &ToolManifest,
-        signature_name: &str,
-        example_limit: usize,
-    ) -> CompactToolContract {
-        (*self.compact_contract_shared_with_signature_name_and_example_limit(
-            manifest,
-            signature_name,
-            example_limit,
-        ))
-        .clone()
-    }
-
-    /// Shared handle to the compact projection for `manifest`, memoized on this
-    /// contract. Read-only consumers should prefer this over
-    /// [`ToolContract::compact_contract`] to avoid the deep `serde_json::Value`
-    /// copies behind schema `$ref` resolution.
+    /// Shared standard projection, avoiding deep schema copies for read-only consumers.
     pub fn compact_contract_shared(&self, manifest: &ToolManifest) -> Arc<CompactToolContract> {
-        self.compact_contract_shared_with_signature_name_and_example_limit(
-            manifest,
-            &manifest.name,
-            COMPACT_TOOL_EXAMPLE_LIMIT,
-        )
+        self.compact_contract_shared_with_signature_name(manifest, &manifest.name)
     }
 
-    /// Shared handle variant of
-    /// [`ToolContract::compact_contract_with_signature_name`].
+    /// Shared standard projection with a host-selected signature name.
     pub fn compact_contract_shared_with_signature_name(
         &self,
         manifest: &ToolManifest,
         signature_name: &str,
     ) -> Arc<CompactToolContract> {
-        self.compact_contract_shared_with_signature_name_and_example_limit(
+        self.compact_contract_with_presentation(
             manifest,
             signature_name,
-            COMPACT_TOOL_EXAMPLE_LIMIT,
+            &ToolPresentationConfig::standard(),
         )
     }
 
-    pub fn compact_contract_shared_with_signature_name_and_example_limit(
+    /// A memoized compact contract under the host's complete presentation policy.
+    pub fn compact_contract_with_presentation(
         &self,
         manifest: &ToolManifest,
         signature_name: &str,
-        example_limit: usize,
+        config: &ToolPresentationConfig,
     ) -> Arc<CompactToolContract> {
         if signature_name == manifest.name
-            && example_limit == COMPACT_TOOL_EXAMPLE_LIMIT
+            && *config == ToolPresentationConfig::standard()
             && let Some(stored) = &manifest.compact_contract
             && stored.name == signature_name
             && stored.description == manifest.description.trim()
@@ -686,20 +678,34 @@ impl ToolContract {
         }
         let key = CompactContractKey {
             signature_name: signature_name.to_string(),
-            example_limit,
+            presentation: *config,
             description: manifest.description.trim().to_string(),
         };
         if let Some(hit) = self.compact_cache.0.lock_recover().get(&key) {
             return Arc::clone(hit);
         }
+        let input = self.input_shape_with(config);
+        let output = self.output_shape_with(config);
+        let witnessed_input = self.output_contract.witnessed_input(&input);
         let computed = Arc::new(CompactToolContract {
             name: signature_name.to_string(),
-            signature: self.input_signature_with_name(manifest, signature_name),
-            returns: self.output_summary(),
-            parameters: self.parameter_metadata(),
-            return_fields: self.output_contract.return_fields(&self.output_shape()),
+            signature: format!(
+                "{}{}({})",
+                signature_name,
+                self.output_contract
+                    .type_parameter_suffix()
+                    .unwrap_or_default(),
+                compact_arguments(&witnessed_input)
+            ),
+            returns: self.output_contract.return_type_label(&output),
+            parameters: witnessed_input
+                .rows()
+                .iter()
+                .map(|row| compact_row(row, "name"))
+                .collect(),
+            return_fields: self.output_contract.return_fields(&output),
             description: manifest.description.trim().to_string(),
-            examples: compact_examples(&self.examples, example_limit),
+            examples: self.compact_examples_with(config),
         });
         self.compact_cache
             .0
@@ -774,8 +780,34 @@ pub struct ModelTool {
     pub output_schema: SchemaContract,
 }
 
-const COMPACT_TOOL_EXAMPLE_LIMIT: usize = 2;
-const COMPACT_TOOL_EXAMPLE_CHAR_LIMIT: usize = 240;
+/// Prompt-facing schema and example cuts; validation always uses the full schema.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(default, deny_unknown_fields)]
+pub struct ToolPresentationConfig {
+    pub example_limit: usize,
+    pub example_chars: usize,
+    pub schema_depth: usize,
+}
+impl Default for ToolPresentationConfig {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+impl ToolPresentationConfig {
+    /// Standard preset: two examples, 240 characters each, eight schema
+    /// container levels. Historical cuts with no universal workload measurement.
+    pub const fn standard() -> Self {
+        Self {
+            example_limit: 2,
+            example_chars: 240,
+            schema_depth: 8,
+        }
+    }
+}
+const COMPACT_TOOL_EXAMPLE_LIMIT: usize = ToolPresentationConfig::standard().example_limit;
+const COMPACT_TOOL_EXAMPLE_CHAR_LIMIT: usize = ToolPresentationConfig::standard().example_chars;
 
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -1062,12 +1094,7 @@ impl ToolDefinition {
     }
 
     pub fn compact_contract(&self) -> CompactToolContract {
-        self.compact_contract_with_example_limit(COMPACT_TOOL_EXAMPLE_LIMIT)
-    }
-
-    pub fn compact_contract_with_example_limit(&self, example_limit: usize) -> CompactToolContract {
-        self.contract
-            .compact_contract_with_example_limit(&self.manifest, example_limit)
+        self.contract.compact_contract(&self.manifest)
     }
 
     pub fn model_tool(&self) -> ModelTool {

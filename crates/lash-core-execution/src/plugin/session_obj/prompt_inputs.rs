@@ -10,6 +10,11 @@ use super::super::{AttachmentOmissionContext, HistoryPartId};
 use super::*;
 
 impl PluginSession {
+    /// The host-selected pool used for this session's prompt composition.
+    pub fn prompt_render_pool(&self) -> &super::super::prompt::PromptRenderPool {
+        self.host.prompt_render_pool()
+    }
+
     /// The attachments of `history` the turn's request omits: the union of
     /// every registered attachment-omission policy's decisions (ADR 0133).
     pub fn attachment_omissions(

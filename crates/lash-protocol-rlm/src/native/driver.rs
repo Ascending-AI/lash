@@ -1,6 +1,6 @@
 use crate::dialect::SessionDialect;
+use crate::tool_records::{bounded_exec_tool_call_records, executed_call_ledger};
 use lash_sansio::TurnId;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core::sansio::{
@@ -11,14 +11,11 @@ use lash_core::session_model::{
     TurnFailureKind, make_error_event,
 };
 use lash_core::{
-    CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmResponse, OmittedToolCalls,
-    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolControl, ToolFailure, ToolValue,
-    facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
-    facade_support::normalized_response_parts,
+    CheckpointKind, DriverAction, DriverContextView, ExecResponse, LlmResponse, ToolCallOutcome,
+    ToolCallRecord, facade_support::TurnFinish, facade_support::TurnOutcome,
+    facade_support::TurnStop, facade_support::normalized_response_parts,
 };
-use lash_rlm_types::{
-    CellOutcome, RlmDiagnosticEvent, RlmExecutedCall, RlmProtocolEvent, RlmTrajectoryEntry,
-};
+use lash_rlm_types::{CellOutcome, RlmDiagnosticEvent, RlmProtocolEvent, RlmTrajectoryEntry};
 use serde_json::Value;
 
 use crate::projection::rlm_protocol_event;
@@ -50,9 +47,6 @@ impl NativeDriver {
         Self { dialect }
     }
 }
-
-const MAX_EXEC_TOOL_CALL_RECORDS: usize = 128;
-const MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES: usize = 64 * 1024;
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
     fn project_visible_assistant_prose(&self, text: &str) -> String {
@@ -142,6 +136,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 Some(TurnFailureCode::EmptyResponse.into()),
                 "Model returned no assistant text.",
                 None,
+                lash_sansio::session_model::RuntimeOutputCuts::standard(),
             )));
             actions.push(DriverAction::Finish(TurnOutcome::Stopped(
                 TurnStop::ProviderError,
@@ -438,7 +433,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     .iter()
                     .filter_map(|call| call.host_record.as_ref())
                     .find_map(terminal_outcome_from_tool_result);
-                let (host_records, omitted) = bounded_exec_tool_call_records(&response.calls);
+                let (host_records, omitted) =
+                    bounded_exec_tool_call_records(&response.calls, &self.dialect.presentation());
                 actions.extend(
                     host_records
                         .into_iter()
@@ -450,7 +446,8 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         summary,
                     }));
                 }
-                (state.calls, state.calls_omitted) = executed_call_ledger(&response.calls);
+                (state.calls, state.calls_omitted) =
+                    executed_call_ledger(&response.calls, &self.dialect.presentation());
                 state.images.extend(response.printed_images);
                 state.output_archive = response.output_archive;
                 for observation in response.observations {
@@ -670,169 +667,6 @@ fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {
         args: record.args,
         output: record.output,
     }
-}
-
-fn bounded_exec_tool_call_records(
-    calls: &[lash_core::ExecutedCall],
-) -> (Vec<ToolCallRecord>, Option<OmittedToolCalls>) {
-    // HostBridge supplies execution-index order, so concurrent dispatch keeps a
-    // deterministic host-record order and first-128 retention boundary.
-    let records = calls
-        .iter()
-        .filter_map(|call| call.host_record.as_ref())
-        .collect::<Vec<_>>();
-    let retained_count = records.len().min(MAX_EXEC_TOOL_CALL_RECORDS);
-    let bounded = records[..retained_count]
-        .iter()
-        .map(|record| bounded_tool_call_record(record))
-        .collect::<Vec<_>>();
-    let omitted = &records[retained_count..];
-    let summary = (!omitted.is_empty()).then(|| OmittedToolCalls {
-        count: omitted.len(),
-        failures: omitted
-            .iter()
-            .filter(|record| !record.output.is_success())
-            .count(),
-        attachments: omitted
-            .iter()
-            .flat_map(|record| tool_output_attachments(&record.output))
-            .collect(),
-    });
-    (bounded, summary)
-}
-
-fn executed_call_ledger(records: &[lash_core::ExecutedCall]) -> (Vec<RlmExecutedCall>, usize) {
-    let omitted = records.len().saturating_sub(MAX_EXEC_TOOL_CALL_RECORDS);
-    let calls = records
-        .iter()
-        .skip(omitted)
-        .map(|call| lash_core::ExecutedCallRecord {
-            operation: call.operation.clone(),
-            outcome: call.outcome,
-        })
-        .collect();
-    (calls, omitted)
-}
-
-fn bounded_tool_call_record(record: &ToolCallRecord) -> ToolCallRecord {
-    ToolCallRecord {
-        call_id: record.call_id.clone(),
-        provider_call_id: record.provider_call_id.clone(),
-        tool: record.tool.clone(),
-        args: record.args.clone(),
-        output: bounded_tool_call_output(&record.output),
-    }
-}
-
-fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
-    let outcome = match &output.outcome {
-        ToolCallOutcome::Success(value) => ToolCallOutcome::Success(bounded_tool_value(value)),
-        ToolCallOutcome::Failure(failure) => {
-            ToolCallOutcome::Failure(bounded_tool_failure(failure))
-        }
-        ToolCallOutcome::Cancelled(cancellation) => {
-            let mut bounded = cancellation.clone();
-            bounded.raw = bounded.raw.as_ref().map(bounded_tool_value);
-            ToolCallOutcome::Cancelled(bounded)
-        }
-    };
-    let control = output.control.as_ref().map(|control| match control {
-        ToolControl::SwitchAgentFrame {
-            frame_key,
-            initial_nodes,
-            task,
-        } => ToolControl::SwitchAgentFrame {
-            frame_key: frame_key.clone(),
-            initial_nodes: initial_nodes.clone(),
-            task: task.clone(),
-        },
-        ToolControl::Finish { value } => ToolControl::Finish {
-            value: bounded_tool_value(value),
-        },
-        ToolControl::Fail { failure } => ToolControl::Fail {
-            failure: bounded_tool_failure(failure),
-        },
-        ToolControl::AbortRun { code, message } => ToolControl::AbortRun {
-            code: code.clone(),
-            message: message.clone(),
-        },
-    });
-    ToolCallOutput {
-        outcome,
-        control,
-        view: None,
-        projection_value: None,
-    }
-}
-
-fn bounded_tool_failure(failure: &ToolFailure) -> ToolFailure {
-    let mut bounded = failure.clone();
-    bounded.raw = bounded.raw.as_ref().map(bounded_tool_value);
-    bounded
-}
-
-fn bounded_tool_value(value: &ToolValue) -> ToolValue {
-    match value {
-        ToolValue::String(value) if value.len() > MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES => {
-            omitted_bytes_marker(value.len())
-        }
-        ToolValue::Array(values) => {
-            ToolValue::Array(values.iter().map(bounded_tool_value).collect())
-        }
-        ToolValue::Object(entries) => ToolValue::Object(
-            entries
-                .iter()
-                .map(|(key, value)| (key.clone(), bounded_tool_value(value)))
-                .collect(),
-        ),
-        ToolValue::UntrustedJson(value) => ToolValue::untrusted_json(bounded_untrusted_json(value)),
-        ToolValue::Null
-        | ToolValue::Bool(_)
-        | ToolValue::Number(_)
-        | ToolValue::String(_)
-        | ToolValue::Attachment(_) => value.clone(),
-    }
-}
-
-fn bounded_untrusted_json(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::String(value) if value.len() > MAX_INLINE_TOOL_OUTPUT_SCALAR_BYTES => {
-            serde_json::json!({ "omitted_bytes": value.len() })
-        }
-        serde_json::Value::Array(values) => {
-            serde_json::Value::Array(values.iter().map(bounded_untrusted_json).collect())
-        }
-        serde_json::Value::Object(entries) => serde_json::Value::Object(
-            entries
-                .iter()
-                .map(|(key, value)| (key.clone(), bounded_untrusted_json(value)))
-                .collect(),
-        ),
-        _ => value.clone(),
-    }
-}
-
-fn omitted_bytes_marker(omitted_bytes: usize) -> ToolValue {
-    ToolValue::Object(BTreeMap::from([(
-        "omitted_bytes".to_string(),
-        ToolValue::untrusted_json(serde_json::json!(omitted_bytes)),
-    )]))
-}
-
-fn tool_output_attachments(output: &ToolCallOutput) -> Vec<lash_core::AttachmentRef> {
-    let mut attachments = output.attachments();
-    match output.control.as_ref() {
-        Some(ToolControl::Finish { value }) => attachments.extend(value.attachments()),
-        Some(ToolControl::Fail { failure }) => attachments.extend(
-            failure
-                .raw
-                .as_ref()
-                .map(ToolValue::attachments)
-                .unwrap_or_default(),
-        ),
-        Some(ToolControl::SwitchAgentFrame { .. } | ToolControl::AbortRun { .. }) | None => {}
-    }
-    attachments
 }
 
 fn trajectory_entry(

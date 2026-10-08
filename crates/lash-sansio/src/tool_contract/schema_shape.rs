@@ -20,7 +20,7 @@ use serde_json::{Map, Number, Value};
 /// How deep the importer follows nested containers and references before it
 /// answers [`ShapeKind::Unknown`]. The bound keeps a recursive schema's
 /// rendered shape finite.
-const MAX_SHAPE_DEPTH: usize = 8;
+const MAX_SHAPE_DEPTH: usize = super::ToolPresentationConfig::standard().schema_depth;
 
 /// The JSON Schema keyword that carries the types JSON Schema cannot say.
 ///
@@ -277,8 +277,14 @@ impl SchemaShape {
     /// Reads a JSON Schema document as a shape. Local `#` references are
     /// resolved against `schema` itself.
     pub fn from_json_schema(schema: &Value) -> Self {
+        Self::from_json_schema_with_depth(schema, MAX_SHAPE_DEPTH)
+    }
+
+    /// Reads a prompt shape to the host's selected depth; schema validation is unchanged.
+    pub fn from_json_schema_with_depth(schema: &Value, max_depth: usize) -> Self {
         ShapeImporter {
             root: schema,
+            max_depth,
             resolving: Vec::new(),
         }
         .import(schema, 0)
@@ -461,6 +467,7 @@ fn union_kind(members: Vec<SchemaShape>) -> ShapeKind {
 }
 
 struct ShapeImporter<'a> {
+    max_depth: usize,
     root: &'a Value,
     /// The `#` references being expanded, so a cycle ends in
     /// [`ShapeKind::Unknown`] instead of recursing.
@@ -472,7 +479,7 @@ impl<'a> ShapeImporter<'a> {
         let Some(map) = schema.as_object().filter(|map| !map.is_empty()) else {
             return SchemaShape::unknown();
         };
-        if depth >= MAX_SHAPE_DEPTH {
+        if depth >= self.max_depth {
             return SchemaShape::unknown();
         }
         let inner = self.import_kind(map, depth);

@@ -45,6 +45,30 @@ use crate::store::BlobRef;
 /// What separates two sections' text within one placement.
 pub const PROMPT_SECTION_SEPARATOR: &str = "\n\n";
 
+/// Host capacity for prompt composition; operational bounds rather than refusal ceilings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PromptRenderPoolConfig {
+    pub workers: NonZeroUsize,
+    pub queue: NonZeroUsize,
+}
+impl Default for PromptRenderPoolConfig {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+impl PromptRenderPoolConfig {
+    /// Standard preset: one worker per available core, at most eight (one if
+    /// unavailable), and a 1,024-job queue. Historical, unmeasured capacities.
+    pub fn standard() -> Self {
+        Self {
+            workers: std::thread::available_parallelism()
+                .unwrap_or(NonZeroUsize::MIN)
+                .min(NonZeroUsize::MIN.saturating_add(7)),
+            queue: NonZeroUsize::MIN.saturating_add(1023),
+        }
+    }
+}
+
 type RenderJob = Box<dyn FnOnce() + Send>;
 
 /// Renders submitted to any pool of the process and not yet ended.
@@ -82,6 +106,10 @@ pub struct PromptRenderPool {
 }
 
 impl PromptRenderPool {
+    pub fn from_config(config: PromptRenderPoolConfig) -> Self {
+        Self::new(config.workers, config.queue)
+    }
+
     /// A pool of up to `workers` threads behind a queue of `queue` jobs. A
     /// worker the host cannot start is logged and left out. Every started
     /// worker has entered its thread before the pool returns.
@@ -116,15 +144,7 @@ impl PromptRenderPool {
     /// eight, behind a queue of 1024 renders.
     pub fn shared() -> &'static Self {
         static SHARED: OnceLock<PromptRenderPool> = OnceLock::new();
-        SHARED.get_or_init(|| {
-            let workers = std::thread::available_parallelism()
-                .map_or(1, NonZeroUsize::get)
-                .clamp(1, 8);
-            Self::new(
-                NonZeroUsize::new(workers).unwrap_or(NonZeroUsize::MIN),
-                NonZeroUsize::new(1024).unwrap_or(NonZeroUsize::MIN),
-            )
-        })
+        SHARED.get_or_init(|| Self::from_config(PromptRenderPoolConfig::standard()))
     }
 
     /// Whether a render of any pool of the process is in flight, and how

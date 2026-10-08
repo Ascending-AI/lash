@@ -885,12 +885,37 @@ impl TurnCancellationEvidence {
     }
 }
 
+/// Character cuts for the runtime's readable transcript copies. Whole values
+/// remain on the outcome; these cuts do not grant or limit output retention.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RuntimeOutputCuts {
+    pub value_reply_max_chars: usize,
+    pub raw_error_max_chars: usize,
+}
+impl RuntimeOutputCuts {
+    /// 16,384 value characters and 4,000 raw-error characters, plus an omission
+    /// marker. These inherited presentation choices have no measurement backing.
+    pub const fn standard() -> Self {
+        Self {
+            value_reply_max_chars: 16 * 1024,
+            raw_error_max_chars: 4000,
+        }
+    }
+}
+impl Default for RuntimeOutputCuts {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+
 pub fn make_error_envelope(
     kind: TurnFailureKind,
     code: Option<FailureCode>,
     terminal_reason: Option<crate::llm::types::LlmTerminalReason>,
     user_message: impl Into<String>,
     raw: Option<String>,
+    cuts: RuntimeOutputCuts,
 ) -> ErrorEnvelope {
     let user_message = user_message.into();
     ErrorEnvelope {
@@ -898,7 +923,7 @@ pub fn make_error_envelope(
         code,
         terminal_reason,
         user_message,
-        raw: raw.map(|s| truncate_raw_error(s.trim())),
+        raw: raw.map(|s| truncate_raw_error(s.trim(), cuts.raw_error_max_chars)),
         retryable: None,
         provider_failure_kind: None,
     }
@@ -909,21 +934,28 @@ pub fn make_error_event(
     code: Option<FailureCode>,
     user_message: impl Into<String>,
     raw: Option<String>,
+    cuts: RuntimeOutputCuts,
 ) -> SessionStreamEvent {
     let user_message = user_message.into();
     SessionStreamEvent::Error {
         message: user_message.clone(),
-        envelope: Some(make_error_envelope(kind, code, None, user_message, raw)),
+        envelope: Some(make_error_envelope(
+            kind,
+            code,
+            None,
+            user_message,
+            raw,
+            cuts,
+        )),
     }
 }
 
-pub fn truncate_raw_error(s: &str) -> String {
-    const MAX_RAW: usize = 4000;
+pub fn truncate_raw_error(s: &str, max_chars: usize) -> String {
     let raw_len = s.chars().count();
-    if raw_len <= MAX_RAW {
+    if raw_len <= max_chars {
         return s.to_string();
     }
-    let keep = MAX_RAW / 2;
+    let keep = max_chars / 2;
     let head = s.chars().take(keep).collect::<String>();
     let tail = s
         .chars()

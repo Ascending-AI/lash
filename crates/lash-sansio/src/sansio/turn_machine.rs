@@ -396,6 +396,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 Some(crate::session_model::TurnFailureCode::ReconfigureFailed.into()),
                 "the turn has no synced execution environment",
                 None,
+                crate::session_model::RuntimeOutputCuts::standard(),
             ));
             return;
         };
@@ -451,6 +452,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             Some(abort.code),
             abort.message,
             None,
+            crate::session_model::RuntimeOutputCuts::standard(),
         ));
         self.finish(TurnOutcome::Stopped(TurnStop::PluginAbort));
     }
@@ -668,6 +670,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     overflow.counter()
                 ),
                 None,
+                crate::session_model::RuntimeOutputCuts::standard(),
             ));
         }
     }
@@ -729,6 +732,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         failure.message
                     ),
                     Some(failure.message),
+                    crate::session_model::RuntimeOutputCuts::standard(),
                 ));
             }
         }
@@ -893,6 +897,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             Some(reason),
             "provider call ended",
             None,
+            crate::session_model::RuntimeOutputCuts::standard(),
         );
         // A terminal reason is a deterministic outcome of a completed call
         // (overflow, filter, cancellation): replaying the identical request
@@ -1001,6 +1006,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             Some(error.terminal_reason),
             "provider call failed",
             None,
+            crate::session_model::RuntimeOutputCuts::standard(),
         );
         // Carry the transport's typed signals through to the envelope (and
         // from there to `TurnIssue`): retryability is always classified, the

@@ -78,6 +78,7 @@ impl RuntimeTurnDriver<'_> {
                     Some(crate::TurnFailureCode::BeforeLlmCallFailed.into()),
                     failure.message.clone(),
                     Some(failure.message),
+                    lash_sansio::session_model::RuntimeOutputCuts::standard(),
                 ));
                 Ok(false)
             }
@@ -115,7 +116,7 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(result) => result,
             Err(err) => {
-                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
             }
         };
@@ -165,7 +166,7 @@ impl RuntimeTurnDriver<'_> {
                 {
                     Ok(response) => Ok(response),
                     Err(err) => {
-                        Self::fail_or_abort_runtime_effect_controller(machine, err)?;
+                        self.fail_or_abort_runtime_effect_controller(machine, err)?;
                         return Ok(());
                     }
                 }
@@ -263,7 +264,7 @@ impl RuntimeTurnDriver<'_> {
                 // A failed checkpoint delivers nothing. What it admitted was
                 // never bound: it stays open session mail.
                 self.pending_checkpoint_turn_inputs = None;
-                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)?;
             }
         }
         Ok(())
@@ -285,7 +286,7 @@ impl RuntimeTurnDriver<'_> {
         {
             Ok(result) => result,
             Err(err) => {
-                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(());
             }
         };
@@ -383,7 +384,7 @@ impl RuntimeTurnDriver<'_> {
                         },
                     },
                 );
-                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(CellExit::Answered);
             }
         };
@@ -454,7 +455,7 @@ impl RuntimeTurnDriver<'_> {
                 if Self::aborts_turn(&err) {
                     return Err(err.into_runtime_error());
                 }
-                Self::fail_or_abort_runtime_effect_controller(machine, err)?;
+                self.fail_or_abort_runtime_effect_controller(machine, err)?;
                 return Ok(CellExit::Answered);
             }
         };

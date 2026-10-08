@@ -253,20 +253,28 @@ pub(crate) fn compact_doc_line(value: &serde_json::Value) -> Option<String> {
 }
 
 pub(crate) fn compact_examples(examples: &[String], limit: usize) -> Vec<String> {
+    compact_examples_with_chars(examples, limit, COMPACT_TOOL_EXAMPLE_CHAR_LIMIT)
+}
+
+pub(crate) fn compact_examples_with_chars(
+    examples: &[String],
+    limit: usize,
+    max_chars: usize,
+) -> Vec<String> {
     examples
         .iter()
         .map(|example| example.trim())
         .filter(|example| !example.is_empty())
         .take(limit)
         .map(|example| {
-            if example.chars().count() <= COMPACT_TOOL_EXAMPLE_CHAR_LIMIT {
+            if example.chars().count() <= max_chars {
                 return example.to_string();
             }
             let mut out = example
                 .chars()
-                .take(COMPACT_TOOL_EXAMPLE_CHAR_LIMIT.saturating_sub(3))
+                .take(max_chars.saturating_sub(3))
                 .collect::<String>();
-            out.push_str("...");
+            out.extend("...".chars().take(max_chars.min(3)));
             out
         })
         .collect()

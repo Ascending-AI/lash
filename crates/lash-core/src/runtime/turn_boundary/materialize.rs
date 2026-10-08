@@ -29,11 +29,6 @@ impl ProtocolTerminalOutput {
     }
 }
 
-/// The most characters a value reply renders. A turn's value is unbounded and
-/// already travels whole on the turn's outcome; the transcript's copy is for
-/// reading, so its spend against the commit budget is capped here, as policy.
-pub(super) const VALUE_REPLY_MAX_CHARS: usize = 16 * 1024;
-
 /// Commits the turn's one reply and marks it (FIG-1493 §5.1, §5.5).
 ///
 /// Every finished turn has a reply, whatever finished it: prose the protocol
@@ -52,6 +47,7 @@ pub(super) fn materialize_turn_reply(
     turn_id: &TurnId,
     message_id: &str,
     protocol_output: &ProtocolTerminalOutput,
+    cuts: lash_sansio::session_model::RuntimeOutputCuts,
 ) {
     let TurnOutcome::Finished(finish) = outcome else {
         return;
@@ -87,7 +83,7 @@ pub(super) fn materialize_turn_reply(
             text.clone()
         }
         TurnFinish::FinalValue { value } | TurnFinish::ToolValue { value, .. } => {
-            render_value_reply(value)
+            render_value_reply(value, cuts.value_reply_max_chars)
         }
     };
     let id = message_id.to_string();
@@ -119,13 +115,13 @@ fn reply_part_id(message: &Message) -> Option<String> {
 }
 
 /// A value reply's text: a string value as itself, any other value as compact
-/// JSON, capped at [`VALUE_REPLY_MAX_CHARS`].
-fn render_value_reply(value: &serde_json::Value) -> String {
+/// JSON, capped at the host's character cut.
+fn render_value_reply(value: &serde_json::Value, max_chars: usize) -> String {
     let rendered = match value {
         serde_json::Value::String(text) => text.clone(),
         other => other.to_string(),
     };
-    match rendered.char_indices().nth(VALUE_REPLY_MAX_CHARS) {
+    match rendered.char_indices().nth(max_chars) {
         Some((cut, _)) => format!("{}…", &rendered[..cut]),
         None => rendered,
     }
@@ -218,6 +214,7 @@ mod tests {
             &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &protocol_output,
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert_eq!(
@@ -263,6 +260,7 @@ mod tests {
             &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         );
 
         let messages = state.read_model().messages.clone();
@@ -313,6 +311,7 @@ mod tests {
             &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert_eq!(
@@ -359,6 +358,7 @@ mod tests {
             &turn(),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         );
     }
 
@@ -416,14 +416,20 @@ mod tests {
 
         materialize(
             &mut state,
-            &final_value(serde_json::json!("é".repeat(VALUE_REPLY_MAX_CHARS + 10))),
+            &final_value(serde_json::json!("é".repeat(
+                lash_sansio::session_model::RuntimeOutputCuts::standard().value_reply_max_chars
+                    + 10
+            ))),
         );
 
         let messages = state.read_model().messages.clone();
         let text = messages.last().expect("the reply").parts[0]
             .content()
             .into_owned();
-        assert_eq!(text.chars().count(), VALUE_REPLY_MAX_CHARS + 1);
+        assert_eq!(
+            text.chars().count(),
+            lash_sansio::session_model::RuntimeOutputCuts::standard().value_reply_max_chars + 1
+        );
         assert!(text.ends_with('…'));
     }
 
@@ -463,6 +469,7 @@ mod tests {
             &turn(),
             TERMINAL_ID,
             &protocol_output,
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert_eq!(
@@ -492,6 +499,7 @@ mod tests {
             &turn(),
             "first-attempt-reply",
             &ProtocolTerminalOutput::default(),
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         );
         mark_all_persisted(&mut state);
         let before = message_ids(&state);
@@ -502,6 +510,7 @@ mod tests {
             &turn(),
             "fresh-attempt-reply",
             &ProtocolTerminalOutput::default(),
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         );
         assert_eq!(
             reply_markers(&state).len(),
@@ -534,6 +543,7 @@ mod tests {
             &turn(),
             TERMINAL_ID,
             &protocol_output,
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert!(reply_markers(&state).is_empty());
@@ -555,6 +565,7 @@ mod tests {
             &TurnId::from(TURN_ID),
             TERMINAL_ID,
             &ProtocolTerminalOutput::default(),
+            lash_sansio::session_model::RuntimeOutputCuts::standard(),
         );
 
         assert_eq!(message_ids(&state), before);

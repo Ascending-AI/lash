@@ -29,7 +29,7 @@ use lash_durable::domain::{ModelCallId, PromptCallKey};
 
 use crate::plugin::prompt::{
     AdmittedCallLoadError, OfferedTools, ProjectedHistoryStats, PromptCall, PromptCompositionError,
-    PromptCutParts, PromptModel, PromptRenderPool, admission_record, load_admitted_call,
+    PromptCutParts, PromptModel, admission_record, load_admitted_call,
 };
 use crate::prompt_sections::{PromptPlan, PromptPurpose};
 use crate::{
@@ -350,7 +350,7 @@ async fn compose(
         &plan,
         purpose,
         Arc::new(cut),
-        PromptRenderPool::shared(),
+        plugins.prompt_render_pool(),
     )
     .await
     {

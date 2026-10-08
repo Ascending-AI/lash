@@ -33,6 +33,7 @@ pub(crate) use javascript_exotics::{
     canonical_regexp_flags, regexp_source, regexp_string, same_value_zero,
 };
 pub(crate) use partition::DurablePartition;
+pub use summary::BindingSummaryConfig;
 pub(crate) use summary::SUMMARY_MAX_CHARS;
 pub(crate) use url_objects::{
     UrlObject, UrlSearchParamsObject, parse_params_string, parse_url, serialize_params,

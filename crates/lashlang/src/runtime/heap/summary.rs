@@ -9,21 +9,55 @@
 
 use super::{Heap, HeapObject, Value, regexp_string, serialize_params};
 
-/// Members shown per container before an ellipsis.
-const SUMMARY_MEMBERS: usize = 4;
-/// Nesting shown before a container collapses to its kind.
-const SUMMARY_DEPTH: usize = 2;
-/// The longest summary, in characters.
-pub(crate) const SUMMARY_MAX_CHARS: usize = 160;
+/// Presentation of opaque heap bindings. These historical cuts have no
+/// workload measurement establishing them as universal limits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BindingSummaryConfig {
+    pub members: usize,
+    pub depth: usize,
+    pub max_chars: usize,
+}
+impl Default for BindingSummaryConfig {
+    fn default() -> Self {
+        Self::standard()
+    }
+}
+impl BindingSummaryConfig {
+    /// Standard preset: four members, two container levels, 160 characters.
+    pub const fn standard() -> Self {
+        Self {
+            members: 4,
+            depth: 2,
+            max_chars: 160,
+        }
+    }
+}
+pub(crate) const SUMMARY_MAX_CHARS: usize = BindingSummaryConfig::standard().max_chars;
 
+struct SummaryView<'a> {
+    heap: &'a Heap,
+    config: &'a BindingSummaryConfig,
+}
 impl Heap {
+    pub(crate) fn summarize(&self, value: &Value, config: &BindingSummaryConfig) -> String {
+        SummaryView { heap: self, config }.summarize(value)
+    }
+}
+
+impl SummaryView<'_> {
     /// `value`, summarized within the bounds above.
     pub(crate) fn summarize(&self, value: &Value) -> String {
         let mut text = String::new();
         self.summarize_into(value, 0, &mut text);
-        if text.chars().count() > SUMMARY_MAX_CHARS {
-            let mut cut = text.chars().take(SUMMARY_MAX_CHARS - 1).collect::<String>();
-            cut.push('…');
+        if text.chars().count() > self.config.max_chars {
+            let mut cut = text
+                .chars()
+                .take(self.config.max_chars.saturating_sub(1))
+                .collect::<String>();
+            if self.config.max_chars > 0 {
+                cut.push('…');
+            }
             return cut;
         }
         text
@@ -59,7 +93,7 @@ impl Heap {
                 );
             }
             Value::Record(record) => self.summarize_record(record.iter(), record.len(), depth, out),
-            Value::Ref(id) => match self.get(*id) {
+            Value::Ref(id) => match self.heap.get(*id) {
                 Ok(object) => self.summarize_object(*id, object, depth, out),
                 Err(_) => out.push_str("<unavailable>"),
             },
@@ -143,7 +177,7 @@ impl Heap {
                 out.push_str(" at ");
                 self.summarize_into(&result.index, depth + 1, out);
             }
-            HeapObject::Url(_) => match self.url_property(id, "href") {
+            HeapObject::Url(_) => match self.heap.url_property(id, "href") {
                 Ok(Some(Value::String(href))) => out.push_str(&format!("URL({})", quote(&href))),
                 _ => out.push_str("URL"),
             },
@@ -193,8 +227,8 @@ impl Heap {
         );
     }
 
-    /// `open` members… `close`, at most `SUMMARY_MEMBERS` of them; below
-    /// `SUMMARY_DEPTH` a non-empty container collapses to `open…close`.
+    /// `open` members… `close`, at most the configured member count; below
+    /// the configured depth a non-empty container collapses to `open…close`.
     #[expect(
         clippy::too_many_arguments,
         reason = "one walker serves every container kind; its bounds and callbacks are its arguments"
@@ -215,17 +249,17 @@ impl Heap {
             return;
         }
         out.push_str(open);
-        if depth >= SUMMARY_DEPTH {
+        if depth >= self.config.depth {
             out.push('…');
         } else {
-            for (index, item) in members.take(SUMMARY_MEMBERS).enumerate() {
+            for (index, item) in members.take(self.config.members).enumerate() {
                 if index > 0 {
                     out.push_str(", ");
                 }
                 member(self, item, depth + 1, out);
             }
-            if len > SUMMARY_MEMBERS {
-                out.push_str(&format!(", … {} more", len - SUMMARY_MEMBERS));
+            if len > self.config.members {
+                out.push_str(&format!(", … {} more", len - self.config.members));
             }
         }
         out.push_str(close);

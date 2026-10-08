@@ -60,7 +60,7 @@ pub(crate) fn recorded_namespace(options: RlmTurnOptions) -> lash_core::Protocol
             .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
             .memory_limit(lash_protocol_rlm::MemoryBound::unbounded())
             .build()
-            .recorded_behaviour(false),
+            .recorded_behaviour(),
     })
     .expect("the recorded namespace encodes")
 }

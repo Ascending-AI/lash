@@ -28,6 +28,15 @@ pub struct ToolRenderParams {
 
 impl Default for ToolRenderParams {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl ToolRenderParams {
+    /// Standard tool render: 16,000 characters over `RenderParams::standard`,
+    /// prefer authored views, 400 lines, 50% head share. Historical, unmeasured
+    /// workload choices; every field is configurable.
+    pub fn standard() -> Self {
         Self {
             value: RenderParams {
                 max_chars: 16_000,
@@ -51,6 +60,17 @@ pub struct ToolRenderPatch {
     pub max_lines: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head_share_percent: Option<u8>,
+}
+
+impl From<&ToolRenderParams> for ToolRenderPatch {
+    fn from(params: &ToolRenderParams) -> Self {
+        Self {
+            value: (&params.value).into(),
+            authored_view: Some(params.authored_view),
+            max_lines: Some(params.max_lines),
+            head_share_percent: Some(params.head_share_percent),
+        }
+    }
 }
 
 impl ToolRenderPatch {
@@ -85,10 +105,28 @@ pub struct StandardRenderConfig {
 impl StandardRenderConfig {
     /// The builtin layer under a host's and a turn's patches: the render
     /// defaults, with no per-tool overrides.
-    // Equivalent body-replacement mutant: the builtin layer is exactly Default.
-    #[cfg_attr(test, mutants::skip)]
     pub fn builtin() -> Self {
-        Self::default()
+        Self::standard()
+    }
+
+    /// The complete standard render base. `Default` is an empty patch that
+    /// inherits it; this preset states every value from `ToolRenderParams::standard`.
+    pub fn standard() -> Self {
+        Self {
+            defaults: (&ToolRenderParams::standard()).into(),
+            per_tool: BTreeMap::new(),
+        }
+    }
+
+    /// Record a complete base so reopening does not consult new defaults.
+    pub(crate) fn recorded_base(&self) -> Self {
+        let defaults = self.defaults.apply(&ToolRenderParams::standard());
+        Self {
+            defaults: (&defaults).into(),
+            // Per-tool values remain patches over the recorded global base:
+            // fields the host left inherited can still follow run defaults.
+            per_tool: self.per_tool.clone(),
+        }
     }
 
     /// `self` over `under`, field by field and tool by tool: every field
