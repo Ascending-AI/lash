@@ -12,8 +12,8 @@ use super::*;
 use crate::runtime::durable::commit_publication::{CommitBase, PublishedHeads};
 use crate::runtime::durable::head::SessionHead;
 use crate::runtime::durable::session::{
-    CellExit, CodeCell, ModelCallAttempt, OpenTurn, PreparedCall, RestoredTurn, TurnCommit,
-    TurnDone, TurnDrive, TurnError, TurnRestore,
+    CellExit, CellToolCalls, CodeCell, ModelCallAttempt, OpenTurn, PreparedCall, RestoredTurn,
+    TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore,
 };
 use crate::runtime::turn_loop::DurableTurn;
 
@@ -52,6 +52,9 @@ pub(in crate::runtime) struct RuntimeDrive {
     _attachments: Option<crate::attachments::AttachmentExecutionBinding>,
     effect_phase: Option<TurnPhaseSpan>,
     commit_phase: Option<TurnPhaseSpan>,
+    /// The tool calls of the turn's last cell, when `turn.commit` is the
+    /// commit that records them: its finish reports them (FIG-5330).
+    finishing_cell_calls: Option<CellToolCalls>,
 }
 
 #[derive(Default)]
@@ -194,6 +197,7 @@ impl RuntimeDrive {
         Self {
             effect_phase,
             commit_phase: None,
+            finishing_cell_calls: None,
             driver,
             machine,
             observer,
@@ -481,8 +485,87 @@ impl TurnDrive for RuntimeDrive {
         .map_err(runtime)
     }
 
-    fn answered_cell_calls(&mut self) -> Vec<crate::ToolCallRecord> {
+    fn answered_cell_calls(&mut self) -> CellToolCalls {
         std::mem::take(&mut self.driver.answered_cell_calls)
+    }
+
+    async fn stopped_cell_calls(
+        &mut self,
+        cx: &ActorContext,
+        id: crate::EffectId,
+    ) -> Result<CellToolCalls, TurnError> {
+        use lash_core_execution::runtime::actor::round::{self, PolicyView, SettledOutput};
+        use lash_durable::domain::{CellId, ExecKey, OwnerKey};
+
+        let Some(code_executor) = self.driver.session.plugins().code_executor() else {
+            return Ok(CellToolCalls::default());
+        };
+        // The cell's snapshot and records are filed under its replay key,
+        // which the restored machine derives again.
+        let invocation = self
+            .driver
+            .turn_effect_invocation(&self.machine, id, RuntimeEffectKind::ExecCode)
+            .map_err(|error| TurnError::Exec(error.to_string()))?;
+        let cell = CellId::new(invocation.effect_replay_key());
+        let session = self.driver.session_id.clone();
+        let run = self.driver.turn_id.clone();
+        let reads = cx.durable_reads()?;
+        let exec = ExecKey::Cell(session.clone(), run.clone(), cell.clone());
+        let mut records = match reads.snapshot(&exec).await? {
+            Some(snapshot) => code_executor
+                .snapshot_tool_calls(&snapshot.snapshot_ref)
+                .map_err(|error| {
+                    TurnError::Exec(format!(
+                        "the stopped cell's snapshot does not read: {error}"
+                    ))
+                })?,
+            None => Vec::new(),
+        };
+        // A call that settled after the cell's latest snapshot is in no
+        // ledger yet: its outcome is still among the cell's own records,
+        // which only the next snapshot prunes. A member without a completed
+        // answer never finished, and is not reported.
+        let rows = reads
+            .run_records(&OwnerKey::Cell(session, run, cell))
+            .await?;
+        let fold = round::fold(&rows, &PolicyView::new([]))
+            .map_err(|error| TurnError::Exec(format!("the stopped cell's records: {error}")))?;
+        for member in fold.rounds().flat_map(|round| round.members()) {
+            if member.draft().tool().as_str().starts_with("cell-host:") {
+                continue;
+            }
+            let Some(completed) = member
+                .outcome()
+                .filter(|outcome| {
+                    matches!(
+                        outcome,
+                        SettledOutput::Completed(_) | SettledOutput::Failed(_)
+                    )
+                })
+                .and_then(SettledOutput::payload)
+                .and_then(round::decode_completed)
+            else {
+                continue;
+            };
+            if records
+                .iter()
+                .any(|record| record.call_id == completed.call_id)
+            {
+                continue;
+            }
+            records.push(crate::ToolCallRecord {
+                call_id: completed.call_id,
+                provider_call_id: completed.provider_call_id,
+                tool: completed.tool_name,
+                args: completed.args,
+                output: completed.output,
+            });
+        }
+        Ok(self.driver.bounded_cell_calls(records))
+    }
+
+    fn finishing_cell_calls(&mut self, calls: &CellToolCalls) {
+        self.finishing_cell_calls = Some(calls.clone());
     }
 
     fn stop_cell(&mut self) {
@@ -515,7 +598,17 @@ impl TurnDrive for RuntimeDrive {
         let plugins = Arc::clone(driver.session.plugins());
         let observed = plugins.has_runtime_event_hooks();
         let finished = if plugins.has_after_turn_hooks() || observed {
-            Some(FinishedTurn::read(cx, &driver.session_id, &driver.turn_id, &outcome).await?)
+            let unrecorded = self.finishing_cell_calls.take();
+            Some(
+                FinishedTurn::read(
+                    cx,
+                    &driver.session_id,
+                    &driver.turn_id,
+                    &outcome,
+                    unrecorded,
+                )
+                .await?,
+            )
         } else {
             None
         };

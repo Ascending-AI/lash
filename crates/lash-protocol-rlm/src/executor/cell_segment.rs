@@ -115,6 +115,21 @@ impl CellSegmentState {
     }
 }
 
+/// The records of the tool calls a cell completed, in call order, as its
+/// stored `snapshot` holds them in its envelope's call ledger.
+pub(crate) fn snapshot_tool_calls(
+    snapshot: &str,
+) -> Result<Vec<lash_core::ToolCallRecord>, String> {
+    let checkpoint: lash_vm_broker::Checkpoint =
+        serde_json::from_str(snapshot).map_err(|error| error.to_string())?;
+    let Some(host) = checkpoint.host.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let state: CellSegmentState =
+        rmp_serde::from_slice(&host.0).map_err(|error| error.to_string())?;
+    Ok(state.host.tool_call_records())
+}
+
 /// A cell resumed from its latest snapshot: the checkpoint the broker runs
 /// on from, and the envelope its host runs on with.
 pub(super) struct ResumedCell {

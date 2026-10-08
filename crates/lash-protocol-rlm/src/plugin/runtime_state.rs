@@ -357,6 +357,29 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
         self.state.execution_state_dirty()
     }
 
+    /// The session's recorded presentation bound: at most
+    /// `max_tool_call_records` records, each output's scalars cut at
+    /// `max_inline_scalar_bytes`.
+    fn bound_tool_call_records(
+        &self,
+        records: Vec<lash_core::ToolCallRecord>,
+    ) -> (
+        Vec<lash_core::ToolCallRecord>,
+        Option<lash_core::OmittedToolCalls>,
+    ) {
+        crate::tool_records::bounded_exec_tool_call_records(
+            &records,
+            &self.state.dialect.presentation(),
+        )
+    }
+
+    fn snapshot_tool_calls(
+        &self,
+        snapshot: &str,
+    ) -> Result<Vec<lash_core::ToolCallRecord>, SessionError> {
+        crate::executor::snapshot_tool_calls(snapshot).map_err(SessionError::Protocol)
+    }
+
     async fn frame_switch_carries(
         &self,
         _ctx: ProtocolSessionContext<'_>,

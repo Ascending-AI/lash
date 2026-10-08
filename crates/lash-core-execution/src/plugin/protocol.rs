@@ -230,6 +230,34 @@ pub trait CodeExecutorPlugin: Send + Sync {
         false
     }
 
+    /// The view of `records`, one cell's tool call records in call order,
+    /// that a turn keeps of the cell: the executor's one bound on how many
+    /// records and how much of each output a cell's round retains, with the
+    /// records it leaves out accounted for. The turn records, streams and
+    /// reports this view and nothing else of the cell's calls (FIG-5330).
+    /// An executor that states no bound keeps every record whole.
+    fn bound_tool_call_records(
+        &self,
+        records: Vec<crate::ToolCallRecord>,
+    ) -> (Vec<crate::ToolCallRecord>, Option<crate::OmittedToolCalls>) {
+        (records, None)
+    }
+
+    /// The records of the tool calls a cell completed, in call order, as
+    /// `snapshot` holds them: the cell's stored snapshot, as this executor
+    /// wrote it. A turn that stops on the cell records them from here, since
+    /// the cell never answers (FIG-5330).
+    ///
+    /// # Errors
+    ///
+    /// [`crate::SessionError`] when the snapshot does not decode.
+    fn snapshot_tool_calls(
+        &self,
+        _snapshot: &str,
+    ) -> Result<Vec<crate::ToolCallRecord>, crate::SessionError> {
+        Ok(Vec::new())
+    }
+
     /// The executable generation this executor runs cells under (FIG-3571):
     /// everything that decides how a cell compiles, what its nested effects
     /// are keyed by, and where its cancel checkpoints fall. A turn's admission

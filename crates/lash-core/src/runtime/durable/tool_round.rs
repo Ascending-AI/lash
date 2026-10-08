@@ -51,7 +51,7 @@ use lash_durable::domain::{DomainWrite, OwnerKey, RunSeq, TurnWrite};
 use lash_durable::{CommitLabel, DurableError, DurableInstant};
 use tokio_util::sync::CancellationToken;
 
-use super::session::{TurnDrive, TurnError, TurnRow, UnfinishedPhase};
+use super::session::{CellToolCalls, TurnDrive, TurnError, TurnRow, UnfinishedPhase};
 use super::turn_cancel;
 use crate::sansio::PendingToolCall;
 use crate::{ActorContext, EffectId, Response};
@@ -365,23 +365,49 @@ pub(super) fn record_refused(
     Ok(())
 }
 
-/// The tool calls of a cell that answered the machine, which the turn's next
-/// commit records.
+/// The tool calls of a cell the turn has yet to record: one that answered
+/// the machine, which the turn's next commit records, or one the turn
+/// stopped on, which the commit that ends the turn records.
 #[derive(Debug)]
 pub(super) struct AnsweredCell {
     /// The cell's effect.
     pub(super) id: EffectId,
-    /// Its tool call records, in the order the cell made the calls.
-    pub(super) calls: Vec<crate::ToolCallRecord>,
+    /// Its tool calls, as the code executor's bound keeps them.
+    pub(super) calls: CellToolCalls,
+}
+
+/// The tool a cell round's last member is recorded under when the code
+/// executor's bound left calls out: the member's answer is their
+/// [`OmittedToolCalls`](crate::OmittedToolCalls) accounting, not a call.
+const OMITTED_CELL_CALLS: &str = "cell-omitted:";
+
+/// The accounting a cell round's member holds of the calls its bound left
+/// out, when `tool` and `answer` are such a member's.
+pub(super) fn omitted_cell_calls(
+    tool: &crate::ToolId,
+    answer: &round::CompletedCall,
+) -> Option<crate::OmittedToolCalls> {
+    if tool.as_str() != OMITTED_CELL_CALLS {
+        return None;
+    }
+    let crate::ToolCallOutcome::Success(value) = &answer.output.outcome else {
+        return None;
+    };
+    serde_json::from_value(value.to_json_value()).ok()
 }
 
 /// Record the tool calls of the cell `answered` names as a settled round of
 /// the turn at the cell's effect, in the transaction that checkpoints past
-/// the cell (FIG-5330). The cell's own records of them are pruned as it
-/// advances, and its answer is their last copy: recorded here, the turn's
-/// settled-round fold reports them beside its other rounds, in call order.
-/// A crash before this commit re-delivers the cell, which answers with them
-/// again from its snapshot.
+/// the cell or ends the turn on it (FIG-5330). The cell's own records of
+/// them are pruned as it advances, and its answer and its snapshot are their
+/// last copies: recorded here, the turn's settled-round fold reports them
+/// beside its other rounds, in call order. A crash before this commit
+/// re-delivers the cell, which answers with them again from its snapshot.
+///
+/// The round is bounded by the code executor
+/// ([`bound_tool_call_records`](crate::plugin::CodeExecutorPlugin::bound_tool_call_records)):
+/// it holds one member for each record the bound keeps, with the output the
+/// bound cut, and one more for the accounting of the calls it left out.
 pub(super) fn record_answered_cell(
     cx: &ActorContext,
     tx: &mut lash_durable::ActorTx,
@@ -391,7 +417,8 @@ pub(super) fn record_answered_cell(
     let Some(AnsweredCell { id, calls }) = answered.take() else {
         return Ok(());
     };
-    let completed = calls
+    let CellToolCalls { calls, omitted } = calls;
+    let mut completed = calls
         .into_iter()
         .map(|record| round::CompletedCall {
             model_return: crate::ModelToolReturn::from_output(record.tool.clone(), &record.output),
@@ -404,6 +431,30 @@ pub(super) fn record_answered_cell(
             replay: None,
         })
         .collect::<Vec<_>>();
+    if let Some(omitted) = omitted {
+        let root = crate::ToolCallRoot::turn(row.run.as_str()).map_err(exec)?;
+        let output = crate::ToolCallOutput::success(serde_json::to_value(&omitted).map_err(exec)?);
+        completed.push(round::CompletedCall {
+            model_return: crate::ModelToolReturn::from_output(
+                OMITTED_CELL_CALLS.to_owned(),
+                &output,
+            ),
+            call_id: crate::ToolCallId::derive(
+                "",
+                root,
+                &[crate::ToolCallPosition::EffectOrdinal(id.0)],
+            ),
+            provider_call_id: None,
+            tool_name: OMITTED_CELL_CALLS.to_owned(),
+            args: serde_json::Value::Null,
+            output,
+            intent_outcomes: Vec::new(),
+            replay: None,
+        });
+    }
+    if completed.is_empty() {
+        return Ok(());
+    }
     record_refused(cx, tx, row, id, &completed)
 }
 

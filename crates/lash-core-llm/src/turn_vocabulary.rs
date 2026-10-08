@@ -79,10 +79,6 @@ impl Drop for RuntimeNamedPhase {
 /// High-level execution summary for a completed turn.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct TurnExecutionMetrics {
-    #[serde(default)]
-    pub had_tool_calls: bool,
-    #[serde(default)]
-    pub had_code_execution: bool,
     /// Wall-clock turn start as epoch milliseconds, read from the runtime
     /// [`Clock`]. The measurement window opens when the runtime starts
     /// claiming the turn (session-execution lease / queued-work claim), so

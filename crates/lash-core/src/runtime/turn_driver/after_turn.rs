@@ -26,7 +26,10 @@ pub(super) struct FinishedTurn {
 }
 
 impl FinishedTurn {
-    /// Run `run` of `session` finished with `outcome`.
+    /// Run `run` of `session` finished with `outcome`. `unrecorded` is the
+    /// tool calls of its last cell when no commit followed the cell: the
+    /// turn's commit records them, after every round its rows hold, and the
+    /// report lists them there (FIG-5330).
     ///
     /// # Errors
     ///
@@ -36,10 +39,18 @@ impl FinishedTurn {
         session: &SessionId,
         run: &crate::TurnId,
         outcome: &TurnOutcome,
+        unrecorded: Option<crate::runtime::durable::session::CellToolCalls>,
     ) -> Result<Self, TurnError> {
-        let (tool_calls, omitted) = RuntimeTurnServices::recorded_tool_calls(cx, session, run)
-            .await
-            .map_err(TurnError::Durable)?;
+        let (mut tool_calls, mut omitted) =
+            RuntimeTurnServices::recorded_tool_calls(cx, session, run)
+                .await
+                .map_err(TurnError::Durable)?;
+        if let Some(cell) = unrecorded {
+            tool_calls.extend(cell.calls);
+            if let Some(left_out) = cell.omitted {
+                crate::runtime::durable::session::add_omitted(&mut omitted, left_out);
+            }
+        }
         Ok(Self {
             outcome: outcome.clone(),
             tool_calls,

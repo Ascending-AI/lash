@@ -7,10 +7,10 @@ use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 use super::commit_publication::{CommitBase, PublishedHeads, announce_head};
-use super::head::SessionHead;
+use super::head::{HeadCache, SessionHead};
 use super::session::{
-    AdmittedInputs, OpenTurn, RecordedPreparation, TurnDrive, TurnError, TurnRestore, TurnRow,
-    TurnServices,
+    AdmittedInputs, CellToolCalls, OpenTurn, RecordedPreparation, TurnDrive, TurnError,
+    TurnRestore, TurnRow, TurnServices, UnfinishedPhase,
 };
 use super::session_mail::{InputAdmission, InputBatching, SessionMailError};
 use crate::runtime::logical_turn::LogicalTurnAdmissions;
@@ -73,7 +73,9 @@ impl RuntimeTurnServices {
     /// order. This reads every step under the turn's owner, so
     /// an owner change or a gap in live activity cannot drop earlier calls.
     /// A code cell's tool calls are among them: the turn records them as a
-    /// settled round of its own once the cell answers (FIG-5330).
+    /// settled round of its own once the cell answers, or when the turn ends
+    /// on the cell (FIG-5330). That round is bounded by the code executor:
+    /// the calls its bound left out are in the omitted-call summary.
     /// Cell host operations are not catalog tool calls. Calls that settled
     /// without material have no retained request/output record and remain
     /// accounted for in the omitted-call summary.
@@ -132,6 +134,12 @@ impl RuntimeTurnServices {
                         "call {} has another call's recorded answer",
                         member.call(),
                     )));
+                }
+                if let Some(left_out) =
+                    super::tool_round::omitted_cell_calls(member.draft().tool(), &completed)
+                {
+                    super::session::add_omitted(&mut omitted, left_out);
+                    continue;
                 }
                 calls.push(crate::ToolCallRecord {
                     call_id: completed.call_id,
@@ -228,6 +236,46 @@ impl TurnServices for RuntimeTurnServices {
         let recorded = restore.recorded_preparation()?;
         let (turn, parts) = self.prepare(cx, restore.row(), Some(recorded)).await?;
         RuntimeDrive::resume(turn, parts, restore).await
+    }
+
+    async fn stopped_cell_calls(
+        &self,
+        cx: &ActorContext,
+        row: &TurnRow,
+        heads: &mut HeadCache,
+    ) -> Result<Option<(crate::EffectId, CellToolCalls)>, TurnError> {
+        use lash_durable::domain::{OwnerKey, RunSeq};
+
+        let UnfinishedPhase::Tools { run, .. } = &row.phase else {
+            return Ok(None);
+        };
+        // A round the turn's rows hold at its phase is a tool round, whose
+        // members are recorded already.
+        let owner = OwnerKey::Turn(row.session.clone(), row.run.clone());
+        let rows = cx.durable_reads()?.run_records(&owner).await?;
+        if rows.iter().any(|stored| stored.run == *run) {
+            return Ok(None);
+        }
+        // The restored machine re-delivers the cell, which names its
+        // snapshot. A turn its committed state cannot prepare ran no cell
+        // this owner can read; its cancel still ends it.
+        let turn = match self.resume(cx, TurnRestore::new(cx, row, heads)).await {
+            Ok(turn) => turn,
+            Err(TurnError::Runtime(refusal)) if refusal.is_terminal() => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let OpenTurn {
+            mut drive, pending, ..
+        } = turn;
+        let redelivered = pending.or_else(|| drive.machine().poll_effect());
+        let Some(crate::Effect::ExecCode { id, .. }) = redelivered else {
+            return Ok(None);
+        };
+        if RunSeq(id.0) != *run {
+            return Ok(None);
+        }
+        let calls = drive.stopped_cell_calls(cx, id).await?;
+        Ok((!calls.is_empty()).then_some((id, calls)))
     }
 
     async fn apply_commands(

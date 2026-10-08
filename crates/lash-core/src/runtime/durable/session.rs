@@ -110,6 +110,24 @@ pub trait TurnServices: Send + Sync {
         admitted: &AdmittedInputs,
     ) -> Result<(), TurnError>;
 
+    /// The tool calls the cell `row`'s turn stopped on completed, with the
+    /// cell's effect, when the turn's phase is a cell whose calls its rows
+    /// do not record yet: what the commit that ends the turn without the
+    /// cell's answer records of it (FIG-5330). `None` for a turn that
+    /// stopped on no cell, and for services that run none.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the turn or the cell's records do not read.
+    async fn stopped_cell_calls(
+        &self,
+        _cx: &ActorContext,
+        _row: &TurnRow,
+        _heads: &mut HeadCache,
+    ) -> Result<Option<(crate::EffectId, CellToolCalls)>, TurnError> {
+        Ok(None)
+    }
+
     /// How many next-turn inputs one of the session's runs takes: the
     /// host's installed queued-work batching. The default takes each input
     /// as its own run.
@@ -339,13 +357,34 @@ pub trait TurnDrive: Send {
         cell: CodeCell,
     ) -> Result<CellExit, TurnError>;
 
-    /// The tool call records of the cell that last answered the machine, in
-    /// the order the cell made the calls, taken once: the turn's next commit
-    /// records them as a settled round of its own (FIG-5330). Empty for a
-    /// drive that runs no cell.
-    fn answered_cell_calls(&mut self) -> Vec<crate::ToolCallRecord> {
-        Vec::new()
+    /// The tool calls of the cell that last answered the machine, taken
+    /// once: the turn's next commit records them as a settled round of its
+    /// own (FIG-5330). Empty for a drive that runs no cell.
+    fn answered_cell_calls(&mut self) -> CellToolCalls {
+        CellToolCalls::default()
     }
+
+    /// The tool calls the cell of effect `id` completed before the turn
+    /// stopped on it, read from the cell's latest snapshot and the outcomes
+    /// it committed since: what a turn that ends without the cell's answer
+    /// records of it (FIG-5330). A call the cell had not finished is not
+    /// among them. Empty for a drive that runs no cell.
+    ///
+    /// # Errors
+    ///
+    /// [`TurnError`] when the cell's snapshot or records do not read.
+    async fn stopped_cell_calls(
+        &mut self,
+        _cx: &ActorContext,
+        _id: crate::EffectId,
+    ) -> Result<CellToolCalls, TurnError> {
+        Ok(CellToolCalls::default())
+    }
+
+    /// `calls` are the tool calls of the turn's last cell, which answered
+    /// with no commit since: `turn.commit` records them, and the finish that
+    /// follows reports them beside the recorded ones (FIG-5330).
+    fn finishing_cell_calls(&mut self, _calls: &CellToolCalls) {}
 
     /// The turn accepted an `Immediate` cancel while its cell ran, and the
     /// phase runner dropped the cell: stop what the cell started that its
@@ -398,6 +437,41 @@ pub enum CellExit {
     /// no answer yet, and the turn suspends until the earliest due, which
     /// the cell noted on the actor's context.
     Suspended,
+}
+
+/// One code cell's tool calls as its turn records them: the records the
+/// code executor's bound keeps
+/// ([`bound_tool_call_records`](crate::plugin::CodeExecutorPlugin::bound_tool_call_records)),
+/// in call order, and the accounting of the calls it leaves out.
+#[derive(Clone, Debug, Default)]
+pub struct CellToolCalls {
+    /// The retained records, in the order the cell made the calls.
+    pub calls: Vec<crate::ToolCallRecord>,
+    /// The calls the bound left out.
+    pub omitted: Option<crate::OmittedToolCalls>,
+}
+
+impl CellToolCalls {
+    /// Whether the cell made no tool call.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.calls.is_empty() && self.omitted.is_none()
+    }
+}
+
+/// Add `more` to the omitted-call accounting `into`.
+pub(crate) fn add_omitted(
+    into: &mut Option<crate::OmittedToolCalls>,
+    more: crate::OmittedToolCalls,
+) {
+    match into {
+        Some(summary) => {
+            summary.count += more.count;
+            summary.failures += more.failures;
+            summary.attachments.extend(more.attachments);
+        }
+        None => *into = Some(more),
+    }
 }
 
 /// A finished machine's last word: what its `Done` effect carried and the
@@ -613,7 +687,10 @@ impl SessionActivation {
         // An accepted cancel request ends the turn before anything else
         // runs: the live owner stopped its work for it, or a crash left it.
         if let Some(request) = row.cancel.clone() {
-            turn_cancel::finalize(cx, &row, &request).await?;
+            // A turn that stopped on a cell records the calls the cell
+            // completed with its cancel: the cell never answers.
+            let stopped = self.services.stopped_cell_calls(cx, &row, heads).await?;
+            turn_cancel::finalize(cx, &row, &request, stopped).await?;
             // The stop then waits for the children its cancel marked (G1b,
             // L6b): the rest of its cascade first, then their terminals,
             // bounded by the stop's grace. A child still running at the

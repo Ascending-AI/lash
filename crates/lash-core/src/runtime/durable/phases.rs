@@ -458,6 +458,11 @@ pub async fn run_phases(
                 if turn_cancel::immediate_in(&tx) {
                     return Ok(PhaseExit::CancelRequested);
                 }
+                // The last cell's calls commit with the turn; its finish
+                // reports them beside the recorded ones.
+                if let Some(cell) = &answered_cell {
+                    drive.finishing_cell_calls(&cell.calls);
+                }
                 // The turn commits, and its run answers, the outcome the
                 // model produced.
                 let done = TurnDone {

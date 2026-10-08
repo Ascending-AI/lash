@@ -339,6 +339,19 @@ impl RuntimeTurnDriver<'_> {
         Ok(())
     }
 
+    /// `records`, one cell's tool call records in call order, as the code
+    /// executor's bound keeps them: what the turn records of the cell.
+    pub(super) fn bounded_cell_calls(
+        &self,
+        records: Vec<crate::ToolCallRecord>,
+    ) -> crate::runtime::durable::session::CellToolCalls {
+        let (calls, omitted) = match self.session.plugins().code_executor() {
+            Some(code_executor) => code_executor.bound_tool_call_records(records),
+            None => (records, None),
+        };
+        crate::runtime::durable::session::CellToolCalls { calls, omitted }
+    }
+
     pub(super) async fn handle_exec_code_effect(
         &mut self,
         machine: &mut TurnMachine,
@@ -491,7 +504,7 @@ impl RuntimeTurnDriver<'_> {
             .as_millis() as u64;
         if let Ok(output) = &result {
             self.recorded_assembly.note_code_outputs(output);
-            self.answered_cell_calls.clone_from(&output.tool_calls);
+            self.answered_cell_calls = self.bounded_cell_calls(output.tool_calls.clone());
         }
         match &result {
             Ok(output) => {

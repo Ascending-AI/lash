@@ -237,7 +237,7 @@ pub(super) fn turn_effect_executor(
         // A step body commits nothing: whatever it would record is dropped
         // with this copy, and the turn's content rides its recorded outcome.
         recorded_assembly: RecordedTurnAssembly::new(),
-        answered_cell_calls: Vec::new(),
+        answered_cell_calls: Default::default(),
         host: driver.host.clone(),
         scoped_effect_controller,
         session_id: driver.session_id.clone(),

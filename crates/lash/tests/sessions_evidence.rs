@@ -30,10 +30,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::TurnExecutionMetrics| {
         let _ = &value.duration_ms;
     });
-    // W0011: lash::TurnExecutionMetrics::had_code_execution [field]
-    field_witness(|value: &lash::TurnExecutionMetrics| {
-        let _ = &value.had_code_execution;
-    });
     // W0012: lash::TurnExecutionMetrics::started_at_ms [field]
     field_witness(|value: &lash::TurnExecutionMetrics| {
         let _ = &value.started_at_ms;

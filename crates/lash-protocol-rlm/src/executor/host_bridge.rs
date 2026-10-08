@@ -78,6 +78,23 @@ pub(super) struct CellHostLedgers {
     pub tool_calls: usize,
 }
 
+impl CellHostLedgers {
+    /// The records of the host tool calls the cell completed, in execution
+    /// order.
+    pub(super) fn tool_call_records(&self) -> Vec<lash_core::ToolCallRecord> {
+        let mut calls = self
+            .calls
+            .iter()
+            .filter_map(|entry| entry.record.as_ref().map(|record| (entry.index, record)))
+            .collect::<Vec<_>>();
+        calls.sort_by_key(|(index, _)| *index);
+        calls
+            .into_iter()
+            .map(|(_, record)| record.clone())
+            .collect()
+    }
+}
+
 pub(super) struct HostBridgeConfig<'run> {
     pub ctx: RuntimeExecutionContext<'run>,
     pub cell: Arc<Result<CellRun, LashlangCellOpener>>,

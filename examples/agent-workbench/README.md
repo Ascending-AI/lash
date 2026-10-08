@@ -398,8 +398,8 @@ Recovery resumes the same Lash turn id. The stable product ids and observation
 cursors converge the resumed turn onto the same rows. A user-facing “retry turn” is different: it submits a new turn with a new
 turn id and is therefore a new transcript copy with new product identities.
 
-Do not use provider `retryable` classification or `had_tool_calls` as evidence
-that retrying is free of duplicate external effects. ADR 0042 makes one tool
+Do not use provider `retryable` classification as evidence that retrying is
+free of duplicate external effects. ADR 0042 makes one tool
 attempt atomic to Lash, but opaque work performed inside it is at-least-once if
 the worker dies after the external effect and before the attempt outcome is
 recorded. Recovery must never re-execute an uncertain tool merely to rebuild UI

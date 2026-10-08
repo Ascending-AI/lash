@@ -25,7 +25,8 @@
 //! work is dropped when the stop wins. Honouring it leaves the rest to the
 //! next activation pass, which finds the request on the row and
 //! [`finalize`]s the turn: its `Cancelled` terminal in one `turn.cancel`
-//! commit, which also settles a tool round's unfinished members `Cancelled`.
+//! commit, which also settles a tool round's unfinished members `Cancelled`
+//! and records the tool calls a cell the turn stopped on completed.
 //! A crash anywhere in between leaves the request on the row, so the next
 //! owner finalizes the turn the same way, before it starts any new work.
 
@@ -34,7 +35,9 @@ use std::future::Future;
 use lash_durable::CommitLabel;
 use lash_durable::domain::{DomainWrite, TurnWrite};
 
-use super::session::{TurnCancelRequest, TurnError, TurnRow, cancel_evidence, cancelled_cause};
+use super::session::{
+    CellToolCalls, TurnCancelRequest, TurnError, TurnRow, cancel_evidence, cancelled_cause,
+};
 use super::session_close::SESSION_CLOSE_MAIL;
 use crate::{ActorContext, TurnCancelMode};
 
@@ -95,7 +98,9 @@ pub(super) async fn unless_cancelled<F: Future>(
 
 /// End `row`'s turn for its accepted `request`: the `Cancelled` terminal,
 /// with the request's evidence as its run's cause, in one `turn.cancel` commit. It
-/// starts no work; the session head does not move.
+/// starts no work; the session head does not move. `stopped_cell` is the
+/// tool calls the cell the turn stopped on completed, which the commit
+/// records as the turn's settled round at the cell's effect (FIG-5330).
 ///
 /// # Errors
 ///
@@ -104,9 +109,13 @@ pub(super) async fn finalize(
     cx: &ActorContext,
     row: &TurnRow,
     request: &TurnCancelRequest,
+    stopped_cell: Option<(crate::EffectId, CellToolCalls)>,
 ) -> Result<(), TurnError> {
     let mut tx = cx.begin().await?;
     super::tool_round::cancel_open_round(cx, &mut tx, row).await?;
+    let mut stopped_cell =
+        stopped_cell.map(|(id, calls)| super::tool_round::AnsweredCell { id, calls });
+    super::tool_round::record_answered_cell(cx, &mut tx, row, &mut stopped_cell)?;
     tx.write(DomainWrite::Turn(TurnWrite::Terminal {
         session: row.session.clone(),
         run: row.run.clone(),

@@ -1773,3 +1773,262 @@ async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen(
     reopened.shutdown().await?;
     Ok(())
 }
+
+/// `app_lookup` answering its first call and holding its second until the
+/// law releases it.
+#[cfg(feature = "rlm")]
+struct SecondLookupHeld {
+    calls: std::sync::atomic::AtomicUsize,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(feature = "rlm")]
+#[async_trait]
+impl ToolProvider for SecondLookupHeld {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        AppTools.tool_manifests()
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        AppTools.resolve_contract(name)
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            self.entered.notify_one();
+            self.release.notified().await;
+        }
+        lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true })).into()
+    }
+}
+
+/// A turn that stops on a code cell loses none of the calls the cell
+/// completed (FIG-5330): its cancel records them from the cell's snapshot
+/// and the outcomes it committed since, and the cancelled turn's report
+/// lists them after a reopen. An `Immediate` cancel stops the cell during
+/// its second call: the first is reported and the unfinished second is not.
+/// An `AfterStep` cancel lets the cell answer and ends the turn before the
+/// model call whose commit would have recorded it: both calls are reported.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cancelled_turn_reports_the_tool_calls_its_cell_completed_after_a_reopen() -> Result<()> {
+    for (mode, completed) in [
+        (crate::TurnCancelMode::Immediate, 1),
+        (crate::TurnCancelMode::AfterStep, 2),
+    ] {
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let core = |backend: lash_core::Backend| {
+            explicit_ephemeral_facets(rlm_core_builder_over(backend))
+                .serve_test_llm_profile(
+                    text_provider(
+                        "cancelled-cell-records",
+                        typescript_block(
+                            "const first = await tools.app_lookup({});\n\
+                             const second = await tools.app_lookup({});",
+                        ),
+                    ),
+                    mock_llm_profile_spec(),
+                )
+                .tools(Arc::new(SecondLookupHeld {
+                    calls: std::sync::atomic::AtomicUsize::new(0),
+                    entered: Arc::clone(&entered),
+                    release: Arc::clone(&release),
+                }))
+                .build(crate::testing::runtime_lease_owner())
+        };
+        let backend = sqlite_memory_store_backend().await;
+        let session_id = id("cancelled-cell-records");
+        let run = turn("cancelled-cell-records-run");
+        let running = core(backend.clone())?;
+        let session = running
+            .session(session_id.clone())
+            .created()
+            .await
+            .open()
+            .await?;
+        let handle = session
+            .send(crate::TurnInput::text("look up twice"))
+            .id(run.clone())
+            .await?;
+        entered.notified().await;
+        handle.cancel().request_id("stop").mode(mode).await?;
+        release.notify_one();
+        let ended = tokio::time::timeout(std::time::Duration::from_secs(60), handle.output())
+            .await
+            .expect("the cancelled turn ends")?
+            .result;
+        assert!(
+            ended.cancellation().is_some(),
+            "{mode:?}: {:?}",
+            ended.outcome
+        );
+        drop(session);
+        running.shutdown().await?;
+
+        let reopened = core(backend)?;
+        let report = reopened
+            .session(session_id)
+            .open()
+            .await?
+            .attach_id(run)
+            .output()
+            .await?
+            .result;
+        assert_eq!(report.source, crate::ReportSource::Durable);
+        assert!(report.cancellation().is_some(), "{mode:?}");
+        assert_eq!(
+            report
+                .tool_calls
+                .iter()
+                .map(|record| (record.tool.as_str(), record.output.is_success()))
+                .collect::<Vec<_>>(),
+            vec![("app_lookup", true); completed],
+            "{mode:?}: the calls the cell completed, and no other"
+        );
+        assert!(report.omitted.is_none(), "{mode:?}");
+        reopened.shutdown().await?;
+    }
+    Ok(())
+}
+
+/// The after-turn callbacks see the tool calls of a cell that ends the turn
+/// (FIG-5330): `finish(...)` in the cell is followed by no commit but the
+/// turn's own, which records the cell's calls, and the report the callbacks
+/// read lists them.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_after_turn_report_lists_the_tool_calls_of_the_cell_that_finished_the_turn()
+-> Result<()> {
+    let seen = Arc::new(StdMutex::new(Vec::new()));
+    let plugin = crate::plugins::StaticPluginFactory::new(
+        crate::plugins::PluginDeclaration::initial("after-turn-cell-calls"),
+        crate::plugins::PluginSpec::new().with_after_turn(crate::hook_key!("calls"), {
+            let seen = Arc::clone(&seen);
+            Arc::new(move |context| {
+                let tools = context
+                    .turn
+                    .tool_calls
+                    .iter()
+                    .map(|record| record.tool.clone())
+                    .collect::<Vec<_>>();
+                seen.lock().expect("the law's lock").push(tools);
+                Box::pin(async { Ok(crate::plugins::AfterTurnContributions::default()) })
+            })
+        }),
+    );
+    let core =
+        explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
+            .serve_test_llm_profile(
+                text_provider(
+                    "after-turn-cell-calls",
+                    typescript_block(
+                        "const found = await tools.app_lookup({});\n\
+                 finish(\"looked up\");",
+                    ),
+                ),
+                mock_llm_profile_spec(),
+            )
+            .tools(Arc::new(AppTools))
+            .plugin(Arc::new(plugin))
+            .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session(id("after-turn-cell-calls"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let settled = session
+        .send(crate::TurnInput::text("look up"))
+        .output()
+        .await?
+        .result;
+    assert_eq!(settled.tool_calls.len(), 1, "the cell made one tool call");
+    assert_eq!(
+        *seen.lock().expect("the law's lock"),
+        vec![vec!["app_lookup".to_owned()]],
+        "the after-turn callbacks ran once, over the cell's call"
+    );
+    drop(session);
+    core.shutdown().await?;
+    Ok(())
+}
+
+/// A cell's recorded round is bounded by the session's recorded RLM
+/// presentation (FIG-5330): with `max_tool_call_records` at one, a cell
+/// that makes two tool calls records one of them, and the settled turn's
+/// report accounts for the other as omitted, after a reopen too.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() -> Result<()> {
+    fn core(backend: lash_core::Backend) -> Result<LashCore> {
+        let mut config = crate::rlm::RlmProtocolPluginConfig::builder()
+            .channel(crate::rlm::RlmChannel::Cell)
+            .instruction_limit(crate::rlm::InstructionBound::instructions(1_000_000))
+            .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
+            .build();
+        config.presentation.max_tool_call_records = 1;
+        let factory = crate::rlm::RlmProtocolPluginFactory::new(
+            config,
+            Arc::new(crate::rlm::TypescriptDialect),
+            &backend,
+        )
+        .with_worker_service(untimed_fixture_workers());
+        explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
+            .serve_test_llm_profile(
+                text_provider(
+                    "bounded-cell-records",
+                    typescript_block(
+                        "const first = await tools.app_lookup({});\n\
+                         const second = await tools.app_lookup({});\n\
+                         finish(\"looked up twice\");",
+                    ),
+                ),
+                mock_llm_profile_spec(),
+            )
+            .tools(Arc::new(AppTools))
+            .build(crate::testing::runtime_lease_owner())
+    }
+    let left_out = Some(lash_core::OmittedToolCalls {
+        count: 1,
+        failures: 0,
+        attachments: Vec::new(),
+    });
+    let backend = sqlite_memory_store_backend().await;
+    let session_id = id("bounded-cell-records");
+    let run = turn("bounded-cell-records-run");
+    let running = core(backend.clone())?;
+    let session = running
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let settled = session
+        .send(crate::TurnInput::text("look up twice"))
+        .id(run.clone())
+        .output()
+        .await?
+        .result;
+    assert_eq!(settled.tool_calls.len(), 1, "the bound keeps one record");
+    assert_eq!(settled.omitted, left_out);
+    drop(session);
+    running.shutdown().await?;
+
+    let reopened = core(backend)?;
+    let report = reopened
+        .session(session_id)
+        .open()
+        .await?
+        .attach_id(run)
+        .output()
+        .await?
+        .result;
+    assert_eq!(report.source, crate::ReportSource::Durable);
+    assert_eq!(report.tool_calls.len(), 1);
+    assert_eq!(report.tool_calls[0].call_id, settled.tool_calls[0].call_id);
+    assert_eq!(report.omitted, left_out);
+    reopened.shutdown().await?;
+    Ok(())
+}

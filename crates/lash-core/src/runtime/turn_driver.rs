@@ -32,9 +32,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// The turn's committed content, recorded in program order from the
     /// machine's emissions and the driver's own terminal events.
     pub(super) recorded_assembly: RecordedTurnAssembly,
-    /// The tool call records of the cell that last answered the machine,
-    /// until the turn's next commit takes them (FIG-5330).
-    pub(super) answered_cell_calls: Vec<crate::ToolCallRecord>,
+    /// The tool calls of the cell that last answered the machine, as the
+    /// code executor's bound keeps them, until the turn's next commit takes
+    /// them (FIG-5330).
+    pub(super) answered_cell_calls: crate::runtime::durable::session::CellToolCalls,
     pub(super) host: RuntimeHost,
     pub(super) scoped_effect_controller: ActorContext,
     pub(super) session_id: SessionId,
