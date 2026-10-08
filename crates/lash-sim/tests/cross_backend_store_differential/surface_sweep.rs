@@ -47,6 +47,7 @@ pub(super) enum SurfaceMethod {
     /// [`RunStore::unfinished_run`](lash_core::store::RunStore::unfinished_run)
     /// of the case's session.
     UnfinishedRun,
+    RunRecordOwners,
     ReadSessionStateVersion,
     AdmitSessionState,
     LoadKnownNode,
@@ -169,6 +170,7 @@ impl SurfaceMethod {
             Self::PendingTurnInput { known: false } => "surface:pending_turn_input_unknown",
             Self::ListTurnInputApplications => "surface:list_turn_input_applications",
             Self::UnfinishedRun => "surface:unfinished_run",
+            Self::RunRecordOwners => "surface:run_record_owners",
             Self::ReadSessionStateVersion => "surface:read_session_state_version",
             Self::AdmitSessionState => "surface:admit_session_state",
             Self::LoadKnownNode => "surface:load_node_known",
@@ -359,6 +361,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::CommittedTurnExists),
             surface(SurfaceMethod::UncommittedTurnExists),
             surface(SurfaceMethod::UnfinishedRun),
+            surface(SurfaceMethod::RunRecordOwners),
             surface(SurfaceMethod::RunTerminal),
             // An input's run binding: unbound, bound once, read back, and a
             // second binding to another run refused.
@@ -582,6 +585,17 @@ impl BackendRunner {
                     "rows={}",
                     store.list_turn_input_applications(&session_id).await?.len()
                 )
+            }
+            SurfaceMethod::RunRecordOwners => {
+                let actor = lash::durable::ActorKey::session(session_id.as_str())
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let owners = self
+                    .lifecycle_backend
+                    .durable()
+                    .run_record_owners(&actor)
+                    .await
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                format!("owners={}", owners.len())
             }
             SurfaceMethod::UnfinishedRun => match store.unfinished_run(&session_id).await? {
                 None => "unfinished=none".to_string(),

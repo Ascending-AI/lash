@@ -7,6 +7,17 @@ pub(super) const PAYLOAD_GATED_ENGINE_KIND: &str = "fig1488-payload-gated";
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for PayloadGatedEngine {
+    async fn check_args(
+        &self,
+        _signature: &lash_core::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: lash_core::ArgsMode,
+    ) -> std::result::Result<(), lash_core::ArgsMismatch> {
+        Err(lash_core::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         PAYLOAD_GATED_ENGINE_KIND
     }

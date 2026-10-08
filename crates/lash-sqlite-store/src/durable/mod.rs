@@ -1277,6 +1277,11 @@ impl DurableReads for SqliteDurableStore {
         self.read(move |tx| run_records::read(tx, &owner)).await
     }
 
+    async fn run_record_owners(&self, actor: &ActorKey) -> Result<Vec<OwnerKey>, DurableError> {
+        let actor = actor.clone();
+        self.read(move |tx| run_records::owners(tx, &actor)).await
+    }
+
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
         let exec = exec.clone();
         self.read(move |tx| snapshots::read(tx, &exec)).await

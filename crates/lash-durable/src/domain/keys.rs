@@ -187,6 +187,31 @@ impl OwnerKey {
     }
 }
 
+/// Exact process owner and the two prefix ranges of a session's record owners.
+/// Empty ranges select nothing; framing escapes slashes and percent signs.
+#[must_use]
+pub fn actor_record_ranges(actor: &ActorKey) -> [String; 5] {
+    match actor.kind() {
+        crate::ActorKind::Process => [
+            stored("p", &[actor.id()]),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ],
+        crate::ActorKind::Session => {
+            let id = actor.id().replace('%', "%25").replace('/', "%2F");
+            [
+                String::new(),
+                format!("t/{id}/"),
+                format!("t/{id}0"),
+                format!("c/{id}/"),
+                format!("c/{id}0"),
+            ]
+        }
+    }
+}
+
 impl ExecKey {
     /// The stored spelling.
     #[must_use]

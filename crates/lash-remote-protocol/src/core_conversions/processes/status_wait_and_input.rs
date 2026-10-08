@@ -178,6 +178,7 @@ impl From<RemoteProcessWaitState> for lash_core::WaitState {
 impl From<lash_core::WaitKind> for RemoteProcessWaitKind {
     fn from(value: lash_core::WaitKind) -> Self {
         match value {
+            lash_core::WaitKind::Call { call_id, tool_id } => Self::Call { call_id, tool_id },
             lash_core::WaitKind::Signal {
                 name,
                 event_type,
@@ -196,6 +197,7 @@ impl From<lash_core::WaitKind> for RemoteProcessWaitKind {
 impl From<RemoteProcessWaitKind> for lash_core::WaitKind {
     fn from(value: RemoteProcessWaitKind) -> Self {
         match value {
+            RemoteProcessWaitKind::Call { call_id, tool_id } => Self::Call { call_id, tool_id },
             RemoteProcessWaitKind::Signal {
                 name,
                 event_type,

@@ -8,6 +8,7 @@ mod activation;
 mod driver;
 mod session_turn;
 mod terminal;
+mod waiting;
 
 pub use activation::ProcessActivation;
 pub use session_turn::{SessionTurnCancel, SessionTurnMail, SessionTurns};

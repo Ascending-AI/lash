@@ -754,10 +754,10 @@ pub use runtime::actor::waits::{PinnedKey, ResolveAnswer};
 pub use runtime::publish_process_execution_env;
 pub use runtime::{
     AbandonEvidence, AbandonWriter, AdmittedDirectSend, AdmittedProcessIdentity, AdmittedScope,
-    AdmittedTurnInputs, Ancestry, AssistantResponseHookEvents, AssistantResponsePlan,
-    AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity, BindingId, CapabilityRef,
-    CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock, ClockWallTime,
-    CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredProcessIdentity,
+    AdmittedTurnInputs, Ancestry, ArgsMismatch, ArgsMode, AssistantResponseHookEvents,
+    AssistantResponsePlan, AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity,
+    BindingId, CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
+    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredProcessIdentity,
     DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
     DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork, EffectAddress,
     EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate, EngineAction,

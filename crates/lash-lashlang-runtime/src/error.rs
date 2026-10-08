@@ -165,6 +165,12 @@ pub enum LashlangRuntimeError {
     /// Process arguments do not match the immutable target signature.
     #[error("invalid process argument `{path}`: {message}")]
     InvalidProcessArgument { path: String, message: String },
+    /// Checking process argument artifacts failed with its typed cause.
+    #[error("failed to check process arguments: {source}")]
+    CheckProcessArgs {
+        #[source]
+        source: lash_core::ArgsMismatch,
+    },
     /// Encoding the process input failed.
     #[error("failed to encode process input: {source}")]
     EncodeProcessInput {

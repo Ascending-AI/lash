@@ -25,11 +25,11 @@ pub(crate) async fn list_session_waits(
         state
             .core
             .completions()
-            .outstanding(&session_id)
+            .parked(lash::admin::CallOwner::Session(session_id))
             .await
             .map_err(AppError::internal)?
             .iter()
-            .map(|key| key.as_str().to_owned())
+            .map(|call| call.key.as_str().to_owned())
             .collect(),
     ))
 }

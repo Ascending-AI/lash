@@ -84,6 +84,17 @@ fn settings_that_break_a_rule_are_refused() {
 struct MismatchedEngine;
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for MismatchedEngine {
+    async fn check_args(
+        &self,
+        _signature: &lash_core::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: lash_core::ArgsMode,
+    ) -> std::result::Result<(), lash_core::ArgsMismatch> {
+        Err(lash_core::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         "testing-fixture"
     }

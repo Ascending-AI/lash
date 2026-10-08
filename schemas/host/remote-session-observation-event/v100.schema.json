@@ -6688,6 +6688,26 @@
       "oneOf": [
         {
           "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "call",
+              "type": "string"
+            },
+            "tool_id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "call_id",
+            "tool_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "event_type": {
               "type": "string"
             },

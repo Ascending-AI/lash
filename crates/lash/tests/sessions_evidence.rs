@@ -905,22 +905,30 @@ fn drain_area_witnesses() {
     });
     // W0297: lash::process::WaitKind::Signal::event_type [field]
     field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { event_type, .. } = value;
+        let lash::process::WaitKind::Signal { event_type, .. } = value else {
+            panic!("expected a signal wait")
+        };
         let _ = event_type;
     });
     // W0298: lash::process::WaitKind::Signal::key [field]
     field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { key, .. } = value;
+        let lash::process::WaitKind::Signal { key, .. } = value else {
+            panic!("expected a signal wait")
+        };
         let _ = key;
     });
     // W0299: lash::process::WaitKind::Signal::name [field]
     field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { name, .. } = value;
+        let lash::process::WaitKind::Signal { name, .. } = value else {
+            panic!("expected a signal wait")
+        };
         let _ = name;
     });
     // W0300: lash::process::WaitKind::Signal::ordinal [field]
     field_witness(|value: &lash::process::WaitKind| {
-        let lash::process::WaitKind::Signal { ordinal, .. } = value;
+        let lash::process::WaitKind::Signal { ordinal, .. } = value else {
+            panic!("expected a signal wait")
+        };
         let _ = ordinal;
     });
     // W0301: lash::process::WaitState [struct]

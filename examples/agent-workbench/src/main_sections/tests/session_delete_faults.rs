@@ -155,6 +155,10 @@ impl DurableReads for DeleteDurableStore {
         self.inner.run_records(owner).await
     }
 
+    async fn run_record_owners(&self, actor: &ActorKey) -> Result<Vec<OwnerKey>, DurableError> {
+        self.inner.run_record_owners(actor).await
+    }
+
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
         self.inner.snapshot(exec).await
     }

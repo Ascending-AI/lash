@@ -1076,6 +1076,8 @@ pub mod messages {
         InternalPartKind, Message, MessageOrigin, MessageRole, Part, PartKind, TurnOutputSource,
         TurnReply, facade_support::MessageSequence, session_model::message::PartAttachment,
     };
+    /// JSON map in integrator signatures, without a second direct dependency.
+    pub use serde_json::Map as JsonMap;
     /// JSON value in integrator signatures, without a second direct dependency.
     pub use serde_json::Value as JsonValue;
 }
@@ -1131,7 +1133,7 @@ pub mod process {
     pub use lash_sansio::{HandleTarget, ObservedProcessFailure};
 
     pub use crate::admin::SessionProcessAdmin;
-    pub use crate::artifacts::{HostArtifactPin, HostArtifacts};
+    pub use crate::artifacts::{HostArtifactPin, HostArtifacts, ProcessDefinitions};
     pub use crate::process_admin::Processes;
     pub use crate::process_observation::{
         ProcessCursor, ProcessCursorError, ProcessCursorReference, ProcessDurableCompleteness,
@@ -1202,6 +1204,7 @@ pub mod process {
         facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
         facade_support::SessionScopeId, facade_support::watch_process_registry, lifetime,
     };
+    pub use lash_core::{ArgsMismatch, ArgsMode};
     /// Test-only registry probes and the conformance-suite registry type that
     /// carries them (`testing` feature only; no production trait requires them).
     #[cfg(any(test, feature = "testing"))]

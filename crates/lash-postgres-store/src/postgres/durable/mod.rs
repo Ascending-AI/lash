@@ -6,7 +6,7 @@
 //! engine's tables (`scripts/check-durable-sql.py`). Each domain the runtime
 //! lanes add to the fenced commit has one submodule here, owned by its lane;
 //! this module dispatches each [`DomainWrite`] and [`MailDomainWrite`] to it
-//! and delegates each [`DurableReads`] read to it.
+//! and delegates each [`lash_durable::DurableReads`] read to it.
 //!
 //! Every write is one guarded transaction: the writer fence first, then the
 //! database clock read once, then the engine's statements. A claim locks its
@@ -34,17 +34,12 @@
 
 use std::sync::{Arc, LazyLock};
 
-use lash_durable::domain::{
-    ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow, ScopeKey,
-    SessionCloseRow, SnapshotRow, TurnRow, WaitId, WaitRow,
-};
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorState, ActorTx, BootId, ClaimCause, ClaimPurpose,
-    Claimed, CommitCapacity, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableReads,
-    DurableStore, Epoch, Fenced, FormatSet, HeartbeatOutcome, Mail, MailAnswer, MailCommit,
-    MailDomainWrite, MailKind, MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease,
-    NodeSpec, OpenedActor, Owner, Reaped, Release, StateRevision, StoreFailure, StoreFailureKind,
-    Woken,
+    Claimed, CommitCapacity, CommitLabel, DomainWrite, DurableError, DurableInstant, DurableStore,
+    Epoch, Fenced, FormatSet, HeartbeatOutcome, Mail, MailAnswer, MailCommit, MailDomainWrite,
+    MailKind, MailRefusal, MailSeq, MailTx, MailWrite, NodeId, NodeLease, NodeSpec, OpenedActor,
+    Owner, Reaped, Release, StateRevision, StoreFailure, StoreFailureKind, Woken,
 };
 use lash_store_sql::Dialect;
 use lash_store_sql::durable::park_events::ParkEventStatements;
@@ -64,6 +59,8 @@ mod park_events;
 pub(crate) mod processes;
 mod prompts;
 pub(crate) use prompts::release as release_prompt_snapshots;
+#[path = "../durable_reads.rs"]
+mod reads;
 #[path = "../durable_replay.rs"]
 mod replay;
 mod run_records;
@@ -1421,163 +1418,6 @@ impl PostgresDurableStore {
         crate::observed_sql::checkout(&self.pools.work)
             .await
             .map_err(sqlx_failure)
-    }
-}
-
-#[async_trait::async_trait]
-impl DurableReads for PostgresDurableStore {
-    async fn turn(
-        &self,
-        session: &lash_sansio::SessionId,
-    ) -> Result<Option<TurnRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            turns::turn(&mut *self.reader().await?, session).await
-        })
-        .await
-    }
-
-    async fn turn_end(
-        &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
-    ) -> Result<Option<lash_durable::domain::TurnEnd>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            turns::turn_end(&mut *self.reader().await?, session, run).await
-        })
-        .await
-    }
-
-    async fn turn_namespaces(
-        &self,
-        session: &lash_sansio::SessionId,
-        run: &lash_sansio::TurnId,
-    ) -> Result<Vec<lash_durable::domain::TurnNamespace>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            turns::turn_namespaces(&mut *self.reader().await?, session, run).await
-        })
-        .await
-    }
-
-    async fn run_records(&self, owner: &OwnerKey) -> Result<Vec<RunRecordRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            run_records::read(&mut *self.reader().await?, owner).await
-        })
-        .await
-    }
-
-    async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            snapshots::read(&mut *self.reader().await?, exec).await
-        })
-        .await
-    }
-
-    async fn pending_waits(&self, owner: &ActorKey) -> Result<Vec<WaitRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            waits::pending(&mut *self.reader().await?, owner).await
-        })
-        .await
-    }
-
-    async fn wait(&self, id: &WaitId) -> Result<Option<WaitRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            waits::wait(&mut *self.reader().await?, id).await
-        })
-        .await
-    }
-
-    async fn process(
-        &self,
-        process: &lash_sansio::ProcessId,
-    ) -> Result<Option<ProcessActorRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            processes::process(&mut *self.reader().await?, process).await
-        })
-        .await
-    }
-
-    async fn live_until_descendants(
-        &self,
-        scope: &ScopeKey,
-        limit: usize,
-    ) -> Result<Vec<lash_sansio::ProcessId>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            processes::live_until_descendants(&mut *self.reader().await?, scope, limit).await
-        })
-        .await
-    }
-
-    async fn until_children(
-        &self,
-        scope: &ScopeKey,
-        after: Option<&lash_sansio::ProcessId>,
-        limit: usize,
-    ) -> Result<Vec<lash_sansio::ProcessId>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            processes::until_children(&mut *self.reader().await?, scope, after, limit).await
-        })
-        .await
-    }
-
-    async fn session_close(
-        &self,
-        session: &lash_sansio::SessionId,
-    ) -> Result<Option<SessionCloseRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            session_close::read(&mut *self.reader().await?, session).await
-        })
-        .await
-    }
-
-    async fn ending_scopes(
-        &self,
-        session: &lash_sansio::SessionId,
-    ) -> Result<Vec<ScopeKey>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            session_close::ending_scopes(&mut *self.reader().await?, session).await
-        })
-        .await
-    }
-
-    async fn session_mailbox(
-        &self,
-        session: &lash_sansio::SessionId,
-    ) -> Result<lash_durable::domain::SessionMailbox, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            session_mail::read(&mut *self.reader().await?, session).await
-        })
-        .await
-    }
-
-    async fn park_events(
-        &self,
-        after: Option<ParkEventSeq>,
-        limit: usize,
-    ) -> Result<Vec<ParkEventRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            park_events::read(&mut *self.reader().await?, after, limit).await
-        })
-        .await
-    }
-
-    async fn prompt_snapshot(
-        &self,
-        call: &lash_durable::domain::PromptCallKey,
-    ) -> Result<Option<lash_durable::domain::PromptSnapshotRow>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            prompts::snapshot(&mut *self.reader().await?, call).await
-        })
-        .await
-    }
-
-    async fn prompt_texts(
-        &self,
-        hashes: &[String],
-    ) -> Result<Vec<lash_durable::domain::PromptText>, DurableError> {
-        self.within(CommitCapacity::Work, async {
-            prompts::texts(&mut *self.reader().await?, hashes).await
-        })
-        .await
     }
 }
 

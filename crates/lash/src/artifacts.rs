@@ -170,3 +170,46 @@ fn claim(pin: &HostArtifactPin) -> Result<ReferrerClaim> {
     ReferrerClaim::unguarded(ArtifactReferrer::HostPin(pin.clone()))
         .map_err(|error| lash_core::PluginError::Session(error.to_string()).into())
 }
+
+/// Snapshot checks of a retained process definition, without starting a process.
+#[derive(Clone)]
+pub struct ProcessDefinitions {
+    pub(crate) artifacts: HostArtifacts,
+}
+
+impl ProcessDefinitions {
+    /// Check every supplied argument; `Complete` also requires every declared argument.
+    ///
+    /// The stored artifact's signature is authoritative. A forged signature claim,
+    /// a missing definition, or an engine without argument validation is refused.
+    /// This read acquires no lasting artifact pin and writes nothing.
+    pub async fn check_args(
+        &self,
+        definition: &ProcessDefinition,
+        args: &serde_json::Map<String, serde_json::Value>,
+        mode: lash_core::ArgsMode,
+    ) -> std::result::Result<(), lash_core::ArgsMismatch> {
+        let resolved = self
+            .artifacts
+            .definition_ports
+            .read_definition(&self.artifacts.engines, &definition.id)
+            .await
+            .map_err(|source| lash_core::ArgsMismatch::DefinitionRead { source })?
+            .ok_or_else(|| lash_core::ArgsMismatch::DefinitionMissing {
+                definition_id: definition.id.clone(),
+            })?;
+        self.artifacts
+            .engines
+            .verify_definition_claim(&resolved.draft, definition)
+            .await
+            .map_err(|source| lash_core::ArgsMismatch::DefinitionRefused { source })?;
+        let engine = self
+            .artifacts
+            .engines
+            .require(resolved.draft.engine_kind().as_str())
+            .map_err(|source| lash_core::ArgsMismatch::DefinitionRead { source })?;
+        engine
+            .check_args(&resolved.definition.signature, args, mode)
+            .await
+    }
+}

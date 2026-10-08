@@ -29,6 +29,12 @@ crate::statements! {
         /// Delete owner `?1`'s records of every run before `?2`.
         prune = "DELETE FROM run_records WHERE owner_key = ?1 AND run_seq < ?2";
 
+        /// Distinct owners in the actor's exact key or its two framed prefix ranges.
+        owners = "SELECT DISTINCT owner_key FROM run_records
+             WHERE owner_key = ?1 OR (owner_key >= ?2 AND owner_key < ?3)
+                 OR (owner_key >= ?4 AND owner_key < ?5)
+             ORDER BY owner_key";
+
         /// Every record of owner `?1`, by run and ordinal.
         read = "SELECT run_seq, ordinal, kind, call_id, record_json, written_epoch
              FROM run_records WHERE owner_key = ?1

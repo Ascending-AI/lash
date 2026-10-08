@@ -47,8 +47,8 @@ pub use definition::{
     ProcessDefinitionTarget,
 };
 pub use definition_ref::{
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessEngineKind, ProcessSignature,
+    ArgsMismatch, ArgsMode, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEngineKind, ProcessSignature,
 };
 pub use definition_store::{
     DefinitionAcquisition, ProcessDefinitionStore, ResolvedProcessDefinition,

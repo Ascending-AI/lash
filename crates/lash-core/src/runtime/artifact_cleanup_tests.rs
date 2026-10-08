@@ -398,6 +398,17 @@ struct Engine(Arc<Applied>);
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for Engine {
+    async fn check_args(
+        &self,
+        _signature: &crate::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: crate::ArgsMode,
+    ) -> std::result::Result<(), crate::ArgsMismatch> {
+        Err(crate::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         ENGINE_KIND
     }

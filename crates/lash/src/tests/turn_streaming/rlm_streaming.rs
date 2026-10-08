@@ -1021,7 +1021,11 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inne
     };
     let owner = SessionId::parse(session.session_id().as_str()).expect("nonblank session id");
     assert!(
-        core.completions().outstanding(&owner).await?.contains(&key),
+        core.completions()
+            .parked(crate::admin::CallOwner::Session(owner.clone()))
+            .await?
+            .iter()
+            .any(|call| call.key == key),
         "the RLM tool's completion key is durably unresolved"
     );
     assert!(

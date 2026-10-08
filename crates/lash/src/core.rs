@@ -427,6 +427,13 @@ impl LashCore {
         )
     }
 
+    /// Check start arguments against a retained definition's authoritative signature.
+    pub fn process_definitions(&self) -> crate::artifacts::ProcessDefinitions {
+        crate::artifacts::ProcessDefinitions {
+            artifacts: self.host_artifacts(),
+        }
+    }
+
     pub fn completions(&self) -> crate::admin::Completions {
         crate::admin::Completions { core: self.clone() }
     }

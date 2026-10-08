@@ -44,6 +44,17 @@ fn module_of(payload: &serde_json::Value) -> Result<String, crate::PluginError> 
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for ModuleDefinitionEngine {
+    async fn check_args(
+        &self,
+        _signature: &lash_core::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: lash_core::ArgsMode,
+    ) -> std::result::Result<(), lash_core::ArgsMismatch> {
+        Err(lash_core::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         DEFINITION_ENGINE
     }

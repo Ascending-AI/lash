@@ -548,6 +548,7 @@ impl ProcessActivation {
                 // the earliest of them, holding nothing.
                 let steps_due = live.lifecycle.due(&idle).await.map_err(steps_failure)?;
                 let next_due = due.into_iter().chain(steps_due).min();
+                super::waiting::project(&mut tx, process, &record, &driver, &fold, millis(now));
                 tx.ack_seen().give_up(Release::Waiting { next_due });
                 owned.commit(tx, CommitLabel::PROCESS_ADVANCE).await?;
                 return Ok(Pass::Released);
@@ -595,6 +596,15 @@ impl ProcessActivation {
             )
             .await?;
         if let Some(outcome) = applied {
+            if let Some(wait) = record.wait()
+                && matches!(wait.kind, crate::WaitKind::Call { .. })
+            {
+                append_event(
+                    &mut tx,
+                    process,
+                    crate::ProcessEventAppendRequest::wait_cleared(process, wait),
+                );
+            }
             record_omitted_effects(&mut tx, process, &driver, self.fleet());
             record_terminal(&mut tx, process, &outcome)?;
             tx.ack_seen();
@@ -1223,8 +1233,16 @@ impl ProcessActivation {
             }
             EngineAction::Terminal(outcome) => return Ok(Some(outcome)),
         }
-        // Any other transition ends a signal wait the record shows.
-        if let Some(wait) = record.wait() {
+        // A call stays waiting while its own step remains in flight.
+        // Other transitions still clear a signal wait.
+        if let Some(wait) = record.wait()
+            && match &wait.kind {
+                crate::WaitKind::Signal { .. } => true,
+                crate::WaitKind::Call { call_id, .. } => {
+                    !driver.steps.values().any(|step| step.call == *call_id)
+                }
+            }
+        {
             append_event(
                 tx,
                 process,
@@ -1373,7 +1391,11 @@ fn effect_class(
 
 /// Append `request` to `process`'s event log on `tx`, exactly once under
 /// its replay key: it commits with the transaction, or not at all.
-fn append_event(tx: &mut ActorTx, process: &ProcessId, request: crate::ProcessEventAppendRequest) {
+pub(super) fn append_event(
+    tx: &mut ActorTx,
+    process: &ProcessId,
+    request: crate::ProcessEventAppendRequest,
+) {
     tx.write(DomainWrite::Process(ProcessWrite::Emit {
         process: process.clone(),
         event_type: request.event_type,

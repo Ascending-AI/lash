@@ -8,9 +8,18 @@ its wait id, 128 random bits from the operating system's CSPRNG, as 32 hex
 digits. The key is a bearer capability: whoever holds it can resolve its wait.
 Lash keeps no completion secret.
 
-`LashCore::completions()` lists a session's outstanding keys
-(`outstanding(session_id)`) and settles one (`resolve(key, resolution)`),
-first writer wins. A second resolution answers `AlreadyResolved` (same
+`LashCore::completions().parked(owner)` lists a session's or process's pending
+admitted tool calls. `lash::admin::CallOwner` selects `Session(SessionId)` or
+`Process(ProcessId)`. Each `ParkedCall` carries its completion `key`, `owner`,
+stable `call_id`, `tool_id` and `deadline`, read from existing wait and admission
+rows. This is a snapshot: a returned key may be settled concurrently.
+
+A deferred process call records `process.waiting` with
+`WaitKind::Call { call_id, tool_id }`, without the bearer key; settling the call
+records `process.resumed`.
+
+`resolve(key, resolution)` settles a wait, first writer wins.
+A second resolution answers `AlreadyResolved` (same
 digest) or `Conflict` (another digest). A key that names no wait answers
 `Unknown`; one whose wait was revoked or timed out answers `Revoked`. A key of
 any other kind answers `ReservedKind`. None of them writes anything.

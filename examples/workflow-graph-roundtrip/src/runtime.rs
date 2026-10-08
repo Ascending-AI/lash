@@ -363,14 +363,17 @@ impl Overlay {
                 wait: WaitState,
             }
             let Waiting { wait } = serde_json::from_value(event.payload.clone())?;
-            let WaitKind::Signal { name, .. } = wait.kind;
+            let waiting_signal = match wait.kind {
+                WaitKind::Signal { name, .. } => Some(name),
+                WaitKind::Call { .. } => None,
+            };
             let mut event = self.event(
                 self.prepared.root_node.clone(),
                 RunStatus::Waiting,
                 DisplayDelta::default(),
                 None,
             );
-            event.waiting_signal = Some(name);
+            event.waiting_signal = waiting_signal;
             return Ok(Some(event));
         }
         let status = match event.event_type.as_str() {
@@ -565,6 +568,44 @@ mod tests {
 
     fn admitted() -> AdmittedWorkflow {
         AdmittedWorkflow::admit(crate::DEFAULT_WORKFLOW).expect("the default workflow admits")
+    }
+
+    /// A host's generic waiting overlay must accept call waits without
+    /// interpreting the call identity as a signal request.
+    #[test]
+    fn a_call_wait_is_observed_without_requesting_a_signal() {
+        let admitted = admitted();
+        let prepared = PreparedRun::new(admitted.view(), &admitted, 1).expect("prepare the view");
+        let mut overlay = Overlay {
+            prepared,
+            process: lash::ProcessId::fixture("call-wait-overlay"),
+            sequence: 0,
+            display: DisplayState::default(),
+            bindings: BTreeMap::new(),
+            pending: BTreeMap::new(),
+            observed: BTreeSet::new(),
+        };
+        let event = ObservedProcessEvent {
+            sequence: 1,
+            event_type: "process.waiting".to_owned(),
+            occurred_at_ms: 42,
+            payload: serde_json::json!({"wait": WaitState {
+                kind: WaitKind::Call {
+                    call_id: lash::ToolCallId::fixture("call-wait-overlay"),
+                    tool_id: lash::tools::ToolId::new("tool:overlay"),
+                },
+                since_ms: 42,
+            }}),
+        };
+        let projected = overlay
+            .durable(&event)
+            .expect("project the call wait")
+            .expect("waiting overlay");
+        assert_eq!(projected.status, RunStatus::Waiting);
+        assert!(
+            projected.waiting_signal.is_none(),
+            "a call asks for no signal"
+        );
     }
 
     #[test]

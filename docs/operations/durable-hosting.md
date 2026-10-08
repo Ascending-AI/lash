@@ -424,7 +424,15 @@ action runs.
 The other trait methods answer registration questions: `kind`,
 `program_identity`, `creation_config` (recorded on the process row and handed
 back to engine steps as `EngineStepRun::engine_config`), `start_artifacts`,
-`end_artifact_referrer`, `acquire_engine_artifact` and `resolve`.
+`end_artifact_referrer`, `acquire_engine_artifact`, `check_args` and `resolve`.
+`check_args` checks supplied arguments against an authoritative signature;
+engines without a checkable signature return `ArgsMismatch::UnsupportedSignature`.
+Hosts invoke it through
+`core.process_definitions().check_args(&definition, &args, mode).await`, with
+`ArgsMode::Partial` or `ArgsMode::Complete`. Partial checks every supplied value
+and rejects undeclared names; Complete also requires every declared argument.
+The facade reads the retained definition, verifies its signature claim, and
+checks arguments without starting a process or acquiring a lasting pin.
 
 ### Worked example: a 40-minute CI suite
 
@@ -547,6 +555,7 @@ impl ProcessEngine for CiEngine {
     // program_identity, creation_config, start_artifacts,
     // end_artifact_referrer, acquire_engine_artifact and resolve answer
     // "none" for this engine; see crates/lash-postgres-workers/src/process.rs.
+    // check_args explicitly returns ArgsMismatch::UnsupportedSignature.
 }
 ```
 
@@ -588,8 +597,11 @@ keep keys out of logs and URLs others can read.
 
 `LashCore::completions()` returns `lash::admin::Completions`:
 
-- `outstanding(session_id)` lists the session's unresolved host-resolvable
-  keys (`lash::durable::PinnedKey`), read from their rows.
+- `parked(owner)` lists a session's or process's pending admitted tool calls.
+  `lash::admin::CallOwner` is `Session(SessionId)` or `Process(ProcessId)`;
+  each `ParkedCall` carries `key`, `owner`, `call_id`, `tool_id` and `deadline`.
+  The listing joins existing wait and admission rows and is a snapshot, so a
+  concurrent resolver may settle a returned key before the host uses it.
 - `resolve(key, resolution)` resolves the key's wait, first writer wins, and
   answers `lash::durable::ResolveAnswer`:
 

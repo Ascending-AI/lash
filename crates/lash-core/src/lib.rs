@@ -31,7 +31,8 @@ pub use lash_core_execution::formats;
 pub use lash_core_execution::process_id_for_test;
 pub use lash_core_execution::process_id_from_handle_json;
 pub use lash_core_execution::runtime::actor::round::{
-    ParkAnnouncementRows, SignalSendRows, StagedPluginState, StoreLocalEffect, StoreLocalRows,
+    CallOwner, ParkAnnouncementRows, ParkedCall, SignalSendRows, StagedPluginState,
+    StoreLocalEffect, StoreLocalRows, parked,
 };
 /// Durable tool-effect format versions, re-exported for the format manifest.
 pub use lash_core_execution::waits;
@@ -662,10 +663,10 @@ pub use lash_core_execution::runtime::publish_process_execution_env;
 pub use lash_core_execution::runtime::{ArtifactReferrerPorts, ReferrerAcquisition};
 pub use runtime::{
     AbandonEvidence, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
-    AdmittedTurnInputs, Ancestry, AssistantResponseHookEvents, AssistantResponsePlan,
-    AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity, BindingId, CapabilityRef,
-    CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock, ClockWallTime,
-    CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredProcessIdentity,
+    AdmittedTurnInputs, Ancestry, ArgsMismatch, ArgsMode, AssistantResponseHookEvents,
+    AssistantResponsePlan, AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity,
+    BindingId, CapabilityRef, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
+    ClockWallTime, CommandJournalGuard, CommandReplayKey, ContractRef, DeclaredProcessIdentity,
     DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
     DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork, EffectAddress,
     EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate, EngineAction,

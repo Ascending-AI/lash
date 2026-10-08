@@ -141,3 +141,23 @@ pub(super) async fn read(
         })
         .collect()
 }
+
+pub(super) async fn owners(
+    tx: &mut PgConnection,
+    actor: &lash_durable::ActorKey,
+) -> Result<Vec<OwnerKey>, DurableError> {
+    let [exact, turn_low, turn_high, cell_low, cell_high] =
+        lash_durable::domain::actor_record_ranges(actor);
+    let keys: Vec<String> = sqlx::query_scalar(SQL.owners.sql())
+        .bind(exact)
+        .bind(turn_low)
+        .bind(turn_high)
+        .bind(cell_low)
+        .bind(cell_high)
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
+        .await
+        .map_err(sqlx_failure)?;
+    keys.into_iter()
+        .map(|key| OwnerKey::parse(&key).map_err(|_| corrupt("run record owner", &key)))
+        .collect()
+}

@@ -36,6 +36,17 @@ pub struct ReceiverEngine;
 
 #[lash::async_trait]
 impl ProcessEngine for ReceiverEngine {
+    async fn check_args(
+        &self,
+        _signature: &lash::process::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: lash::process::ArgsMode,
+    ) -> std::result::Result<(), lash::process::ArgsMismatch> {
+        Err(lash::process::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         RECEIVER_ENGINE_KIND
     }
@@ -150,6 +161,17 @@ pub struct SourceEngine;
 
 #[lash::async_trait]
 impl ProcessEngine for SourceEngine {
+    async fn check_args(
+        &self,
+        _signature: &lash::process::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: lash::process::ArgsMode,
+    ) -> std::result::Result<(), lash::process::ArgsMismatch> {
+        Err(lash::process::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         SOURCE_ENGINE_KIND
     }
@@ -265,6 +287,17 @@ pub struct SleeperEngine;
 
 #[lash::async_trait]
 impl ProcessEngine for SleeperEngine {
+    async fn check_args(
+        &self,
+        _signature: &lash::process::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: lash::process::ArgsMode,
+    ) -> std::result::Result<(), lash::process::ArgsMismatch> {
+        Err(lash::process::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         SLEEPER_ENGINE_KIND
     }

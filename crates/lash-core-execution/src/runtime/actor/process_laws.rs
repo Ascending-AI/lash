@@ -248,6 +248,17 @@ fn ended(value: Value) -> EngineAction {
 
 #[async_trait::async_trait]
 impl ProcessEngine for LawEngine {
+    async fn check_args(
+        &self,
+        _signature: &crate::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: crate::ArgsMode,
+    ) -> std::result::Result<(), crate::ArgsMismatch> {
+        Err(crate::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         LAW_ENGINE_KIND
     }

@@ -433,3 +433,27 @@ mod tests {
         );
     }
 }
+
+/// Whether a host is checking a supplied subset or all required start arguments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArgsMode {
+    Partial,
+    Complete,
+}
+
+/// A typed refusal of a definition's argument check; checking writes nothing.
+#[derive(Debug, thiserror::Error)]
+pub enum ArgsMismatch {
+    #[error("argument `{path}`: {message}")]
+    Argument { path: String, message: String },
+    #[error("process engine `{engine_kind}` cannot check this signature")]
+    UnsupportedSignature { engine_kind: ProcessEngineKind },
+    #[error("process definition `{definition_id}` is not retained")]
+    DefinitionMissing {
+        definition_id: super::ProcessDefinitionId,
+    },
+    #[error(transparent)]
+    DefinitionRefused { source: ProcessDefinitionRefusal },
+    #[error(transparent)]
+    DefinitionRead { source: crate::PluginError },
+}

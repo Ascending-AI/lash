@@ -479,11 +479,13 @@ async fn suspended_tool_keeps_turn_and_history_head_until_resolution(tier: Tier)
         let outstanding = world
             .core
             .completions()
-            .outstanding(session.session_id())
+            .parked(lash::admin::CallOwner::Session(
+                session.session_id().clone(),
+            ))
             .await
             .expect("the session's outstanding completions read");
         assert!(
-            outstanding.iter().any(|pinned| pinned.as_str() == key),
+            outstanding.iter().any(|pinned| pinned.key.as_str() == key),
             "the parked call's wait is outstanding while it waits"
         );
         let waiting = head(&world, session_name).await;
@@ -568,7 +570,7 @@ async fn fork_inherits_history_without_execution_queues_waits_or_journals(tier: 
         world
             .core
             .completions()
-            .outstanding(branch.session_id())
+            .parked(lash::admin::CallOwner::Session(branch.session_id().clone()))
             .await
             .expect("the fork's waits read")
             .is_empty(),
@@ -825,15 +827,17 @@ async fn a_cancelled_turns_parked_completion_is_revoked(tier: Tier) {
         outcome.as_ref().is_ok_and(|output| !output.is_success()),
         "the turn settles cancelled, not answered: {outcome:?}"
     );
-    let outstanding = world
+    let parked = world
         .core
         .completions()
-        .outstanding(session.session_id())
+        .parked(lash::admin::CallOwner::Session(
+            session.session_id().clone(),
+        ))
         .await
-        .expect("the session's outstanding completions read");
+        .expect("the session's parked calls read");
     assert!(
-        outstanding.iter().all(|pinned| pinned.as_str() != key),
-        "the cancelled turn's wait is still outstanding"
+        parked.iter().all(|call| call.key.as_str() != key),
+        "the cancelled turn's call is still parked"
     );
     let late = world
         .core

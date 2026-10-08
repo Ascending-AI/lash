@@ -109,6 +109,13 @@ impl DurableReads for CutStore {
         self.inner.run_records(owner).await
     }
 
+    async fn run_record_owners(
+        &self,
+        actor: &lash_durable::ActorKey,
+    ) -> Result<Vec<lash_durable::domain::OwnerKey>, DurableError> {
+        self.inner.run_record_owners(actor).await
+    }
+
     async fn snapshot(&self, exec: &ExecKey) -> Result<Option<SnapshotRow>, DurableError> {
         self.inner.snapshot(exec).await
     }
@@ -1187,6 +1194,17 @@ impl LawEngine {
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for LawEngine {
+    async fn check_args(
+        &self,
+        _signature: &crate::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: crate::ArgsMode,
+    ) -> std::result::Result<(), crate::ArgsMismatch> {
+        Err(crate::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         LAW_ENGINE_KIND
     }

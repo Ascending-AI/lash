@@ -12,6 +12,7 @@ use lash_sansio::TurnId;
 // below, but their home is `crate::plugins`: authoring surface a plugin
 // implements, not a name a host writes to invoke one (ADR 0051, FIG-1921).
 pub use lash_core::facade_support::AcceptedInjectedTurnInput;
+pub use lash_core::{CallOwner, ParkedCall};
 
 #[derive(Clone)]
 pub struct Completions {
@@ -19,22 +20,15 @@ pub struct Completions {
 }
 
 impl Completions {
-    /// The completion keys of `session_id`'s unresolved host-resolvable
-    /// waits (`tool_completion` and `custom`): each wait's id.
+    /// Snapshot the owner's pending admitted calls and their pinned identities and deadlines.
     ///
-    /// This administrative read is scoped to exactly `session_id`. It returns
-    /// a snapshot: another resolver may settle a returned key concurrently,
-    /// so callers must handle [`lash_core::ResolveAnswer::AlreadyResolved`],
-    /// `Conflict` or `Revoked` from [`Self::resolve`]. A returned key is a
-    /// bearer capability: it alone authorizes resolving its wait, so the host
-    /// authorizes this read and hands the keys only to callers it trusts.
-    pub async fn outstanding(&self, session_id: &SessionId) -> Result<Vec<lash_core::PinnedKey>> {
-        let backend = self.core.env.core.control.effect_host.backend();
-        let owner = lash_core::durable_port::ActorKey::session(session_id.as_str())
-            .map_err(|error| durable_error(error.to_string()))?;
-        lash_core::waits::outstanding_keys(backend, &owner)
+    /// Returned keys are bearer capabilities. The host authorizes this read and
+    /// shares keys only with trusted callers. A concurrent resolver may settle a
+    /// returned key, so callers handle `AlreadyResolved`, `Conflict` and `Revoked`.
+    pub async fn parked(&self, owner: CallOwner) -> Result<Vec<ParkedCall>> {
+        lash_core::parked(self.core.env.core.control.effect_host.backend(), owner)
             .await
-            .map_err(|error| durable_error(error.to_string()))
+            .map_err(EmbedError::from)
     }
 
     /// Resolve the wait `key` names, first writer wins.

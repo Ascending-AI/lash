@@ -129,3 +129,103 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
     };
     assert!(!result.into_output().is_success());
 }
+
+/// FIG-5411: hosts check partial mappings and complete inputs against the
+/// retained signature, without admitting a process or accepting a forged claim.
+#[cfg(feature = "rlm")]
+#[tokio::test]
+async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
+    use crate::process::{ArgsMismatch, ArgsMode};
+    use lashlang::testing::ast_builders as b;
+    let backend = sqlite_memory_store_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("the core builds");
+    let environment = lash_lashlang_runtime::LashlangSurface::default()
+        .for_process_registry(true)
+        .host_environment(&lash_core::ToolCatalog::default())
+        .unwrap();
+    let compiled = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "args-check",
+        program: b::module(
+            vec![b::process_returning(
+                "handler",
+                vec![
+                    b::param("event", lashlang::TypeExpr::Str),
+                    b::param("count", lashlang::TypeExpr::Int),
+                ],
+                lashlang::TypeExpr::Str,
+                b::finish(b::var("event")),
+            )],
+            Vec::new(),
+        ),
+        environment: &environment,
+    })
+    .unwrap();
+    let pin = crate::process::HostArtifactPin::mint();
+    core.host_artifacts()
+        .publish_module(&pin, &compiled.artifact)
+        .await
+        .unwrap();
+    let draft =
+        lashlang::ProcessDefinitionIdentity::from_artifact_export(&compiled.artifact, "handler")
+            .unwrap()
+            .draft()
+            .unwrap();
+    let definition = core
+        .host_artifacts()
+        .publish_definition(&pin, &draft)
+        .await
+        .unwrap();
+    let checker = core.process_definitions();
+    let partial = serde_json::json!({"event": "ready"})
+        .as_object()
+        .unwrap()
+        .clone();
+    checker
+        .check_args(&definition, &partial, ArgsMode::Partial)
+        .await
+        .unwrap();
+    assert!(
+        matches!(checker.check_args(&definition, &partial, ArgsMode::Complete).await, Err(ArgsMismatch::Argument { path, .. }) if path == "count")
+    );
+    let complete = serde_json::json!({"event": "ready", "count": 2})
+        .as_object()
+        .unwrap()
+        .clone();
+    checker
+        .check_args(&definition, &complete, ArgsMode::Complete)
+        .await
+        .unwrap();
+    let bad = serde_json::json!({"count": "two"})
+        .as_object()
+        .unwrap()
+        .clone();
+    assert!(
+        matches!(checker.check_args(&definition, &bad, ArgsMode::Partial).await, Err(ArgsMismatch::Argument { path, .. }) if path == "count")
+    );
+    let extra = serde_json::json!({"other": 1}).as_object().unwrap().clone();
+    assert!(
+        matches!(checker.check_args(&definition, &extra, ArgsMode::Partial).await, Err(ArgsMismatch::Argument { path, .. }) if path == "other")
+    );
+    let forged = lash_core::ProcessDefinition::new(
+        definition.id,
+        lash_core::ProcessSignature::known(serde_json::json!({"forged": true})),
+    );
+    assert!(matches!(
+        checker
+            .check_args(&forged, &complete, ArgsMode::Complete)
+            .await,
+        Err(ArgsMismatch::DefinitionRefused { .. })
+    ));
+    assert!(
+        core.backend()
+            .process_registry()
+            .list_processes(&Default::default())
+            .await
+            .unwrap()
+            .is_empty(),
+        "argument checking admits no process"
+    );
+    core.shutdown().await.unwrap();
+}

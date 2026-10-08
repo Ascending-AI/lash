@@ -220,6 +220,15 @@ impl ProtocolDriverPlugin for Integrator {
 
 #[lash::async_trait]
 impl ProcessEngine for Integrator {
+    async fn check_args(
+        &self,
+        _signature: &lash::process::ProcessSignature,
+        _args: &lash::messages::JsonMap<String, lash::messages::JsonValue>,
+        _mode: lash::process::ArgsMode,
+    ) -> std::result::Result<(), lash::process::ArgsMismatch> {
+        unreachable!("external signature witness")
+    }
+
     fn kind(&self) -> &'static str {
         unreachable!("external signature witness")
     }

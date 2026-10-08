@@ -160,6 +160,17 @@ pub struct HeldProcessEngine;
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
 impl crate::ProcessEngine for HeldProcessEngine {
+    async fn check_args(
+        &self,
+        _signature: &crate::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: crate::ArgsMode,
+    ) -> std::result::Result<(), crate::ArgsMismatch> {
+        Err(crate::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         HELD_PROCESS_ENGINE_KIND
     }
@@ -248,6 +259,17 @@ pub struct FixtureProcessEngine;
 #[cfg(any(test, feature = "testing"))]
 #[async_trait::async_trait]
 impl crate::ProcessEngine for FixtureProcessEngine {
+    async fn check_args(
+        &self,
+        _signature: &crate::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: crate::ArgsMode,
+    ) -> std::result::Result<(), crate::ArgsMismatch> {
+        Err(crate::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         "testing-fixture"
     }

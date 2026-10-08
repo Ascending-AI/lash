@@ -161,6 +161,15 @@ pub trait ProcessEngine: Send + Sync {
         artifact_ref: &str,
     ) -> Result<(), crate::PluginError>;
 
+    /// Check supplied start arguments against an authoritative signature.
+    /// Engines with no checkable signature return a typed refusal.
+    async fn check_args(
+        &self,
+        signature: &super::ProcessSignature,
+        args: &serde_json::Map<String, serde_json::Value>,
+        mode: super::ArgsMode,
+    ) -> Result<(), super::ArgsMismatch>;
+
     /// What this engine's stored artifact says about a definition reference:
     /// its authoritative signature and the signal event types it declares.
     /// The signature on the reference is a claim this method never reads; an

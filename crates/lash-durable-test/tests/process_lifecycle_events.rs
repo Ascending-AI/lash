@@ -174,6 +174,17 @@ fn cancelled(origin: lash_sansio::CancelOrigin) -> lash_core::EngineAction {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessEngine for ScriptEngine {
+    async fn check_args(
+        &self,
+        _signature: &lash_core_execution::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: lash_core_execution::ArgsMode,
+    ) -> std::result::Result<(), lash_core_execution::ArgsMismatch> {
+        Err(lash_core_execution::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         KIND
     }
@@ -267,6 +278,7 @@ const WRITE_TOOL: &str = "lifecycle_events_write";
 #[derive(Debug, Default)]
 struct World {
     writes: Mutex<Vec<serde_json::Value>>,
+    parked: Mutex<Option<(String, lash_core::ToolCallId)>>,
 }
 
 struct Write {
@@ -276,6 +288,15 @@ struct Write {
 #[async_trait::async_trait]
 impl lash::tools::StaticToolExecute for Write {
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        if call.args["x"] == 999 {
+            let key = call
+                .context
+                .completion_key()
+                .expect("a deferring call has a key");
+            *self.world.parked.lock().unwrap() =
+                Some((key.as_str().to_owned(), call.context.call_id().clone()));
+            return lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::new());
+        }
         self.world.writes.lock().unwrap().push(call.args.clone());
         lash_core::ToolOutcome::ok(serde_json::json!({ "wrote": call.args })).into()
     }
@@ -297,6 +318,8 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
     )
     .expect("the write tool's schemas")
     .with_execution(std::time::Duration::from_secs(120))
+    .with_declaration(lash_core::ToolDeclaration::deferring())
+    .with_park(lash_core::ParkBound::Within(Duration::from_secs(300)))
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL));
     Arc::new(lash::tools::StaticToolProvider::new(
@@ -527,7 +550,10 @@ async fn a_process_waiting_on_a_signal_is_observed_waiting_until_it_resumes(tier
         event_type,
         key,
         ..
-    } = &first.kind;
+    } = &first.kind
+    else {
+        panic!("expected a signal wait")
+    };
     assert_eq!(name, "go");
     assert_eq!(event_type, "signal.go");
     assert_eq!(
@@ -1018,3 +1044,255 @@ async fn a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_own
  {
     a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_owners_events().await;
 }
+
+// FIG-5411: a deferred call has one waiting transition and resolution resumes it.
+fn deferred_advance(
+    _: &mut serde_json::Value,
+    event: lash_core::EngineEvent,
+) -> lash_core::EngineAction {
+    match event {
+        lash_core::EngineEvent::Started { .. } => write("deferred", 999, None),
+        lash_core::EngineEvent::StepSettled { .. } => answer(serde_json::json!("done")),
+        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
+        _ => lash_core::EngineAction::Idle,
+    }
+}
+
+async fn a_deferred_call_records_one_waiting_event_and_resumes(tier: Tier) {
+    let (stores, _keep) = stores(tier).await;
+    let world = Arc::new(World::default());
+    let heard = Heard::default();
+    let (backend, core) = core(&stores, deferred_advance, &world, &heard, "deferred");
+    let process = start(&core).await;
+    let (key, call_id) = tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let parked = world.parked.lock().unwrap().clone();
+            if let Some(parked) = parked {
+                let actor = lash_core::durable_port::ActorKey::process(process.as_str()).unwrap();
+                if backend
+                    .durable()
+                    .actor(&actor)
+                    .await
+                    .unwrap()
+                    .is_some_and(|row| row.state == lash_core::durable_port::ActorState::Waiting)
+                {
+                    break parked;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the process releases on its deferred call");
+    let events = log(&backend, &process).await;
+    let waits = of_type(&events, "process.waiting");
+    assert_eq!(
+        waits.len(),
+        1,
+        "a deferred call records exactly one waiting event"
+    );
+    assert_eq!(
+        waits[0].payload["wait"]["kind"]["call_id"],
+        serde_json::json!(call_id)
+    );
+    assert_eq!(waits[0].payload["wait"]["kind"]["tool_id"], WRITE_TOOL);
+    assert!(
+        !waits[0].payload.to_string().contains(&key),
+        "the event never publishes a bearer key"
+    );
+    core.completions()
+        .resolve(&key, lash_core::Resolution::Ok(serde_json::json!({})))
+        .await
+        .unwrap();
+    ended(&core, &process).await;
+    let events = log(&backend, &process).await;
+    assert_eq!(of_type(&events, "process.waiting").len(), 1);
+    assert_eq!(of_type(&events, "process.resumed").len(), 1);
+}
+on_every_tier!(a_deferred_call_records_one_waiting_event_and_resumes);
+
+/// The actor released on this process's one deferred call, including its
+/// durable call identity and the deadline its admission pinned.
+async fn parked_call(
+    core: &lash::LashCore,
+    backend: &lash::Backend,
+    process: &lash_core::ProcessId,
+) -> lash::admin::ParkedCall {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            let actor = lash::durable::ActorKey::process(process.as_str()).unwrap();
+            if backend
+                .durable()
+                .actor(&actor)
+                .await
+                .unwrap()
+                .is_some_and(|row| row.state == lash::durable::ActorState::Waiting)
+            {
+                let mut calls = core
+                    .completions()
+                    .parked(lash::admin::CallOwner::Process(process.clone()))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    calls.len(),
+                    1,
+                    "the owner lists exactly its unresolved call"
+                );
+                return calls.remove(0);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the process parks on its call")
+}
+
+/// FIG-5411: takeover retains the pending call, identity, capability and
+/// deadline; settled calls are absent and neither sink publishes a fact twice.
+async fn a_deferred_call_survives_takeover_without_duplicate_publication(tier: Tier) {
+    let (stores, _keep) = stores(tier).await;
+    let world = Arc::new(World::default());
+    let first_heard = Heard::default();
+    let (backend, first) = core(
+        &stores,
+        deferred_advance,
+        &world,
+        &first_heard,
+        "park-first",
+    );
+    let process = start(&first).await;
+    let before = parked_call(&first, &backend, &process).await;
+    assert_eq!(
+        before.owner,
+        lash::admin::CallOwner::Process(process.clone())
+    );
+    assert_eq!(before.tool_id.as_str(), WRITE_TOOL);
+    let wait = backend
+        .durable()
+        .wait(&lash::durable::domain::WaitId::parse_hex(before.key.as_str()).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(before.deadline, wait.purpose.deadline());
+    assert!(
+        before.deadline.is_some(),
+        "the call's admission pins a deadline"
+    );
+    let settled = start(&first).await;
+    let other = parked_call(&first, &backend, &settled).await;
+    first
+        .completions()
+        .resolve(
+            other.key.as_str(),
+            lash_core::Resolution::Ok(serde_json::json!({})),
+        )
+        .await
+        .unwrap();
+    ended(&first, &settled).await;
+    assert!(
+        first
+            .completions()
+            .parked(lash::admin::CallOwner::Process(settled.clone()))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let prefix = heard_the_log(&first_heard, &backend, &process).await;
+    let first_sequences = first_heard.sequences(&process);
+    first.shutdown().await.unwrap();
+    let second_heard = Heard::default();
+    let (backend, second) = core(
+        &stores,
+        deferred_advance,
+        &world,
+        &second_heard,
+        "park-second",
+    );
+    let after = parked_call(&second, &backend, &process).await;
+    assert!(
+        before == after,
+        "takeover preserves exactly the call, key and deadline"
+    );
+    assert!(
+        second
+            .completions()
+            .parked(lash::admin::CallOwner::Process(settled))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    second
+        .completions()
+        .resolve(
+            after.key.as_str(),
+            lash_core::Resolution::Ok(serde_json::json!({})),
+        )
+        .await
+        .unwrap();
+    ended(&second, &process).await;
+    assert!(
+        second
+            .completions()
+            .parked(lash::admin::CallOwner::Process(process.clone()))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let events = log(&backend, &process).await;
+    assert_eq!(of_type(&events, "process.waiting").len(), 1);
+    assert_eq!(of_type(&events, "process.resumed").len(), 1);
+    let terminal = events.last().unwrap().sequence;
+    tokio::time::timeout(Duration::from_secs(60), async {
+        while !second_heard.sequences(&process).contains(&terminal) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let second_sequences = second_heard.sequences(&process);
+    // FIG-5396: a successor may redeliver an event the previous node
+    // published before recording its durable mark. Publication is once per
+    // node; (process, sequence) remains the host's deduplication identity.
+    for sequences in [&first_sequences, &second_sequences] {
+        assert!(
+            sequences.windows(2).all(|pair| pair[0] < pair[1]),
+            "each node publishes once, in sequence order"
+        );
+    }
+    let published: std::collections::BTreeSet<_> = first_sequences
+        .into_iter()
+        .chain(second_sequences)
+        .collect();
+    assert_eq!(
+        published.into_iter().collect::<Vec<_>>(),
+        events
+            .iter()
+            .map(|event| event.sequence)
+            .collect::<Vec<_>>(),
+        "the two hosts deliver every logged identity"
+    );
+    for heard in [&first_heard, &second_heard] {
+        for event in heard
+            .0
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event.process_id == process)
+        {
+            assert_eq!(
+                Some(event),
+                events
+                    .iter()
+                    .find(|logged| logged.sequence == event.sequence),
+                "every delivery is the immutable event at its stable identity"
+            );
+        }
+    }
+    assert_eq!(
+        &events[..prefix.len()],
+        prefix.as_slice(),
+        "takeover preserves the earlier log"
+    );
+    second.shutdown().await.unwrap();
+}
+on_every_tier!(a_deferred_call_survives_takeover_without_duplicate_publication);

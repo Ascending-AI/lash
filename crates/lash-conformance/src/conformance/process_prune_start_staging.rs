@@ -569,6 +569,17 @@ struct ModuleNamingEngine;
 
 #[async_trait::async_trait]
 impl crate::ProcessEngine for ModuleNamingEngine {
+    async fn check_args(
+        &self,
+        _signature: &lash_core::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: lash_core::ArgsMode,
+    ) -> std::result::Result<(), lash_core::ArgsMismatch> {
+        Err(lash_core::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         MODULE_NAMING_ENGINE
     }

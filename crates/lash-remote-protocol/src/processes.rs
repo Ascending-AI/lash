@@ -404,6 +404,10 @@ pub struct RemoteProcessWaitState {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RemoteProcessWaitKind {
+    Call {
+        call_id: lash_sansio::ToolCallId,
+        tool_id: lash_sansio::ToolId,
+    },
     Signal {
         name: String,
         event_type: String,
@@ -415,6 +419,9 @@ pub enum RemoteProcessWaitKind {
 impl RemoteProcessWaitState {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         match &self.kind {
+            RemoteProcessWaitKind::Call { tool_id, .. } => {
+                require_non_empty(type_name, "wait.tool_id", tool_id.as_str())
+            }
             RemoteProcessWaitKind::Signal {
                 name,
                 event_type,

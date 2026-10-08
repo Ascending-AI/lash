@@ -97,6 +97,17 @@ fn ended(text: &str) -> EngineAction {
 
 #[async_trait::async_trait]
 impl ProcessEngine for BenchEngine {
+    async fn check_args(
+        &self,
+        _signature: &lash_core_execution::ProcessSignature,
+        _args: &serde_json::Map<String, serde_json::Value>,
+        _mode: lash_core_execution::ArgsMode,
+    ) -> std::result::Result<(), lash_core_execution::ArgsMismatch> {
+        Err(lash_core_execution::ArgsMismatch::UnsupportedSignature {
+            engine_kind: self.kind().into(),
+        })
+    }
+
     fn kind(&self) -> &'static str {
         KIND
     }
