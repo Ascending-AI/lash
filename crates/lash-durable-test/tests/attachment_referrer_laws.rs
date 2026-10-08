@@ -1029,30 +1029,9 @@ async fn a_cancelled_child_keeps_its_puts_until_pruned(tier: Tier) {
 
 tiered_laws!(
     engine_and_session_turn_create_only_real_sessions,
+    delivered_attachment_survives_prune_and_replay_start_input,
     process_referrer_cleanup_is_complete_without_sessions,
     upload_expiry_is_local,
     queued_input_outlives_its_upload_expiry,
     a_cancelled_child_keeps_its_puts_until_pruned,
 );
-
-/// Law 3 per tier, ignored until a durable turn's puts are held by its
-/// execution: today they hold an upload edge for a day.
-mod start_input {
-    macro_rules! ignored_tier {
-        ($module:ident, $tier:ident) => {
-            mod $module {
-                #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-                #[ignore = "FIG-5351: a durable turn's put is held by an upload edge, not by its execution"]
-                async fn delivered_attachment_survives_prune_and_replay_start_input() {
-                    super::super::delivered_attachment_survives_prune_and_replay_start_input(
-                        super::super::served::Tier::$tier,
-                    )
-                    .await;
-                }
-            }
-        };
-    }
-    ignored_tier!(sqlite_memory, SqliteMemory);
-    ignored_tier!(sqlite_file, SqliteFile);
-    ignored_tier!(postgres, Postgres);
-}

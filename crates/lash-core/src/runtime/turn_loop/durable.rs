@@ -17,6 +17,9 @@ pub(in crate::runtime) struct DurableTurn {
     /// Why the admitted input did not normalize: the turn ends at once,
     /// `InvalidInput`, without calling the model.
     pub(in crate::runtime) invalid_input: Option<String>,
+    /// The turn's execution, bound to the session's attachment store while
+    /// the turn runs: every put of the turn is held by it (ADR 0124 §4).
+    pub(in crate::runtime) attachments: Option<crate::attachments::AttachmentExecutionBinding>,
 }
 
 impl LashRuntime {
@@ -47,6 +50,7 @@ impl LashRuntime {
             .first()
             .and_then(|admitted| admitted.inputs.first())
             .and_then(|input| input.run_spec.clone());
+        let attachments = self.bind_turn_attachments(controller)?;
         self.materialize_turn_session(controller).await?;
         self.resolve_turn_config(controller, run, admitted_run_spec.as_ref())
             .await?;
@@ -361,7 +365,36 @@ impl LashRuntime {
             messages,
             before_turn,
             invalid_input,
+            attachments,
         })
+    }
+
+    /// Bind the session's attachment store to the turn's execution before
+    /// ingress, tools or plugins can put bytes, so a put of the turn is held
+    /// by `Execution(j)` and, unless the turn's commit names it, ends when
+    /// the turn settles (ADR 0124 §4). A resumed turn binds the same
+    /// execution, so a put made before a crash stays held across it. A store
+    /// with no session holder has no execution to bind.
+    fn bind_turn_attachments(
+        &self,
+        controller: &ActorContext,
+    ) -> Result<Option<crate::attachments::AttachmentExecutionBinding>, RuntimeError> {
+        let store = &self.host.core.durability.attachment_store;
+        if !matches!(
+            store.holder(),
+            crate::attachments::AttachmentHolder::Runtime(crate::RuntimeOwner::Session(_))
+        ) {
+            return Ok(None);
+        }
+        store
+            .bind_execution_scoped(controller.execution_scope().journal_identity()?)
+            .map(Some)
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::RuntimeEffectAttachmentStore,
+                    error.to_string(),
+                )
+            })
     }
 }
 

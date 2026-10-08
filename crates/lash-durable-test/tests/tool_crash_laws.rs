@@ -42,6 +42,11 @@
 //!   after resume, the value of the step's committed outcome; and of two
 //!   concurrent steps, one never observes the other's change before it
 //!   committed.
+//! - **Attachments (FIG-5351, ADR 0124 §4):** a turn's tool puts two blobs
+//!   and answers one of them. Cut anywhere, its puts are held by the turn's
+//!   execution, never by an upload: once the turn ended and the cleanup
+//!   relay ran, the answered blob is held by the session alone and survives
+//!   a sweep, and the other has no referrer and is swept.
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -93,6 +98,12 @@ const STATE_SET: &str = "state_set";
 const STATE_OBSERVE: &str = "state_observe";
 /// The key both tools set.
 const STATE_KEY: &str = "t";
+/// The tool that puts [`KEPT`] and [`SCRATCH`] and answers [`KEPT`].
+const PUT: &str = "crash_put";
+/// The blob the [`PUT`] call answers, which the turn's commit names.
+const KEPT: &str = "crash-put-kept";
+/// The blob the [`PUT`] call puts and answers nothing of.
+const SCRATCH: &str = "crash-put-scratch";
 /// How many times [`STATE_OBSERVE`] yields while it looks for the other
 /// member's value before it stops looking.
 const OBSERVE_YIELDS: usize = 512;
@@ -133,6 +144,8 @@ enum Turn {
     StateCell,
     /// One cell of a `Promise.all` of [`STATE_SET`] and [`STATE_OBSERVE`].
     StatePairCell,
+    /// One step of one [`PUT`] call.
+    Put,
 }
 
 impl Turn {
@@ -187,6 +200,11 @@ impl Turn {
                 PROBE,
                 serde_json::json!({ "label": ACTIVITY }),
             )])],
+            Self::Put => vec![served::response(vec![served::call(
+                "call-put",
+                PUT,
+                serde_json::json!({}),
+            )])],
             Self::State => vec![served::response(vec![served::call(
                 "call-state",
                 STATE_SET,
@@ -231,6 +249,7 @@ impl Turn {
                 Vec::new(),
             ),
             Self::Activity => (vec![ACTIVITY.to_owned()], Vec::new()),
+            Self::Put => (vec![PUT.to_owned()], Vec::new()),
             Self::State => (vec!["T".to_owned()], Vec::new()),
             Self::StateCell => (vec!["C".to_owned()], Vec::new()),
             Self::StatePair | Self::StatePairCell => {
@@ -260,6 +279,7 @@ impl Turn {
             Self::LimitCell => (LIMIT, 1),
             Self::CellIdentity
             | Self::Activity
+            | Self::Put
             | Self::State
             | Self::StatePair
             | Self::StateCell
@@ -274,11 +294,23 @@ impl Turn {
         refusal_in(&exceeded.to_string())
     }
 
+    /// The session's spec: a [`Turn::Put`] session accepts its text
+    /// attachment.
+    fn spec(self) -> lash::SessionSpec {
+        let spec = served::spec(self.max_tool_calls());
+        if self == Self::Put {
+            spec.attachment_acceptance(lash_core::attachments::attachment_test_acceptance())
+        } else {
+            spec
+        }
+    }
+
     fn max_tool_calls(self) -> usize {
         match self {
             Self::LimitStep | Self::LimitCell => LIMIT,
             Self::CellIdentity
             | Self::Activity
+            | Self::Put
             | Self::State
             | Self::StatePair
             | Self::StateCell
@@ -384,6 +416,69 @@ impl lash_core::ToolProvider for Probe {
             .or_default()
             .push(call.context.call_id().clone());
         ToolOutcome::ok(serde_json::json!({ "label": label })).into()
+    }
+}
+
+fn put_definition() -> lash_core::ToolDefinition {
+    let object = serde_json::json!({ "type": "object", "additionalProperties": true });
+    lash_core::ToolDefinition::raw(
+        format!("tool:{PUT}"),
+        PUT,
+        "Puts two blobs and answers the first.",
+        object.clone(),
+        object,
+    )
+    .expect("the put tool's schemas")
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], PUT))
+    // A put a kill interrupted runs again at its ordinal and puts the same
+    // bytes again.
+    .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
+        std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
+        1,
+        1,
+    ))
+}
+
+/// [`PUT`]: puts [`KEPT`] and [`SCRATCH`] through the call's attachment
+/// store and answers [`KEPT`].
+struct Puts {
+    world: Arc<World>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for Puts {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![put_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == PUT).then(|| Arc::new(put_definition().contract()))
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.world.enter(PUT, call.context.call_id());
+        let attachments = call.context.attachments();
+        let put = |text: &str| {
+            attachments.put(
+                text.as_bytes().to_vec(),
+                lash_core::AttachmentCreateMeta::new(
+                    lash_core::MediaType::parse("text/plain").expect("text MIME"),
+                    None,
+                    Some(format!("{text}.txt")),
+                ),
+            )
+        };
+        let kept = match put(KEPT).await {
+            Ok(reference) => reference,
+            Err(error) => return ToolOutcome::err_fmt(error).into(),
+        };
+        if let Err(error) = put(SCRATCH).await {
+            return ToolOutcome::err_fmt(error).into();
+        }
+        ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
+            lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(kept)),
+        ))
+        .into()
     }
 }
 
@@ -573,6 +668,13 @@ impl Crash {
                 } else {
                     lash::LashCore::standard_builder(backend.clone())
                 };
+                let builder = if self.turn == Turn::Put {
+                    builder.tools(Arc::new(Puts {
+                        world: Arc::clone(&self.world),
+                    }))
+                } else {
+                    builder
+                };
                 builder
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
@@ -661,6 +763,9 @@ impl Crash {
         if self.turn.changes_state() {
             violations.extend(self.state_laws().await);
         }
+        if self.turn == Turn::Put {
+            violations.extend(self.put_laws().await);
+        }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
         }
@@ -698,6 +803,86 @@ impl Crash {
         }
         if self.turn.one_change() && shown.len() != 1 {
             violations.push(format!("the model was shown {shown:?}, not one value"));
+        }
+        violations
+    }
+
+    /// The [`Turn::Put`] laws, once the turn ended: after the cleanup relay
+    /// ran, [`KEPT`] is held by the session alone and [`SCRATCH`] by
+    /// nothing, so a sweep keeps the one and reclaims the other.
+    async fn put_laws(&self) -> Vec<String> {
+        let backend = self.backend();
+        let clock = self
+            .clock
+            .lock_recover()
+            .clone()
+            .expect("the database is built first");
+        let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+            &backend,
+            lash_core::ProcessEngineRegistry::default(),
+        );
+        let referrers = backend.attachment_referrers();
+        let (kept, scratch) = (
+            lash_core::attachments::content_id(KEPT.as_bytes()),
+            lash_core::attachments::content_id(SCRATCH.as_bytes()),
+        );
+        let held = [lash_core::ArtifactReferrer::Session(session())];
+        let mut found = (Vec::new(), Vec::new());
+        // A relay visit before the turn ended defers its row by a backoff:
+        // each pass after the first moves the clock past the longest one.
+        for _ in 0..4 {
+            if let Err(error) = lash_core::runtime::obligations::relay::relay_due(
+                &relay,
+                clock.as_ref(),
+                std::num::NonZeroUsize::new(256).expect("a page"),
+            )
+            .await
+            {
+                return vec![format!("the cleanup relay's due pass: {error}")];
+            }
+            found = match (
+                referrers.attachment_referrers(&kept).await,
+                referrers.attachment_referrers(&scratch).await,
+            ) {
+                (Ok(kept), Ok(scratch)) => (kept, scratch),
+                other => return vec![format!("read the puts' referrers: {other:?}")],
+            };
+            if found.0 == held && found.1.is_empty() {
+                break;
+            }
+            clock.advance_by(900_000).await;
+        }
+        let mut violations = Vec::new();
+        if found.0 != held {
+            violations.push(format!(
+                "the answered put is held by {:?}, not by the session alone",
+                found.0
+            ));
+        }
+        if !found.1.is_empty() {
+            violations.push(format!(
+                "the put no commit names is still held by {:?}",
+                found.1
+            ));
+        }
+        if let Err(error) = lash::persistence::reclaim_unreferenced_attachments(
+            backend.session_store_factory().as_ref(),
+            backend.attachment_store().as_ref(),
+            lash_core::AttachmentReclamationPolicy {
+                grace_period_ms: 0,
+                empty_root_set: lash_core::EmptyRootSetPolicy::AuthorizeDeleteAll,
+            },
+        )
+        .await
+        {
+            violations.push(format!("sweep attachments: {error}"));
+        }
+        let store = backend.attachment_store();
+        if store.get(&kept, 1024).await.is_err() {
+            violations.push("the answered put was reclaimed".to_owned());
+        }
+        if store.get(&scratch, 1024).await.is_ok() {
+            violations.push("the put no commit names survived the sweep".to_owned());
         }
         violations
     }
@@ -919,9 +1104,7 @@ impl Scenario for Crash {
         let session = self
             .core()
             .session(session())
-            .create(lash::SessionCreation::root(served::spec(
-                self.turn.max_tool_calls(),
-            )))
+            .create(lash::SessionCreation::root(self.turn.spec()))
             .await
             .map_err(|error| format!("create the session: {error}"))?;
         if self.turn == Turn::Activity {
@@ -1550,6 +1733,14 @@ async fn a_commit_whose_publication_was_lost_still_reaches_the_host(tier: Tier) 
     prove_at(Turn::Activity, tier, &[CommitLabel::TURN_COMMIT]).await;
 }
 
+/// A turn whose tool puts two blobs and answers one, cut anywhere: each put
+/// is held by the turn's execution, which a resumed turn binds again, so
+/// the answered blob survives on the session and the other ends with the
+/// turn (FIG-5351, ADR 0124 §4).
+async fn a_turns_puts_are_held_by_its_execution_across_a_crash(tier: Tier) {
+    prove(Turn::Put, tier).await;
+}
+
 /// A tool's plugin-state change cut at its `round.outcome`, before or after
 /// the commit, its acknowledgement or its owner lost: once the turn
 /// resumes, the session's committed state is the value the call's committed
@@ -1690,3 +1881,26 @@ tiered_laws!(
     tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell,
     code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill,
 );
+
+/// [`a_turns_puts_are_held_by_its_execution_across_a_crash`] on the SQLite
+/// tiers: the PostgreSQL dialect's store set has no attachment store.
+mod puts {
+    mod sqlite_memory {
+        #[tokio::test]
+        async fn a_turns_puts_are_held_by_its_execution_across_a_crash() {
+            super::super::a_turns_puts_are_held_by_its_execution_across_a_crash(
+                super::super::served::Tier::SqliteMemory,
+            )
+            .await;
+        }
+    }
+    mod sqlite_file {
+        #[tokio::test]
+        async fn a_turns_puts_are_held_by_its_execution_across_a_crash() {
+            super::super::a_turns_puts_are_held_by_its_execution_across_a_crash(
+                super::super::served::Tier::SqliteFile,
+            )
+            .await;
+        }
+    }
+}

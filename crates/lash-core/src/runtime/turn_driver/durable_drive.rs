@@ -44,6 +44,9 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// lifecycle observers. Dropped with a commit that was not acknowledged,
     /// the staged state fences its namespaces.
     after_commit: AfterCommit,
+    /// The turn's execution bound to the session's attachment store: the
+    /// turn's puts are held by it until the drive ends (ADR 0124 §4).
+    _attachments: Option<crate::attachments::AttachmentExecutionBinding>,
 }
 
 #[derive(Default)]
@@ -79,6 +82,7 @@ impl RuntimeDrive {
             messages,
             before_turn,
             invalid_input,
+            attachments,
         } = turn;
         let machine = fresh_machine(&mut driver, messages, &parts.observer, invalid_input)?;
         let opening_work = driver.pending_queued.len();
@@ -87,6 +91,7 @@ impl RuntimeDrive {
             machine,
             opening_work,
             before_turn,
+            attachments,
             parts,
         ))
     }
@@ -103,6 +108,7 @@ impl RuntimeDrive {
             messages,
             before_turn,
             invalid_input,
+            attachments,
         } = turn;
         let config =
             fresh_machine(&mut driver, messages, &parts.observer, invalid_input)?.into_config();
@@ -156,6 +162,7 @@ impl RuntimeDrive {
                 machine,
                 opening_work,
                 before_turn,
+                attachments,
                 parts,
             )),
             pending,
@@ -168,6 +175,7 @@ impl RuntimeDrive {
         machine: TurnMachine,
         opening_work: usize,
         before_turn: Vec<crate::plugin::RecordedTurnContribution>,
+        attachments: Option<crate::attachments::AttachmentExecutionBinding>,
         parts: DriveParts,
     ) -> Self {
         let DriveParts {
@@ -190,6 +198,7 @@ impl RuntimeDrive {
             commit,
             published,
             after_commit: AfterCommit::default(),
+            _attachments: attachments,
         }
     }
 }
