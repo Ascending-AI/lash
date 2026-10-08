@@ -295,14 +295,17 @@ async fn retire_session_attempt(state: &AppState, session_id: &SessionId) -> Res
             .await
             .map_err(|error| AppError::session_delete_failed(session_id, error))?
     };
-    if matches!(deletion, lash::SessionDeletion::Requested { .. }) {
-        await_session_tombstone(state, session_id).await?;
-    }
-    // A deleted session's registrations deliver to nobody.
+    // A closing session's registrations deliver to nobody: they go once the
+    // close is requested, before its tombstone. A refused request never gets
+    // here, so a session that stays live keeps them, and a workbench that
+    // dies before this line leaves them to the trigger recovery at boot.
     let subscriptions = match state.host_triggers.delete_owned_by(session_id).await {
         Ok(()) => json!("deleted"),
         Err(error) => json!({ "error": error.to_string() }),
     };
+    if matches!(deletion, lash::SessionDeletion::Requested { .. }) {
+        await_session_tombstone(state, session_id).await?;
+    }
     // The close detaches the global process rows the session originated
     // rather than deleting them; reclaim its finished ones so the work rail
     // does not keep a deleted session's work forever (FIG-989).

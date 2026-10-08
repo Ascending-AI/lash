@@ -114,11 +114,12 @@ generic `yield` rejection are independent of host event delivery.
 ### 4. Host patterns
 
 **Approvals.** An approval tool declares a short body bound and an
-`UntilScopeEnd` park, records its completion key and caller context under
-`call_id`, then returns `Pending`. The host commits the authenticated human
-decision before resolving the key. After a crash it reconciles the decision
-and retries that resolution. `AlreadyResolved` is success; `Conflict` is a
-conflicting decision; `Revoked` means the call cannot receive it.
+`UntilScopeEnd` park, records its caller context under `call_id`, then
+returns `Pending`. The host commits the authenticated human decision before
+resolving the key `Completions::parked` lists for that call. After a crash it
+reconciles the decision and retries that resolution. `AlreadyResolved` is
+success; `Conflict` is a conflicting decision; `Revoked` means the call cannot
+receive it.
 
 **Triggers.** The host owns registrations, enabled state, source provisioning,
 input mappings and timers. It checks a mapping's partial start arguments at

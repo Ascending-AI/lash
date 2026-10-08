@@ -3,18 +3,20 @@
 //! The workbench owns its sources. Each workbench process runs one timer, and
 //! every pass of it:
 //!
-//! - reads every `cron` registration, so a deleted registration (a session's
-//!   close deletes its registrations) stops ticking at the next pass;
-//! - fires, for each registration, the latest tick at or before now that the
-//!   timer has not passed yet. On boot that is the latest tick missed since
-//!   the registration was made, once.
+//! - reads every active `cron` registration, so a deleted registration (a
+//!   session's close deletes its registrations) stops ticking at the next
+//!   pass;
+//! - fires, for each registration, the latest tick at or before now that is
+//!   after the tick the registration was ticked through. On boot that is the
+//!   latest tick missed while no workbench ran, once.
 //!
-//! A tick's occurrence id names the registration and the tick instant, so a
-//! restart or a second firing records each tick once; a second workbench over
-//! the same store starts each tick's process once under its start key. A tick
-//! delivers `{ fired_at }`, the tick's own instant in RFC 3339.
+//! The tick a registration was ticked through is on its row and advances in
+//! the transaction that records the tick's occurrence, so a restart records
+//! each tick once even after the occurrence was pruned. A tick's occurrence
+//! id names the registration and the tick instant, and a second workbench
+//! over the same store starts each tick's process once under its start key.
+//! A tick delivers `{ fired_at }`, the tick's own instant in RFC 3339.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -97,10 +99,8 @@ impl CronTimer {
         let clock = Arc::clone(&self.clock);
         let mut stop = self.stop.subscribe();
         tokio::spawn(async move {
-            // The instant up to which each registration was ticked.
-            let mut passed = BTreeMap::new();
             loop {
-                pass(&state, clock.as_ref(), &mut passed);
+                pass(&state, clock.as_ref());
                 tokio::select! {
                     biased;
                     _ = stop.changed() => break,
@@ -116,9 +116,8 @@ impl CronTimer {
     }
 }
 
-/// One pass: fire the due tick of every cron registration, and note in
-/// `passed` the instant each was ticked up to.
-fn pass(state: &AppState, clock: &dyn lash::runtime::Clock, passed: &mut BTreeMap<String, u64>) {
+/// One pass: fire the due tick of every active cron registration.
+fn pass(state: &AppState, clock: &dyn lash::runtime::Clock) {
     let now_ms = u64::try_from(clock.timestamp_datetime().timestamp_millis()).unwrap_or_default();
     let subscriptions = match state.host_triggers.subscriptions(None) {
         Ok(subscriptions) => subscriptions,
@@ -127,18 +126,18 @@ fn pass(state: &AppState, clock: &dyn lash::runtime::Clock, passed: &mut BTreeMa
             return;
         }
     };
-    let mut live = BTreeMap::new();
     for subscription in subscriptions {
         let TriggerSource::Cron { expr, tz } = subscription.source else {
             continue;
         };
-        let since_ms = u64::try_from(subscription.created_at_ms).unwrap_or_default();
-        live.insert(subscription.id, (expr, tz, since_ms));
-    }
-    // A deleted registration is forgotten.
-    passed.retain(|id, _| live.contains_key(id));
-    for (id, (expr, tz, since_ms)) in live {
-        let floor = passed.get(&id).copied().unwrap_or(since_ms);
+        let id = subscription.id;
+        // Ticked through its last recorded tick, or since it was made.
+        let floor = u64::try_from(
+            subscription
+                .ticked_through_ms
+                .unwrap_or(subscription.created_at_ms),
+        )
+        .unwrap_or_default();
         let due = match last_tick(&expr, tz.as_deref(), now_ms) {
             Ok(due) => due.filter(|due| *due > floor),
             Err(error) => {
@@ -153,8 +152,6 @@ fn pass(state: &AppState, clock: &dyn lash::runtime::Clock, passed: &mut BTreeMa
             eprintln!(
                 "agent-workbench cron: registration {id} tick {due} was not recorded: {error}"
             );
-            continue;
         }
-        passed.insert(id, now_ms.max(floor));
     }
 }

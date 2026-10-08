@@ -238,10 +238,11 @@ preserved three-layer acceptance gates.
 ### Durable approval is host policy
 
 The resident `ops.apply_change` demo tool shows the approval pattern without
-adding an approval concept to Lash. It is a deferring tool: the body calls
-`AttemptContext::completion_key()`, writes the key, tool arguments,
-requesting session, and request time to the host-owned
-`<data-dir>/approvals.db`, and returns `ToolOutcome::Pending`. The tool
+adding an approval concept to Lash. It is a deferring tool: the body writes
+its call id, tool arguments, requesting session, and request time to the
+host-owned `<data-dir>/approvals.db`, and returns `ToolOutcome::Pending`. The
+ledger stores no completion key: `Completions::parked` is the one source of
+what is pending and of the key that resolves it. The tool
 declares a short execution bound for that body and a park that lasts until the
 turn that asked ends (`ParkBound::UntilScopeEnd`), so an approval waits for a
 human as long as the turn does and never times out on its own.
@@ -249,10 +250,13 @@ human as long as the turn does and never times out on its own.
 `GET /api/approvals` lists each live session's parked calls of this tool
 (`Completions::parked`) with the request the ledger recorded for each; a call
 whose wait settled or was revoked is no longer parked and no longer listed.
-Approve and deny write the decision to the ledger, then resolve the call's key
-through `LashCore::completions()`; a boot pass re-resolves decided rows a crash
-left unresolved. Returned keys carry resolution authority, so the routes
-require the deployment-operator authorization.
+Approve and deny write the decision to the ledger, then resolve the call with
+the key `parked` lists for its call id, through `LashCore::completions()`, and
+delete the row once `resolve` answers. A boot pass does the same for a decided
+row a crash left over a call that is still parked, and deletes every row whose
+call is no longer parked. A decision for a call that is no longer parked is
+refused. Returned keys carry resolution authority, so the routes require the
+deployment-operator authorization.
 
 Approval is host policy. Lash core will never grow a manifest approval flag or
 approval/revert API: hosts decide which tools need sign-off, how operators are
@@ -475,32 +479,50 @@ ticks, are its own, kept in `<data-dir>/host-triggers.db` (`src/host_triggers.rs
 and built from lash's primitives, each shown once:
 
 - **`call_id` dedup and caller context.** `workbench.register_trigger` is a host
-  tool. It upserts one subscription keyed by `AttemptContext::call_id()`, so a
-  redriven call registers once, records the caller's session from its owner,
-  checks the input mapping against the definition with the start-args check
-  (`LashCore::process_definitions().check_args`), and pins the definition
-  under a host pin so it outlives the frame that created it. Its `source` is
+  tool. It checks the input mapping against the definition with the start-args
+  check (`LashCore::process_definitions().check_args`), then records one
+  subscription keyed by `AttemptContext::call_id()`, so a redriven call
+  registers once, with the caller's session from its owner. Its `source` is
   `{ kind: "mail" }` or `{ kind: "cron", expr, tz? }`; the event is passed in
   the argument `event_arg` names, and `args` fixes the others. Event payloads
   are the host's types: `{ account, title, text }` and `{ fired_at }`.
+- **A host pin with a recoverable lifecycle.** A subscription's row is
+  recorded `pending` with a fresh host pin, the pin takes hold of the
+  definition so it outlives the frame that created it, and only then is the
+  row `pinned`. Only `pinned` rows are listed, ticked and delivered to.
+  Removal marks the row `deleting`, which stops its dispatch, then releases
+  the pin, then deletes the row. The boot recovery finishes either half after
+  a crash: it pins a `pending` row (or removes it if its definition is gone),
+  releases and deletes a `deleting` one, and removes every row whose session
+  is no longer live. A session's delete removes its rows once its close is
+  requested, before its tombstone.
 - **`with_host_start_key` dedup.** A source firing records its occurrence and
-  one delivery per matching subscription in one host transaction. The delivery
-  pass then starts each delivery's process under the host start key
+  selects its recipients in one host transaction: one `INSERT ... SELECT` over
+  the `pinned` subscriptions writes the deliveries. The delivery pass then
+  starts each delivery's process under the host start key
   `{occurrence}:{subscription}`, with an environment the host chooses, and
   binds the process id. The pass runs at boot first, so a crash between start
-  and bind is repaired: the key answers the process the first start made.
-  Delivered processes are host-originated and the workbench prunes only
-  session-originated processes, so no process is pruned before its delivery is
-  bound.
+  and bind is repaired: the key answers the process the first start made. A
+  start that fails is counted; after five the delivery is recorded as failed
+  with its last error and is not tried again.
+- **Retention.** Delivered processes are host-originated and the workbench
+  prunes only session-originated processes, so no process is pruned before its
+  delivery is bound and its start key keeps deduplicating. An occurrence whose
+  deliveries are all bound or failed is pruned with them once it is an hour
+  old, longer than either source can fire the same occurrence again.
 - **Lifecycle cursor plus `send().id`.** The notice pass follows
   `processes_changed_since`. When a delivered process reaches a terminal, it
   sends the subscribing session one short input with id
   `process-end:{process_id}`, then commits its cursor. A retried send after a
-  lost acknowledgement is the same input.
+  lost acknowledgement is the same input. A send that fails is counted and
+  the page read again; after five the notice is recorded as skipped and the
+  cursor moves on.
 
 The cron timer (`src/cron.rs`) reads the cron registrations every quarter
-second and fires, for each, the latest tick it has not passed yet; on boot that
-is the latest tick missed since the registration, once. A tick's occurrence id
+second and fires, for each, the latest tick after the one its row was ticked
+through; on boot that is the latest tick missed while no workbench ran, once.
+The row advances in the transaction that records the tick, so a tick is
+recorded once even after its occurrence was pruned. A tick's occurrence id
 names the registration and the tick, and the mail tool's occurrence id names
 its call, so a repeated firing records nothing new. The triggers page lists
 the chat's registrations and deletes one; deleting a session deletes its

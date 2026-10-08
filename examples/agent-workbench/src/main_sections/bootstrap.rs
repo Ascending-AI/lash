@@ -459,18 +459,19 @@ pub(crate) fn workbench_app_state(
 }
 
 /// What a workbench does before it serves: create its current session,
-/// reconcile the approvals decided while it was down, take up the turns a
-/// previous incarnation was following (the session's engine settles them
-/// whoever follows them) and the current session's runs, start its trigger
-/// passes, whose first delivery pass starts and binds what a crash left
-/// unbound, and start its cron timer, which first catches up the ticks missed
+/// reconcile the approval ledger with the calls still parked, take up the
+/// turns a previous incarnation was following (the session's engine settles
+/// them whoever follows them) and the current session's runs, start its
+/// trigger passes, which first finish the registrations and removals a crash
+/// left half done and then start and bind what it left unbound, and start its
+/// cron timer, which first catches up the ticks missed
 /// while no workbench ran.
 pub(crate) async fn start_workbench(state: &AppState) -> AnyhowResult<()> {
     state
         .ensure_current_session()
         .await
         .context("create the workbench's current session")?;
-    reconcile_decided_approvals(state).await;
+    reconcile_approvals(state).await;
     turns::resume_turn_followers(state).await;
     turns::watch_session_runs(state, &state.current_session_id()).await;
     state.trigger_passes.start(state.clone());

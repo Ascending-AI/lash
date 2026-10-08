@@ -128,8 +128,8 @@ Reset to a fresh session and submit:
    `07-restart-approved-state.json`, and `07-restart-trace-slice.json`.
 4. Reconcile terminal identities and counts. The trace slice after restart must
    contain exactly one typed `tool_call_completed` and one `turn_completed` for
-   the original call/turn, and the approvals ledger must still contain exactly
-   one row for the original key, decided once. Correlate replayed start
+   the original call/turn, and the approvals ledger must hold no row for the
+   original key: the row is deleted once the resolve answered. Correlate replayed start
    observations by typed call id/name/arguments; do not count their fresh trace
    record ids as provider executions.
 
@@ -143,5 +143,5 @@ Reset to a fresh session and submit:
 | Deny parks | one identical wait across DOM and both APIs | | `03-*` |
 | Deny is typed | the cell handles typed `approval_denied`; no retry | | `04-*` |
 | Restart continuity | same session, turn, key, arguments, and row/message identities | | `05-*`, `06-*` |
-| Restart resumes once | one typed tool completion + one turn completion + one decided ledger row | | `07-*` |
+| Restart resumes once | one typed tool completion + one turn completion + no ledger row left | | `07-*` |
 | Teardown | workbench and owned containers stopped; ports free | | teardown log |

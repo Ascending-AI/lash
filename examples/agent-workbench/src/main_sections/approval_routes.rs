@@ -2,8 +2,8 @@ use super::*;
 use lash::SessionId;
 
 // The host-owned approval routes. A pending approval is a parked call of the
-// approval tool; its context (arguments, requesting session) stays in the
-// workbench ledger.
+// approval tool, and `Completions::parked` is where its key comes from; its
+// context (arguments, requesting session) stays in the workbench ledger.
 
 /// Every pending approval: each live session's parked calls of the approval
 /// tool (`Completions::parked`), with the request its call recorded. A call
@@ -72,6 +72,33 @@ pub(crate) async fn deny_wait(
     decide_approval(&state, &key, false).await
 }
 
+/// The parked approval call `call_id` of `session_id`, with the key that
+/// resolves it. `None` once its wait settled or was revoked.
+async fn parked_approval(
+    state: &AppState,
+    session_id: &SessionId,
+    call_id: &str,
+) -> Result<Option<lash::admin::ParkedCall>, lash::EmbedError> {
+    Ok(state
+        .core
+        .completions()
+        .parked(lash::admin::CallOwner::Session(session_id.clone()))
+        .await?
+        .into_iter()
+        .find(|call| {
+            call.tool_id.as_str() == approvals::APPROVAL_TOOL_ID && call.call_id.as_str() == call_id
+        }))
+}
+
+/// Decide the approval `key_id`, the call id its request was recorded under.
+///
+/// The key is the one `Completions::parked` lists for that call. The ledger
+/// row is the decision's durable record, so the decision is written first and
+/// the resolution is derived from it; the row is deleted once `resolve`
+/// answers. A crash between the two writes leaves a decided row over a call
+/// that is still parked: a repeated request, or the boot reconcile, resolves
+/// it with the recorded decision. A call that is no longer parked cannot
+/// receive a decision, so its row is deleted and the request refused.
 pub(crate) async fn decide_approval(
     state: &AppState,
     key_id: &str,
@@ -80,78 +107,54 @@ pub(crate) async fn decide_approval(
     state
         .authorization
         .authorize(WorkbenchAuthorizationAction::ManageApprovals)?;
-    let pending = state
+    let not_pending = || AppError::bad_request(format!("approval `{key_id}` is not pending"));
+    let request = state
         .approvals
-        .undecided(key_id)
-        .map_err(AppError::internal)?;
-    // The ledger row is the decision's durable record, so it is written first
-    // and the wait resolution is derived from it. A crash between the two
-    // writes leaves a decided row over an outstanding wait; the decided arm
-    // redrives `resolve` with the recorded decision, which `AlreadyResolved`
-    // makes idempotent. The boot reconcile runs the same repair for rows the
-    // operator never retries.
-    let (decision, key, tool, arguments, requesting_session) = match pending {
-        Some(pending) => {
-            let not_pending = |error: approvals::ApprovalError| match error {
-                approvals::ApprovalError::NotPending(_) => {
-                    AppError::bad_request(format!("approval `{key_id}` is not pending"))
-                }
-                other => AppError::internal(other),
-            };
-            let key = state
-                .approvals
-                .completion_key(key_id)
-                .map_err(not_pending)?;
-            let decision = if approved {
-                approvals::ApprovalDecision::Approved
-            } else {
-                approvals::ApprovalDecision::Denied
-            };
-            state
-                .approvals
-                .mark_decided(key_id, decision)
-                .map_err(not_pending)?;
-            (
-                decision,
-                key,
-                pending.tool,
-                pending.arguments,
-                pending.requesting_session,
-            )
-        }
-        None => {
-            let decided = state
-                .approvals
-                .decided()
-                .map_err(AppError::internal)?
-                .into_iter()
-                .find(|approval| approval.key == key_id)
-                .ok_or_else(|| {
-                    AppError::bad_request(format!("approval `{key_id}` is not pending"))
-                })?;
-            (
-                decided.decision,
-                decided.completion_key,
-                decided.tool,
-                decided.arguments,
-                decided.requesting_session,
-            )
-        }
+        .request(key_id)
+        .map_err(AppError::internal)?
+        .ok_or_else(not_pending)?;
+    let requesting_session = SessionId::parse(request.requesting_session)?;
+    let Some(call) = parked_approval(state, &requesting_session, key_id)
+        .await
+        .map_err(AppError::internal)?
+    else {
+        state.approvals.forget(key_id).map_err(AppError::internal)?;
+        return Err(not_pending());
     };
-    let resolution = approvals::resolution_for(decision, &arguments);
+    let wanted = if approved {
+        approvals::ApprovalDecision::Approved
+    } else {
+        approvals::ApprovalDecision::Denied
+    };
+    let opposite = || {
+        AppError::bad_request(format!(
+            "approval `{key_id}` already has the opposite decision"
+        ))
+    };
+    let decision = state
+        .approvals
+        .decide(key_id, wanted)
+        .map_err(|error| match error {
+            approvals::ApprovalError::NotPending(_) => not_pending(),
+            other => AppError::internal(other),
+        })?;
+    if decision != wanted {
+        return Err(opposite());
+    }
     let outcome = state
         .core
         .completions()
-        .resolve(key.as_str(), resolution.clone())
+        .resolve(
+            call.key.as_str(),
+            approvals::resolution_for(decision, &request.arguments),
+        )
         .await
         .map_err(AppError::internal)?;
+    // `resolve` answered: the row has nothing left to repair.
+    state.approvals.forget(key_id).map_err(AppError::internal)?;
     match outcome {
         lash::durable::ResolveAnswer::Resolved | lash::durable::ResolveAnswer::AlreadyResolved => {}
-        lash::durable::ResolveAnswer::Conflict => {
-            return Err(AppError::bad_request(format!(
-                "approval `{key_id}` already has the opposite decision"
-            )));
-        }
+        lash::durable::ResolveAnswer::Conflict => return Err(opposite()),
         lash::durable::ResolveAnswer::Unknown
         | lash::durable::ResolveAnswer::Revoked
         | lash::durable::ResolveAnswer::ReservedKind => {
@@ -162,12 +165,12 @@ pub(crate) async fn decide_approval(
     }
     let outcome = format!("{outcome:?}");
     state.trace_for_session(
-        &SessionId::parse(requesting_session)?,
+        &requesting_session,
         "approval.decided",
         json!({
             "key": key_id,
-            "tool": tool,
-            "arguments": arguments,
+            "tool": request.tool,
+            "arguments": request.arguments,
             "decision": decision.as_str(),
             "resolve_outcome": outcome,
         }),
@@ -179,42 +182,57 @@ pub(crate) async fn decide_approval(
     })))
 }
 
-/// Boot-time half of the repair: a crash can leave a decided ledger row over a
-/// wait that was never resolved, and the pending list no longer shows it for
-/// an operator to retry. Re-resolve every decided row; `resolve` is
-/// idempotent, so rows whose wait already settled are observed, not redriven.
-pub(crate) async fn reconcile_decided_approvals(state: &AppState) {
-    let decided = match state.approvals.decided() {
-        Ok(decided) => decided,
+/// Boot-time half of the repair, over every ledger row. A decided row whose
+/// call is still parked is the crash between the decision and its resolve:
+/// resolve it with the key `parked` lists and delete the row once `resolve`
+/// answers. A row whose call is no longer parked, decided or not, has nothing
+/// left to receive a decision and is deleted.
+pub(crate) async fn reconcile_approvals(state: &AppState) {
+    let requests = match state.approvals.requests() {
+        Ok(requests) => requests,
         Err(error) => {
             eprintln!("agent-workbench approval reconcile cannot read the ledger: {error}");
             return;
         }
     };
-    for decided in decided {
-        let resolution = approvals::resolution_for(decided.decision, &decided.arguments);
-        match state
-            .core
-            .completions()
-            .resolve(decided.completion_key.as_str(), resolution)
-            .await
-        {
-            Ok(
-                lash::durable::ResolveAnswer::Resolved
-                | lash::durable::ResolveAnswer::AlreadyResolved
-                | lash::durable::ResolveAnswer::Unknown
-                | lash::durable::ResolveAnswer::Revoked
-                | lash::durable::ResolveAnswer::ReservedKind,
-            ) => {}
-            Ok(lash::durable::ResolveAnswer::Conflict) => eprintln!(
-                "agent-workbench approval reconcile: {} was decided {} but the wait resolved differently",
-                decided.key,
-                decided.decision.as_str()
-            ),
-            Err(error) => eprintln!(
-                "agent-workbench approval reconcile could not resolve {}: {error}",
-                decided.key
-            ),
+    for request in requests {
+        if let Err(error) = reconcile_approval(state, &request).await {
+            eprintln!(
+                "agent-workbench approval reconcile could not settle {}: {error}",
+                request.call_id
+            );
         }
     }
+}
+
+async fn reconcile_approval(
+    state: &AppState,
+    request: &approvals::ApprovalRequest,
+) -> AnyhowResult<()> {
+    let session_id = SessionId::parse(request.requesting_session.clone())?;
+    let Some(call) = parked_approval(state, &session_id, &request.call_id).await? else {
+        state.approvals.forget(&request.call_id)?;
+        return Ok(());
+    };
+    let Some(decision) = request.decision else {
+        // Still waiting for its operator.
+        return Ok(());
+    };
+    let answer = state
+        .core
+        .completions()
+        .resolve(
+            call.key.as_str(),
+            approvals::resolution_for(decision, &request.arguments),
+        )
+        .await?;
+    if answer == lash::durable::ResolveAnswer::Conflict {
+        eprintln!(
+            "agent-workbench approval reconcile: {} was decided {} but the wait resolved differently",
+            request.call_id,
+            decision.as_str()
+        );
+    }
+    state.approvals.forget(&request.call_id)?;
+    Ok(())
 }
