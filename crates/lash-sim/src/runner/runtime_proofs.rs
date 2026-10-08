@@ -74,6 +74,110 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
     })
 }
 
+/// Run a real `session.send().output()` against `script` on the durable
+/// engine, releasing its scripted-transport SSE events one gate at a time
+/// in timeline order, and record whether the turn terminalized without
+/// committing any output.
+#[cfg(test)]
+pub(super) async fn run_live_turn_facts(
+    seed: u64,
+    provider_kind: &str,
+    script: ProviderWireScript,
+    fault_kind: &str,
+    offered_prose_deltas: usize,
+) -> Result<crate::oracles::LiveProviderFailureFacts, FixedScriptRunnerError> {
+    let schedule = ScriptedTransportSchedule::new();
+    let transport = Arc::new(
+        ScriptedLlmHttpTransport::from_scripts([script.clone()])?
+            .with_event_schedule(schedule.clone()),
+    );
+    let (provider_handle, model, provider_kind) =
+        runtime_provider_components(provider_kind, &transport)
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let engine = crate::backend::SimEngine::new(seed).await?;
+    let core = lash::LashCore::standard_builder(engine.backend())
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_llm_profile(provider_handle, model.clone())
+        .build(crate::sim_process_owner())
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let session_id = lash_sansio::SessionId::fixture(format!(
+        "sim-live-failure-{provider_kind}-{offered_prose_deltas}"
+    ));
+    let session = crate::open_created_session(model.wire_model.clone(), &core, session_id)
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let events = Arc::new(RuntimeProofRecordingEvents::default());
+    let turn_engine = engine.clone();
+    let turn_session = session.clone();
+    let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
+    let turn = tokio::spawn(async move {
+        turn_engine
+            .run_turn(
+                &turn_session,
+                "sim-live-failure-turn",
+                turn_events,
+                text_turn("Run the live provider failure turn."),
+            )
+            .await
+    });
+    // The first release gate is an explicit schedule boundary: once the turn
+    // is blocked there, it cannot finish before delivery.
+    schedule.wait_until_blocked(0, 0).await;
+    let turn_was_live_parked = !turn.is_finished();
+    for (event_index, wire_event) in script.timeline().iter().enumerate() {
+        if turn.is_finished() {
+            break;
+        }
+        schedule.release(0, event_index, wire_event.event_name(), wire_event.at());
+    }
+    let result = turn
+        .await
+        .map_err(|err| {
+            FixedScriptRunnerError::Runtime(format!(
+                "live provider failure turn task failed to join: {err}"
+            ))
+        })??
+        .map(|output| output.result);
+    let streamed_prose_deltas = events.assistant_prose_delta_count().await;
+    // Committed output is the durable turn result and the session's
+    // transcript, not transient stream deltas.
+    let (terminalized_failure, committed_assistant_message_nonempty, committed_final_values) =
+        match &result {
+            Ok(turn_result) => (
+                !turn_result.is_success(),
+                turn_result
+                    .assistant_message()
+                    .is_some_and(|message| !message.is_empty()),
+                usize::from(turn_result.final_value().is_some()),
+            ),
+            Err(_) => (true, false, 0),
+        };
+    let committed_prose_in_transcript =
+        session
+            .observe()
+            .read_view()
+            .messages()
+            .iter()
+            .any(|message| {
+                message.parts.iter().any(|part| {
+                    part.content()
+                        .contains(crate::runtime_providers::LIVE_FAILURE_LEAK_PROSE)
+                })
+            });
+    Ok(crate::oracles::LiveProviderFailureFacts {
+        provider_kind,
+        fault_kind: fault_kind.to_string(),
+        offered_prose_deltas,
+        streamed_prose_deltas,
+        turn_was_live_parked,
+        terminalized_failure,
+        committed_assistant_message_nonempty,
+        committed_final_values,
+        committed_prose_in_transcript,
+    })
+}
+
 /// The proof's input prompt.
 pub(super) const PENDING_TOOL_PROMPT: &str = "use async tool";
 

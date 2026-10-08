@@ -1,6 +1,9 @@
 use super::*;
 use crate::scheduler::PendingRuntimeBoundary;
+use lash_llm_transport::{LlmHttpRequest, LlmHttpResponse};
+use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat};
 use lash_sansio::SessionId;
+use lash_sansio::sync::MutexExt;
 
 #[tokio::test]
 async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {
@@ -1080,4 +1083,326 @@ async fn a_world_live_replay_keeps_activity_however_long_the_host_runs() {
             panic!("an hour of host time dropped the world's activity: {reason:?}")
         }
     }
+}
+
+#[derive(Debug)]
+struct CapturingLlmHttpTransport {
+    inner: ScriptedLlmHttpTransport,
+    bodies: Mutex<Vec<Vec<u8>>>,
+}
+
+#[async_trait::async_trait]
+impl LlmHttpTransport for CapturingLlmHttpTransport {
+    async fn send(
+        &self,
+        request: LlmHttpRequest,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<LlmHttpResponse, LlmTransportError> {
+        self.bodies.lock_recover().push(request.body.to_vec());
+        self.inner.send(request, timeout).await
+    }
+}
+
+fn stable_prompt_prefix_bytes(body: &Value, message_count: usize) -> Vec<u8> {
+    // `cache_control` is the provider's deliberately moving breakpoint
+    // directive, not prompt content. Remove only that annotation before
+    // comparing the serialized prompt prefix; roles, part shape, and text
+    // remain byte-for-byte significant.
+    let mut prefix = body["messages"].as_array().expect("messages array")[..message_count].to_vec();
+    for message in &mut prefix {
+        if let Some(parts) = message.get_mut("content").and_then(Value::as_array_mut) {
+            for part in parts {
+                part.as_object_mut()
+                    .map(|object| object.remove("cache_control"));
+            }
+        }
+    }
+    serde_json::to_vec(&prefix).expect("serialize stable prompt prefix")
+}
+
+fn wire_message_text(message: &Value) -> String {
+    match &message["content"] {
+        Value::String(text) => text.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| part.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        content => panic!("unexpected message content: {content}"),
+    }
+}
+
+#[tokio::test]
+async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
+    for (model, cache_control) in [
+        (
+            "anthropic/claude-sonnet-4.6",
+            lash_core::CacheControlDialect::Anthropic,
+        ),
+        (
+            "google/gemini-3.1-pro-preview",
+            lash_core::CacheControlDialect::Gemini,
+        ),
+    ] {
+        let responses = [
+            "<typescript>\nconst scratch_note = \"saved\";\nprint(scratch_note);\n</typescript>",
+            "RLM work is complete.",
+        ];
+        let mut scripts = responses
+            .iter()
+            .map(|text| runtime_script_for_text(OPENAI_COMPATIBLE, text))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("OpenRouter RLM scripts");
+        for script in &mut scripts {
+            script.endpoint.path = "/api/v1/chat/completions".to_string();
+            script
+                .request_match
+                .body
+                .get_mut("model")
+                .expect("model request matcher")
+                .equals = Some(json!(model));
+        }
+        let capture = Arc::new(CapturingLlmHttpTransport {
+            inner: ScriptedLlmHttpTransport::from_scripts(scripts).expect("valid provider scripts"),
+            bodies: Mutex::new(Vec::new()),
+        });
+        let provider = OpenAiCompatibleProvider::new("test-key", OPENROUTER_BASE_URL)
+            .with_compat(OpenAiCompat::openrouter())
+            .with_transport(capture.clone());
+        let engine = crate::backend::SimEngine::new(0x5eed_7002)
+            .await
+            .expect("sim engine");
+        let backend = engine.backend();
+        let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                .channel(lash_protocol_rlm::RlmChannel::Cell)
+                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                .build(),
+            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+            &backend,
+        );
+        let core = lash::LashCore::rlm_builder(backend, factory)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .serve_test_llm_profile(
+                ProviderHandle::new(provider.into_components()),
+                lash_core::LlmProfileMetadata::builder(model)
+                    .context_window_tokens(200_000)
+                    .build()
+                    .expect("model limits")
+                    .with_capability(lash_core::LlmProfileCapability {
+                        instruction_role: Default::default(),
+                        native_mid_conversation_system: false,
+                        cache_control: Some(cache_control),
+                        ..lash_core::LlmProfileCapability::default()
+                    }),
+            )
+            .build(crate::sim_process_owner())
+            .expect("RLM prefix-stability core");
+        let session = crate::open_created_session(
+            model,
+            &core,
+            SessionId::fixture(format!("prefix-stability-{}", model.replace('/', "-"))),
+        )
+        .await
+        .expect("RLM prefix-stability session");
+
+        let output = engine
+            .run_turn(
+                &session,
+                "prefix-stability-turn",
+                Arc::new(super::runtime_proofs::RuntimeProofRecordingEvents::default()),
+                Arc::new(|session: &lash::LashSession| {
+                    Ok(session.send(lash::TurnInput::text("inspect")))
+                }),
+            )
+            .await
+            .expect("RLM prefix-stability handler")
+            .expect("RLM prefix-stability turn");
+        assert!(
+            output.is_success(),
+            "RLM turn failed for {model}: {output:?}"
+        );
+
+        let bodies = capture.bodies.lock_recover();
+        assert_eq!(bodies.len(), 2, "expected two RLM iterations for {model}");
+        let previous_body: Value = serde_json::from_slice(&bodies[0]).expect("first request JSON");
+        let next_body: Value = serde_json::from_slice(&bodies[1]).expect("second request JSON");
+        let previous_messages = previous_body["messages"].as_array().expect("messages");
+        let next_messages = next_body["messages"].as_array().expect("messages");
+        let stable_message_count = previous_messages.len() - 1;
+
+        assert_eq!(
+            stable_prompt_prefix_bytes(&previous_body, stable_message_count),
+            stable_prompt_prefix_bytes(&next_body, stable_message_count),
+            "RLM prompt prefix changed for {model}"
+        );
+        assert!(
+            next_messages
+                .iter()
+                .take(stable_message_count)
+                .all(|message| message["content"].is_array()),
+            "stable prefix text shape changed for {model}"
+        );
+        assert_eq!(
+            wire_message_text(&previous_messages[0]),
+            wire_message_text(&next_messages[0]),
+            "RLM system prompt changed for {model}"
+        );
+        assert!(
+            wire_message_text(previous_messages.last().expect("first volatile tail"))
+                .contains("=== CURRENT ITERATION: 1 ==="),
+            "first volatile suffix was not last for {model}"
+        );
+        let next_tail = wire_message_text(next_messages.last().expect("second volatile tail"));
+        assert!(
+            next_tail.contains("=== CURRENT ITERATION: 2 ===")
+                && next_tail.contains(r#"- `scratch_note` = "saved""#),
+            "updated volatile suffix was not last for {model}: {next_tail}"
+        );
+        assert!(
+            next_messages
+                .iter()
+                .take(stable_message_count)
+                .all(|message| !wire_message_text(message).contains("scratch_note")),
+            "volatile bound variables leaked into the stable prefix for {model}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "FIG-5346: a live LashSession's report and reads stay at the pre-turn state after a durable turn"]
+async fn runtime_facade_turn_uses_scripted_transport_and_checks_invariants() {
+    let proof = Box::pin(prove_runtime_facade_turn())
+        .await
+        .expect("runtime proof");
+
+    assert_eq!(proof.provider_kind, "openai-compatible");
+    assert_eq!(proof.session_id, "sim-runtime-session");
+    assert_eq!(proof.turn_index, 1);
+    assert_eq!(proof.assistant_message, "Runtime scripted answer.");
+    assert_eq!(proof.provider_exchange_count, 1);
+    assert!(proof.runtime_invariant.is_passed());
+    assert!(proof.provider_output_invariant.is_passed());
+    assert!(
+        proof
+            .pending_tool_completion
+            .turn_suspension_invariant
+            .is_passed()
+    );
+    assert!(
+        proof
+            .pending_tool_completion
+            .scheduler_resolution_invariant
+            .is_passed()
+    );
+    assert!(
+        proof
+            .pending_tool_completion
+            .final_result_invariant
+            .is_passed()
+    );
+    assert!(
+        proof
+            .final_value_semantic_channel
+            .semantic_channel_invariant
+            .is_passed()
+    );
+}
+
+#[tokio::test]
+#[ignore = "FIG-5346: a live LashSession's report and reads stay at the pre-turn state after a durable turn"]
+async fn pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary() {
+    let proof = prove_pending_tool_completion_through_turn()
+        .await
+        .expect("pending tool proof");
+
+    assert_eq!(proof.session_id, "sim-pending-tool-session");
+    assert_eq!(proof.turn_index, 1);
+    assert_eq!(proof.assistant_message, "done");
+    assert_eq!(proof.tool_name, "app_lookup");
+    assert!(proof.scheduler_controlled);
+    assert!(proof.turn_suspended_before_completion);
+    assert_eq!(proof.completed_event_count_before_resolution, 0);
+    assert!(proof.completed_event_count_after_resolution > 0);
+    // The proof records each resolve outcome's rendering.
+    assert_eq!(
+        proof.completion_outcome,
+        format!("{:?}", lash_core::ResolveOutcome::Accepted)
+    );
+    assert!(
+        proof
+            .duplicate_completion_outcome
+            .starts_with("AlreadyResolved { terminal: Ok("),
+        "{}",
+        proof.duplicate_completion_outcome
+    );
+    assert!(proof.turn_suspension_invariant.is_passed());
+    assert!(proof.scheduler_resolution_invariant.is_passed());
+    assert!(proof.final_result_invariant.is_passed());
+}
+
+#[tokio::test]
+#[ignore = "FIG-5346: a live LashSession's report and reads stay at the pre-turn state after a durable turn"]
+async fn final_value_semantic_channel_proof_uses_runtime_outcome_and_event() {
+    let proof = prove_final_value_semantic_channel()
+        .await
+        .expect("final value proof");
+
+    assert_eq!(proof.session_id, "sim-final-value-session");
+    assert_eq!(proof.turn_index, 1);
+    assert_eq!(proof.facts.outcome_kind, "final_value");
+    assert_eq!(
+        proof.final_value,
+        json!({
+            "source": "semantic-channel",
+            "ok": true,
+            "count": 3,
+        })
+    );
+    assert!(proof.final_value_event_count > 0);
+    assert!(proof.assistant_prose_delta_count > 0);
+    assert!(!proof.facts.transcript_inference_required());
+    assert!(proof.semantic_channel_invariant.is_passed());
+}
+
+#[tokio::test]
+#[ignore = "FIG-5346: a live LashSession's report and reads stay at the pre-turn state after a durable turn"]
+async fn live_provider_failure_oracle_bites_on_a_committing_turn() {
+    // END-TO-END NEGATIVE: shift a REAL `session.send().output()` against a VALID
+    // success script that streams AND COMMITS the leak prose (the same prose a
+    // failure turn must NOT commit). The live-failure oracle MUST fail on it —
+    // proving the "no committed output" assertion bites end-to-end, not just on
+    // synthetic facts.
+    let script = runtime_script_for_text(
+        OPENAI_COMPATIBLE,
+        crate::runtime_providers::LIVE_FAILURE_LEAK_PROSE,
+    )
+    .expect("valid success control script");
+    let facts = run_live_turn_facts(7, OPENAI_COMPATIBLE, script, "success_control", 1)
+        .await
+        .expect("shift committing control turn");
+
+    // The control turn really did commit the prose (the runtime CAN commit).
+    assert!(
+        facts.committed_assistant_message_nonempty,
+        "the success control turn should have committed the assistant prose: {facts:?}"
+    );
+    assert!(
+        !facts.terminalized_failure,
+        "the success control turn should not terminalize as a failure: {facts:?}"
+    );
+    assert!(
+        facts.committed_prose_in_transcript,
+        "the success control turn should leave the prose in the transcript: {facts:?}"
+    );
+
+    // The oracle catches the committed output.
+    let verdict = crate::oracles::live_provider_failure_terminalizes(&facts);
+    assert!(
+        !verdict.is_passed(),
+        "a turn that commits output MUST fail the live-provider-failure oracle: {}",
+        verdict.message
+    );
 }
