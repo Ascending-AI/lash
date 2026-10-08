@@ -211,10 +211,6 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
 /// A server's instructions render once per module on every prompt surface a
 /// session offers its tools on, from the recorded catalog alone.
 #[tokio::test]
-#[expect(
-    clippy::expect_used,
-    reason = "integration fixture setup and assertions"
-)]
 async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
     const INSTRUCTIONS: &str = "Authenticate with login before searching. Follow every nextCursor.";
     let initialize = serde_json::json!({

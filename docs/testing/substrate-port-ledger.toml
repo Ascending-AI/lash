@@ -4,47 +4,13 @@
 # 1687 rows over 873 files, 4049 laws.
 # By class: mechanical 198, semantic 130, delete 888, replace 471.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 92, L9c 354, L9d 100, L9e 138, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 266, ported 135, deleted 1286.
-# 1611 rows over 873 files, 3984 laws.
-# By class: mechanical 164, semantic 111, delete 871, replace 465.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 322, ported 107, deleted 1182.
+# By status: todo 186, ported 151, deleted 1350.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
 #   an operator can inspect and act on the process-operations surface on a multi-node PostgreSQL and S3 deployment, and every outcome stays truthful in durable state across a node kill (judged runbook)
 # - L8: runbooks/session-operator/runbook.md
 #   session operator verbs (withdraw an input, cancel a running run, redrive, cancel or fork parked work, repeat a lost reply) act once on live PostgreSQL and refuse stale repeats with unchanged receipts
-# - L9c: crates/lash-protocol-standard/src/discovery_tests.rs::all_discovery_refusals_are_reported_and_accounted_before_continuing
-#   all discovery refusals are reported and accounted before continuing
-# - L9c: crates/lash-protocol-standard/src/discovery_tests.rs::mixed_discovery_refusals_and_admitted_calls_are_each_reported_once
-#   mixed discovery refusals and admitted calls are each reported once
-# - L9c: crates/lash-protocol-standard/src/provider_part_persistence_tests.rs
-#   final and tool calling responses persist identical typed provider parts
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::attempt_context_provider_realizes_every_v2_intent_through_the_coordinator
-#   attempt context provider realizes every v2 intent through the coordinator
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::before_tool_hook_receives_resolved_argument_projection_policy
-#   before tool hook receives resolved argument projection policy
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them
-#   dispatch allows unknown mcp args when schema does not forbid them
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::explicit_execution_grant_runs_non_catalog_tool_with_binding
-#   explicit execution grant runs non catalog tool with binding
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests.rs::retry_ladder_survives_a_later_pending_completion
-#   retry ladder survives a later pending completion
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/attachment_normalization.rs
-#   denied second source records no manifest intent for the first; and 4 more law(s) of the file, by test name
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::after_checks_fail_or_abort_but_never_replace
-#   after checks fail or abort but never replace
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::argument_transforms_chain_once_in_registration_order
-#   argument transforms chain once in registration order
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::checks_inspect_the_provider_prepared_call
-#   checks inspect the provider prepared call
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::displaced_terminals_are_published_as_composition_evidence
-#   displaced terminals are published as composition evidence
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_checks_without_a_decision_record_publish_no_state_before_settlement
-#   result checks without a decision record publish no state before settlement
-# - L9c: crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/composition_laws.rs::result_transforms_chain_and_checks_see_the_final_result
-#   result transforms chain and checks see the final result
 # - L9c: crates/lash-restate-test/tests/one_driver.rs
 #   a host's send leaves the engine the only driver, an empty commit finishes the work without another admission, and inputs on both sides of it each run once
 # - L9c: crates/lash-restate-test/tests/run_close.rs
@@ -241,74 +207,6 @@
 #   sqlite each timer aggregate in a cell waits on its own; and 1 more law(s) of the file, by test name
 # - L9e: crates/lash/src/tests/turn_streaming/control_and_cancel.rs
 #   turn stream finish returns committed assistant prose; and 8 more law(s) of the file, by test name
-# - L9f: crates/lash-sim/src/backend_fault.rs::generated_backend_failure_seed_records_script_evidence
-#   generated backend failure seed records script evidence
-# - L9f: crates/lash-sim/src/cache_regression.rs::rlm_live_bound_state_is_prefix_stable_for_every_serializer
-#   rlm live bound state is prefix stable for every serializer
-# - L9f: crates/lash-sim/src/invariants/tests.rs::a_broken_frame_chain_breaks_frame_lineage
-#   a broken frame chain breaks frame lineage
-# - L9f: crates/lash-sim/src/invariants/tests.rs::a_rerun_outside_the_window_breaks_the_effect_window
-#   a rerun outside the window breaks the effect window
-# - L9f: crates/lash-sim/src/invariants/tests.rs::a_resolution_consumed_by_another_call_breaks_completion_ownership
-#   a resolution consumed by another call breaks completion ownership
-# - L9f: crates/lash-sim/src/invariants/tests.rs::a_violation_renders_its_seed_invariant_and_excerpt
-#   a violation renders its seed invariant and excerpt
-# - L9f: crates/lash-sim/src/invariants/tests.rs::an_artifact_nobody_holds_breaks_reachability
-#   an artifact nobody holds breaks reachability
-# - L9f: crates/lash-sim/src/invariants/tests.rs::an_existing_start_answered_to_another_originator_is_caught
-#   an existing start answered to another originator is caught
-# - L9f: crates/lash-sim/src/invariants/tests.rs::an_input_left_open_or_settled_twice_breaks_input_settlement
-#   an input left open or settled twice breaks input settlement
-# - L9f: crates/lash-sim/src/invariants/tests.rs::an_obligation_left_due_or_stalled_untyped_breaks_settled_or_stalled
-#   an obligation left due or stalled untyped breaks settled or stalled
-# - L9f: crates/lash-sim/src/invariants/tests.rs::checker_failure_retains_history_and_registered_regression
-#   checker failure retains history and registered regression
-# - L9f: crates/lash-sim/src/invariants/tests.rs::failure_artifact_keeps_seed_history_and_checker
-#   failure artifact keeps seed history and checker
-# - L9f: crates/lash-sim/src/invariants/tests.rs::soak_history_host_admission_catches_unrequested_input_rows
-#   soak history host admission catches unrequested input rows
-# - L9f: crates/lash-sim/src/invariants/tests.rs::the_clean_history_keeps_every_invariant_and_gives_each_facts
-#   the clean history keeps every invariant and gives each facts
-# - L9f: crates/lash-sim/src/invariants/tests.rs::two_calls_sharing_a_completion_key_break_completion_ownership
-#   two calls sharing a completion key break completion ownership
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_agent_failed_child_fixture_reason
-#   minimizer preserves agent failed child fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_agent_mini_oracle_fixture_reason
-#   minimizer preserves agent mini oracle fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_agent_subagent_child_fixture_reason
-#   minimizer preserves agent subagent child fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_agent_tuple_fixture_reason
-#   minimizer preserves agent tuple fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_backend_retry_runtime_completion_fixture_reason
-#   minimizer preserves backend retry runtime completion fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_failing_oracle_id_and_reason
-#   minimizer preserves failing oracle id and reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_provider_mutation_runtime_completion_fixture_reason
-#   minimizer preserves provider mutation runtime completion fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_queued_input_operational_fixture_reason
-#   minimizer preserves queued input operational fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_rlm_default_mode_fixture_reason
-#   minimizer preserves rlm default mode fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_rlm_mini_oracle_fixture_reason
-#   minimizer preserves rlm mini oracle fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_rlm_typed_finish_fixture_reason
-#   minimizer preserves rlm typed finish fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_runtime_graph_failure_across_every_artifact
-#   minimizer preserves runtime graph failure across every artifact
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_scheduler_owned_boundary_bug_reason
-#   minimizer preserves scheduler owned boundary bug reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_standard_max_turn_stop_fixture_reason
-#   minimizer preserves standard max turn stop fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_standard_mini_oracle_fixture_reason
-#   minimizer preserves standard mini oracle fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::minimizer_preserves_trigger_wakeup_operational_fixture_reason
-#   minimizer preserves trigger wakeup operational fixture reason
-# - L9f: crates/lash-sim/src/minimize.rs::removing_a_sessions_provider_family_removes_its_checkpoint_evidence
-#   removing a sessions provider family removes its checkpoint evidence
-# - L9f: crates/lash-sim/src/generation_disposition_matrix.rs::protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed
-#   an RLM session's protocol-owned stop sequence is left off the wire and the attempt receipt reports SuppressedProtocolOwned
-# - L9f: crates/lash-sim/src/generation_disposition_matrix.rs::runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value
-#   a session's output-token cap above the model's capacity is clamped on the wire and the turn's attempt receipt reports ClampedToCapacity
 # - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::coverage_oracles_are_failing_capable_not_presence_only
 #   every coverage oracle can fail on a recorded run, not only on missing facts
 # - L9f: crates/lash-sim/src/oracles/tests/contract_checks.rs::every_battery_slot_declares_the_one_oracle_id_its_verdict_uses
@@ -329,134 +227,6 @@
 #   a generated-sim profile run writes its trace, replay and provider artifacts
 # - L9f: crates/lash-sim/src/runner/tests.rs::generated_sim_search_mode_keeps_summary_lean_and_labels_shards
 #   generated-sim search mode keeps its summary lean and labels every shard
-# - L9f: crates/lash-sim/src/runner/tests.rs::live_provider_failure_oracle_bites_on_a_committing_turn
-#   live provider failure oracle bites on a committing turn
-# - L9f: crates/lash-sim/src/runner/tests.rs::pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary
-#   pending tool completion proof uses scheduler delivered tool boundary
-# - L9f: crates/lash-sim/src/runner/tests.rs::runtime_completion_serialization_mutation_guard
-#   runtime completion serialization mutation guard
-# - L9f: crates/lash-sim/src/runner/tests.rs::runtime_facade_turn_uses_scripted_transport_and_checks_invariants
-#   runtime facade turn uses scripted transport and checks invariants
-# - L9f: crates/lash-sim/src/runtime_feedback.rs::runtime_feedback_real_checkpoint_directive_reaches_provider_wires
-#   runtime feedback real checkpoint directive reaches provider wires
-# - L9f: crates/lash-sim/src/runtime_feedback.rs::runtime_feedback_real_rlm_output_limit_retry_reaches_provider_wires
-#   runtime feedback real rlm output limit retry reaches provider wires
-# - L9f: crates/lash-sim/src/state_checker.rs::checker_names_a_declared_session_whose_checkpoints_all_vanished
-#   checker names a declared session whose checkpoints all vanished
-# - L9f: crates/lash-sim/src/state_checker.rs::checker_rejects_commit_session_without_runtime_facts_and_leaf_mismatch
-#   checker rejects commit session without runtime facts and leaf mismatch
-# - L9f: crates/lash-sim/src/state_checker.rs::promoted_v1_v2_commits_are_skipped_for_their_declared_schema_version
-#   promoted v1 v2 commits are skipped for their declared schema version
-# - L9f: crates/lash-sim/src/state_checker.rs::seeded_checker_rejects_corrupted_runtime_usage
-#   seeded checker rejects corrupted runtime usage
-# - L9f: crates/lash-sim/src/state_checker.rs::standard_generated_run_checks_commits_and_requires_v3_state
-#   standard generated run checks commits and requires v3 state
-# - L9f: crates/lash-sim/tests/logical_turn.rs
-#   admitted switch is seeded atomic ordered and exactly once; and 4 more law(s) of the file, by test name
-# - L9h: examples/workflow-graph-roundtrip/tests/authoring.rs
-#   blank workflow full authoring round trip rejects malformed then runs; and 5 more law(s) of the file, by test name
-# - L9h: examples/workflow-graph-roundtrip/tests/durable_run.rs
-#   a saved workflow runs as a durable process
-# - L9h: examples/workflow-graph-roundtrip/tests/roundtrip.rs
-#   operation catalog and fragment validation match the editor contract; and 20 more law(s) of the file, by test name
-# - L9h: examples/workflow-graph-roundtrip/tests/type_facets.rs
-#   type facets are projected and client echoes are ignored on save; and 1 more law(s) of the file, by test name
-# - L9f: crates/lash-sim/tests/stack_policy.rs::assert_product_stack_probe_passes
-#   every fixed Agent product contract runs to completion in a child process held to the 2 MiB product stack budget, one case per contract
-# - L9h: crates/lash-perf/src/bin/tool_batch_baseline/native_run_cost_tests.rs
-#   l15 census tracks native run records and all descendants
-# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::a_dropped_runtime_frees_its_in_process_lane
-#   a dropped runtime frees its in process lane
-# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::rlm_globals_keeps_fixed_session_projection_across_real_turns
-#   the RLM-globals perf scenario keeps one fixed session projection across real turns
-# - L9h: crates/lash-perf/src/runtime_perf/harness/tests.rs::scenario_wiring_drives_the_benchmark_plugin_list_in_order
-#   scenario wiring drives the benchmark plugin list in order
-# - L9h: crates/lash-perf/src/runtime_perf/measurement/contention.rs::async_settlement_smoke_drains_every_open_child_span
-#   the async-settlement scenario drains every open child span and reports spawn, settle and drain samples
-# - L9h: crates/lash-perf/src/runtime_perf/measurement/contention.rs::writer_contention_smoke_reports_wait_release_latency_and_execution
-#   the writer-contention scenario reports wait, release-latency and execution samples for same-session and many-session writers
-# - L9h: crates/lash-perf/src/runtime_perf/measurement/queued_work.rs::queued_work_admission_stress_advances_its_commit_cursor
-#   queued-work admission under stress advances its commit cursor
-# - L9h: crates/lash-perf/src/runtime_perf/measurement/queued_work.rs::turn_input_ingress_stress_advances_its_commit_cursor
-#   turn-input ingress under stress advances its commit cursor
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::async_completion_smoke_witnesses_match_session_geometry
-#   async-completion witnesses match the session geometry
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::checkpoint_state_hot_paths_capture_one_changed_component_per_turn
-#   checkpoint-state hot paths capture one changed component per turn
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_queued_work_contention_sqlite_smoke_reports_structure_and_counters
-#   the durable queued-work contention scenario on SQLite reports its structure and counters
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_sqlite_checkpoint_curve_reports_paired_structural_samples
-#   the durable SQLite checkpoint curve reports paired structural samples
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_knee_smoke_reports_each_step
-#   the high-traffic SQLite knee scenario reports each step
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_smoke_reports_load_structure
-#   the high-traffic SQLite scenario reports its load structure
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_trigger_waits_for_terminal_delivery
-#   a high-traffic trigger waits for terminal delivery
-# - L9h: crates/lash-perf/src/runtime_perf/report_phase_tests.rs::stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls
-#   durable SQLite turn scenarios report their phases and store calls
-# - L9h: examples/agent-workbench/src/main_sections/tests/commit_budget.rs
-#   commit budget is explicit host policy with no implicit builder fallback
-# - L9h: examples/agent-workbench/src/main_sections/tests/continue_as_projection.rs
-#   two continue as switches keep real sends and show the current follow task; and 3 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/deferred_tools.rs
-#   deferred search observation enables next block call; and 1 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/done_stream_items.rs
-#   done stream items are transient and not snapshotted; and 1 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/facade_homes.rs::workbench_plugin_observes_session_config_policy_transition
-#   workbench plugin observes session config policy transition
-# - L9h: examples/agent-workbench/src/main_sections/tests/mail_payload.rs::inject_message_scopes_emission_to_requested_session
-#   inject message scopes emission to requested session
-# - L9h: examples/agent-workbench/src/main_sections/tests/multi_session.rs::a_created_session_runs_beside_the_ambient_default
-#   a created session runs beside the ambient default
-# - L9h: examples/agent-workbench/src/main_sections/tests/multi_session.rs::selecting_a_session_moves_the_query_less_default
-#   selecting a session moves the query less default
-# - L9h: examples/agent-workbench/src/main_sections/tests/multi_session.rs::the_session_roster_survives_the_web_process
-#   the session roster survives the web process
-# - L9h: examples/agent-workbench/src/main_sections/tests/observation_config.rs
-#   state get preserves config; and 4 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/provider_execution_evidence.rs
-#   provider execution evidence reaches the record surfaces
-# - L9h: examples/agent-workbench/src/main_sections/tests/provider_tool_projection.rs
-#   every tool a standard workbench turn offers projects under every provider tool dialect
-# - L9h: examples/agent-workbench/src/main_sections/tests/queued_work.rs
-#   workbench lists and controls individual queued batches; and 3 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/recoverable_chat_bare_prose.rs
-#   chat finish requires text session wide and prose still ends a turn; and 4 more law(s) of the file, by test name
-# - L9h: examples/agent-workbench/src/main_sections/tests/recoverable_chat_failures.rs::workbench_provider_failure_emits_only_fixed_public_product_copy
-#   workbench provider failure emits only fixed public product copy
-# - L9h: examples/agent-workbench/src/main_sections/tests/remote_execution_evidence.rs::workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_replacement
-#   workbench remote recovery facades deliver cursor events and terminal replacement
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::a_delete_that_lands_between_admission_and_claim_refuses_the_send
-#   a delete that lands between admission and claim refuses the send
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::a_retiring_session_refuses_use_but_admits_the_delete_retry
-#   a retiring session refuses use but admits the delete retry
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::deleting_a_session_with_a_running_turn_cancels_it_before_retiring
-#   deleting a session with a running turn cancels it before retiring
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_fence.rs::every_session_bound_route_refuses_a_retired_id_with_the_same_conflict
-#   every session bound route refuses a retired id with the same conflict
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_isolation.rs
-#   concurrent sessions isolate transcripts triggers and processes
-# - L9h: examples/agent-workbench/src/main_sections/tests/session_resume.rs
-#   committed transcript and provider history survive web process reconstruction
-# - L9h: examples/agent-workbench/src/main_sections/tests/tool_control.rs
-#   workbench tools expose typed cancellation and turn control
-# - L9h: examples/agent-workbench/src/main_sections/tests/tool_loss.rs
-#   a run that lost a tool renders the loss to the user
-# - L9h: examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs
-#   button trigger lifecycle stays visible and queues wakes during active turn
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_cell_reads_what_an_earlier_cell_bound_in_both_dialects
-#   a cell reads what an earlier cell bound in both dialects
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_name_no_one_has_is_still_refused_in_both_dialects
-#   a name no one has is still refused in both dialects
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects
-#   a rehydrated session still reads its earlier bindings in both dialects
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_typescript_workbench_serves_typescript_turns_and_records_the_dialect
-#   a typescript workbench serves typescript turns and records the dialect
-# - L9h: examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::the_code_failure_scenario_renders_a_failed_cell_and_terminates
-#   the code failure scenario renders a failed cell and terminates
-# - L9h: runbooks/workbench-cron-schedule/runbook.md
-#   a recurring schedule registered from a Workbench chat turn fires one turn per tick; disable, re-enable and delete take effect at the next boundary (judged runbook)
 # END SUMMARY
 #
 # Every test that uses the Restate server double (`lash_restate_test`), every

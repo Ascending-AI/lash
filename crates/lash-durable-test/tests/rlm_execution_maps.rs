@@ -460,7 +460,7 @@ async fn process_map_fixture(tier: Tier, workers: lash::rlm::WorkerService) {
         let artifact = stored_artifact(&world, &started.identity.module_ref).await;
         if artifact.ir().declarations.iter().any(|declaration| {
             matches!(declaration, lashlang::Declaration::Process(process)
-                if process.name.to_string() == started.identity.entry_name
+                if process.name == started.identity.entry_name
                     && matches!(&process.origin, lashlang::ProcessOrigin::Lifted { site, .. }
                         if site.root == lashlang::AstRoot::Main && site.steps.len() == 2))
         }) {

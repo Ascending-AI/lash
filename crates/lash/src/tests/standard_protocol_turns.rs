@@ -368,6 +368,10 @@ fn trace_positions(
 /// whose refusal text reaches the next model request, and it and every
 /// admitted call beside it have exactly one ordered start and completion in
 /// the trace and in the turn's activity.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the test host reads back the trace file it configured"
+)]
 async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     let requests = Arc::new(StdMutex::new(Vec::new()));
     let admitted = Arc::new(AtomicUsize::new(0));
