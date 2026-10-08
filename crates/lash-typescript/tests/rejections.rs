@@ -543,3 +543,171 @@ fn a_missing_field_of_a_closed_literal_is_tsc2339() {
     .expect_err("a closed shape refuses a field it lacks");
     assert_eq!(error.code, Code::LinkError, "{error}");
 }
+
+// Source audits run in the integration-test host, which owns filesystem
+// access. The dialect library receives source text and never reads the world.
+mod diagnostic_sources {
+    use lash_typescript::{CodeClassification, DiagnosticCode};
+
+    /// Read every Rust source under the crate's source root, including nested
+    /// modules. Buck and Cargo supply this tree as test data; deriving the
+    /// inventory here keeps new modules in the diagnostic-site checks.
+    fn emitting_sources() -> Vec<(std::path::PathBuf, String)> {
+        fn visit(
+            root: &std::path::Path,
+            directory: &std::path::Path,
+            sources: &mut Vec<(std::path::PathBuf, String)>,
+        ) {
+            for entry in std::fs::read_dir(directory).expect("read the crate's source directory") {
+                let path = entry.expect("read a source entry").path();
+                if path.is_dir() {
+                    visit(root, &path, sources);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    sources.push((
+                        path.strip_prefix(root)
+                            .expect("source is under the root")
+                            .to_path_buf(),
+                        std::fs::read_to_string(&path).expect("read the Rust source"),
+                    ));
+                }
+            }
+        }
+
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sources = Vec::new();
+        visit(&root, &root, &mut sources);
+        sources.sort_by(|left, right| left.0.cmp(&right.0));
+        sources
+    }
+
+    /// Every out-of-line module declaration must resolve to source the walker
+    /// reads. Check nested and public modules too, so a missing test-data file
+    /// cannot quietly make the diagnostic classification check partial.
+    #[test]
+    fn the_source_walker_reads_every_module() {
+        let sources = emitting_sources();
+        let listed = sources
+            .iter()
+            .map(|(path, _)| path)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        let mut missing = Vec::new();
+        for (path, source) in &sources {
+            let parent = path.parent().expect("a source has a parent");
+            let module_directory = match path.file_name().and_then(|name| name.to_str()) {
+                Some("lib.rs" | "mod.rs") => parent.to_path_buf(),
+                _ => parent.join(path.file_stem().expect("a Rust source has a stem")),
+            };
+            for line in source.lines().map(str::trim) {
+                let declaration = line
+                    .strip_prefix("pub ")
+                    .or_else(|| line.strip_prefix("pub(crate) "))
+                    .or_else(|| line.strip_prefix("pub(super) "))
+                    .unwrap_or(line);
+                let Some(module) = declaration
+                    .strip_prefix("mod ")
+                    .and_then(|rest| rest.strip_suffix(';'))
+                else {
+                    continue;
+                };
+                let candidates = [
+                    module_directory.join(format!("{module}.rs")),
+                    module_directory.join(module).join("mod.rs"),
+                ];
+                if !candidates
+                    .iter()
+                    .any(|candidate| listed.contains(candidate))
+                {
+                    missing.push(candidates[0].clone());
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "these modules can emit diagnostics the walker never reads: {missing:?}"
+        );
+    }
+
+    /// The three per-site codes must never be answered by a table.
+    ///
+    /// Deriving the answer from `accepted_idiom().is_some()` filed every arity mistake under
+    /// "refused"; excluding the codes wholesale filed the entire determinism-refusal set —
+    /// `Promise.then`, `crypto.randomUUID`, `localeCompare`, the local-time `Date` readers —
+    /// under "your program is wrong", which sends a model debugging something the runtime will
+    /// never run.
+    /// Neither a default nor an exclusion is available now: the site says, or the crate does
+    /// not compile past this test.
+    ///
+    /// Read from the crate's own sources rather than exercised through inputs,
+    /// because the property is about *every* site, including ones no fixture
+    /// reaches.
+    #[test]
+    fn every_ambiguous_code_site_classifies_itself() {
+        let per_site = DiagnosticCode::ALL
+            .iter()
+            .filter(|code| code.classification() == CodeClassification::PerSite)
+            .map(|code| format!("{code:?}"))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            per_site.len(),
+            3,
+            "the walker below is written for exactly these: {per_site:?}"
+        );
+
+        // The constructors and helpers that state a family. Anything else
+        // building a per-site code is a site that never chose.
+        const CLASSIFYING: &[&str] = &[
+            "Diagnostic::refusal",
+            "Diagnostic::defect",
+            "reject_refusal",
+            "reject_defect",
+        ];
+
+        let mut unclassified = Vec::new();
+        let mut classified = 0usize;
+        for (path, source) in emitting_sources() {
+            // Production code only. A test fixture naming a code emits nothing
+            // to a model, and this file's own fixtures would otherwise trip it.
+            let source = source.split("#[cfg(test)]").next().unwrap_or_default();
+            for (offset, _) in source.match_indices("DiagnosticCode::") {
+                let name = source[offset + "DiagnosticCode::".len()..]
+                    .split(|ch: char| !ch.is_alphanumeric())
+                    .next()
+                    .unwrap_or_default();
+                if !per_site.contains(name) {
+                    continue;
+                }
+                // The callee whose argument list this code opens: step back over
+                // whitespace to the `(`, then read the identifier before it.
+                // Reading the nearest preceding `Diagnostic::` instead would
+                // walk past helper calls and land on an unrelated constructor.
+                let head = source[..offset].trim_end();
+                let Some(head) = head.strip_suffix('(') else {
+                    unclassified.push(format!(
+                        "{}: `{name}` is not the first argument of a call",
+                        path.display()
+                    ));
+                    continue;
+                };
+                let callee = head
+                    .rsplit(|ch: char| !(ch.is_alphanumeric() || ch == '_' || ch == ':'))
+                    .next()
+                    .unwrap_or_default();
+                if CLASSIFYING.contains(&callee) {
+                    classified += 1;
+                } else {
+                    unclassified.push(format!("{}: `{name}` built by `{callee}`", path.display()));
+                }
+            }
+        }
+
+        assert!(
+            unclassified.is_empty(),
+            "a per-site code must say which family it is: {unclassified:#?}"
+        );
+        assert!(
+            classified > 40,
+            "the walker found only {classified} sites, so it is not reading the crate"
+        );
+    }
+}
