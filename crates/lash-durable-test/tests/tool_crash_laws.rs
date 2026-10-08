@@ -1951,25 +1951,9 @@ tiered_laws!(
     a_turn_cut_at_a_phase_commit_resumes_under_its_trace_scope,
 );
 
-/// [`a_turns_puts_are_held_by_its_execution_across_a_crash`] on the SQLite
-/// tiers: the PostgreSQL dialect's store set has no attachment store.
+/// The attachment put crash law on every store tier (FIG-5400).
 mod puts {
-    mod sqlite_memory {
-        #[tokio::test]
-        async fn a_turns_puts_are_held_by_its_execution_across_a_crash() {
-            super::super::a_turns_puts_are_held_by_its_execution_across_a_crash(
-                super::super::served::Tier::SqliteMemory,
-            )
-            .await;
-        }
-    }
-    mod sqlite_file {
-        #[tokio::test]
-        async fn a_turns_puts_are_held_by_its_execution_across_a_crash() {
-            super::super::a_turns_puts_are_held_by_its_execution_across_a_crash(
-                super::super::served::Tier::SqliteFile,
-            )
-            .await;
-        }
-    }
+    use super::{a_turns_puts_are_held_by_its_execution_across_a_crash, served};
+
+    crate::tiered_laws!(current_thread: a_turns_puts_are_held_by_its_execution_across_a_crash);
 }
