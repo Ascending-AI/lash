@@ -485,7 +485,7 @@ pub(crate) async fn deliver_process_wake_tx(
     let Some(wake) = wake else {
         return Ok(());
     };
-    crate::PostgresDurableStore::lock_session_admission(tx, &wake.target_session_id)
+    crate::runtime_persistence::lock_session_history_mutation_tx(tx, &wake.target_session_id)
         .await
         .map_err(PluginError::from)?;
     let sql = crate::session_sql::session_sql();

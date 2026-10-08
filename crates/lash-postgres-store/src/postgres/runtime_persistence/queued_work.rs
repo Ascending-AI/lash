@@ -14,7 +14,6 @@ impl PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        crate::PostgresDurableStore::lock_session_admission(&mut tx, &batch.session_id).await?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
         let queued = enqueue_queued_work_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
@@ -30,7 +29,6 @@ impl PostgresStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        crate::PostgresDurableStore::lock_session_admission(&mut tx, &batch.session_id).await?;
         ensure_session_not_deleted_tx(&mut tx, &batch.session_id).await?;
         let queued =
             enqueue_queued_work_with_outcome_tx(&mut tx, &batch, self.clock.timestamp_ms()).await?;

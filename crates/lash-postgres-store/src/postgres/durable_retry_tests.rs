@@ -26,24 +26,13 @@ use crate::testing::{CommitFault, IsolatedDatabase, LostCommit};
 
 const LABEL: CommitLabel = CommitLabel::new("law.write");
 
-/// FIG-5423: an admission blocked by the owner takes no lock that the
-/// owner's head commit needs. The old referrer -> history -> actor order
-/// deadlocked with the owner's actor -> history -> referrer order.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_lock() {
-    use lash_core_execution::runtime::QueuedWorkBatchDraft;
+/// Admit session `session` to the catalog, with no durable actor yet.
+async fn admit(storage: &PostgresStorage, session: &lash_sansio::SessionId) {
     use lash_core_execution::{
-        ArtifactReferrer, DeliveryPolicy, MaxToolCalls, SessionCatalogStore as _,
-        SessionCreationHead, SessionPolicy, SessionRelation, SessionStoreCreateRequest, TurnBudget,
+        MaxToolCalls, SessionCatalogStore as _, SessionCreationHead, SessionPolicy,
+        SessionRelation, SessionStoreCreateRequest, TurnBudget,
     };
 
-    let (_database, storage) = storage(
-        "a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_lock",
-        &PostgresHostConfig::default(),
-    )
-    .await
-    .expect("hermetic PostgreSQL is available");
-    let session = lash_sansio::SessionId::from("admission-lock-order");
     storage
         .session_store_factory()
         .admit_session(&SessionStoreCreateRequest {
@@ -56,54 +45,32 @@ async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_l
         })
         .await
         .expect("the catalog admits the session");
-    let store = storage.durable_store();
-    create(&store, &actor(session.as_str())).await;
-    let mut owner = crate::begin_guarded(storage.pool(), &storage.fence)
-        .await
-        .expect("the owner's transaction opens");
-    crate::PostgresDurableStore::lock_session_admission(&mut owner, &session)
-        .await
-        .expect("the owner holds its actor row");
+}
 
-    let (started, pid) = tokio::sync::oneshot::channel();
-    let admission = tokio::spawn({
-        let pool = storage.pool().clone();
-        let fence = storage.fence.clone();
-        let session = session.clone();
-        async move {
-            let mut tx = crate::begin_guarded(&pool, &fence)
-                .await
-                .expect("admission opens");
-            let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
-                .fetch_one(&mut **tx)
-                .await
-                .expect("the admission's backend pid");
-            started.send(pid).expect("the owner awaits the pid");
-            let batch = QueuedWorkBatchDraft::new(
-                session,
-                DeliveryPolicy::EarliestSafeBoundary,
-                lash_core_execution::facade_support::SessionCommand::RefreshToolCatalog {
-                    reason: "concurrent owner commit".into(),
-                },
-            );
-            let outcome =
-                crate::runtime_persistence::enqueue_queued_work_with_outcome_tx(&mut tx, &batch, 1)
-                    .await
-                    .expect("the admission commits without contention");
-            tx.commit().await.expect("the admission commits");
-            outcome
-        }
-    });
-    let pid = pid.await.expect("the admission started");
+/// The advisory key of session `session`'s artifact referrer lock.
+fn referrer_key(session: &lash_sansio::SessionId) -> String {
+    let referrer = lash_core_execution::ArtifactReferrer::Session(session.clone());
+    format!(
+        "lash-artifact-referrer:{}:{}",
+        referrer.kind().as_str(),
+        referrer.canonical_id(),
+    )
+}
+
+/// Wait until a backend of this database other than `holders` waits on a
+/// lock.
+async fn lock_wait_beside(storage: &PostgresStorage, holders: &[i32]) {
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let waiting: bool = sqlx::query_scalar(
-                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid = $1 AND wait_event_type = 'Lock')",
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                 WHERE datname = current_database() AND pid <> ALL($1)
+                   AND wait_event_type = 'Lock')",
             )
-            .bind(pid)
+            .bind(holders)
             .fetch_one(storage.pool())
             .await
-            .expect("read the admission's lock wait");
+            .expect("read the lock waits");
             if waiting {
                 break;
             }
@@ -111,7 +78,54 @@ async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_l
         }
     })
     .await
-    .expect("the admission waits on the owner");
+    .expect("a producer waits on a held lock");
+}
+
+async fn backend_pid(tx: &mut sqlx::PgConnection) -> i32 {
+    sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(tx)
+        .await
+        .expect("the backend pid")
+}
+
+/// A producer admission into session `name`, run on `storage` while an owner
+/// transaction holds the session's actor row.
+type Admission = Box<
+    dyn FnOnce(
+            PostgresStorage,
+            lash_sansio::SessionId,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send,
+>;
+
+/// The session lock order (FIG-5423, FIG-5429): an admission that waits for
+/// the session's owner holds no lock the owner's head commit takes after its
+/// actor row. The owner holds the actor row; once the admission waits on a
+/// lock, the owner takes the session's history lock and its referrer lock
+/// without waiting. An admission that took history first and the actor row
+/// last (in its wake) deadlocked with a producer that took them the other
+/// way round, and one of them was refused `Contended`.
+async fn a_waiting_admission_holds_no_history_or_referrer_lock(
+    name: &'static str,
+    admission: Admission,
+) {
+    let (_database, storage) = storage(name, &PostgresHostConfig::default())
+        .await
+        .expect("hermetic PostgreSQL is available");
+    let session = lash_sansio::SessionId::from(name);
+    admit(&storage, &session).await;
+    let store = storage.durable_store();
+    create(&store, &actor(session.as_str())).await;
+    let mut owner = crate::begin_guarded(storage.pool(), &storage.fence)
+        .await
+        .expect("the owner's transaction opens");
+    crate::PostgresDurableStore::lock_session_actor(&mut owner, &session)
+        .await
+        .expect("the owner holds its actor row");
+    let owner_pid = backend_pid(&mut owner).await;
+
+    let admitted = tokio::spawn(admission(storage.clone(), session.clone()));
+    lock_wait_beside(&storage, &[owner_pid]).await;
 
     let history_free: bool =
         sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 1::bigint))")
@@ -119,14 +133,9 @@ async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_l
             .fetch_one(&mut **owner)
             .await
             .expect("the owner probes its history lock");
-    let referrer = ArtifactReferrer::Session(session);
     let referrer_free: bool =
         sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))")
-            .bind(format!(
-                "lash-artifact-referrer:{}:{}",
-                referrer.kind().as_str(),
-                referrer.canonical_id(),
-            ))
+            .bind(referrer_key(&session))
             .fetch_one(&mut **owner)
             .await
             .expect("the owner probes its referrer lock");
@@ -136,14 +145,183 @@ async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_l
         .rollback()
         .await
         .expect("the owner releases its locks");
-    admission.await.expect("the admission ends");
+    admitted.await.expect("the admission is admitted");
     assert!(
         history_free,
-        "the blocked admission holds the owner's history lock"
+        "the waiting admission holds the owner's history lock"
     );
     assert!(
         referrer_free,
-        "the blocked admission holds the owner's referrer lock"
+        "the waiting admission holds the owner's referrer lock"
+    );
+}
+
+/// FIG-5423: a queued-work admission takes the actor row first.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_queued_admission_waiting_for_the_owner_holds_no_history_or_referrer_lock() {
+    use lash_core_execution::DeliveryPolicy;
+    use lash_core_execution::runtime::QueuedWorkBatchDraft;
+
+    a_waiting_admission_holds_no_history_or_referrer_lock(
+        "admission-lock-order",
+        Box::new(|storage, session| {
+            Box::pin(async move {
+                let mut tx = crate::begin_guarded(storage.pool(), &storage.fence)
+                    .await
+                    .expect("admission opens");
+                let batch = QueuedWorkBatchDraft::new(
+                    session,
+                    DeliveryPolicy::EarliestSafeBoundary,
+                    lash_core_execution::facade_support::SessionCommand::RefreshToolCatalog {
+                        reason: "concurrent owner commit".into(),
+                    },
+                );
+                crate::runtime_persistence::enqueue_queued_work_with_outcome_tx(&mut tx, &batch, 1)
+                    .await
+                    .expect("the admission commits without contention");
+                tx.commit().await.expect("the admission commits");
+            })
+        }),
+    )
+    .await;
+}
+
+/// FIG-5429: a turn-input batch takes the actor row before the history lock
+/// its ingress allocation needs, so it never holds history while its wake
+/// waits for the actor.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_turn_input_admission_waiting_for_the_owner_holds_no_history_or_referrer_lock() {
+    use lash_core_execution::{PendingTurnInputBatch, TurnInputStore as _};
+
+    a_waiting_admission_holds_no_history_or_referrer_lock(
+        "turn-input-lock-order",
+        Box::new(|storage, session| {
+            Box::pin(async move {
+                let draft = lash_core_execution::PendingTurnInputDraft::new(
+                    &session,
+                    lash_core_execution::TurnInputIngress::NextTurn,
+                    lash_core_execution::TurnInput::text("racing"),
+                )
+                .with_source_key("racing-input");
+                storage
+                    .store()
+                    .enqueue_pending_turn_inputs(PendingTurnInputBatch::one(draft))
+                    .await
+                    .expect("the turn input is admitted without contention");
+            })
+        }),
+    )
+    .await;
+}
+
+/// FIG-5429: a session close takes the actor row before the history lock,
+/// so it never holds history while its wake waits for the actor.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_session_close_waiting_for_the_owner_holds_no_history_or_referrer_lock() {
+    use lash_core_execution::store::ControlIntentStore as _;
+
+    a_waiting_admission_holds_no_history_or_referrer_lock(
+        "session-close-lock-order",
+        Box::new(|storage, session| {
+            Box::pin(async move {
+                storage
+                    .store()
+                    .begin_session_close(&session, 1)
+                    .await
+                    .expect("the close begins without contention")
+                    .expect("the session exists");
+            })
+        }),
+    )
+    .await;
+}
+
+/// FIG-5429: a producer that waited for history while the session's actor
+/// was created takes the new actor row before history after all. Holding
+/// history while it waits for the row, it deadlocks with a writer that
+/// locked the row once it appeared and then waits for history: the racing
+/// producers of the turn-input batch law met exactly that and were refused
+/// `Contended`. Here the owner holds the new row as the producer leaves
+/// its history wait; once the producer waits for the row, the owner takes
+/// history without waiting.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_producer_queued_behind_the_actors_creation_takes_the_actor_row_before_history() {
+    use lash_core_execution::{PendingTurnInputBatch, TurnInputStore as _};
+
+    let name = "actor-creation-lock-order";
+    let (_database, storage) = storage(name, &PostgresHostConfig::default())
+        .await
+        .expect("hermetic PostgreSQL is available");
+    let session = lash_sansio::SessionId::from(name);
+    admit(&storage, &session).await;
+    let mut history = crate::begin_guarded(storage.pool(), &storage.fence)
+        .await
+        .expect("the history holder opens");
+    crate::runtime_persistence::lock_session_history_mutation_tx(&mut history, &session)
+        .await
+        .expect("the holder takes history while the session has no actor");
+    let history_pid = backend_pid(&mut history).await;
+
+    let produced = tokio::spawn({
+        let store = storage.store();
+        let session = session.clone();
+        async move {
+            let draft = lash_core_execution::PendingTurnInputDraft::new(
+                &session,
+                lash_core_execution::TurnInputIngress::NextTurn,
+                lash_core_execution::TurnInput::text("queued"),
+            )
+            .with_source_key("queued-input");
+            store
+                .enqueue_pending_turn_inputs(PendingTurnInputBatch::one(draft))
+                .await
+                .expect("the producer is admitted without contention");
+        }
+    });
+    lock_wait_beside(&storage, &[history_pid]).await;
+    create(&storage.durable_store(), &actor(session.as_str())).await;
+    let mut owner = crate::begin_guarded(storage.pool(), &storage.fence)
+        .await
+        .expect("the owner's transaction opens");
+    crate::PostgresDurableStore::lock_session_actor(&mut owner, &session)
+        .await
+        .expect("the owner holds the new actor row");
+    let owner_pid = backend_pid(&mut owner).await;
+    history.commit().await.expect("the holder releases history");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM pg_locks
+                 WHERE NOT granted AND locktype IN ('transactionid', 'tuple')
+                   AND pid <> $1)",
+            )
+            .bind(owner_pid)
+            .fetch_one(storage.pool())
+            .await
+            .expect("read the actor row's waiters");
+            if waiting {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the producer waits for the actor row");
+    let history_free: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1, 1::bigint))")
+            .bind(session.as_str())
+            .fetch_one(&mut **owner)
+            .await
+            .expect("the owner probes its history lock");
+    // Release the producer and join even on the red side.
+    owner
+        .rollback()
+        .await
+        .expect("the owner releases its locks");
+    produced.await.expect("the producer is admitted");
+    assert!(
+        history_free,
+        "the producer holds history while it waits for the actor row"
     );
 }
 

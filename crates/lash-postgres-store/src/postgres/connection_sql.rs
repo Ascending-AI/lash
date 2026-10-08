@@ -53,8 +53,22 @@ lash_store_sql::statements! {
         /// A separate seed from [`Self::lock_xact_by_text`] on purpose: a
         /// session id locked for history mutation and the same id locked for
         /// anything else must not be the same lock, or two unrelated writers
-        /// would queue behind each other.
+        /// would queue behind each other. A session writer takes it after
+        /// the session's actor row (the durable `lock_session_writes`), and
+        /// alone only while the session has no actor.
         lock_xact_session_history = "SELECT pg_advisory_xact_lock(hashtextextended(?1, 1::bigint))";
+
+        /// The savepoint a session writer takes history in while the
+        /// session has no actor, and backs off to when the actor appeared
+        /// while it waited (the durable `lock_session_writes`).
+        savepoint_session_history = "SAVEPOINT lash_session_history";
+
+        /// Release the [`Self::lock_xact_session_history`] taken in
+        /// [`Self::savepoint_session_history`].
+        rollback_to_session_history = "ROLLBACK TO SAVEPOINT lash_session_history";
+
+        /// End [`Self::savepoint_session_history`], keeping what it holds.
+        release_session_history = "RELEASE SAVEPOINT lash_session_history";
 
         /// The batch form: every distinct session in `?1`, locked in one
         /// statement in `session_id` order.

@@ -127,6 +127,19 @@ lash_store_sql::statements! {
              WHERE a.actor_key = c.actor_key
              RETURNING a.actor_key, a.epoch, c.state, c.formats";
 
+        /// Session `?2`'s write authority when its actor `?1` exists: the
+        /// actor row, then the history lock (seed `1`), in that order, and
+        /// one row. The aggregate reads the whole locking subquery before
+        /// the projection takes the advisory lock, so one statement keeps
+        /// the order. No row, and no lock, when the actor does not exist.
+        lock_session_writes = "SELECT held.locked, pg_advisory_xact_lock(hashtextextended(?2, 1::bigint))
+             FROM (
+                 SELECT count(*) AS locked FROM (
+                     SELECT 1 FROM actors WHERE actor_key = ?1 FOR NO KEY UPDATE
+                 ) AS actor
+             ) AS held
+             WHERE held.locked > 0";
+
         /// Lock the rows of actors `?1` in key order: a mailbox commit
         /// that wakes several actors takes their locks before any write,
         /// so two such commits never wait on each other in a cycle.

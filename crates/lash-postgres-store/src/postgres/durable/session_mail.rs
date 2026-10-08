@@ -15,16 +15,74 @@ use sqlx::PgConnection;
 use super::{Committing, SQL, get, sqlx_failure};
 
 impl super::PostgresDurableStore {
-    /// A producer takes the session actor before the history and referrer
-    /// locks its admission needs, in the same order as an owner commit.
-    /// Holding those locks while waiting for the owner would deadlock the
-    /// producer with a concurrent head commit (FIG-5423).
-    pub(crate) async fn lock_session_admission(
+    /// Session `session`'s write authority, held to the commit: its actor
+    /// row, then its history lock. Every session writer takes the two in
+    /// this order, as an owner commit does, so no writer holds history
+    /// while it waits for the actor row, and racing producers queue instead
+    /// of deadlocking (FIG-5423, FIG-5429).
+    ///
+    /// A session with no actor yet has no row to lock: history alone orders
+    /// its writers, and the one that creates the actor holds history. An
+    /// actor created while this transaction waited for history would leave
+    /// it holding history without the row, so the history lock is taken in
+    /// a savepoint, and released to take the new row first. Actor rows are
+    /// never deleted, so this backs off at most once.
+    pub(crate) async fn lock_session_writes(
         tx: &mut PgConnection,
         session: &SessionId,
     ) -> Result<(), crate::StoreError> {
-        let actor = lash_durable::ActorKey::session(session.as_str())
-            .map_err(|error| crate::StoreError::Backend(error.to_string()))?;
+        use crate::support::store_sqlx_error;
+        let connection = crate::connection_sql::connection_sql();
+        let actor = session_actor(session)?;
+        loop {
+            let held: Option<i64> = sqlx::query_scalar(SQL.postgres.lock_session_writes.sql())
+                .bind(actor.as_str())
+                .bind(session.as_str())
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?;
+            if held.is_some() {
+                return Ok(());
+            }
+            sqlx::query(connection.savepoint_session_history.sql())
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?;
+            sqlx::query(connection.lock_xact_session_history.sql())
+                .bind(session.as_str())
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?;
+            let created = sqlx::query(SQL.actor.epoch_of.sql())
+                .bind(actor.as_str())
+                .fetch_optional(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?
+                .is_some();
+            if created {
+                sqlx::query(connection.rollback_to_session_history.sql())
+                    .execute(crate::observed_sql::executor(&mut *tx))
+                    .await
+                    .map_err(store_sqlx_error)?;
+            }
+            sqlx::query(connection.release_session_history.sql())
+                .execute(crate::observed_sql::executor(&mut *tx))
+                .await
+                .map_err(store_sqlx_error)?;
+            if !created {
+                return Ok(());
+            }
+        }
+    }
+
+    /// The session's actor row alone: an owner commit's first lock, as a
+    /// law's owner takes it.
+    #[cfg(test)]
+    pub(crate) async fn lock_session_actor(
+        tx: &mut PgConnection,
+        session: &SessionId,
+    ) -> Result<(), crate::StoreError> {
+        let actor = session_actor(session)?;
         sqlx::query(SQL.postgres.lock_actors.sql())
             .bind([actor.as_str()].as_slice())
             .execute(crate::observed_sql::executor(tx))
@@ -32,6 +90,11 @@ impl super::PostgresDurableStore {
             .map_err(crate::support::store_sqlx_error)?;
         Ok(())
     }
+}
+
+fn session_actor(session: &SessionId) -> Result<lash_durable::ActorKey, crate::StoreError> {
+    lash_durable::ActorKey::session(session.as_str())
+        .map_err(|error| crate::StoreError::Backend(error.to_string()))
 }
 
 fn undecodable(what: &str, detail: impl std::fmt::Display) -> DurableError {

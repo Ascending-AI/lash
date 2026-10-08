@@ -19,20 +19,15 @@ pub(crate) async fn allocate_ingress_sequence_tx(
     .map_err(store_sqlx_error)
 }
 
+/// Session `session_id`'s history-mutation lock, taken after its actor row
+/// ([`PostgresDurableStore::lock_session_writes`]).
+///
+/// [`PostgresDurableStore::lock_session_writes`]: crate::PostgresDurableStore::lock_session_writes
 pub(crate) async fn lock_session_history_mutation_tx(
     tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
-    sqlx::query(
-        crate::connection_sql::connection_sql()
-            .lock_xact_session_history
-            .sql(),
-    )
-    .bind(session_id.as_str())
-    .execute(crate::observed_sql::executor(&mut *tx))
-    .await
-    .map_err(store_sqlx_error)?;
-    Ok(())
+    crate::PostgresDurableStore::lock_session_writes(tx, session_id).await
 }
 
 pub(crate) async fn lock_session_history_mutations_tx(
@@ -42,6 +37,7 @@ pub(crate) async fn lock_session_history_mutations_tx(
     if session_ids.is_empty() {
         return Ok(());
     }
+    // A fork takes no actor row after history, so history alone orders it.
     sqlx::query(
         crate::connection_sql::connection_sql()
             .lock_xact_session_history_batch
@@ -197,9 +193,8 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
     now: u64,
 ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
     lash_core_execution::store_backend_support::validate_queued_work_draft(batch)?;
-    crate::PostgresDurableStore::lock_session_admission(tx, &batch.session_id).await?;
-    // Owner commits take history before referrers, too. An admission from
-    // another domain's transaction must preserve the same order.
+    // The actor row, then history, then referrers: an owner commit's order,
+    // which an admission from another domain's transaction keeps too.
     lock_session_history_mutation_tx(tx, &batch.session_id).await?;
     let claim = lash_core_execution::ReferrerClaim::unguarded(
         lash_core_execution::ArtifactReferrer::Session(batch.session_id.clone()),

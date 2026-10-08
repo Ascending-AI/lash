@@ -251,9 +251,22 @@ pub enum StoreError {
     /// carried error does not grow every `Result` that returns a store error.
     #[error("turn outcome materialization refused: {error}")]
     TurnOutcomeMaterializationRefused { error: Box<crate::RuntimeError> },
-    /// The backend could not acquire its transactional write authority because
-    /// another writer currently holds it. Retry the identical commit unchanged;
-    /// do not reload, rebase, or alter its semantic content.
+    /// The backend could not acquire its transactional write authority within
+    /// its bound. Retry the identical commit unchanged; do not reload, rebase,
+    /// or alter its semantic content.
+    ///
+    /// The contention contract (FIG-5429): ordering racing writers is the
+    /// store's job, never its caller's. Every write transaction takes its
+    /// locks in one order, so two producers racing on one session queue
+    /// behind each other and both are admitted, in commit order. On
+    /// PostgreSQL the order is the writer fence, then a session's actor row,
+    /// then its history lock, then its referrer locks, then rows; on SQLite
+    /// it is `BEGIN IMMEDIATE`'s one write lock. A deadlock between two
+    /// store writers is a lock-order defect, not a refusal to hand a caller.
+    /// This error therefore means only that one wait outlived the store's
+    /// bound (PostgreSQL's `lock_timeout`, SQLite's busy timeout), or that a
+    /// transaction the store retries at its own boundary used up its
+    /// attempts: a lock held past its guard, or an overloaded store.
     #[error("store commit is contended; retry the identical commit unchanged")]
     Contended,
     #[error(
