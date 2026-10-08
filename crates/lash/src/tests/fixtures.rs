@@ -95,3 +95,21 @@ fn long_text_tool_definition() -> lash_core::ToolDefinition {
         "app_lookup",
     )
 }
+
+/// A committed message as the store-level laws compare it: its role's name
+/// and its parts' content, one per line.
+pub(crate) fn role_and_text(message: &lash_core::Message) -> (String, String) {
+    let role = match message.role {
+        lash_core::MessageRole::User => "user",
+        lash_core::MessageRole::Assistant => "assistant",
+        lash_core::MessageRole::System => "system",
+        lash_core::MessageRole::Event => "event",
+    };
+    let text = message
+        .parts
+        .iter()
+        .map(|part| part.content())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (role.to_owned(), text)
+}

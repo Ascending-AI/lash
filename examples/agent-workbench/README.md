@@ -299,13 +299,16 @@ the workbench product-event snapshot/cursor. It then attaches two independent
 lanes after those cursors:
 
 - `/api/observations` is Lash's lane. The server enters
-  `ObservableSession::subscribe_recoverable_chat` directly, then encodes its
-  updates for HTTP. It forwards provisional turn activity,
-  the example-owned replay gap, and terminal replacement. Event identity is
-  `(session_id, replay_incarnation_id, cursor)`, so a consumer may safely retain
-  its bounded identity cache when the server restarts and reuses cursor values.
-  A replay gap still clears pre-gap identities before the stream continues from
-  its authoritative snapshot cursor.
+  `ObservableSession::subscribe_and_recover` directly, then encodes its
+  items for HTTP: provisional turn activity, a commit as the example's
+  terminal replacement, a resident change as its resident replacement, and a
+  replay gap. A commit's typed transcript entries become the workbench's own
+  rows (`ChatRow`, in `chat_rows.rs`), which the page renders. Event identity
+  is `SessionObservationEventId` (`session_id, replay_incarnation_id, cursor`),
+  so a consumer may safely retain its bounded identity cache when the server
+  restarts and reuses cursor values. A replay gap still clears pre-gap
+  identities before the stream continues from its authoritative snapshot
+  cursor.
 - `/api/events` is the product lane. `SessionEventRegistry` first appends every
   event to `.agent-workbench/product-events.json` with a monotonic per-session
   sequence and stable event id, then broadcasts it as a freshness hint. A

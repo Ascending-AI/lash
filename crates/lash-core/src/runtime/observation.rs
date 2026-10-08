@@ -263,12 +263,7 @@ fn export_observation_state(runtime: &LashRuntime) -> (crate::SessionReadView, V
     // view: that view outlives its run on resident state, and a replay
     // re-installs it (FIG-4529).
     let read_view = crate::SessionReadView::recorded_from_runtime_state(&runtime.state)
-        .with_transcript_options(
-            runtime
-                .plugin_session()
-                .map(|plugins| plugins.transcript_options())
-                .unwrap_or_default(),
-        );
+        .with_transcript_decoders(runtime.services.plugins.transcript_decoders());
     (read_view, authority_fingerprint(&runtime.state))
 }
 
@@ -475,25 +470,25 @@ impl RuntimeHandle {
             authority_fingerprint,
         );
         let payload = if previous.revision < revision {
-            let previous_rows = previous
+            let previous_entries = previous
                 .read_view
                 .transcript()
                 .expect("resident history is valid")
-                .into_records()
+                .into_entries()
                 .into_iter()
-                .map(|row| row.row_id)
+                .map(|entry| entry.entry_id)
                 .collect::<std::collections::HashSet<_>>();
-            let rows = next
+            let entries = next
                 .read_view
                 .transcript()
                 .expect("resident history is valid")
-                .into_records()
+                .into_entries()
                 .into_iter()
-                .filter(|row| !previous_rows.contains(&row.row_id))
+                .filter(|entry| !previous_entries.contains(&entry.entry_id))
                 .collect();
             Some(SessionObservationEventPayload::Committed {
                 base_revision: previous.revision,
-                rows,
+                entries,
             })
         } else if force_resident || previous.authority_fingerprint != next.authority_fingerprint {
             Some(SessionObservationEventPayload::ResidentChanged)

@@ -102,7 +102,7 @@ pub(crate) async fn session_observations_with_shutdown(
         None => {
             session
                 .observe()
-                .recoverable_chat_snapshot()
+                .snapshot()
                 .await
                 .map_err(|error| {
                     state.session_admission_error(&session_id, "api.observations", error)
@@ -146,7 +146,7 @@ async fn forward_session_observations_until_shutdown(
     tx: mpsc::Sender<ObservationStreamItem>,
     mut shutdown: Option<tokio::sync::watch::Receiver<bool>>,
 ) {
-    use lash::recoverable_chat::RecoverableChatUpdate;
+    use lash::observe::{SessionObservationEventPayload, SessionObservationStreamItem};
 
     if !send_until_shutdown(
         &tx,
@@ -159,7 +159,7 @@ async fn forward_session_observations_until_shutdown(
     {
         return;
     }
-    let mut stream = session.observe().subscribe_recoverable_chat(cursor);
+    let mut stream = session.observe().subscribe_and_recover(cursor);
     let mut sequence = 0;
     loop {
         let item = match shutdown.as_mut() {
@@ -174,60 +174,33 @@ async fn forward_session_observations_until_shutdown(
             break;
         };
         match item {
-            Ok(RecoverableChatUpdate::Event { event, .. }) => {
-                let event = ObservationEvent::from_core(sequence, &event);
-                sequence = sequence.saturating_add(1);
-                if !send_until_shutdown(
-                    &tx,
-                    ObservationStreamItem::Observation {
-                        event: Box::new(ObservationEnvelope::new(event)),
-                    },
-                    &mut shutdown,
-                )
-                .await
-                {
-                    break;
-                }
-            }
-            Ok(RecoverableChatUpdate::TerminalReplacement { event, .. }) => {
+            Ok(SessionObservationStreamItem::Event(event)) => {
                 let cursor = event.cursor.to_string();
-                let event = ObservationEvent::from_core(sequence, &event);
+                let observed = Box::new(ObservationEnvelope::new(ObservationEvent::from_core(
+                    sequence, &event,
+                )));
                 sequence = sequence.saturating_add(1);
-                if !send_until_shutdown(
-                    &tx,
-                    ObservationStreamItem::TerminalReplacement {
-                        cursor,
-                        event: Box::new(ObservationEnvelope::new(event)),
-                    },
-                    &mut shutdown,
-                )
-                .await
-                {
+                let item = match event.payload {
+                    SessionObservationEventPayload::Committed { .. } => {
+                        ObservationStreamItem::TerminalReplacement {
+                            cursor,
+                            event: observed,
+                        }
+                    }
+                    SessionObservationEventPayload::ResidentChanged => {
+                        ObservationStreamItem::ResidentReplacement {
+                            cursor,
+                            event: observed,
+                        }
+                    }
+                    _ => ObservationStreamItem::Observation { event: observed },
+                };
+                if !send_until_shutdown(&tx, item, &mut shutdown).await {
                     break;
                 }
             }
-            Ok(RecoverableChatUpdate::ResidentReplacement { event, .. }) => {
-                let cursor = event.cursor.to_string();
-                let event = ObservationEvent::from_core(sequence, &event);
-                sequence = sequence.saturating_add(1);
-                if !send_until_shutdown(
-                    &tx,
-                    ObservationStreamItem::ResidentReplacement {
-                        cursor,
-                        event: Box::new(ObservationEnvelope::new(event)),
-                    },
-                    &mut shutdown,
-                )
-                .await
-                {
-                    break;
-                }
-            }
-            Ok(RecoverableChatUpdate::ReplayGap { snapshot, gap }) => {
-                let observation = ObservationSnapshot::from(lash::observe::SessionObservation {
-                    read_view: snapshot.read_view,
-                    cursor: snapshot.cursor,
-                });
+            Ok(SessionObservationStreamItem::Gap { observation, gap }) => {
+                let observation = ObservationSnapshot::from(observation);
                 let gap = ObservationGap::from(gap);
                 if !send_until_shutdown(
                     &tx,

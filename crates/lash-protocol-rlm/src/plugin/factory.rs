@@ -298,11 +298,9 @@ impl RlmProtocolPluginFactory {
 }
 
 impl PluginFactory for RlmProtocolPluginFactory {
-    fn transcript_projector(
-        &self,
-    ) -> Option<Arc<dyn lash_core::plugin::TranscriptRowProjectorPlugin>> {
+    fn transcript_decoder(&self) -> Option<Arc<dyn lash_core::plugin::TranscriptDecoderPlugin>> {
         Some(Arc::new(
-            crate::projection::transcript::RlmTranscriptProjector,
+            crate::projection::transcript::RlmTranscriptDecoder,
         ))
     }
 

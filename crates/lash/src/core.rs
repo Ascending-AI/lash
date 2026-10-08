@@ -59,13 +59,13 @@ pub struct LashCore {
 pub use lash_core::session_delete::SessionDeletion;
 
 impl LashCore {
-    pub(crate) fn transcript_options(&self) -> crate::transcript::TranscriptProjectionOptions {
+    pub(crate) fn transcript_decoders(&self) -> crate::transcript::TranscriptDecoders {
         self.protocol_factory
             .iter()
             .chain(self.plugin_factories.iter())
-            .filter_map(|factory| factory.transcript_projector())
-            .fold(Default::default(), |options, projector| {
-                options.with_projector(projector)
+            .filter_map(|factory| factory.transcript_decoder())
+            .fold(Default::default(), |decoders, decoder| {
+                decoders.with_decoder(decoder)
             })
     }
 

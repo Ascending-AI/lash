@@ -47,27 +47,9 @@ impl FinishedTurn {
         })
     }
 
-    fn assistant_output(&self) -> crate::AssistantOutput {
-        match &self.outcome {
-            TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { text }) => {
-                crate::AssistantOutput {
-                    safe_text: text.clone(),
-                    raw_text: text.clone(),
-                    state: crate::OutputState::Usable,
-                }
-            }
-            _ => crate::AssistantOutput {
-                safe_text: String::new(),
-                raw_text: String::new(),
-                state: crate::OutputState::EmptyOutput,
-            },
-        }
-    }
-
     fn report(&self) -> crate::plugin::TurnHookReport {
         crate::plugin::TurnHookReport {
             outcome: self.outcome.clone(),
-            assistant_output: self.assistant_output(),
             execution: Default::default(),
             token_usage: Default::default(),
             tool_calls: Arc::new(self.tool_calls.clone()),
@@ -79,11 +61,9 @@ impl FinishedTurn {
     /// The finalized turn the lifecycle observers see, over its committed
     /// `state`.
     pub(super) fn finalized(self, state: crate::SessionSnapshot) -> crate::AssembledTurn {
-        let assistant_output = self.assistant_output();
         crate::AssembledTurn {
             state,
             outcome: self.outcome,
-            assistant_output,
             execution: Default::default(),
             token_usage: Default::default(),
             llm_calls: Vec::new(),

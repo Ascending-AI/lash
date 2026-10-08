@@ -20,7 +20,7 @@ and bounded live replay follows [ADR 0002](0002-session-observation-uses-cursors
    last checkpoint, and an `AfterStep` stop waits for the step's checkpoint,
    so its completed step is committed (ADR 0039). After an `Immediate` stop
    the next turn's context is the last checkpoint. Nothing a stopped turn streamed
-   after it enters the graph, `AssistantOutput`, history or the store.
+   after it enters the graph, the turn's outcome, history or the store.
 
 2. **The live stream is the contract.** Every host-visible observation is
    published in order on its lane. Stream deltas arrive in frames (ADR 0002):

@@ -336,7 +336,7 @@ card that disagrees with the inbox API, is a contract violation → Abort/RCA.
 
 ## Transcript projection gate (workbench scenarios)
 
-The deterministic transcript gate reconciles graph nodes, canonical rows,
+The deterministic transcript gate reconciles graph nodes, rendered rows,
 `/api/state`, and quiescent rendered DOM pairwise. It covers the former
 Surfaces A–E, including reasoning, successful and failed code, nested tool
 summaries, terminal values, retry retraction, attachments, and reload.

@@ -1318,6 +1318,30 @@ async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() {
     core.shutdown().await.expect("shutdown");
 }
 
+/// Whether `entry` is a message spoken in `role`.
+fn is_role(
+    entry: &crate::transcript::TranscriptEntry,
+    role: crate::transcript::TranscriptRole,
+) -> bool {
+    matches!(&entry.item, crate::transcript::TranscriptItem::Message(message) if message.role == role)
+}
+
+/// A message entry's text blocks, one per line.
+fn text_of(entry: &crate::transcript::TranscriptEntry) -> String {
+    let crate::transcript::TranscriptItem::Message(message) = &entry.item else {
+        return String::new();
+    };
+    message
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            crate::transcript::TranscriptBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn whole_history() -> crate::persistence::HistoryBudget {
     crate::persistence::HistoryBudget {
         max_nodes: std::num::NonZeroU32::MIN.saturating_add(127),
@@ -1342,43 +1366,37 @@ async fn transcript_totally_projects_really_committed_nodes_in_source_order() {
         .await
         .expect("history");
     assert!(page.next.is_none());
-    assert_eq!(projection.rows().len(), page.nodes.len());
-    assert!(
-        projection
-            .rows()
-            .windows(2)
-            .all(|rows| rows[0].ordinal() < rows[1].ordinal())
-    );
-    for (row, node) in projection.rows().iter().zip(page.nodes.iter().rev()) {
-        assert_eq!(row.record().timestamp, node.record.timestamp);
+    assert_eq!(projection.entries().len(), page.nodes.len());
+    for (entry, node) in projection.entries().iter().zip(page.nodes.iter().rev()) {
+        assert_eq!(entry.timestamp, node.record.timestamp);
         assert_eq!(
-            serde_json::to_value(row.row_id()).expect("row id"),
+            serde_json::to_value(&entry.entry_id).expect("entry id"),
             serde_json::to_value(&node.record.node_id).expect("node id")
         );
     }
     let users = projection
         .visible()
-        .filter(|row| row.kind == crate::transcript::TranscriptRowKind::User)
-        .map(|row| row.content.text.as_str())
+        .filter(|entry| is_role(entry, crate::transcript::TranscriptRole::User))
+        .map(text_of)
         .collect::<Vec<_>>();
     assert_eq!(users, ["first question", "second question"]);
     let replies = projection
         .visible()
-        .filter(|row| row.provenance.is_turn_reply)
+        .filter(|entry| entry.provenance.is_turn_reply)
         .collect::<Vec<_>>();
     assert_eq!(replies.len(), 2);
     assert!(
         replies
             .iter()
-            .all(|row| row.kind == crate::transcript::TranscriptRowKind::AssistantReply)
+            .all(|entry| is_role(entry, crate::transcript::TranscriptRole::Assistant))
     );
     assert_ne!(replies[0].provenance.turn_id, replies[1].provenance.turn_id);
     assert_eq!(
         projection.visible().count()
             + projection
-                .rows()
+                .entries()
                 .iter()
-                .filter(|row| row.record().suppressed.is_some())
+                .filter(|entry| entry.is_suppressed())
                 .count(),
         page.nodes.len()
     );
@@ -1399,9 +1417,9 @@ async fn committed_row_deltas_transport_each_new_node_once() {
         .read_view()
         .transcript()
         .expect("valid committed history")
-        .into_records()
+        .into_entries()
         .into_iter()
-        .map(|row| row.row_id)
+        .map(|row| row.entry_id)
         .collect::<std::collections::HashSet<_>>();
     for input in ["first delta question", "second delta question"] {
         let cursor = session
@@ -1425,20 +1443,15 @@ async fn committed_row_deltas_transport_each_new_node_once() {
         };
         let mut carried = Vec::new();
         for event in events {
-            let lash_core::SessionObservationEventPayload::Committed { rows, .. } = &event.payload
+            let lash_core::SessionObservationEventPayload::Committed { entries: rows, .. } =
+                &event.payload
             else {
                 continue;
             };
             for row in rows {
                 assert!(
-                    seen.insert(row.row_id.clone()),
+                    seen.insert(row.entry_id.clone()),
                     "a commit repeated an earlier node"
-                );
-                assert!(
-                    serde_json::to_value(row)
-                        .expect("row")
-                        .get("ordinal")
-                        .is_none()
                 );
                 carried.push(row.clone());
             }
@@ -1452,7 +1465,7 @@ async fn committed_row_deltas_transport_each_new_node_once() {
             .read_view()
             .transcript()
             .expect("valid committed history")
-            .into_records();
+            .into_entries();
         assert_eq!(
             seen.len(),
             canonical.len(),
@@ -1461,14 +1474,14 @@ async fn committed_row_deltas_transport_each_new_node_once() {
         assert!(
             carried
                 .iter()
-                .any(|row| row.kind == crate::transcript::TranscriptRowKind::User
-                    && row.content.text == input)
+                .any(|row| is_role(row, crate::transcript::TranscriptRole::User)
+                    && text_of(row) == input)
         );
         for row in carried {
             assert_eq!(
                 canonical
                     .iter()
-                    .find(|candidate| candidate.row_id == row.row_id),
+                    .find(|candidate| candidate.entry_id == row.entry_id),
                 Some(&row)
             );
         }
@@ -1524,41 +1537,42 @@ async fn transcript_totally_projects_a_really_committed_rlm_trajectory() {
         .await
         .expect("history");
     assert!(page.next.is_none());
-    assert_eq!(projection.rows().len(), page.nodes.len());
-    for (row, node) in projection.rows().iter().zip(page.nodes.iter().rev()) {
+    assert_eq!(projection.entries().len(), page.nodes.len());
+    for (entry, node) in projection.entries().iter().zip(page.nodes.iter().rev()) {
         assert_eq!(
-            serde_json::to_value(row.row_id()).expect("row id"),
+            serde_json::to_value(&entry.entry_id).expect("entry id"),
             serde_json::to_value(&node.record.node_id).expect("node id")
         );
-        assert_eq!(row.record().timestamp, node.record.timestamp);
+        assert_eq!(entry.timestamp, node.record.timestamp);
     }
     assert_eq!(
         projection
             .visible()
-            .filter(|row| row.provenance.is_turn_reply)
-            .map(|row| row.content.text.as_str())
+            .filter(|entry| entry.provenance.is_turn_reply)
+            .map(text_of)
             .collect::<Vec<_>>(),
         ["committed corpus reply"]
     );
+    assert!(projection.visible().any(|entry| matches!(
+        &entry.item,
+        crate::transcript::TranscriptItem::Message(message)
+            if message.blocks.iter().any(|block| matches!(
+                block,
+                crate::transcript::TranscriptBlock::Reasoning { text }
+                    if text == "committed corpus reasoning"
+            ))
+    )));
+    assert!(projection.visible().any(|entry| matches!(
+        &entry.item,
+        crate::transcript::TranscriptItem::Cell(cell)
+            if cell.code == "print(\"committed corpus output\");"
+                && cell.prints.iter().map(|print| print.text.as_str()).eq(["committed corpus output"])
+    )));
     assert!(
         projection
-            .visible()
-            .any(|row| row.content.reasoning == ["committed corpus reasoning"])
-    );
-    assert!(projection.visible().any(|row| row.content.code.as_deref()
-        == Some("print(\"committed corpus output\");")
-        && row.content.output.as_deref() == Some("committed corpus output")));
-    assert!(
-        projection
-            .rows()
+            .entries()
             .iter()
-            .any(|row| row.record().suppressed.is_some())
-    );
-    assert!(
-        projection
-            .rows()
-            .windows(2)
-            .all(|rows| rows[0].ordinal() < rows[1].ordinal())
+            .any(|entry| entry.is_suppressed())
     );
     core.shutdown().await.expect("shutdown");
 }

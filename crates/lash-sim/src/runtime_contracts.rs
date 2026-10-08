@@ -267,7 +267,6 @@ pub struct RuntimeFinalValueInvariantFacts {
     pub semantic_value: Option<Value>,
     pub terminal_event_count: usize,
     pub assistant_prose_delta_count: usize,
-    pub assistant_output_text: String,
     pub semantic_channel_observed: bool,
 }
 
@@ -285,7 +284,7 @@ impl Serialize for RuntimeFinalValueInvariantFacts {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut state = serializer.serialize_struct(
             "RuntimeFinalValueInvariantFacts",
-            7 + usize::from(self.semantic_value.is_some()),
+            6 + usize::from(self.semantic_value.is_some()),
         )?;
         state.serialize_field("outcome_kind", &self.outcome_kind)?;
         if let Some(semantic_value) = &self.semantic_value {
@@ -296,7 +295,6 @@ impl Serialize for RuntimeFinalValueInvariantFacts {
             "assistant_prose_delta_count",
             &self.assistant_prose_delta_count,
         )?;
-        state.serialize_field("assistant_output_text", &self.assistant_output_text)?;
         state.serialize_field("semantic_channel_observed", &self.semantic_channel_observed)?;
         state.serialize_field(
             "transcript_inference_required",
@@ -643,7 +641,6 @@ pub fn runtime_final_value_invariant_facts(
         semantic_value,
         terminal_event_count,
         assistant_prose_delta_count,
-        assistant_output_text: result.assistant_output.safe_text.clone(),
         semantic_channel_observed,
     }
 }
@@ -827,11 +824,6 @@ mod tests {
                     ),
                 ),
                 outcome,
-                assistant_output: lash_core::facade_support::AssistantOutput {
-                    safe_text: "looks final".to_string(),
-                    raw_text: "looks final".to_string(),
-                    state: lash_core::facade_support::OutputState::Usable,
-                },
                 usage: Default::default(),
                 llm_calls: Vec::new(),
                 failure_evidence: Vec::new(),

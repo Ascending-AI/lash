@@ -13,12 +13,14 @@ class TranscriptProjectionTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        kinds = sorted(gate.KINDS)
-        self.write("crates/lash-core-store/src/transcript/mod.rs", "pub enum TranscriptRowKind {\n" + "\n".join(f"{kind}," for kind in kinds) + "\n}")
+        items, roles = sorted(gate.DECODED["items"]), sorted(gate.DECODED["roles"])
+        self.write("crates/lash-core-store/src/transcript/mod.rs",
+                   "pub enum TranscriptItem {\n" + "\n".join(f"{item}(Payload)," for item in items) + "\n}\n"
+                   "pub enum TranscriptRole {\n" + "\n".join(f"{role}," for role in roles) + "\n}")
         self.write("examples/agent-workbench/tests/transcript_projection_harness.mjs", "export const SURFACES = ['host'];\n")
         self.write("examples/host/asset.html", "// BEGIN ROWS\nfunction render() {}\n// END ROWS\n")
         self.write("examples/host/src/render.rs", "fn render(view: View) { view.transcript(); }\n")
-        self.prefix = f"row_kinds = {kinds!r}\n"
+        self.prefix = f"items = {items!r}\nroles = {roles!r}\n"
         self.surface = f"""
 [[surfaces]]
 name = 'host'
@@ -27,7 +29,8 @@ sources = ['examples/host/src/render.rs']
 begin = '// BEGIN ROWS'
 end = '// END ROWS'
 harness = 'examples/agent-workbench/tests/transcript_projection_harness.mjs'
-row_kinds = {kinds!r}
+items = {items!r}
+roles = {roles!r}
 """
         self.registry()
 
@@ -90,9 +93,9 @@ row_kinds = {kinds!r}
         self.write("examples/host/src/render.rs", "fn render(part: Part) { if part.kind() == PartKind::Reasoning {} }")
         self.assertIn("host re-derives committed classification", self.errors())
 
-    def test_new_kind_requires_every_surface_to_handle_it(self):
-        self.write("crates/lash-core-store/src/transcript/mod.rs", "pub enum TranscriptRowKind {\nSecret,\n}")
-        self.assertIn("row kind coverage changed", self.errors())
+    def test_new_decoded_role_requires_every_surface_to_handle_it(self):
+        self.write("crates/lash-core-store/src/transcript/mod.rs", "pub enum TranscriptItem {\nMessage(M),\nCell(C),\nSuppressed(S),\n}\npub enum TranscriptRole {\nSecret,\n}")
+        self.assertIn("decoded roles coverage changed", self.errors())
 
     def test_stored_cardinality_totals_are_red(self):
         self.write("scripts/transcript-projection-sites.toml", self.prefix + "[cardinality]\nreads = 0\noutputs = 0\n" + self.surface + "\n[sites]\n")

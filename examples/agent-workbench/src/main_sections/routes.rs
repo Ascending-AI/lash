@@ -58,11 +58,13 @@ async fn read_state_snapshot(
     // Each cursor is read before the data it covers, so a stream attached at
     // these cursors can only re-deliver what the snapshot already holds; the
     // page upserts by row identity, which makes that redelivery idempotent.
-    let transcript = durable
-        .transcript()
-        .await
-        .map_err(AppError::internal)?
-        .into_records();
+    let transcript = ChatRow::all(
+        durable
+            .transcript()
+            .await
+            .map_err(AppError::internal)?
+            .entries(),
+    );
     let product_events = state.event_tx.snapshot(session_id);
     // Read after the product lane: a turn this reports as running has not
     // settled yet, so its `done` is still in (or after) the lane snapshot.

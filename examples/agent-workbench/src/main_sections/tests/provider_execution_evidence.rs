@@ -141,10 +141,7 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
                 .expect("state the fixture model's output cap");
         }
         let observable = session.observe();
-        let initial = observable
-            .recoverable_chat_snapshot()
-            .await
-            .expect("a durable snapshot");
+        let initial = observable.snapshot().await.expect("a durable snapshot");
         // Establish the subscription before the route's model-selection
         // command changes the durable head. A recovery stream subscribes
         // only on its first poll, which could observe the config commit

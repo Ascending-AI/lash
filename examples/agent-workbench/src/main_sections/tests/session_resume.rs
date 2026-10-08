@@ -48,7 +48,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
     assert_eq!(
         messages
             .iter()
-            .map(|message| (message.role, lash::message_text(message)))
+            .map(|message| (message.role, message_text(message)))
             .collect::<Vec<_>>(),
         vec![
             (

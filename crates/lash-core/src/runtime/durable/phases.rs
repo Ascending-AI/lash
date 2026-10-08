@@ -421,13 +421,13 @@ pub async fn run_phases(
                 if turn_cancel::immediate_in(&tx) {
                     return Ok(PhaseExit::CancelRequested);
                 }
-                // The turn commits, and its run answers, the host-facing
-                // projection of an assistant message the model produced.
+                // The turn commits, and its run answers, the outcome the
+                // model produced.
                 let done = TurnDone {
                     messages,
                     event_delta,
                     protocol_iteration,
-                    outcome: outcome.take().map(host_outcome),
+                    outcome: outcome.take(),
                 };
                 let cause = done.run_terminal_cause(&run)?;
                 let kind = cause.kind();
@@ -594,18 +594,4 @@ pub(super) fn settle_unsent(
             result: Err(error),
             text_streamed: false,
         });
-}
-
-/// `outcome` as its host reads it: a finished assistant message is the
-/// projection of the text the model produced (every line without its
-/// trailing whitespace, the whole trimmed).
-fn host_outcome(outcome: crate::TurnOutcome) -> crate::TurnOutcome {
-    match outcome {
-        crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { text }) => {
-            crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage {
-                text: crate::runtime::turn_boundary::sanitize_assistant_output(text),
-            })
-        }
-        outcome => outcome,
-    }
 }

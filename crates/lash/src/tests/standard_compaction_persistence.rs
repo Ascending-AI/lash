@@ -4,10 +4,13 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use crate::message_text;
 use lash_core::facade_support::SessionNodeProjection as _;
 use lash_sansio::SessionId;
 use std::collections::VecDeque;
+
+fn message_text(message: &lash_core::Message) -> String {
+    super::fixtures::role_and_text(message).1
+}
 use tokio::sync::Mutex as TokioMutex;
 
 fn response_with_usage(text: &str, input_tokens: i64) -> LlmResponse {

@@ -90,7 +90,6 @@ pub mod preflight;
 pub(crate) mod process_admin;
 mod process_lifecycle;
 mod process_observation;
-pub mod recoverable_chat;
 /// A session's config and the typed commands that change it (FIG-4379).
 ///
 /// Every installed owner records its namespace when a session is created,
@@ -206,9 +205,7 @@ pub use crate::session::{
     LashSession, ObservableSession, ParkedSession, SessionBuilder, SessionCreation,
     SessionParkRefused,
 };
-pub use crate::turn::{
-    ReportSource, TurnActivityFanout, TurnOutput, TurnReport, message_role, message_text,
-};
+pub use crate::turn::{ReportSource, TurnActivityFanout, TurnOutput, TurnReport};
 /// Re-exported so implementors of `#[async_trait]` facade traits (for example
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
@@ -331,7 +328,7 @@ pub mod prelude {
         SessionStartPoint, SessionView, ToolAdmin, TurnActivity, TurnActivityFanout,
         TurnActivityId, TurnActivitySink, TurnBudget, TurnEvent, TurnExecutionMetrics, TurnFinish,
         TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus,
-        TurnStop, message_role, message_text,
+        TurnStop,
     };
 }
 
@@ -347,6 +344,7 @@ pub mod observe {
     pub use futures_util::Stream;
     pub use lash_core::runtime::ParsedSessionCursor;
 
+    pub use crate::observation_feed::SessionObservationEventId;
     pub use crate::session::{SessionObservationStream, SessionObservationStreamItem};
     pub use lash_core::{
         LiveReplayEventDraft, LiveReplayGapReason, LiveReplayStore, LiveReplayStoreError,
@@ -731,7 +729,7 @@ pub mod plugins {
         AssistantProseProjectorPlugin, AssistantStreamFinishedHook, DecidedContextPressure,
         PluginFuture, PluginLifecycleEventHook, PluginLifecycleFuture, ResolvedToolSurface,
         ToolCatalogContributor, ToolPresentationArtifacts, ToolPresentationFacts,
-        ToolPresentationInput, ToolPresentationStep, TranscriptRowProjectorPlugin,
+        ToolPresentationInput, ToolPresentationStep, TranscriptDecoderPlugin,
     };
     pub use lash_core::runtime::ToolAttemptEffectOutcome;
     pub use lash_core::runtime::{
@@ -1208,8 +1206,6 @@ pub mod runtime {
     /// How a failed turn settles (FIG-3575): an outcome is recorded, a live
     /// fault aborts. A host minting a foreign error code chooses its class.
     pub use lash_core::TurnFailureCause;
-    /// Assistant-output state exposed by assembled runtime turns.
-    pub use lash_core::facade_support::OutputState;
     /// Wall-clock milliseconds since the Unix epoch, as the runtime stamps its
     /// own process records. A host that mints a record the runtime will compare
     /// against uses the same reading rather than its own.
@@ -1412,11 +1408,13 @@ pub use crate::core::ForkRequest;
 /// (FIG-4731).
 pub use lash_core::{RetainedRevision, Retention, Target};
 
-/// Canonical committed chat rows and protocol-neutral display contracts.
+/// The typed, decoded committed history of a session (ADR 0129): facts a
+/// host renders however it likes.
 pub mod transcript {
     pub use lash_core::transcript::{
-        CommittedTurn, CommittedTurnsPage, RowContent, RowId, RowOrdinal, RowProvenance, RowTool,
-        SuppressionReason, TranscriptProjection, TranscriptProjectionOptions,
-        TranscriptProjectionOutcome, TranscriptRow, TranscriptRowKind, TranscriptRowRecord,
+        CellPrint, CellResult, CommittedTurn, CommittedTurnsPage, EntryId, EntryProvenance,
+        SessionTranscript, SuppressionReason, TerminalValue, ToolResultBlock, TranscriptBlock,
+        TranscriptCell, TranscriptDecoders, TranscriptEntry, TranscriptItem, TranscriptMessage,
+        TranscriptRole,
     };
 }

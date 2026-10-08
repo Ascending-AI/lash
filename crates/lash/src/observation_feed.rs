@@ -9,16 +9,22 @@
 //! it, and every gap's replacement snapshot is the durable head, never a
 //! resident projection that may trail a commit another process made.
 //!
-//! A `Committed` event carries the commit's rows delta, not the session's
+//! A `Committed` event carries the commit's entries delta, not the session's
 //! read view: the feed delivers it only to a consumer that holds the
 //! revision the delta extends, and rebuilds from the durable head when the
 //! consumer holds any other.
+//!
+//! Delivery is at least once, and every event carries a redelivery identity
+//! ([`SessionObservationEventId`]). A stream drops an identity it already
+//! delivered within a bounded window, which a host seeds with the identities
+//! it applied before a reconnect; a gap or a commit clears the window.
 //!
 //! Which commits reach the tail is the live replay store's property. The
 //! in-memory default holds this process's publications; a host whose
 //! sessions run on several processes configures one shared store, and every
 //! process's feed then carries every commit.
 
+use std::collections::{BTreeSet, VecDeque};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -45,7 +51,7 @@ pub(crate) struct FeedSource {
     session_id: SessionId,
     store: lash_core::store::SessionStore,
     live_replay: Arc<dyn LiveReplayStore>,
-    transcript_options: crate::transcript::TranscriptProjectionOptions,
+    transcript_decoders: crate::transcript::TranscriptDecoders,
     resident: RuntimeHandle,
 }
 
@@ -54,7 +60,7 @@ impl FeedSource {
         let observation = resident.observe();
         Self {
             session_id: observation.session_id().clone(),
-            transcript_options: observation.read_view.transcript_options().clone(),
+            transcript_decoders: observation.read_view.transcript_decoders().clone(),
             live_replay: Arc::clone(&resident.live_replay_store),
             store,
             resident,
@@ -79,7 +85,7 @@ impl FeedSource {
                 .map(|(revision, view)| {
                     (
                         revision,
-                        view.with_transcript_options(self.transcript_options.clone()),
+                        view.with_transcript_decoders(self.transcript_decoders.clone()),
                     )
                 }),
         )
@@ -276,17 +282,103 @@ async fn adopt_committed_head(resident: &mut lash_core::facade_support::LashRunt
     Ok(())
 }
 
+/// At-least-once delivery identity of one observation event.
+///
+/// The replay-store incarnation makes it safe to persist across process
+/// restarts: a newly constructed store may reuse a cursor, but it cannot
+/// reproduce an old identity.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SessionObservationEventId {
+    /// Session that produced the event.
+    pub session_id: SessionId,
+    /// Replay-store incarnation that produced the event.
+    pub replay_incarnation_id: String,
+    /// Replay cursor of the event.
+    pub cursor: String,
+}
+
+impl SessionObservationEventId {
+    /// The identity of `event`.
+    pub fn of(event: &SessionObservationEvent) -> Self {
+        Self {
+            session_id: event.session_id(),
+            replay_incarnation_id: event.replay_incarnation_id().to_string(),
+            cursor: event.cursor.to_string(),
+        }
+    }
+}
+
+/// How many delivered identities a stream remembers.
+const MAX_APPLIED_EVENT_IDS: usize = 4096;
+
+/// The bounded window of identities a stream delivered or its host applied.
+#[derive(Default)]
+struct AppliedEventIds {
+    ids: BTreeSet<SessionObservationEventId>,
+    order: VecDeque<SessionObservationEventId>,
+}
+
+impl AppliedEventIds {
+    fn insert(&mut self, id: SessionObservationEventId) -> bool {
+        if !self.ids.insert(id.clone()) {
+            return false;
+        }
+        self.order.push_back(id);
+        while self.order.len() > MAX_APPLIED_EVENT_IDS {
+            if let Some(expired) = self.order.pop_front() {
+                self.ids.remove(&expired);
+            }
+        }
+        true
+    }
+
+    fn clear(&mut self) {
+        self.ids.clear();
+        self.order.clear();
+    }
+
+    /// Whether the stream delivers `item`: a gap always, clearing the
+    /// window, since its snapshot is authoritative; an event only when its
+    /// identity is new, and a commit clears the window it settles.
+    fn admit(&mut self, item: &SessionObservationStreamItem) -> bool {
+        match item {
+            SessionObservationStreamItem::Gap { .. } => {
+                self.clear();
+                true
+            }
+            SessionObservationStreamItem::Event(event) => {
+                let id = SessionObservationEventId::of(event);
+                if !self.insert(id.clone()) {
+                    return false;
+                }
+                if matches!(
+                    event.payload,
+                    SessionObservationEventPayload::Committed { .. }
+                ) {
+                    self.clear();
+                    self.insert(id);
+                }
+                true
+            }
+        }
+    }
+}
+
 /// Stream returned by [`ObservableSession::subscribe_and_recover`](crate::ObservableSession::subscribe_and_recover):
 /// the session feed from a cursor.
 ///
 /// It yields the live replay's events after the cursor, each durable commit
 /// once, and [`SessionObservationStreamItem::Gap`] with the durable head
 /// when the cursor cannot be continued. It keeps going after a gap from the
-/// gap's cursor.
+/// gap's cursor. It never yields an event identity twice within its bounded
+/// window.
+///
+/// Dropping the stream only disconnects observation; it never cancels work.
 pub struct SessionObservationStream {
     cursor: SessionCursor,
     state: Option<Box<FeedState>>,
     step: Option<FeedStep>,
+    applied: AppliedEventIds,
 }
 
 /// One feed step in flight: it owns the feed's state and hands it back
@@ -305,7 +397,22 @@ impl SessionObservationStream {
                 live: None,
             })),
             step: None,
+            applied: AppliedEventIds::default(),
         }
+    }
+
+    /// Seed identities the host already applied, so a reconnect's
+    /// redelivery is idempotent even when the host's persisted cursor
+    /// trails individual applied events. The stream keeps a bounded recent
+    /// window and clears it at a gap, whose snapshot is authoritative.
+    pub fn with_applied_event_ids(
+        mut self,
+        ids: impl IntoIterator<Item = SessionObservationEventId>,
+    ) -> Self {
+        for id in ids {
+            self.applied.insert(id);
+        }
+        self
     }
 
     /// Returns the stream's current replay cursor.
@@ -318,22 +425,29 @@ impl Stream for SessionObservationStream {
     type Item = Result<SessionObservationStreamItem>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if self.step.is_none() {
-            let Some(state) = self.state.take() else {
+        loop {
+            if self.step.is_none() {
+                let Some(state) = self.state.take() else {
+                    return Poll::Ready(None);
+                };
+                self.step = Some(state.next().boxed());
+            }
+            let Some(step) = self.step.as_mut() else {
                 return Poll::Ready(None);
             };
-            self.step = Some(state.next().boxed());
+            let (state, item) = std::task::ready!(step.as_mut().poll(cx));
+            self.step = None;
+            self.cursor = state.cursor.clone();
+            if !state.done {
+                self.state = Some(state);
+            }
+            if let Some(Ok(delivered)) = &item
+                && !self.applied.admit(delivered)
+            {
+                continue;
+            }
+            return Poll::Ready(item);
         }
-        let Some(step) = self.step.as_mut() else {
-            return Poll::Ready(None);
-        };
-        let (state, item) = std::task::ready!(step.as_mut().poll(cx));
-        self.step = None;
-        self.cursor = state.cursor.clone();
-        if !state.done {
-            self.state = Some(state);
-        }
-        Poll::Ready(item)
     }
 }
 
@@ -342,7 +456,7 @@ enum Delivery {
     Item(SessionObservationStreamItem),
     /// A commit the consumer already holds.
     Skipped,
-    /// A commit whose rows extend a revision the consumer does not hold:
+    /// A commit whose entries extend a revision the consumer does not hold:
     /// the consumer rebuilds from the durable head.
     Diverged,
 }

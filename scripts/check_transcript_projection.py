@@ -3,7 +3,8 @@
 
 FIG-972: the UI owns its input rows; correlation uses typed turn provenance.
 FIG-984: every settled turn has one committed reply, and its owning writer
-depends on the termination kind. Hosts style rows; they do not select replies.
+depends on the termination kind. Lash decodes typed history (FIG-5430); hosts
+render it and do not select replies.
 
 Two independent scrapes inventory committed-truth reads and even single
 turn-output accessor calls. Each function's exact counts and disposition are
@@ -28,7 +29,10 @@ OUTPUTS = {"assistant_message", "final_value", "tool_value"}
 CALL = re.compile(r"(?:\.|\b(?:TurnOutput|TurnOutputReport)::)\s*(messages|chronological_projection|message_tree|assistant_message|final_value|tool_value)\s*\(")
 RAW_STRING = re.compile(r'(?:br|r)(#+)?"')
 FUNCTION = re.compile(r"\bfn\s+([A-Za-z_]\w*)\s*(?:<|\()")
-KINDS = {"User", "AssistantReply", "Reasoning", "ToolCall", "CodeBlock", "Attachment", "Event"}
+# The decoded vocabulary every rendering surface handles: what a committed
+# node decodes to, and the roles a decoded message speaks in.
+DECODED = {"items": {"Message", "Cell", "Suppressed"}, "roles": {"User", "Assistant", "Tool", "Event"}}
+DECODED_ENUMS = {"items": "TranscriptItem", "roles": "TranscriptRole"}
 DISPOSITIONS = {"projection-core", "evidence-read", "output-read"}
 
 
@@ -115,10 +119,11 @@ def check(root: Path) -> list[str]:
         if cardinality != expected:
             errors.append(f"{scrape_name} cardinality changed: {cardinality}")
     kind_source = (root / "crates/lash-core-store/src/transcript/mod.rs").read_text()
-    kind_body = re.search(r"pub enum TranscriptRowKind\s*\{([^}]+)\}", kind_source)
-    actual_kinds = set(re.findall(r"^\s*(\w+)\s*,", kind_body[1], re.MULTILINE)) if kind_body else set()
-    if actual_kinds != KINDS or set(registry["row_kinds"]) != KINDS:
-        errors.append(f"canonical row kind coverage changed: {sorted(actual_kinds)}")
+    for vocabulary, enum in DECODED_ENUMS.items():
+        body = re.search(rf"pub enum {enum}\s*\{{([^}}]+)\}}", kind_source)
+        actual = set(re.findall(r"^\s*(\w+)\s*[,(]", body[1], re.MULTILINE)) if body else set()
+        if actual != DECODED[vocabulary] or set(registry.get(vocabulary, ())) != DECODED[vocabulary]:
+            errors.append(f"decoded {vocabulary} coverage changed: {sorted(actual)}")
     harness = root / "examples/agent-workbench/tests/transcript_projection_harness.mjs"
     if not harness.is_file():
         errors.append("shared production renderer harness is missing")
@@ -135,8 +140,8 @@ def check(root: Path) -> list[str]:
     for surface in registry["surfaces"]:
         if surface["harness"] != "examples/agent-workbench/tests/transcript_projection_harness.mjs":
             errors.append(f"surface lacks the shared row harness: {surface['name']}")
-        if set(surface["row_kinds"]) != KINDS:
-            errors.append(f"surface row coverage is incomplete: {surface['name']}")
+        if any(set(surface.get(vocabulary, ())) != kinds for vocabulary, kinds in DECODED.items()):
+            errors.append(f"surface decoded coverage is incomplete: {surface['name']}")
         asset = root / surface["asset"]
         if not asset.is_file():
             errors.append(f"deleted rendered asset: {surface['asset']}")
@@ -169,7 +174,7 @@ def main() -> int:
     for error in errors:
         print(f"transcript-projection: {error}", file=sys.stderr)
     if not errors:
-        print("transcript-projection: both scrapes, kind coverage and render boundaries passed")
+        print("transcript-projection: both scrapes, decoded coverage and render boundaries passed")
     return int(bool(errors))
 
 

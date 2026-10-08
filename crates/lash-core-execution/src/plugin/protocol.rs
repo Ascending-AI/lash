@@ -357,4 +357,4 @@ pub trait ProtocolDriverPlugin: Send + Sync {
     }
 }
 
-pub use lash_core_store::transcript::TranscriptRowProjectorPlugin;
+pub use lash_core_store::transcript::TranscriptDecoderPlugin;

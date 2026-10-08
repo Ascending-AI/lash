@@ -4,8 +4,8 @@
 //! Every commit that moves a session's head (a turn's `turn.commit`, with a
 //! frame switch's among them, and a `session.command`, a compaction's among
 //! them) is published to the live replay store once the owner's commit is
-//! acknowledged, by the node that made it: `Committed { base_revision, rows }`
-//! at the head's revision, carrying the transcript rows the commit added to
+//! acknowledged, by the node that made it: `Committed { base_revision, entries }`
+//! at the head's revision, carrying the transcript entries the commit added to
 //! what the session's subscribers held, after an `AgentFrameSwitched` when
 //! it opened a frame. Only `Committed` settles the provisional activity the
 //! turn streamed before it.
@@ -13,7 +13,7 @@
 //! The publication follows the commit, so an owner lost between the two,
 //! or one whose commit's acknowledgement was lost, publishes nothing. Before
 //! each pass an owner announces the durable head it finds unpublished by its
-//! node: a `Committed` at the head with no rows over the head itself. A
+//! node: a `Committed` at the head with no entries over the head itself. A
 //! subscriber that holds the head skips it as a redelivery; one that holds
 //! an earlier revision cannot apply it and rebuilds from the durable head,
 //! as a replay gap.
@@ -21,7 +21,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 
-use lash_core_store::transcript::{RowId, TranscriptProjectionOptions};
+use lash_core_store::transcript::{EntryId, TranscriptDecoders};
 use lash_sansio::sync::MutexExt as _;
 
 use crate::{
@@ -50,14 +50,14 @@ impl PublishedHeads {
 
 /// What a session's subscribers hold before a commit, read off the runtime
 /// opened at the committed head: its revision, its current frame and the
-/// rows of its transcript.
+/// entries of its transcript.
 pub(in crate::runtime) struct CommitBase {
     session: SessionId,
     store: crate::store::SessionStore,
     revision: SessionRevision,
     frame: Option<FrameNodeId>,
-    rows: HashSet<RowId>,
-    options: TranscriptProjectionOptions,
+    entries: HashSet<EntryId>,
+    decoders: TranscriptDecoders,
 }
 
 impl CommitBase {
@@ -65,18 +65,15 @@ impl CommitBase {
     /// on; `None` for a runtime with no store, which commits nothing.
     pub(in crate::runtime) fn of(runtime: &LashRuntime) -> Option<Self> {
         let store = runtime.services.store.clone()?;
-        let options = runtime
-            .plugin_session()
-            .map(|plugins| plugins.transcript_options())
-            .unwrap_or_default();
-        let rows = crate::SessionReadView::recorded_from_runtime_state(&runtime.state)
-            .with_transcript_options(options.clone())
+        let decoders = runtime.services.plugins.transcript_decoders();
+        let entries = crate::SessionReadView::recorded_from_runtime_state(&runtime.state)
+            .with_transcript_decoders(decoders.clone())
             .transcript()
             .map(|transcript| {
                 transcript
-                    .into_records()
+                    .into_entries()
                     .into_iter()
-                    .map(|row| row.row_id)
+                    .map(|entry| entry.entry_id)
                     .collect()
             })
             .unwrap_or_default();
@@ -85,13 +82,13 @@ impl CommitBase {
             store,
             revision: SessionRevision::from_runtime(runtime),
             frame: runtime.state.current_frame_node_id.clone(),
-            rows,
-            options,
+            entries,
+            decoders,
         })
     }
 
     /// Publish the commit past this base to `live`, once the owner's commit
-    /// is acknowledged: the durable head's revision with the rows it added,
+    /// is acknowledged: the durable head's revision with the entries it added,
     /// addressed to `turn` when a turn made it. A head still at the base
     /// committed nothing, and publishes nothing.
     pub(in crate::runtime) async fn publish(
@@ -117,14 +114,14 @@ impl CommitBase {
         if revision <= self.revision {
             return;
         }
-        let rows = crate::SessionReadView::recorded_from_runtime_state(&loaded.state)
-            .with_transcript_options(self.options.clone())
+        let entries = crate::SessionReadView::recorded_from_runtime_state(&loaded.state)
+            .with_transcript_decoders(self.decoders.clone())
             .transcript()
             .map(|transcript| {
                 transcript
-                    .into_records()
+                    .into_entries()
                     .into_iter()
-                    .filter(|row| !self.rows.contains(&row.row_id))
+                    .filter(|entry| !self.entries.contains(&entry.entry_id))
                     .collect()
             })
             .unwrap_or_default();
@@ -143,7 +140,7 @@ impl CommitBase {
             turn,
             SessionObservationEventPayload::Committed {
                 base_revision: self.revision,
-                rows,
+                entries,
             },
         ));
         publish(live, published, &self.session, revision, drafts).await;
@@ -178,7 +175,7 @@ pub(in crate::runtime) async fn announce_head(
         None::<TurnId>,
         SessionObservationEventPayload::Committed {
             base_revision: revision,
-            rows: Vec::new(),
+            entries: Vec::new(),
         },
     );
     publish(live, published, session, revision, vec![draft]).await;

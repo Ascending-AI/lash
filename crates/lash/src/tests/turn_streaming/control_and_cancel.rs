@@ -27,7 +27,6 @@ async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
 
     assert_eq!(assistant_prose(&activities), "firstsecond");
     assert_eq!(result.assistant_message(), Some("first\n\nsecond"));
-    assert_eq!(result.assistant_output.safe_text, "first\n\nsecond");
     assert!(result.is_success());
     Ok(())
 }

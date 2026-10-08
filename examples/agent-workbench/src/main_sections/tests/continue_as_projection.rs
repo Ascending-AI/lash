@@ -37,9 +37,7 @@ fn user_rows(snapshot: &StateReadSnapshot) -> Vec<String> {
     snapshot
         .transcript
         .iter()
-        .filter(|row| {
-            row.suppressed.is_none() && row.kind == lash::transcript::TranscriptRowKind::User
-        })
+        .filter(|row| row.suppressed.is_none() && row.kind == crate::ChatRowKind::User)
         .map(|row| row.content.text.clone())
         .collect()
 }
@@ -91,7 +89,7 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
                 message.origin.as_ref(),
                 Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. })
                     if *turn_id == ordinary_turn_id
-            ) && lash::message_text(message) == ordinary_prompt
+            ) && message_text(message) == ordinary_prompt
         }),
         "the follow-frame send carries its runtime-stamped turn input"
     );
@@ -271,9 +269,7 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
         boundary
             .transcript
             .iter()
-            .filter(|row| {
-                row.suppressed.is_none() && row.kind == lash::transcript::TranscriptRowKind::User
-            })
+            .filter(|row| { row.suppressed.is_none() && row.kind == crate::ChatRowKind::User })
             .map(|row| serde_json::to_string(&row.row_id).expect("encode the row id"))
             .collect::<BTreeSet<_>>()
             .len(),
@@ -314,7 +310,7 @@ async fn canonical_transcript_scenario_survives_a_frame_switch() {
         snapshot
             .transcript
             .iter()
-            .any(|row| row.kind == lash::transcript::TranscriptRowKind::CodeBlock)
+            .any(|row| row.kind == crate::ChatRowKind::CodeBlock)
     );
     workbench.shutdown().await;
 }

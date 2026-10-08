@@ -93,12 +93,7 @@ async fn committed_messages(state: &AppState, session_id: &SessionId) -> Vec<(St
             committed
                 .messages()
                 .iter()
-                .map(|message| {
-                    (
-                        lash::message_role(message).to_string(),
-                        lash::message_text(message),
-                    )
-                })
+                .map(|message| (message_role(message).to_string(), message_text(message)))
                 .collect()
         })
         .unwrap_or_default()

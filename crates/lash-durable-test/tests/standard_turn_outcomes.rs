@@ -169,7 +169,10 @@ async fn standard_runtime_text_part_reconciles_without_streaming_duplicate(tier:
         .await;
     let output = world.send(&session, "continue").await;
 
-    assert_eq!(output.result.assistant_output.safe_text, "The sentence.");
+    assert_eq!(
+        output.result.assistant_message().unwrap_or_default(),
+        "The sentence."
+    );
     assert_eq!(streamed_prose(&output), "The sentence.");
     world.shutdown().await;
 }
@@ -341,7 +344,10 @@ async fn standard_runtime_executes_streamed_tool_call_when_final_response_is_emp
     let session = world.session("streamed-tool-call", served::spec(8)).await;
     let output = world.send(&session, "run the tool").await;
 
-    assert_eq!(output.result.assistant_output.safe_text, "done");
+    assert_eq!(
+        output.result.assistant_message().unwrap_or_default(),
+        "done"
+    );
     let calls = &output.result.tool_calls;
     assert_eq!(calls.len(), 1, "{calls:?}");
     assert_eq!(calls[0].provider_call_id.as_deref(), Some("tool-1"));
@@ -370,7 +376,7 @@ async fn standard_runtime_preserves_part_boundaries_when_response_is_not_streame
     let output = world.send(&session, "hi").await;
 
     assert_eq!(
-        output.result.assistant_output.safe_text,
+        output.result.assistant_message().unwrap_or_default(),
         "Intro paragraph.\n\n## Heading"
     );
     let blocks = output

@@ -14,9 +14,7 @@ use crate::ToolCallRecord;
 use crate::session_model::{MessageRole, PartKind, SessionStreamEvent, TokenUsage};
 use crate::{TurnFinish, TurnOutcome, TurnStop};
 
-use crate::runtime::{
-    AssembledTurn, AssistantOutput, OutputState, TerminationPolicy, TurnExecutionMetrics, TurnIssue,
-};
+use crate::runtime::{AssembledTurn, TerminationPolicy, TurnExecutionMetrics, TurnIssue};
 
 /// The committed content of one turn, folded in the driver's program order.
 pub struct RecordedTurnAssembly {
@@ -174,40 +172,10 @@ impl RecordedTurnAssembly {
             issues.push(issue);
         }
 
-        let raw_output = if let Some(output) =
-            self.outcome.as_ref().and_then(render_outcome_for_output)
-        {
-            output
-        } else {
-            let recovered = recovered_assistant_output_from_state(&state);
-            if !recovered.is_empty() {
-                issues.push(TurnIssue {
-                    severity: crate::runtime::TurnIssueSeverity::Advisory,
-                    kind: crate::TurnFailureKind::Runtime,
-                    code: Some(crate::TurnFailureCode::AssistantOutputRecoveredFromState.into()),
-                    terminal_reason: None,
-                    message: "assistant output was recovered from persisted messages because no explicit assistant output was assembled".to_string(),
-                    raw: None,
-                    retryable: None,
-                    provider_failure_kind: None,
-            plugin_failures: Vec::new(),
-                });
-            }
-            recovered
-        };
-        let safe_output = sanitize_assistant_output(raw_output.clone());
-
         let outcome = if let Some(evidence) = cancellation {
             TurnOutcome::Stopped(TurnStop::Cancelled { evidence })
         } else if let Some(outcome) = self.outcome.take() {
-            match outcome {
-                TurnOutcome::Finished(TurnFinish::AssistantMessage { .. }) => {
-                    TurnOutcome::Finished(TurnFinish::AssistantMessage {
-                        text: safe_output.clone(),
-                    })
-                }
-                outcome => outcome,
-            }
+            outcome
         } else if !self.saw_done && termination.treat_missing_done_as_failure {
             issues.push(TurnIssue {
                 severity: crate::runtime::TurnIssueSeverity::Blocking,
@@ -239,11 +207,22 @@ impl RecordedTurnAssembly {
                 TurnOutcome::Stopped(TurnStop::RuntimeError)
             }
         } else {
-            TurnOutcome::Finished(TurnFinish::AssistantMessage {
-                text: safe_output.clone(),
-            })
+            let recovered = recovered_assistant_output_from_state(&state);
+            if !recovered.is_empty() {
+                issues.push(TurnIssue {
+                    severity: crate::runtime::TurnIssueSeverity::Advisory,
+                    kind: crate::TurnFailureKind::Runtime,
+                    code: Some(crate::TurnFailureCode::AssistantOutputRecoveredFromState.into()),
+                    terminal_reason: None,
+                    message: "assistant output was recovered from persisted messages because no explicit assistant output was assembled".to_string(),
+                    raw: None,
+                    retryable: None,
+                    provider_failure_kind: None,
+                    plugin_failures: Vec::new(),
+                });
+            }
+            TurnOutcome::Finished(TurnFinish::AssistantMessage { text: recovered })
         };
-        let output_state = classify_output_state(&raw_output, &safe_output, &issues);
 
         AssembledTurn {
             execution: TurnExecutionMetrics {
@@ -256,11 +235,6 @@ impl RecordedTurnAssembly {
             },
             state,
             outcome,
-            assistant_output: AssistantOutput {
-                safe_text: safe_output,
-                raw_text: raw_output,
-                state: output_state,
-            },
             token_usage: self.token_usage,
             llm_calls: self.llm_calls,
             tool_calls: self.tool_calls,
@@ -273,39 +247,6 @@ impl RecordedTurnAssembly {
             turn_input_acceptance: None,
             turn_cancel_input_outcome: Default::default(),
         }
-    }
-}
-
-fn render_final_value_for_output(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::Null => String::new(),
-        serde_json::Value::String(text) => text.clone(),
-        other => serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string()),
-    }
-}
-
-fn render_outcome_for_output(outcome: &TurnOutcome) -> Option<String> {
-    match outcome {
-        TurnOutcome::Finished(TurnFinish::AssistantMessage { text }) => Some(text.clone()),
-        TurnOutcome::Finished(TurnFinish::FinalValue { value })
-        | TurnOutcome::Finished(TurnFinish::ToolValue { value, .. })
-        | TurnOutcome::Stopped(TurnStop::SubmittedError { value })
-        | TurnOutcome::Stopped(TurnStop::ToolError { value, .. }) => {
-            Some(render_final_value_for_output(value))
-        }
-        TurnOutcome::AgentFrameSwitch { .. }
-        | TurnOutcome::Stopped(
-            TurnStop::Cancelled { .. }
-            | TurnStop::Incomplete
-            | TurnStop::InvalidInput
-            | TurnStop::MaxTurns
-            | TurnStop::ToolFailure
-            | TurnStop::ProviderError
-            | TurnStop::ContextOverflow
-            | TurnStop::PluginAbort
-            | TurnStop::RuntimeError
-            | TurnStop::AgentFrameSwitchLimit,
-        ) => None,
     }
 }
 
@@ -336,71 +277,6 @@ fn recovered_assistant_output_from_state(state: &crate::SessionSnapshot) -> Stri
                 .collect::<String>()
         })
         .unwrap_or_default()
-}
-
-/// The host-facing assistant message of `text`: every line loses its
-/// trailing whitespace, and the whole is trimmed.
-pub(in crate::runtime) fn sanitize_assistant_output(text: String) -> String {
-    text.lines()
-        .map(str::trim_end)
-        .collect::<Vec<_>>()
-        .join(
-            "
-",
-        )
-        .trim()
-        .to_string()
-}
-
-pub fn classify_output_state(raw_text: &str, safe_text: &str, issues: &[TurnIssue]) -> OutputState {
-    if safe_text.is_empty() && raw_text.is_empty() {
-        return OutputState::EmptyOutput;
-    }
-    if safe_text.is_empty() && contains_traceback_only(raw_text) {
-        return OutputState::TracebackOnly;
-    }
-    if issues
-        .iter()
-        .any(|issue| issue.severity == crate::runtime::TurnIssueSeverity::Blocking)
-        && !safe_text.is_empty()
-    {
-        return OutputState::RecoveredFromError;
-    }
-    OutputState::Usable
-}
-
-fn contains_traceback_only(raw_text: &str) -> bool {
-    if raw_text.is_empty() {
-        return false;
-    }
-    let has_traceback = raw_text.contains("Traceback (most recent call last)")
-        || raw_text.lines().any(|line| {
-            let trimmed = line.trim();
-            trimmed.starts_with("Runtime error:")
-                || trimmed.starts_with("NameError:")
-                || trimmed.starts_with("TypeError:")
-                || trimmed.starts_with("ValueError:")
-                || trimmed.starts_with("KeyError:")
-                || trimmed.starts_with("AttributeError:")
-                || trimmed.starts_with("SyntaxError:")
-                || trimmed.starts_with("ImportError:")
-                || trimmed.starts_with("ModuleNotFoundError:")
-        });
-    if !has_traceback {
-        return false;
-    }
-    // If no alphabetic prose besides traceback/exception formatting, treat as traceback-only.
-    !raw_text.lines().any(|line| {
-        let trimmed = line.trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with("Traceback")
-            || trimmed.starts_with("File ")
-            || trimmed.starts_with("Runtime error:")
-        {
-            return false;
-        }
-        !trimmed.contains(':')
-    })
 }
 
 #[cfg(test)]

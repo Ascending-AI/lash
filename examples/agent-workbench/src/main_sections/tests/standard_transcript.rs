@@ -157,10 +157,7 @@ async fn shared_harness_preserves_standard_turn_prose_and_order() {
     use std::io::Write as _;
 
     let (view, _) = two_round_turn().await;
-    let rows = view
-        .transcript()
-        .expect("project committed nodes")
-        .into_records();
+    let rows = crate::ChatRow::all(view.transcript().expect("decode committed nodes").entries());
     println!(
         "FIG-5298 rows={}",
         serde_json::to_string(&rows).expect("serialize rows")

@@ -1,11 +1,11 @@
 use lash_sansio::TurnId;
 
 use crate::support::{
-    Arc, LlmCallRecord, Message, MessageRole, SessionSnapshot, TokenUsage, ToolCallRecord,
-    TurnActivity, TurnActivitySink, TurnExecutionMetrics, TurnOutcome, async_trait,
+    Arc, LlmCallRecord, SessionSnapshot, TokenUsage, ToolCallRecord, TurnActivity,
+    TurnActivitySink, TurnExecutionMetrics, TurnOutcome, async_trait,
 };
 
-pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
+pub use lash_core::facade_support::{TurnIssue, TurnIssueSeverity};
 /// Typed turn-failure vocabulary carried on [`TurnIssue`] and on session error
 /// envelopes. A host branches on these instead of matching the display string.
 /// The namespaced [`FailureCode`](crate::provider::FailureCode) on `code`
@@ -23,8 +23,6 @@ pub struct TurnReport {
     /// Cancellation evidence, when the turn was cancelled, rides this outcome
     /// — read it with [`TurnReport::cancellation`].
     pub outcome: TurnOutcome,
-    /// Assistant output committed by the turn.
-    pub assistant_output: AssistantOutput,
     /// This session's own LLM tokens for the turn. Every session owns its
     /// usage; child-session tokens live on each child's own turn report.
     /// A durable report sums reported usage from the attempts in `llm_calls`;
@@ -248,23 +246,5 @@ impl TurnActivitySink for TurnActivityFanout {
         for sink in &self.sinks {
             sink.emit(activity.clone()).await;
         }
-    }
-}
-
-pub fn message_text(message: &Message) -> String {
-    message
-        .parts
-        .iter()
-        .map(|part| part.content())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub fn message_role(message: &Message) -> &'static str {
-    match message.role {
-        MessageRole::User => "user",
-        MessageRole::Assistant => "assistant",
-        MessageRole::System => "system",
-        MessageRole::Event => "event",
     }
 }

@@ -336,7 +336,7 @@ pub use scenario_contracts::{RUNTIME_SCENARIO_CONTRACTS, ScenarioContractSpec};
 pub use state::{RuntimeCheckpointComponents, RuntimeSessionState};
 use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_with_clock};
 #[cfg(feature = "testing")]
-pub use turn_boundary::{RecordedTurnAssembly, classify_output_state};
+pub use turn_boundary::RecordedTurnAssembly;
 pub use turn_control::{
     QueueWithdrawalPublisher, TurnAddress, TurnAttach, TurnCancelAffectedInput,
     TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
@@ -370,9 +370,7 @@ use usage::nonzero_usage;
 // runtime machinery, so they live one layer down in `lash-core-llm` where the
 // plugin, tool-provider and tool-dispatch layers can name them without
 // reaching up into the runtime. Re-exported here at their original paths.
-pub use lash_core_llm::turn_vocabulary::{
-    AssistantOutput, OutputState, TurnExecutionMetrics, TurnIssue, TurnIssueSeverity,
-};
+pub use lash_core_llm::turn_vocabulary::{TurnExecutionMetrics, TurnIssue, TurnIssueSeverity};
 
 pub use lash_core_execution::runtime::{
     AgentFrameRun, AssembledTurn, CodeOutputRecord, DeploymentStore, DeploymentStoreDecorator,

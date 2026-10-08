@@ -8,6 +8,8 @@
 
 #[path = "support/served.rs"]
 mod served;
+#[path = "support/sim.rs"]
+mod sim;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -15,7 +17,11 @@ use std::time::Duration;
 
 use lash::persistence::CommittedTurnCursor;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash::transcript::{CommittedTurn, TranscriptRowKind};
+use lash::transcript::{
+    CellResult, CommittedTurn, SessionTranscript, ToolResultBlock, TranscriptBlock,
+    TranscriptEntry, TranscriptItem, TranscriptRole,
+};
+use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::store::TurnCommitOutcome;
 use lash_core::{ToolCall, ToolControl, ToolOutcome};
 use served::{Tier, WATCHDOG, World};
@@ -66,19 +72,29 @@ async fn follow(
     .expect("deadlock watchdog: the expected turns never committed")
 }
 
-/// Whether `row` is an accepted input's user row.
-fn is_input_row(row: &lash::transcript::TranscriptRowRecord) -> bool {
-    row.suppressed.is_none()
-        && row.kind == TranscriptRowKind::User
-        && row.provenance.input_id.is_some()
+/// Whether `entry` is an accepted input's user message.
+fn is_input_row(entry: &TranscriptEntry) -> bool {
+    matches!(&entry.item, TranscriptItem::Message(message) if message.role == TranscriptRole::User)
+        && entry.provenance.input_id.is_some()
 }
 
-/// The texts of a turn's input rows, in order.
+/// The texts of a turn's input messages, in order.
 fn user_texts(turn: &CommittedTurn) -> Vec<String> {
-    turn.rows
+    turn.entries
         .iter()
-        .filter(|row| is_input_row(row))
-        .map(|row| row.content.text.clone())
+        .filter(|entry| is_input_row(entry))
+        .map(|entry| match &entry.item {
+            TranscriptItem::Message(message) => message
+                .blocks
+                .iter()
+                .filter_map(|block| match block {
+                    TranscriptBlock::Text { text } => Some(text.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => String::new(),
+        })
         .collect()
 }
 
@@ -87,7 +103,7 @@ fn user_texts(turn: &CommittedTurn) -> Vec<String> {
 async fn assert_turns_hold_every_user_row(session: &lash::DurableSession, turns: &[CommittedTurn]) {
     let mut read = Vec::new();
     for turn in turns {
-        for row in &turn.rows {
+        for row in &turn.entries {
             if is_input_row(row) {
                 assert_eq!(
                     row.provenance.turn_id.as_ref(),
@@ -525,10 +541,353 @@ async fn a_coalesced_turns_rows_include_every_user_row(tier: Tier) {
     world.shutdown().await;
 }
 
+const ECHO_TOOL: &str = "echo";
+
+/// `echo`'s body: it answers every call.
+struct Echo;
+
+#[async_trait::async_trait]
+impl StaticToolExecute for Echo {
+    async fn execute(&self, _call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        ToolOutcome::ok(serde_json::json!({ "echoed": true })).into()
+    }
+}
+
+fn echo() -> Arc<dyn lash_core::ToolProvider> {
+    let definition = lash_core::ToolDefinition::raw(
+        ECHO_TOOL,
+        ECHO_TOOL,
+        "Answers every call.",
+        serde_json::json!({ "type": "object", "properties": { "n": { "type": "integer" } } }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("echo's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
+    .with_tool_binding(lash_core::ToolBinding::new(["tools"], ECHO_TOOL));
+    Arc::new(StaticToolProvider::new(vec![definition], Echo))
+}
+
+fn standard_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
+    lash::LashCore::standard_builder(backend.clone()).tools(echo())
+}
+
+fn rlm_with_echo(backend: &lash::Backend) -> lash::LashCoreBuilder {
+    lash::LashCore::rlm_builder(
+        backend.clone(),
+        served::rlm(backend, None, sim::untimed_workers()),
+    )
+    .tools(echo())
+}
+
+/// A host's own rendering of committed history: one line per visible entry,
+/// built from the typed transcript alone.
+fn render(entries: &[TranscriptEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .filter(|entry| !entry.is_suppressed())
+        .map(|entry| {
+            let reply = if entry.provenance.is_turn_reply {
+                "reply "
+            } else {
+                ""
+            };
+            match &entry.item {
+                TranscriptItem::Message(message) => {
+                    let blocks = message
+                        .blocks
+                        .iter()
+                        .map(|block| match block {
+                            TranscriptBlock::Text { text } => format!("text:{text}"),
+                            TranscriptBlock::Reasoning { text } => format!("reasoning:{text}"),
+                            TranscriptBlock::ToolCall {
+                                tool_name,
+                                arguments,
+                                ..
+                            } => format!("call:{tool_name}{arguments}"),
+                            TranscriptBlock::ToolResult {
+                                tool_name, content, ..
+                            } => format!(
+                                "result:{tool_name}:{}",
+                                content
+                                    .iter()
+                                    .map(|block| match block {
+                                        ToolResultBlock::Text { text } => text.clone(),
+                                        other => format!("{other:?}"),
+                                    })
+                                    .collect::<String>()
+                            ),
+                            other => format!("{other:?}"),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    format!("{reply}{:?}: {blocks}", message.role)
+                }
+                TranscriptItem::Cell(cell) => format!(
+                    "{reply}cell {}: {} prints={:?} result={} calls={} omitted={}",
+                    cell.language,
+                    cell.code,
+                    cell.prints
+                        .iter()
+                        .map(|print| &print.text)
+                        .collect::<Vec<_>>(),
+                    match &cell.result {
+                        CellResult::Completed => "completed".to_owned(),
+                        CellResult::Failed(failure) => format!("failed:{}", failure.message),
+                        CellResult::Finished(value) => format!("finished:{value:?}"),
+                    },
+                    cell.calls.len(),
+                    cell.calls_omitted,
+                ),
+                TranscriptItem::Suppressed(_) => unreachable!("suppressed entries are filtered"),
+            }
+        })
+        .collect()
+}
+
+/// A host's live view: the snapshot's entries, advanced by each commit's
+/// entries (upserted by identity), and replaced by a gap's snapshot.
+#[derive(Default)]
+struct LiveView(Vec<TranscriptEntry>);
+
+impl LiveView {
+    fn replace(&mut self, transcript: SessionTranscript) {
+        self.0 = transcript.into_entries();
+    }
+
+    fn apply(&mut self, entries: &[TranscriptEntry]) {
+        for entry in entries {
+            match self
+                .0
+                .iter()
+                .position(|held| held.entry_id == entry.entry_id)
+            {
+                Some(index) => self.0[index] = entry.clone(),
+                None => self.0.push(entry.clone()),
+            }
+        }
+    }
+
+    fn holds_reply(&self) -> bool {
+        self.0.iter().any(|entry| entry.provenance.is_turn_reply)
+    }
+}
+
+/// Follow session `name` from its snapshot while its one turn runs, then
+/// restart the serving node and read the session back: the live rendering
+/// and the recovered one, which must be the same.
+async fn rendered_live_and_after_recovery(
+    world: &mut World,
+    name: &str,
+    script: Vec<lash::provider::LlmResponse>,
+    builder: fn(&lash::Backend) -> lash::LashCoreBuilder,
+) -> Vec<String> {
+    use lash::observe::{
+        SessionObservationEventPayload, SessionObservationStreamItem, Stream as _,
+    };
+    world.script(name, script);
+    let session = world.session(name, served::spec(256)).await;
+    let session_id = lash::SessionId::try_from(name.to_owned()).expect("a session id");
+    let observed = world
+        .core
+        .session(session_id.clone())
+        .open()
+        .await
+        .expect("the session opens for observation");
+    let snapshot = observed
+        .observe()
+        .snapshot()
+        .await
+        .expect("the snapshot reads the durable head");
+    let mut live = LiveView::default();
+    live.replace(
+        snapshot
+            .read_view
+            .transcript()
+            .expect("the snapshot decodes"),
+    );
+    let mut feed = observed.observe().subscribe_and_recover(snapshot.cursor);
+    let output = world.send(&session, name).await;
+    if !output.result.is_success() {
+        let transcript = session.transcript().await.expect("the transcript decodes");
+        panic!(
+            "{name}: the turn must answer: {:?} {:#?}\n{:#?}\nrequests: {:#?}\nactivities: {:#?}",
+            output.result.outcome,
+            output.result.errors,
+            render(transcript.entries()),
+            world.requests(name).len(),
+            output
+                .activities
+                .iter()
+                .map(|activity| format!("{:?}", activity.event))
+                .collect::<Vec<_>>()
+        );
+    }
+    tokio::time::timeout(WATCHDOG, async {
+        while !live.holds_reply() {
+            let item = std::future::poll_fn(|cx| std::pin::Pin::new(&mut feed).poll_next(cx))
+                .await
+                .expect("the feed stays open")
+                .expect("the feed answers");
+            match item {
+                SessionObservationStreamItem::Event(event) => {
+                    if let SessionObservationEventPayload::Committed { entries, .. } =
+                        &event.payload
+                    {
+                        live.apply(entries);
+                    }
+                }
+                SessionObservationStreamItem::Gap { observation, .. } => {
+                    live.replace(observation.read_view.transcript().expect("the gap decodes"));
+                }
+            }
+        }
+    })
+    .await
+    .expect("deadlock watchdog: the turn's commit never reached the live feed");
+    let rendered_live = render(&live.0);
+    drop(feed);
+    drop(observed);
+
+    world.restart(&format!("{name}-recovery"), builder).await;
+    let recovered = world
+        .core
+        .session(session_id.clone())
+        .durable()
+        .await
+        .expect("the session opens after the restart")
+        .transcript()
+        .await
+        .expect("the recovered transcript decodes");
+    let rendered_recovered = render(recovered.entries());
+    assert_eq!(
+        rendered_live, rendered_recovered,
+        "{name}: the live view renders what recovery reads"
+    );
+    let reconnected = world
+        .core
+        .session(session_id)
+        .open()
+        .await
+        .expect("the session reopens for observation")
+        .observe()
+        .snapshot()
+        .await
+        .expect("the reconnecting snapshot reads the durable head");
+    assert_eq!(
+        render(
+            reconnected
+                .read_view
+                .transcript()
+                .expect("the reconnecting snapshot decodes")
+                .entries()
+        ),
+        rendered_recovered,
+        "{name}: a reconnecting observer renders what recovery reads"
+    );
+    rendered_recovered
+}
+
+/// ADR 0129 (FIG-5430): a host renders committed history from lash's typed
+/// transcript alone, live from the observation feed and after recovery: a
+/// Standard turn's tool call, its result and its sealed reply, and an RLM
+/// turn's cells, one of whose calls were partly omitted from its record,
+/// with the cell that finished the turn and its sealed reply.
+async fn a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_after_recovery(
+    tier: Tier,
+) {
+    const STANDARD: &str = "typed-history-standard";
+    const RLM: &str = "typed-history-rlm";
+    let Some(mut world) = World::new(tier, standard_with_echo).await else {
+        return;
+    };
+    let standard = rendered_live_and_after_recovery(
+        &mut world,
+        STANDARD,
+        vec![
+            served::response(vec![served::call(
+                "echo-call",
+                ECHO_TOOL,
+                serde_json::json!({ "n": 1 }),
+            )]),
+            served::response(vec![lash_core::LlmOutputPart::Text {
+                text: "standard reply".to_owned(),
+                response_meta: None,
+            }]),
+        ],
+        standard_with_echo,
+    )
+    .await;
+    assert_eq!(
+        standard.first().map(String::as_str),
+        Some(&*format!("User: text:{STANDARD}"))
+    );
+    assert!(
+        standard
+            .iter()
+            .any(|line| line.starts_with("Assistant: ") && line.contains("call:echo{\"n\":1}")),
+        "the tool call renders: {standard:#?}"
+    );
+    assert!(
+        standard
+            .iter()
+            .any(|line| line.starts_with("Tool: result:echo:") && line.contains("echoed")),
+        "the provider's user-role tool result renders as the tool's: {standard:#?}"
+    );
+    assert_eq!(
+        standard
+            .iter()
+            .filter(|line| line.starts_with("reply "))
+            .collect::<Vec<_>>(),
+        ["reply Assistant: text:standard reply"],
+        "one sealed reply: {standard:#?}"
+    );
+    world.shutdown().await;
+
+    let Some(mut world) = World::new(tier, rlm_with_echo).await else {
+        return;
+    };
+    let rlm = rendered_live_and_after_recovery(
+        &mut world,
+        RLM,
+        vec![
+            served::cell(
+                "for (let n = 0; n < 130; n++) { await tools.echo({ n }); }\nprint(\"called\");",
+            ),
+            served::cell("finish(\"rlm reply\");"),
+        ],
+        rlm_with_echo,
+    )
+    .await;
+    let cells = rlm
+        .iter()
+        .filter(|line| line.starts_with("cell typescript: "))
+        .collect::<Vec<_>>();
+    assert_eq!(cells.len(), 2, "both cells render: {rlm:#?}");
+    assert!(
+        cells[0].ends_with("prints=[\"called\"] result=completed calls=128 omitted=2"),
+        "the calling cell renders its recorded calls and the omitted count: {rlm:#?}"
+    );
+    assert!(
+        cells[1].contains("result=finished:") && cells[1].contains("rlm reply"),
+        "the finishing cell renders its typed terminal value: {rlm:#?}"
+    );
+    let replies = rlm
+        .iter()
+        .filter(|line| line.starts_with("reply "))
+        .collect::<Vec<_>>();
+    assert_eq!(replies.len(), 1, "one sealed reply: {rlm:#?}");
+    assert!(
+        replies[0].starts_with("reply Assistant: ") && replies[0].contains("rlm reply"),
+        "the sealed reply renders: {rlm:#?}"
+    );
+    world.shutdown().await;
+}
+
 tiered_laws!(
     a_cursor_reads_on_across_compaction_and_a_frame_switch,
     a_forks_first_read_serves_only_its_own_turns,
     a_cursor_survives_a_process_restart,
     a_steered_turns_rows_include_every_user_row,
     a_coalesced_turns_rows_include_every_user_row,
+    a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_after_recovery,
 );

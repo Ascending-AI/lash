@@ -172,9 +172,7 @@ pub use work::{
 // runtime machinery, so they live one layer down in `lash-core-llm` where the
 // plugin, tool-provider and tool-dispatch layers can name them without
 // reaching up into the runtime. Re-exported here at their original paths.
-pub use lash_core_llm::turn_vocabulary::{
-    AssistantOutput, OutputState, TurnExecutionMetrics, TurnIssue, TurnIssueSeverity,
-};
+pub use lash_core_llm::turn_vocabulary::{TurnExecutionMetrics, TurnIssue, TurnIssueSeverity};
 
 pub use lash_core_store::effect_opener::EffectOpenerError;
 pub use lash_core_store::runtime_error::{

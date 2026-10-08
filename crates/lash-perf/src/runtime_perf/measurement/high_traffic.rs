@@ -524,10 +524,9 @@ async fn run_high_traffic_direct_turn(
         .result;
     if !matches!(report.outcome, lash::TurnOutcome::Finished(_)) {
         anyhow::bail!(
-            "high-traffic {kind} operation {ordinal} did not finish: {:?}; errors={:?}; output={:?}",
+            "high-traffic {kind} operation {ordinal} did not finish: {:?}; errors={:?}",
             report.outcome,
-            report.errors,
-            report.assistant_output
+            report.errors
         );
     }
     Ok(report.usage)

@@ -76,24 +76,6 @@ impl Drop for RuntimeNamedPhase {
     }
 }
 
-/// Canonical assistant output payload.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct AssistantOutput {
-    pub safe_text: String,
-    pub raw_text: String,
-    pub state: OutputState,
-}
-
-/// Quality and usability of assembled terminal output.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum OutputState {
-    Usable,
-    EmptyOutput,
-    TracebackOnly,
-    RecoveredFromError,
-}
-
 /// High-level execution summary for a completed turn.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct TurnExecutionMetrics {

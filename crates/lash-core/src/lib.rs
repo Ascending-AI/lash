@@ -261,7 +261,6 @@ pub mod facade_support {
     pub use crate::provider::ProviderOptions;
     pub use crate::runtime::AgentFrameRun;
     pub use crate::runtime::AssembledTurn;
-    pub use crate::runtime::AssistantOutput;
     pub use crate::runtime::CanonicalRuntimeEffectEnvelope;
     pub use crate::runtime::DirectCompletionClient;
     pub use crate::runtime::EmbeddedRuntimeHost;
@@ -278,7 +277,6 @@ pub mod facade_support {
     pub use crate::runtime::ObservedProcessEventReadOutcome;
     pub use crate::runtime::ObservedWorkItem;
     pub use crate::runtime::ObservedWorkItemState;
-    pub use crate::runtime::OutputState;
     pub use crate::runtime::ProcessEngineRegistry;
     pub use crate::runtime::ProcessEventAppendPlan;
     pub use crate::runtime::ProcessEventSink;

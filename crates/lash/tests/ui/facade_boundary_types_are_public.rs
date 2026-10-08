@@ -26,7 +26,7 @@ use lash::plugins::{
 };
 use lash::provider::{ProviderRateLimitPolicy, ProviderReliability, ProviderRetryPolicy};
 use lash::tools::{ToolCallRecord, ToolOutputContract};
-use lash::turn::{AssistantOutput, TurnFailureCode, TurnFailureKind, TurnIssue};
+use lash::turn::{TurnFailureCode, TurnFailureKind, TurnIssue};
 use lash::usage::TokenUsage;
 use lash::{
     EmptyLlmProfiles, LlmProfileConfig, LlmProfileKey, LlmProfileLimits, LlmProfileMetadata,
@@ -181,8 +181,8 @@ fn message_role_type_is_nameable(role: MessageRole) -> &'static str {
     }
 }
 
-fn turn_result_detail_types_are_nameable(output: AssistantOutput, issue: TurnIssue) {
-    let _ = (output, issue);
+fn turn_result_detail_types_are_nameable(issue: TurnIssue) {
+    let _ = issue;
 }
 
 fn turn_failure_vocabulary_is_nameable(kind: TurnFailureKind, code: TurnFailureCode) {

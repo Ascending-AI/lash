@@ -96,7 +96,6 @@ pub fn settled(outcome: &Value) -> (String, Option<String>) {
                 .then(|| finish["value"].as_str())
                 .flatten()
         })
-        .or_else(|| report["assistant_output"]["safe_text"].as_str())
         .map(ToOwned::to_owned);
     (kind, reply)
 }

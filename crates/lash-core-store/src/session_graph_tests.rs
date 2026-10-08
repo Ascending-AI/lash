@@ -1412,7 +1412,7 @@ fn node_timestamp_round_trips_fixed_width_utc_instants() {
     );
 }
 
-fn project_stored_assistant(id: &str, parts: Vec<Part>) -> crate::transcript::TranscriptProjection {
+fn project_stored_assistant(id: &str, parts: Vec<Part>) -> crate::transcript::SessionTranscript {
     let node = SessionNodeRecord {
         node_id: NodeId::fixture(id),
         parent_node_id: None,
@@ -1436,17 +1436,11 @@ fn project_stored_assistant(id: &str, parts: Vec<Part>) -> crate::transcript::Tr
         .expect("encode the stored conversation node");
     let stored = SessionNodeRecord::decode_storage_body(id.into(), None, &body)
         .expect("decode the stored conversation node");
-    let projection = crate::transcript::TranscriptProjection::from_records(
+    crate::transcript::SessionTranscript::from_records(
         [&stored],
-        &crate::transcript::TranscriptProjectionOptions::default(),
+        &crate::transcript::TranscriptDecoders::default(),
     )
-    .expect("project the stored conversation node");
-    // The shared renderer harness consumes these canonical records verbatim.
-    println!(
-        "FIG-5291 row={}",
-        serde_json::to_string(projection.rows()[0].record()).expect("serialize the canonical row")
-    );
-    projection
+    .expect("decode the stored conversation node")
 }
 
 /// FIG-5291: opaque replay reasoning has no visible content, including whitespace.
@@ -1464,18 +1458,20 @@ fn transcript_suppresses_blank_opaque_reasoning_as_empty_content() {
                 }),
             )],
         );
-        assert_eq!(projection.rows().len(), 1);
+        assert_eq!(projection.entries().len(), 1);
         assert_eq!(projection.visible().count(), 0);
         assert_eq!(
-            projection.rows()[0].record().suppressed,
-            Some(crate::transcript::SuppressionReason::EmptyContent)
+            projection.entries()[0].item,
+            crate::transcript::TranscriptItem::Suppressed(
+                crate::transcript::SuppressionReason::EmptyContent
+            )
         );
     }
 }
 
-/// FIG-5291: tool calls own the row kind while reasoning accompanies that same row.
+/// FIG-5291: a tool call and its reasoning are one assistant entry, in part order.
 #[test]
-fn transcript_reasoning_with_tool_call_is_one_tool_call_row() {
+fn transcript_reasoning_with_tool_call_is_one_assistant_entry() {
     let projection = project_stored_assistant(
         "reasoning-with-tool",
         vec![
@@ -1490,17 +1486,30 @@ fn transcript_reasoning_with_tool_call_is_one_tool_call_row() {
             ),
         ],
     );
-    assert_eq!(projection.rows().len(), 1);
-    let rows = projection.visible().collect::<Vec<_>>();
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].kind, crate::transcript::TranscriptRowKind::ToolCall);
-    assert_eq!(rows[0].content.reasoning, ["Inspect the file first."]);
-    assert_eq!(rows[0].content.text, "{\"path\":\"notes.txt\"}");
+    assert_eq!(projection.entries().len(), 1);
+    let entries = projection.visible().collect::<Vec<_>>();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].item,
+        crate::transcript::TranscriptItem::Message(crate::transcript::TranscriptMessage {
+            role: crate::transcript::TranscriptRole::Assistant,
+            blocks: vec![
+                crate::transcript::TranscriptBlock::Reasoning {
+                    text: "Inspect the file first.".into()
+                },
+                crate::transcript::TranscriptBlock::ToolCall {
+                    call_id: lash_sansio::ToolCallId::fixture("transcript-call"),
+                    tool_name: "read_file".into(),
+                    arguments: "{\"path\":\"notes.txt\"}".into(),
+                },
+            ],
+        })
+    );
 }
 
 /// FIG-5291: exposed reasoning retains its text and drops blank sibling parts.
 #[test]
-fn transcript_nonempty_reasoning_remains_a_reasoning_row() {
+fn transcript_nonempty_reasoning_remains_a_reasoning_entry() {
     let projection = project_stored_assistant(
         "nonempty-reasoning",
         vec![
@@ -1508,13 +1517,16 @@ fn transcript_nonempty_reasoning_remains_a_reasoning_row() {
             Part::reasoning("reasoning".into(), "  Consider the options.\n".into(), None),
         ],
     );
-    assert_eq!(projection.rows().len(), 1);
-    let rows = projection.visible().collect::<Vec<_>>();
-    assert_eq!(rows.len(), 1);
+    assert_eq!(projection.entries().len(), 1);
+    let entries = projection.visible().collect::<Vec<_>>();
+    assert_eq!(entries.len(), 1);
     assert_eq!(
-        rows[0].kind,
-        crate::transcript::TranscriptRowKind::Reasoning
+        entries[0].item,
+        crate::transcript::TranscriptItem::Message(crate::transcript::TranscriptMessage {
+            role: crate::transcript::TranscriptRole::Assistant,
+            blocks: vec![crate::transcript::TranscriptBlock::Reasoning {
+                text: "  Consider the options.\n".into()
+            }],
+        })
     );
-    assert_eq!(rows[0].content.reasoning, ["  Consider the options.\n"]);
-    assert!(rows[0].content.text.is_empty());
 }

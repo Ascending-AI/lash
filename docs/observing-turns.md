@@ -6,9 +6,9 @@ Keep the cursor and use the bounded live replay described in
 when reconnecting. A replay gap means the missing activities cannot be
 reconstructed from the durable session view.
 
-Start a feed from `session.observe().snapshot().await` (or
-`recoverable_chat_snapshot().await`): the session's durable head with a
-cursor bound to its revision. A feed judges its cursor against the durable
+Start a feed from `session.observe().snapshot().await`: the session's
+durable head with a cursor bound to its revision, then follow
+`subscribe_and_recover(cursor)`. A feed judges its cursor against the durable
 head, and a gap's replacement snapshot is the durable head too, so an
 observer whose own handle never adopted a commit another process made still
 gets a current snapshot. Which processes' activities reach the feed is the
@@ -28,17 +28,28 @@ checkpointed state. A cancelled tool batch can itself be checkpointed, so the
 marker decides the cut. The marker is live-only: like every other turn
 activity, it is absent from durable history.
 
-## Placing committed rows
+Delivery is at least once. Every event has a `SessionObservationEventId`
+(its session, replay-store incarnation and cursor), safe to persist across a
+process restart. The stream drops an identity it already delivered within a
+bounded window of 4,096; seed the window with the identities your host applied
+(`with_applied_event_ids`) so a reconnect from a trailing cursor redelivers
+nothing twice. A gap or a commit clears the window. Dropping the stream only
+disconnects observation; it never cancels work.
 
-A live activity is provisional. `Committed { base_revision, rows }` supplies
-the new canonical records for that commit, including named suppressions; it
-never repeats the earlier transcript and never carries the session's read
-view. `rows` extend the session at `base_revision`: the recoverable-chat feed
-delivers a commit only to a consumer holding that revision, and answers any
-other with a replay gap and the durable head. The remote event transports the
-same `base_revision` and `rows`. Replace the preview for each record's typed
-turn provenance, then style its neutral content. Read `durable.transcript()`
-for a complete retained transcript after reconnecting across a replay gap.
+## Placing committed entries
+
+A live activity is provisional. `Committed { base_revision, entries }`
+supplies the typed transcript entries that commit added, including named
+suppressions; it never repeats the earlier transcript and never carries the
+session's read view. `entries` extend the session at `base_revision`: the
+feed delivers a commit only to a consumer holding that revision, and answers
+any other with a replay gap and the durable head. Replace the preview for
+each entry's typed turn provenance, then render the entry yourself: lash
+hands you roles, content blocks, tool calls and results, code cells and their
+typed outcomes, and the sealed reply, never display text
+([ADR 0129](adr/0129-committed-history-is-typed-facts-a-host-renders.md)). Read
+`durable.transcript()` for a complete retained transcript after reconnecting
+across a replay gap.
 
 On the durable substrate the node that commits publishes the commit once its
 owner's commit is acknowledged: a turn's `turn.commit` after the turn's own
@@ -48,22 +59,20 @@ each with an `AgentFrameSwitched` ahead of it when the commit opened a frame.
 An owner that lost a commit's acknowledgement, or a node lost before it
 published, is covered by the next pass over the session: it announces the
 durable head as a `Committed` whose `base_revision` is the head itself and
-whose `rows` are empty. A consumer holding the head skips it as a
+whose `entries` are empty. A consumer holding the head skips it as a
 redelivery; one holding an earlier revision cannot extend it and rebuilds
-from the durable head, which the recoverable-chat feed answers as a replay
-gap.
+from the durable head, which the feed answers as a replay gap.
 
 ```rust,ignore
-if let lash::observe::SessionObservationEventPayload::Committed { rows, .. } = &event.payload {
-    for row in rows.iter().filter(|row| row.suppressed.is_none()) {
-        place_row(row); // the host's presentation adapter
+if let lash::observe::SessionObservationEventPayload::Committed { entries, .. } = &event.payload {
+    for entry in entries.iter().filter(|entry| !entry.is_suppressed()) {
+        place_entry(entry); // the host's own rendering of a typed entry
     }
 }
 ```
 
-`row_id` supports equality and transport. A snapshot's `RowOrdinal` supports
-ordering only: it is absent from the row record and cannot be persisted or
-used as a cursor.
+`entry_id` supports equality and transport. An entry's position in a
+transcript orders it; that order is not a cursor.
 
 ## A stopped turn's tail: the live stream is the contract
 

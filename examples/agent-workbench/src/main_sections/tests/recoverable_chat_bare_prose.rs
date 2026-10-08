@@ -81,7 +81,7 @@ async fn committed_replies(
         .filter(|row| {
             row.provenance.is_turn_reply && row.provenance.turn_id.as_ref() == Some(turn_id)
         })
-        .map(|row| row.content.text.clone())
+        .map(|entry| crate::ChatRow::of(entry).content.text)
         .collect()
 }
 
@@ -230,8 +230,7 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
         .messages()
         .iter()
         .filter(|message| {
-            lash::message_role(message) == "assistant"
-                && lash::message_text(message).contains(REPLY)
+            message_role(message) == "assistant" && message_text(message).contains(REPLY)
         })
         .count();
     assert_eq!(committed, 1, "the reasoned reply commits once");

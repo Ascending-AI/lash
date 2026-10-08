@@ -7,25 +7,22 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 #[derive(Clone, Debug)]
-pub struct SessionReadView(
-    Arc<SessionReadState>,
-    crate::transcript::TranscriptProjectionOptions,
-);
+pub struct SessionReadView(Arc<SessionReadState>, crate::transcript::TranscriptDecoders);
 impl SessionReadView {
-    pub fn with_transcript_options(
+    pub fn with_transcript_decoders(
         mut self,
-        options: crate::transcript::TranscriptProjectionOptions,
+        options: crate::transcript::TranscriptDecoders,
     ) -> Self {
         self.1 = options;
         self
     }
     pub fn transcript(
         &self,
-    ) -> Result<crate::transcript::TranscriptProjection, crate::runtime_error::StoredDataCorruption>
+    ) -> Result<crate::transcript::SessionTranscript, crate::runtime_error::StoredDataCorruption>
     {
-        crate::transcript::TranscriptProjection::from_read_state(self, &self.1)
+        crate::transcript::SessionTranscript::from_read_state(self, &self.1)
     }
-    pub fn transcript_options(&self) -> &crate::transcript::TranscriptProjectionOptions {
+    pub fn transcript_decoders(&self) -> &crate::transcript::TranscriptDecoders {
         &self.1
     }
     fn from_graph_message_sequence_meta(

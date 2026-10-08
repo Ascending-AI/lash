@@ -560,7 +560,11 @@ mod tests {
         assert_eq!(
             transcript
                 .visible()
-                .filter(|row| row.kind == lash_core::transcript::TranscriptRowKind::User)
+                .filter(|entry| matches!(
+                    &entry.item,
+                    lash_core::transcript::TranscriptItem::Message(message)
+                        if message.role == lash_core::transcript::TranscriptRole::User
+                ))
                 .count(),
             1,
             "one admitted input produces one canonical user row"
@@ -568,8 +572,20 @@ mod tests {
         assert_eq!(
             transcript
                 .visible()
-                .filter(|row| row.provenance.is_turn_reply)
-                .map(|row| row.content.text.as_str())
+                .filter(|entry| entry.provenance.is_turn_reply)
+                .flat_map(|entry| match &entry.item {
+                    lash_core::transcript::TranscriptItem::Message(message) => message
+                        .blocks
+                        .iter()
+                        .filter_map(|block| match block {
+                            lash_core::transcript::TranscriptBlock::Text { text } => {
+                                Some(text.as_str())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                    _ => Vec::new(),
+                })
                 .collect::<Vec<_>>(),
             ["settled"],
             "the final value has exactly one committed marked reply"

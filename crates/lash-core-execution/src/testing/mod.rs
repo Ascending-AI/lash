@@ -415,8 +415,8 @@ use crate::plugin::{PluginError, SessionCreateRequest, SessionHandle, SessionSna
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::session_model::{ConversationRecord, SessionHistoryRecord};
 use crate::{
-    AssembledTurn, AssistantOutput, OutputState, ProviderOptions, RuntimeSessionState,
-    SessionPolicy, TokenUsage, TurnExecutionMetrics, TurnFinish, TurnOutcome, TurnStop,
+    AssembledTurn, ProviderOptions, RuntimeSessionState, SessionPolicy, TokenUsage,
+    TurnExecutionMetrics, TurnFinish, TurnOutcome, TurnStop,
 };
 
 /// Generous claim bounds for store/runtime conformance tests whose subject is
@@ -1860,11 +1860,6 @@ pub fn mock_assembled_turn(session_id: &SessionId, summary: &str) -> AssembledTu
         outcome: TurnOutcome::Finished(TurnFinish::AssistantMessage {
             text: summary.to_string(),
         }),
-        assistant_output: AssistantOutput {
-            safe_text: summary.to_string(),
-            raw_text: summary.to_string(),
-            state: OutputState::Usable,
-        },
         execution: TurnExecutionMetrics::default(),
         token_usage: TokenUsage::default(),
         llm_calls: Vec::new(),

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use lash_core::transcript::TranscriptRowRecord;
+use lash_core::transcript::TranscriptEntry;
 use lash_core::{
     LiveReplayEventDraft, LiveReplayStoreError, ProcessId, SessionCursor, SessionObservationEvent,
     SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
@@ -20,7 +20,7 @@ enum StoredPayload {
     },
     Committed {
         base_revision: SessionRevision,
-        rows: Vec<TranscriptRowRecord>,
+        entries: Vec<TranscriptEntry>,
     },
     ResidentChanged,
     AgentFrameSwitched {
@@ -74,10 +74,10 @@ pub(super) fn encode(
         },
         SessionObservationEventPayload::Committed {
             base_revision,
-            rows,
+            entries,
         } => StoredPayload::Committed {
             base_revision: *base_revision,
-            rows: rows.clone(),
+            entries: entries.clone(),
         },
         SessionObservationEventPayload::ResidentChanged => StoredPayload::ResidentChanged,
         SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
@@ -139,10 +139,10 @@ pub(super) fn decode(
         }
         StoredPayload::Committed {
             base_revision,
-            rows,
+            entries,
         } => SessionObservationEventPayload::Committed {
             base_revision,
-            rows,
+            entries,
         },
         StoredPayload::ResidentChanged => SessionObservationEventPayload::ResidentChanged,
         StoredPayload::AgentFrameSwitched { frame_id } => {

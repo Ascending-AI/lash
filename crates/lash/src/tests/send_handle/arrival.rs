@@ -166,7 +166,8 @@ async fn dropping_a_send_handle_stops_nothing() -> Result<()> {
             .await
             .messages()
             .iter()
-            .any(|message| crate::message_text(message) == format!("echo: {HELD}")),
+            .any(|message| super::super::fixtures::role_and_text(message).1
+                == format!("echo: {HELD}")),
         "the dropped send's reply is committed"
     );
     Ok(())

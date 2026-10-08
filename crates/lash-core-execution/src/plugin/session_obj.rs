@@ -623,14 +623,10 @@ impl PluginSession {
             .map(|entry| Arc::clone(&entry.hook))
     }
 
-    pub fn transcript_options(&self) -> lash_core_store::transcript::TranscriptProjectionOptions {
-        self.capabilities()
-            .contributions
-            .transcript_row_projectors
-            .iter()
-            .fold(Default::default(), |options, entry| {
-                options.with_projector(Arc::clone(&entry.hook))
-            })
+    /// The host's transcript decoders: pure, so a session decodes its
+    /// committed history whether or not its plugins are materialized.
+    pub fn transcript_decoders(&self) -> lash_core_store::transcript::TranscriptDecoders {
+        self.host.transcript_decoders()
     }
 
     pub fn assistant_prose_projector(&self) -> Option<Arc<dyn AssistantProseProjectorPlugin>> {

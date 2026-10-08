@@ -403,6 +403,31 @@ async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
     producer.shutdown().await.expect("stop the producer");
 }
 
+/// Whether `entry` is a committed user message.
+fn is_user_entry(entry: &lash::transcript::TranscriptEntry) -> bool {
+    matches!(
+        &entry.item,
+        lash::transcript::TranscriptItem::Message(message)
+            if message.role == lash::transcript::TranscriptRole::User
+    )
+}
+
+/// A user message's text blocks, one per line.
+fn user_text(entry: &lash::transcript::TranscriptEntry) -> String {
+    let lash::transcript::TranscriptItem::Message(message) = &entry.item else {
+        return String::new();
+    };
+    message
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            lash::transcript::TranscriptBlock::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Every accepted input appears exactly once in committed history, with the
 /// same id in its row and application, and with no neighbouring input's text.
 async fn assert_input_rows(
@@ -413,7 +438,7 @@ async fn assert_input_rows(
     let transcript = session.transcript().await.expect("read committed rows");
     let rows: Vec<_> = transcript
         .visible()
-        .filter(|row| row.kind == lash::transcript::TranscriptRowKind::User)
+        .filter(|row| is_user_entry(row))
         .collect();
     let actual: Vec<_> = rows
         .iter()
@@ -423,7 +448,7 @@ async fn assert_input_rows(
                     .input_id
                     .clone()
                     .expect("each user row names its input"),
-                row.content.text.clone(),
+                user_text(row),
             )
         })
         .collect();
@@ -618,7 +643,7 @@ async fn host_input_ids_correlate_new_queued_and_steering_rows(tier: Tier) {
         let transcript = session.transcript().await.expect("read committed rows");
         let rows: Vec<_> = transcript
             .visible()
-            .filter(|row| row.kind == lash::transcript::TranscriptRowKind::User)
+            .filter(|row| is_user_entry(row))
             .collect();
         assert_eq!(
             rows.iter()
@@ -627,7 +652,7 @@ async fn host_input_ids_correlate_new_queued_and_steering_rows(tier: Tier) {
                         .input_id
                         .clone()
                         .expect("the user row names its input"),
-                    row.content.text.clone(),
+                    user_text(row),
                 ))
                 .collect::<Vec<_>>(),
             expected

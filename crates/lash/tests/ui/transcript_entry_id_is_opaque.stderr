@@ -1,0 +1,5 @@
+error[E0599]: no method named `strip_prefix` found for struct `EntryId` in the current scope
+ --> tests/ui/transcript_entry_id_is_opaque.rs:3:28
+  |
+3 |     let _ = entry.entry_id.strip_prefix("host-owned:");
+  |                            ^^^^^^^^^^^^ method not found in `EntryId`

@@ -173,7 +173,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.env.core.providers.models),
             Arc::clone(self.core.env.core.tracing.scopes()),
         )
-        .with_transcript_options(self.core.transcript_options())
+        .with_transcript_decoders(self.core.transcript_decoders())
     }
 
     /// Create this session, then return its **Durable Session**.
@@ -315,7 +315,7 @@ impl SessionBuilder {
             Arc::clone(&self.core.env.core.providers.models),
             Arc::clone(self.core.env.core.tracing.scopes()),
         )
-        .with_transcript_options(self.core.transcript_options()))
+        .with_transcript_decoders(self.core.transcript_decoders()))
     }
 
     /// This is for advanced hosts that already own a complete state snapshot.
@@ -994,7 +994,7 @@ impl LashSession {
             self.binding.llm_profiles(),
             self.binding.trace_scopes(),
         )
-        .with_transcript_options(self.read_view().transcript_options().clone())
+        .with_transcript_decoders(self.read_view().transcript_decoders().clone())
     }
 
     /// Cancel every outstanding durable wait for this session without deleting

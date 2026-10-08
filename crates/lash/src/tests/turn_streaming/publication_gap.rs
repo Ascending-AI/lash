@@ -28,7 +28,7 @@ impl lash_core::LiveReplayStore for PublicationFailureStore {
             && events.iter().any(|event| {
                 matches!(
                     &event.payload,
-                    lash_core::SessionObservationEventPayload::Committed { rows, .. }
+                    lash_core::SessionObservationEventPayload::Committed { entries: rows, .. }
                         if !rows.is_empty()
                 )
             })
@@ -134,7 +134,7 @@ pub(super) async fn publication_failure_preserves_committed_turn_and_exposes_gap
     assert!(
         !events.iter().any(|event| matches!(
             &event.payload,
-            lash_core::SessionObservationEventPayload::Committed { rows, .. } if !rows.is_empty()
+            lash_core::SessionObservationEventPayload::Committed { entries: rows, .. } if !rows.is_empty()
         )),
         "{events:#?}"
     );

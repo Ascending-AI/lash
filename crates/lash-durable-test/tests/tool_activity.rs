@@ -16,9 +16,9 @@
 //!   round call, one that answers at once and one that parks and is
 //!   resolved out of band, and its output is what the turn records and the
 //!   model is shown.
-//! - **Commits:** a host following the session through its recoverable
-//!   chat sees the turn's provisional activity settled by exactly one
-//!   `TerminalReplacement` per commit, carrying the rows the commit added,
+//! - **Commits:** a host following the session through its observation
+//!   feed sees the turn's provisional activity settled by exactly one
+//!   `Committed` event per commit, carrying the entries the commit added,
 //!   also when another node made the commit. The crash half, a commit whose
 //!   publication was lost, is in `tool_crash_laws.rs`.
 
@@ -30,7 +30,7 @@ mod served;
 use std::sync::{Arc, Mutex};
 
 use lash::observe::Stream as _;
-use lash::recoverable_chat::{RecoverableChatSubscription, RecoverableChatUpdate};
+use lash::observe::{SessionObservationStream, SessionObservationStreamItem};
 use lash_core::ToolDefinitionBindingExt as _;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity, StreamBlockKind,
@@ -238,26 +238,34 @@ async fn world_with(
 }
 
 /// The next update of `updates`, within the watchdog.
-async fn next_update(updates: &mut RecoverableChatSubscription) -> RecoverableChatUpdate {
+async fn next_update(updates: &mut SessionObservationStream) -> SessionObservationStreamItem {
     tokio::time::timeout(
         WATCHDOG,
         std::future::poll_fn(|cx| std::pin::Pin::new(&mut *updates).poll_next(cx)),
     )
     .await
-    .expect("deadlock watchdog: the recoverable chat yielded nothing")
-    .expect("the recoverable chat stays open")
-    .expect("the recoverable chat answers")
+    .expect("deadlock watchdog: the observation stream yielded nothing")
+    .expect("the observation stream stays open")
+    .expect("the observation stream answers")
 }
 
-/// The updates of `updates` up to and including the next
-/// `TerminalReplacement`.
+/// Whether `update` is a commit's `Committed` event.
+fn is_commit(update: &SessionObservationStreamItem) -> bool {
+    matches!(
+        update,
+        SessionObservationStreamItem::Event(event)
+            if matches!(event.payload, SessionObservationEventPayload::Committed { .. })
+    )
+}
+
+/// The updates of `updates` up to and including the next commit.
 async fn through_next_commit(
-    updates: &mut RecoverableChatSubscription,
-) -> Vec<RecoverableChatUpdate> {
+    updates: &mut SessionObservationStream,
+) -> Vec<SessionObservationStreamItem> {
     let mut seen = Vec::new();
     loop {
         let update = next_update(updates).await;
-        let commit = matches!(update, RecoverableChatUpdate::TerminalReplacement { .. });
+        let commit = is_commit(&update);
         seen.push(update);
         if commit {
             return seen;
@@ -267,23 +275,23 @@ async fn through_next_commit(
 
 /// The updates of `updates` while the call `provider_call_id` holds on
 /// `gate`, up to and including its `ToolCallStarted`; then, with the gate
-/// open, up to and including the next `TerminalReplacement`.
+/// open, up to and including the next commit.
 ///
 /// A subscription attaches on its first poll. A subscriber first polled
 /// once the turn ended meets its commit durable but perhaps not yet
 /// published, which is a gap. Held behind the gate, the turn cannot commit
 /// before the subscription attached and streamed the call's start.
 async fn through_the_held_call_s_commit(
-    updates: &mut RecoverableChatSubscription,
+    updates: &mut SessionObservationStream,
     gate: &Gate,
     provider_call_id: &str,
-) -> Vec<RecoverableChatUpdate> {
+) -> Vec<SessionObservationStreamItem> {
     let mut seen = Vec::new();
     loop {
         let update = next_update(updates).await;
         let started = matches!(
             &update,
-            RecoverableChatUpdate::Event { event, .. }
+            SessionObservationStreamItem::Event(event)
                 if matches!(
                     &event.payload,
                     SessionObservationEventPayload::TurnActivity(TurnActivity {
@@ -303,12 +311,12 @@ async fn through_the_held_call_s_commit(
 }
 
 /// The row ids of `view`'s transcript, in order.
-fn row_ids(view: &lash_core::SessionReadView) -> Vec<lash_core_store::transcript::RowId> {
+fn row_ids(view: &lash_core::SessionReadView) -> Vec<lash_core_store::transcript::EntryId> {
     view.transcript()
-        .expect("the transcript projects")
-        .into_records()
+        .expect("the transcript decodes")
+        .into_entries()
         .into_iter()
-        .map(|row| row.row_id)
+        .map(|row| row.entry_id)
         .collect()
 }
 
@@ -615,12 +623,10 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
             .expect("the session opens");
         let snapshot = observed
             .observe()
-            .recoverable_chat_snapshot()
+            .snapshot()
             .await
             .expect("the snapshot reads the durable head");
-        let mut updates = observed
-            .observe()
-            .subscribe_recoverable_chat(snapshot.cursor);
+        let mut updates = observed.observe().subscribe_and_recover(snapshot.cursor);
         let run = lash::TurnId::from("provider-activity-run");
         let sink = Recorded::default();
         let (outcome, ()) = tokio::time::timeout(WATCHDOG, async {
@@ -634,7 +640,32 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
                     loop {
                         let update = next_update(&mut updates).await;
                         match update {
-                            RecoverableChatUpdate::Event { event, .. } => {
+                            SessionObservationStreamItem::Event(event)
+                                if matches!(
+                                    event.payload,
+                                    SessionObservationEventPayload::Committed { .. }
+                                ) =>
+                            {
+                                assert_eq!(event.turn_id.as_ref(), Some(&run));
+                                let SessionObservationEventPayload::Committed {
+                                    entries: rows, ..
+                                } = &event.payload
+                                else {
+                                    panic!("a replacement carries committed rows: {event:#?}");
+                                };
+                                assert!(!rows.is_empty(), "the run commits transcript rows");
+                                assert_eq!(seen, expected, "all live deltas precede Committed");
+                                break;
+                            }
+                            SessionObservationStreamItem::Event(event)
+                                if matches!(
+                                    event.payload,
+                                    SessionObservationEventPayload::ResidentChanged
+                                ) =>
+                            {
+                                panic!("the durable turn has no resident replacement")
+                            }
+                            SessionObservationStreamItem::Event(event) => {
                                 if let SessionObservationEventPayload::TurnActivity(activity) =
                                     &event.payload
                                 {
@@ -681,22 +712,8 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
                                     }
                                 }
                             }
-                            RecoverableChatUpdate::TerminalReplacement { event, .. } => {
-                                assert_eq!(event.turn_id.as_ref(), Some(&run));
-                                let SessionObservationEventPayload::Committed { rows, .. } =
-                                    &event.payload
-                                else {
-                                    panic!("a replacement carries committed rows: {event:#?}");
-                                };
-                                assert!(!rows.is_empty(), "the run commits transcript rows");
-                                assert_eq!(seen, expected, "all live deltas precede Committed");
-                                break;
-                            }
-                            RecoverableChatUpdate::ReplayGap { .. } => {
+                            SessionObservationStreamItem::Gap { .. } => {
                                 panic!("the host keeps up with the stream")
-                            }
-                            RecoverableChatUpdate::ResidentReplacement { .. } => {
-                                panic!("the durable turn has no resident replacement")
                             }
                         }
                     }
@@ -776,8 +793,8 @@ async fn a_presentation_step_presents_every_native_round_call(tier: Tier) {
     world.shutdown().await;
 }
 
-/// Through the recoverable chat, a turn's provisional tool activity is
-/// followed by exactly one `TerminalReplacement`, whose rows are the rows
+/// Through the observation feed, a turn's provisional tool activity is
+/// followed by exactly one `Committed`, whose entries are the entries
 /// the turn's commit added; the next turn's commit is the next one.
 async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(tier: Tier) {
     const NAME: &str = "activity law: settle the call";
@@ -803,12 +820,12 @@ async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(ti
         .expect("the session opens for observation");
     let snapshot = observed
         .observe()
-        .recoverable_chat_snapshot()
+        .snapshot()
         .await
         .expect("the snapshot reads the durable head");
     let mut updates = observed
         .observe()
-        .subscribe_recoverable_chat(snapshot.cursor.clone());
+        .subscribe_and_recover(snapshot.cursor.clone());
 
     let (output, first) = tokio::join!(
         world.send(&session, NAME),
@@ -830,13 +847,13 @@ async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(ti
         first
             .iter()
             .chain(&second)
-            .all(|update| !matches!(update, RecoverableChatUpdate::ReplayGap { .. })),
+            .all(|update| !matches!(update, SessionObservationStreamItem::Gap { .. })),
         "a subscriber that keeps up meets no gap: {first:#?} {second:#?}"
     );
     assert!(
         first.iter().any(|update| matches!(
             update,
-            RecoverableChatUpdate::Event { event, .. }
+            SessionObservationStreamItem::Event(event)
                 if matches!(
                     &event.payload,
                     SessionObservationEventPayload::TurnActivity(TurnActivity {
@@ -847,12 +864,12 @@ async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(ti
         )),
         "the call's start streamed before the commit: {first:#?}"
     );
-    let Some(RecoverableChatUpdate::TerminalReplacement { event, .. }) = first.last() else {
-        unreachable!("through_next_commit ends at a replacement");
+    let Some(SessionObservationStreamItem::Event(event)) = first.last() else {
+        unreachable!("through_next_commit ends at a commit");
     };
     let SessionObservationEventPayload::Committed {
         base_revision,
-        rows,
+        entries: rows,
     } = &event.payload
     else {
         panic!("a replacement is a commit: {event:#?}");
@@ -865,13 +882,13 @@ async fn a_turn_s_activity_is_settled_by_one_terminal_replacement_of_its_rows(ti
     assert!(!added.is_empty(), "the turn's commit added rows");
     assert_eq!(
         rows.iter()
-            .map(|row| row.row_id.clone())
+            .map(|row| row.entry_id.clone())
             .collect::<Vec<_>>(),
         added,
         "the replacement carries the rows the commit added"
     );
-    let Some(RecoverableChatUpdate::TerminalReplacement { event: next, .. }) = second.last() else {
-        unreachable!("through_next_commit ends at a replacement");
+    let Some(SessionObservationStreamItem::Event(next)) = second.last() else {
+        unreachable!("through_next_commit ends at a commit");
     };
     let SessionObservationEventPayload::Committed {
         base_revision: next_base,
@@ -939,12 +956,12 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         .expect("the session opens for observation");
     let snapshot = observed
         .observe()
-        .recoverable_chat_snapshot()
+        .snapshot()
         .await
         .expect("the snapshot reads the durable head");
     let mut updates = observed
         .observe()
-        .subscribe_recoverable_chat(snapshot.cursor.clone());
+        .subscribe_and_recover(snapshot.cursor.clone());
 
     let (output, seen) = tokio::join!(
         async {
@@ -961,16 +978,16 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         .await
         .expect("the head reads")
         .expect("the session has a head");
-    let Some(RecoverableChatUpdate::TerminalReplacement { event, .. }) = seen.last() else {
-        unreachable!("through_next_commit ends at a replacement");
+    let Some(SessionObservationStreamItem::Event(event)) = seen.last() else {
+        unreachable!("through_next_commit ends at a commit");
     };
-    let SessionObservationEventPayload::Committed { rows, .. } = &event.payload else {
+    let SessionObservationEventPayload::Committed { entries: rows, .. } = &event.payload else {
         panic!("a replacement is a commit: {event:#?}");
     };
     let held = row_ids(&snapshot.read_view);
     assert_eq!(
         rows.iter()
-            .map(|row| row.row_id.clone())
+            .map(|row| row.entry_id.clone())
             .collect::<Vec<_>>(),
         row_ids(&head)
             .into_iter()

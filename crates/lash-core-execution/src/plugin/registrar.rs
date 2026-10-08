@@ -155,8 +155,6 @@ pub(crate) struct PluginContributions {
     pub(crate) protocol_session: Option<RegisteredExclusiveHook<Arc<dyn ProtocolSessionPlugin>>>,
     pub(crate) protocol_driver: Option<RegisteredExclusiveHook<Arc<dyn ProtocolDriverPlugin>>>,
     pub(crate) code_executor: Option<RegisteredExclusiveHook<Arc<dyn CodeExecutorPlugin>>>,
-    pub(crate) transcript_row_projectors:
-        Vec<RegisteredHook<Arc<dyn TranscriptRowProjectorPlugin>>>,
     pub(crate) assistant_prose_projector:
         Option<RegisteredExclusiveHook<Arc<dyn AssistantProseProjectorPlugin>>>,
     /// Prompt sections and wrappers, in registration order (ADR 0133).
@@ -377,20 +375,6 @@ impl OutputRegistrations<'_> {
             CallbackSlot::AssistantStreamFinished,
             key,
             hook,
-        )
-    }
-
-    pub fn transcript_projector(
-        self,
-        key: HookKey,
-        projector: Arc<dyn TranscriptRowProjectorPlugin>,
-    ) -> Result<(), PluginError> {
-        push_keyed_hook(
-            &mut self.reg.contributions.transcript_row_projectors,
-            &self.reg.owner,
-            CallbackSlot::TranscriptProjector,
-            key,
-            projector,
         )
     }
 

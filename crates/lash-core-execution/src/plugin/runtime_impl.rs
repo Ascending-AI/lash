@@ -211,6 +211,18 @@ impl PluginHost {
         self.factories.as_ref().as_slice()
     }
 
+    /// Every factory's transcript decoder, the protocol's first: a pure
+    /// extension that needs no materialized plugin.
+    pub fn transcript_decoders(&self) -> lash_core_store::transcript::TranscriptDecoders {
+        self.protocol_factory
+            .iter()
+            .chain(self.factories.iter())
+            .filter_map(|factory| factory.transcript_decoder())
+            .fold(Default::default(), |decoders, decoder| {
+                decoders.with_decoder(decoder)
+            })
+    }
+
     /// This host's plugins in hook order ([`super::PluginComposition`]): the
     /// builtin factories, then the embedder's, each as it declares itself.
     pub fn composition(&self) -> Result<super::PluginComposition, super::PluginDeclarationError> {

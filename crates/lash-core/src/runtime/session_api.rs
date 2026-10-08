@@ -170,11 +170,7 @@ impl LashRuntime {
             self.state.effective_policy().clone(),
             self.state.effective_protocol_turn_options(),
         )
-        .with_transcript_options(
-            self.plugin_session()
-                .map(|plugins| plugins.transcript_options())
-                .unwrap_or_default(),
-        )
+        .with_transcript_decoders(self.services.plugins.transcript_decoders())
     }
 
     /// Export the narrow persistence snapshot used by stores and resume logic.

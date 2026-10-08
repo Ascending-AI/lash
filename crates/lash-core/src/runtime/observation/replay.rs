@@ -307,13 +307,13 @@ pub enum SessionQueueEventKind {
 pub enum SessionObservationEventPayload {
     TurnActivity(crate::TurnActivity),
     /// A durable commit, by reference: the event's cursor names the
-    /// committed revision, and `rows` are the transcript rows the commit
-    /// added to the session at `base_revision`. A consumer holding
-    /// `base_revision` advances by applying `rows`; any other consumer
+    /// committed revision, and `entries` are the transcript entries the
+    /// commit added to the session at `base_revision`. A consumer holding
+    /// `base_revision` advances by applying `entries`; any other consumer
     /// loads the durable head. The full read view never rides the feed.
     Committed {
         base_revision: SessionRevision,
-        rows: Vec<crate::transcript::TranscriptRowRecord>,
+        entries: Vec<crate::transcript::TranscriptEntry>,
     },
     /// A revision-stable change to resident authority, by reference: a
     /// consumer that needs the resident view reads it again.

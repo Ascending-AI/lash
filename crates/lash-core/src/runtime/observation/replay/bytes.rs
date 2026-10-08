@@ -24,8 +24,8 @@ pub(super) fn event_bytes(
         SessionObservationEventPayload::TurnActivity(activity) => counter.count(activity)?,
         SessionObservationEventPayload::Committed {
             base_revision,
-            rows,
-        } => counter.count(&(base_revision, rows))?,
+            entries,
+        } => counter.count(&(base_revision, entries))?,
         SessionObservationEventPayload::ResidentChanged => {}
         SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {
             counter.count(frame_id)?

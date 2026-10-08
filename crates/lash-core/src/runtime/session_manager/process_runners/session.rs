@@ -239,24 +239,9 @@ impl RuntimeSessionServices {
                         "child session `{session_id}` has no committed head"
                     ))
                 })?;
-        let text = match &outcome {
-            crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { text }) => {
-                Some(text.clone())
-            }
-            _ => None,
-        };
         Ok(crate::AssembledTurn {
             state: state.to_snapshot(),
             outcome,
-            assistant_output: crate::AssistantOutput {
-                state: if text.is_some() {
-                    crate::OutputState::Usable
-                } else {
-                    crate::OutputState::EmptyOutput
-                },
-                safe_text: text.clone().unwrap_or_default(),
-                raw_text: text.unwrap_or_default(),
-            },
             execution: Default::default(),
             token_usage: Default::default(),
             llm_calls: Vec::new(),
@@ -529,16 +514,7 @@ fn final_value_of_turn(
             Ok(value.clone())
         }
         crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { text }) => {
-            let text = [
-                text.as_str(),
-                turn.assistant_output.safe_text.as_str(),
-                turn.assistant_output.raw_text.as_str(),
-            ]
-            .into_iter()
-            .map(str::trim)
-            .find(|text| !text.is_empty())
-            .unwrap_or_default();
-            Ok(serde_json::Value::String(text.to_string()))
+            Ok(serde_json::Value::String(text.trim().to_string()))
         }
         crate::TurnOutcome::AgentFrameSwitch { .. } => Err(Box::new(crate::ToolFailure::tool(
             crate::ToolFailureClass::Execution,

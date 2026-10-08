@@ -775,7 +775,7 @@ async fn committed_attachment_ref_is_exposed_in_the_workbench_snapshot() {
 }
 
 /// The chat message a transcript row carries, if it carries one.
-fn transcript_message(row: &lash::transcript::TranscriptRowRecord) -> Option<ChatMessage> {
+fn transcript_message(row: &crate::ChatRow) -> Option<ChatMessage> {
     chat_message_from_row(row).expect("project canonical row")
 }
 

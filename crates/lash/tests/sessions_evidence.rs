@@ -158,10 +158,6 @@ fn drain_area_witnesses() {
     fn trait_witness_0059<T: lash::plugins::SessionStateService>() {}
     // W0063: lash::runtime::AssembledTurn [struct]
     type_witness::<lash::runtime::AssembledTurn>();
-    // W0064: lash::runtime::AssembledTurn::assistant_output [field]
-    field_witness(|value: &lash::runtime::AssembledTurn| {
-        let _ = &value.assistant_output;
-    });
     // W0065: lash::runtime::AssembledTurn::errors [field]
     field_witness(|value: &lash::runtime::AssembledTurn| {
         let _ = &value.errors;
@@ -664,20 +660,6 @@ fn drain_area_witnesses() {
     let _ = lash::runtime::SessionSnapshot::replace_active_read_state;
     // W0217: lash::runtime::TurnContext [struct]
     type_witness::<lash::runtime::TurnContext>();
-    // W0223: lash::turn::AssistantOutput [struct]
-    type_witness::<lash::turn::AssistantOutput>();
-    // W0224: lash::turn::AssistantOutput::raw_text [field]
-    field_witness(|value: &lash::turn::AssistantOutput| {
-        let _ = &value.raw_text;
-    });
-    // W0225: lash::turn::AssistantOutput::safe_text [field]
-    field_witness(|value: &lash::turn::AssistantOutput| {
-        let _ = &value.safe_text;
-    });
-    // W0226: lash::turn::AssistantOutput::state [field]
-    field_witness(|value: &lash::turn::AssistantOutput| {
-        let _ = &value.state;
-    });
     // W0227: lash::turn::TurnIssue [struct]
     type_witness::<lash::turn::TurnIssue>();
     // W0228: lash::turn::TurnIssue::code [field]
@@ -1045,24 +1027,6 @@ fn drain_area_witnesses() {
     });
     // W0380: lash_core::facade_support::validate_replayed_effect_envelope [function]
     let _ = lash_core::facade_support::validate_replayed_effect_envelope;
-    // W0381: lash::runtime::OutputState [enum]
-    type_witness::<lash::runtime::OutputState>();
-    // W0382: lash::runtime::OutputState::EmptyOutput [variant]
-    variant_witness(|value: &lash::runtime::OutputState| {
-        matches!(value, lash::runtime::OutputState::EmptyOutput)
-    });
-    // W0383: lash::runtime::OutputState::RecoveredFromError [variant]
-    variant_witness(|value: &lash::runtime::OutputState| {
-        matches!(value, lash::runtime::OutputState::RecoveredFromError)
-    });
-    // W0384: lash::runtime::OutputState::TracebackOnly [variant]
-    variant_witness(|value: &lash::runtime::OutputState| {
-        matches!(value, lash::runtime::OutputState::TracebackOnly)
-    });
-    // W0385: lash::runtime::OutputState::Usable [variant]
-    variant_witness(|value: &lash::runtime::OutputState| {
-        matches!(value, lash::runtime::OutputState::Usable)
-    });
     // W0386: lash::durability::RuntimeReplay [struct]
     type_witness::<lash::durability::RuntimeReplay>();
     // W0387: lash::durability::RuntimeReplay::attribution [field]

@@ -73,7 +73,7 @@ impl lash_core::LiveReplayStore for PublishedCommits {
             .filter(|event| {
                 matches!(
                     &event.payload,
-                    lash_core::SessionObservationEventPayload::Committed { rows, .. }
+                    lash_core::SessionObservationEventPayload::Committed { entries: rows, .. }
                         if !rows.is_empty()
                 )
             })
@@ -619,8 +619,6 @@ async fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> Resul
         first.result.outcome,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::ProviderError)
     ));
-    assert!(first.result.assistant_output.safe_text.is_empty());
-    assert!(first.result.assistant_output.raw_text.is_empty());
     assert!(first.activities.iter().any(|activity| matches!(
         &activity.event,
         TurnEvent::AssistantProseDelta { text, .. } if text.contains(MARKER)
@@ -851,7 +849,7 @@ async fn session_observation_envelopes_scope_activity_and_commit_to_the_turn() -
         .find(|event| {
             matches!(
                 &event.payload,
-                lash_core::SessionObservationEventPayload::Committed { rows, .. } if !rows.is_empty()
+                lash_core::SessionObservationEventPayload::Committed { entries: rows, .. } if !rows.is_empty()
             )
         })
         .expect("turn commit observation");
@@ -1178,7 +1176,7 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
         let session = core.session(session_id).created().await.open().await?;
         let before = session
             .observe()
-            .recoverable_chat_snapshot()
+            .snapshot()
             .await
             .expect("durable snapshot");
         let turn_session = session.clone();
@@ -1200,7 +1198,7 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
             lash_core::LiveReplayOutcome::Replayed(events) => events.iter().any(|event| {
                 matches!(
                     &event.payload,
-                    lash_core::SessionObservationEventPayload::Committed { rows, .. } if !rows.is_empty()
+                    lash_core::SessionObservationEventPayload::Committed { entries: rows, .. } if !rows.is_empty()
                 )
             }),
             lash_core::LiveReplayOutcome::Gap(reason) => {
@@ -1214,20 +1212,19 @@ async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
         );
         let snapshot = session
             .observe()
-            .recoverable_chat_snapshot()
+            .snapshot()
             .await
             .expect("durable snapshot");
-        let snapshot_is_new =
-            snapshot.read_view.messages().iter().any(|message| {
-                crate::message_text(message).contains("exactly once across the cut")
-            });
+        let snapshot_is_new = snapshot.read_view.messages().iter().any(|message| {
+            crate::tests::fixtures::role_and_text(message)
+                .1
+                .contains("exactly once across the cut")
+        });
         assert!(
             snapshot_is_new,
             "{boundary:?}: the snapshot is the durable head, which commits before it publishes"
         );
-        let mut stream = session
-            .observe()
-            .subscribe_recoverable_chat(snapshot.cursor);
+        let mut stream = session.observe().subscribe_and_recover(snapshot.cursor);
         replay_store.release_commit_install();
         turn.await.expect("join publishing turn")?;
 
@@ -1289,13 +1286,13 @@ async fn payload_authority_matches_revision_transition() -> Result<()> {
         .find(|event| {
             matches!(
                 &event.payload,
-                lash_core::SessionObservationEventPayload::Committed { rows, .. } if !rows.is_empty()
+                lash_core::SessionObservationEventPayload::Committed { entries: rows, .. } if !rows.is_empty()
             )
         })
         .expect("durable transition emitted Committed");
     let lash_core::SessionObservationEventPayload::Committed {
         base_revision,
-        rows,
+        entries: rows,
     } = &committed.payload
     else {
         unreachable!()
@@ -1350,7 +1347,7 @@ impl PausedCommitReplayStore {
         events.iter().any(|event| {
             matches!(
                 &event.payload,
-                lash_core::SessionObservationEventPayload::Committed { rows, .. }
+                lash_core::SessionObservationEventPayload::Committed { entries: rows, .. }
                     if !rows.is_empty()
             ) || matches!(
                 &event.payload,
@@ -1409,7 +1406,7 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
         let authoritative = events.iter().any(|event| {
             matches!(
                 &event.payload,
-                lash_core::SessionObservationEventPayload::Committed { rows, .. }
+                lash_core::SessionObservationEventPayload::Committed { entries: rows, .. }
                     if !rows.is_empty()
             ) || matches!(
                 &event.payload,
@@ -1477,7 +1474,7 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
         .await?;
     let cursor = session
         .observe()
-        .recoverable_chat_snapshot()
+        .snapshot()
         .await
         .expect("durable snapshot")
         .cursor;
@@ -1488,25 +1485,25 @@ async fn recoverable_chat_conformance_deduplicates_redelivery_identity() -> Resu
         .await?;
     live.published(1).await;
 
-    let mut first_delivery = session.observe().subscribe_recoverable_chat(cursor.clone());
+    let mut first_delivery = session.observe().subscribe_and_recover(cursor.clone());
     let first_id = match first_delivery.next().await.expect("first replay event")? {
-        crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. }
-        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. }
-        | crate::recoverable_chat::RecoverableChatUpdate::ResidentReplacement { id, .. } => id,
-        crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
+        crate::observe::SessionObservationStreamItem::Event(event) => {
+            crate::observe::SessionObservationEventId::of(&event)
+        }
+        crate::observe::SessionObservationStreamItem::Gap { .. } => {
             panic!("fresh cursor unexpectedly gapped")
         }
     };
 
     let mut redelivery = session
         .observe()
-        .subscribe_recoverable_chat(cursor)
+        .subscribe_and_recover(cursor)
         .with_applied_event_ids([first_id.clone()]);
     let next_id = match redelivery.next().await.expect("next replay event")? {
-        crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. }
-        | crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement { id, .. }
-        | crate::recoverable_chat::RecoverableChatUpdate::ResidentReplacement { id, .. } => id,
-        crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { .. } => {
+        crate::observe::SessionObservationStreamItem::Event(event) => {
+            crate::observe::SessionObservationEventId::of(&event)
+        }
+        crate::observe::SessionObservationStreamItem::Gap { .. } => {
             panic!("fresh cursor unexpectedly gapped")
         }
     };
@@ -1550,7 +1547,7 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
         .await?;
     let initial_cursor = first_session
         .observe()
-        .recoverable_chat_snapshot()
+        .snapshot()
         .await
         .expect("durable snapshot")
         .cursor;
@@ -1567,9 +1564,11 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
         .await;
     let mut first_stream = first_session
         .observe()
-        .subscribe_recoverable_chat(initial_cursor);
+        .subscribe_and_recover(initial_cursor);
     let old_id = match first_stream.next().await.expect("pre-restart event")? {
-        crate::recoverable_chat::RecoverableChatUpdate::Event { id, .. } => id,
+        crate::observe::SessionObservationStreamItem::Event(event) => {
+            crate::observe::SessionObservationEventId::of(&event)
+        }
         other => panic!("expected pre-restart provisional event, got {other:?}"),
     };
     let old_cursor = first_stream.cursor().clone();
@@ -1591,22 +1590,22 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
         .await?;
     let restarted_at = second_session
         .observe()
-        .recoverable_chat_snapshot()
+        .snapshot()
         .await
         .expect("durable snapshot")
         .cursor;
     let mut retained_applied_ids = second_session
         .observe()
-        .subscribe_recoverable_chat(restarted_at)
+        .subscribe_and_recover(restarted_at)
         .with_applied_event_ids([old_id.clone()]);
     let mut recovered = second_session
         .observe()
-        .subscribe_recoverable_chat(old_cursor)
+        .subscribe_and_recover(old_cursor)
         .with_applied_event_ids([old_id.clone()]);
     let gap = recovered.next().await.expect("restart gap")?;
     assert!(matches!(
         gap,
-        crate::recoverable_chat::RecoverableChatUpdate::ReplayGap {
+        crate::observe::SessionObservationStreamItem::Gap {
             gap: lash_core::facade_support::LiveReplayGap {
                 reason: lash_core::LiveReplayGapReason::Unavailable,
                 ..
@@ -1631,13 +1630,13 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
             .await
             .expect("gap stream did not continue with the new event")
             .expect("recovered stream remains open")?;
-    let crate::recoverable_chat::RecoverableChatUpdate::Event {
-        id: gap_continuation_id,
-        event: gap_continuation_event,
-    } = gap_continuation
+    let crate::observe::SessionObservationStreamItem::Event(gap_continuation_event) =
+        gap_continuation
     else {
         panic!("expected post-gap provisional event");
     };
+    let gap_continuation_id =
+        crate::observe::SessionObservationEventId::of(&gap_continuation_event);
     let update = tokio::time::timeout(
         std::time::Duration::from_millis(500),
         retained_applied_ids.next(),
@@ -1645,9 +1644,10 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
     .await
     .expect("retained pre-restart identity incorrectly suppressed the new event")
     .expect("recovered stream remains open")?;
-    let crate::recoverable_chat::RecoverableChatUpdate::Event { id, event } = update else {
+    let crate::observe::SessionObservationStreamItem::Event(event) = update else {
         panic!("expected post-restart provisional event");
     };
+    let id = crate::observe::SessionObservationEventId::of(&event);
     assert_ne!(
         id.cursor, old_id.cursor,
         "a fresh replay-store incarnation must change the opaque cursor even at the same numeric position"
@@ -1691,7 +1691,7 @@ async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()>
         .await?;
     let cursor = session
         .observe()
-        .recoverable_chat_snapshot()
+        .snapshot()
         .await
         .expect("durable snapshot")
         .cursor;
@@ -1699,9 +1699,13 @@ async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()>
         .send(TurnInput::text("trim the initial cursor"))
         .output()
         .await?;
-    let mut stream = session.observe().subscribe_recoverable_chat(cursor);
+    let mut stream = session.observe().subscribe_and_recover(cursor);
     let update = stream.next().await.expect("gap update")?;
-    let crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, gap } = update else {
+    let crate::observe::SessionObservationStreamItem::Gap {
+        observation: snapshot,
+        gap,
+    } = update
+    else {
         panic!("trimmed cursor must be forwarded as a recoverable gap");
     };
     assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Trimmed);
@@ -1714,30 +1718,29 @@ async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()>
     let continued = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             match stream.next().await.expect("post-gap live update")? {
-                crate::recoverable_chat::RecoverableChatUpdate::ReplayGap { snapshot, .. } => {
+                crate::observe::SessionObservationStreamItem::Gap {
+                    observation: snapshot,
+                    ..
+                } => {
                     break Ok::<_, crate::EmbedError>(
                         snapshot
                             .read_view
                             .messages()
                             .iter()
-                            .map(crate::message_text)
+                            .map(|message| crate::tests::fixtures::role_and_text(message).1)
                             .collect::<Vec<_>>()
                             .join("\n"),
                     );
                 }
-                crate::recoverable_chat::RecoverableChatUpdate::TerminalReplacement {
-                    event,
-                    ..
-                } => {
-                    let lash_core::SessionObservationEventPayload::Committed { rows, .. } =
-                        &event.payload
-                    else {
-                        panic!("a terminal replacement carries a commit");
-                    };
-                    break Ok(format!("{rows:?}"));
+                crate::observe::SessionObservationStreamItem::Event(event) => {
+                    if let lash_core::SessionObservationEventPayload::Committed {
+                        entries: rows,
+                        ..
+                    } = &event.payload
+                    {
+                        break Ok(format!("{rows:?}"));
+                    }
                 }
-                crate::recoverable_chat::RecoverableChatUpdate::ResidentReplacement { .. }
-                | crate::recoverable_chat::RecoverableChatUpdate::Event { .. } => {}
             }
         }
     })
@@ -1879,11 +1882,11 @@ async fn recoverable_chat_conformance_disconnect_does_not_cancel_server_work() -
         .await?;
     let cursor = session
         .observe()
-        .recoverable_chat_snapshot()
+        .snapshot()
         .await
         .expect("durable snapshot")
         .cursor;
-    let stream = session.observe().subscribe_recoverable_chat(cursor);
+    let stream = session.observe().subscribe_and_recover(cursor);
     let run_session = session.clone();
     let mut turn = tokio::spawn(async move {
         run_session

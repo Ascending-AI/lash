@@ -774,7 +774,7 @@ impl<T: PluginDefinition> PluginMetadata for T {
 pub trait PluginFactory: PluginMetadata + Send + Sync {
     /// Pure display extension. Available to durable readers without plugin
     /// materialization, state restoration, effects or a session writer.
-    fn transcript_projector(&self) -> Option<Arc<dyn super::TranscriptRowProjectorPlugin>> {
+    fn transcript_decoder(&self) -> Option<Arc<dyn super::TranscriptDecoderPlugin>> {
         None
     }
 

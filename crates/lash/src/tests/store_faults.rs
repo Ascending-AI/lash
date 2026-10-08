@@ -823,12 +823,7 @@ mod sweep {
                 .read_model()
                 .messages
                 .iter()
-                .map(|message| {
-                    (
-                        crate::turn::message_role(message).into(),
-                        crate::turn::message_text(message),
-                    )
-                })
+                .map(super::fixtures::role_and_text)
                 .collect(),
             None => Vec::new(),
         };

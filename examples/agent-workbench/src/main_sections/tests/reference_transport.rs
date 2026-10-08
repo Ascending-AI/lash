@@ -19,7 +19,7 @@
 //!   legitimately redelivers them — which is why applied-event dedupe is part
 //!   of the contract rather than a nicety.
 //! * `observation` events carry `(session_id, replay_incarnation_id, cursor)`
-//!   — the remote encoding of `RecoverableChatEventId`. A redelivered identity
+//!   — the remote encoding of `SessionObservationEventId`. A redelivered identity
 //!   applies once, never twice.
 //! * Turn activity folds into the turn's one output row: prose deltas
 //!   accumulate under their activity correlation id (so a
@@ -49,13 +49,13 @@ use lash::TurnEvent;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// Mirrors `MAX_APPLIED_EVENT_IDS` in `lash::recoverable_chat`: the dedupe
+/// Mirrors the bounded dedupe window of `lash::observe::SessionObservationStream`: the dedupe
 /// window is bounded because an honest client only needs to absorb redelivery
 /// inside a replay suffix, not dedupe history forever.
 const MAX_APPLIED_EVENT_IDS: usize = 4096;
 
 /// The wire identity of one delivered observation event — the remote encoding
-/// of `lash::recoverable_chat::RecoverableChatEventId`. The incarnation makes
+/// of `lash::observe::SessionObservationEventId`. The incarnation makes
 /// the identity safe across replay-store restarts: a rebuilt store may reuse a
 /// cursor but cannot reproduce the old identity.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

@@ -5,7 +5,7 @@ use super::*;
 /// projection, committed through the durable session's own admin append on an
 /// in-memory store set. Canonical records come from committed history, never
 /// a fixture authored beside the test (FIG-1530).
-async fn durable_transcript_projection_fixture() -> Vec<lash::transcript::TranscriptRowRecord> {
+async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
     let stores = lash::sqlite::SqliteStoreSet::memory()
         .await
         .expect("an in-memory store set opens");
@@ -149,20 +149,20 @@ async fn durable_transcript_projection_fixture() -> Vec<lash::transcript::Transc
     );
     session.close().await.expect("the session closes");
 
-    let rows = core
-        .session(session_id)
-        .durable()
-        .await
-        .expect("the durable session opens")
-        .transcript()
-        .await
-        .expect("the committed transcript projects")
-        .into_records();
+    let rows = crate::ChatRow::all(
+        core.session(session_id)
+            .durable()
+            .await
+            .expect("the durable session opens")
+            .transcript()
+            .await
+            .expect("the committed transcript decodes")
+            .entries(),
+    );
     assert!(
-        rows.iter().any(
-            |row| row.kind == lash::transcript::TranscriptRowKind::CodeBlock
-                && row.content.output.as_deref() == Some("durable projection")
-        ),
+        rows.iter()
+            .any(|row| row.kind == crate::ChatRowKind::CodeBlock
+                && row.content.output.as_deref() == Some("durable projection")),
         "the committed durable tool trajectory projects a code row"
     );
     core.shutdown().await.expect("the core shuts down");

@@ -413,18 +413,15 @@ pub(crate) async fn watch_session_runs(state: &AppState, session_id: &SessionId)
 
 /// A session opened for observation and its update stream from the current
 /// cursor: what a watch reads run starts from.
-type SessionRunSubscription = (
-    lash::LashSession,
-    lash::recoverable_chat::RecoverableChatSubscription,
-);
+type SessionRunSubscription = (lash::LashSession, lash::observe::SessionObservationStream);
 
 async fn subscribe_session_runs(
     state: &AppState,
     session_id: &SessionId,
 ) -> Result<SessionRunSubscription, lash::EmbedError> {
     let session = state.open_session_for_observation(session_id).await?;
-    let cursor = session.observe().recoverable_chat_snapshot().await?.cursor;
-    let updates = session.observe().subscribe_recoverable_chat(cursor);
+    let cursor = session.observe().snapshot().await?.cursor;
+    let updates = session.observe().subscribe_and_recover(cursor);
     Ok((session, updates))
 }
 
@@ -465,8 +462,6 @@ async fn watch_until_idle(
     session_id: &SessionId,
     subscribed: Option<SessionRunSubscription>,
 ) {
-    use lash::recoverable_chat::RecoverableChatUpdate;
-
     let follows = &state.active_turns.follows;
     let mut backoff = REFOLLOW_BACKOFF;
     let (session, mut updates) = match subscribed {
@@ -503,7 +498,7 @@ async fn watch_until_idle(
         let Some(update) = update else {
             return;
         };
-        let Ok(RecoverableChatUpdate::Event { event, .. }) = update else {
+        let Ok(lash::observe::SessionObservationStreamItem::Event(event)) = update else {
             continue;
         };
         let lash::observe::SessionObservationEventPayload::TurnActivity(activity) = &event.payload
@@ -767,11 +762,13 @@ pub(crate) async fn settle_workbench_turn(
 /// With the claim released, the product rows the settled turn published
 /// for its live view retire: the committed transcript carries them now.
 fn retire_settled_turn_rows(state: &AppState, session: &lash::LashSession) -> Result<(), AppError> {
-    let rows = session
-        .read_view()
-        .transcript()
-        .map_err(AppError::internal)?
-        .into_records();
+    let rows = crate::ChatRow::all(
+        session
+            .read_view()
+            .transcript()
+            .map_err(AppError::internal)?
+            .entries(),
+    );
     crate::retire_settled_product_rows(state, &session.session_id(), &rows)
         .map_err(AppError::internal)
 }
@@ -805,13 +802,13 @@ pub(crate) async fn record_turn_output_for_profile(
         turn_state.settle_terminal();
         streamed_prose
     };
-    let projection = session
+    let transcript = session
         .read_view()
         .transcript()
         .map_err(AppError::internal)?;
-    let assistant_text = projection
+    let assistant_text = transcript
         .reply(identity.durable_turn_id)
-        .map(|row| row.content.text.clone())
+        .map(|entry| crate::ChatRow::of(entry).content.text)
         .unwrap_or_default();
     state.trace_for_session(
         &session.session_id(),

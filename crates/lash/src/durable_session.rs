@@ -83,7 +83,7 @@ enum DurableAcquisition {
 /// non-creating acquisition rule and the observation contract.
 #[derive(Clone)]
 pub struct DurableSession {
-    transcript_options: crate::transcript::TranscriptProjectionOptions,
+    transcript_decoders: crate::transcript::TranscriptDecoders,
     session_id: SessionId,
     ops: DurableSessionOps,
     acquisition: DurableAcquisition,
@@ -105,17 +105,17 @@ pub struct DurableSession {
 }
 
 impl DurableSession {
-    pub(crate) fn with_transcript_options(
+    pub(crate) fn with_transcript_decoders(
         mut self,
-        options: crate::transcript::TranscriptProjectionOptions,
+        options: crate::transcript::TranscriptDecoders,
     ) -> Self {
-        self.transcript_options = options;
+        self.transcript_decoders = options;
         self
     }
 
-    /// Project all retained committed history, paging across frame boundaries.
+    /// Decode all retained committed history, paging across frame boundaries.
     /// This read takes no live-session writer and restores no plugins.
-    pub async fn transcript(&self) -> Result<crate::transcript::TranscriptProjection> {
+    pub async fn transcript(&self) -> Result<crate::transcript::SessionTranscript> {
         let Some(store) = self.store_if_present().await? else {
             return Ok(Default::default());
         };
@@ -138,9 +138,9 @@ impl DurableSession {
             }
         }
         records.reverse();
-        crate::transcript::TranscriptProjection::from_records(
+        crate::transcript::SessionTranscript::from_records(
             records.iter(),
-            &self.transcript_options,
+            &self.transcript_decoders,
         )
         .map_err(|error| {
             crate::EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
@@ -163,7 +163,7 @@ impl DurableSession {
         trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
     ) -> Self {
         Self {
-            transcript_options: Default::default(),
+            transcript_decoders: Default::default(),
             ops: DurableSessionOps::new(session_id.clone(), Arc::clone(&live_replay_store)),
             acquisition: DurableAcquisition::Catalog,
             catalog,
@@ -193,7 +193,7 @@ impl DurableSession {
         trace_scopes: Arc<dyn lash_core::TraceScopeFactory>,
     ) -> Self {
         Self {
-            transcript_options: Default::default(),
+            transcript_decoders: Default::default(),
             ops: DurableSessionOps::new(session_id.clone(), Arc::clone(&live_replay_store)),
             acquisition: DurableAcquisition::Bound(Arc::new(store)),
             catalog,
@@ -469,7 +469,7 @@ impl DurableSession {
         lash_core::store::load_session_read_view(store)
             .await
             .map(|view| {
-                view.map(|view| view.with_transcript_options(self.transcript_options.clone()))
+                view.map(|view| view.with_transcript_decoders(self.transcript_decoders.clone()))
             })
             .map_err(EmbedError::Store)
     }
@@ -522,7 +522,7 @@ impl DurableSession {
             .await?
             .load_committed_turns(after, limit)
             .await?;
-        crate::transcript::CommittedTurnsPage::project(page, &self.transcript_options).map_err(
+        crate::transcript::CommittedTurnsPage::decode(page, &self.transcript_decoders).map_err(
             |error| {
                 crate::EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
                     record_kind: error.record_kind,

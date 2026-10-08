@@ -41,8 +41,8 @@ rejection, exponential state retry, and the manual "retry now" affordance.
 - **Recovery events.** `resync` on the product stream (emitted by `session_events` in
   [`routes.rs`](../../examples/agent-workbench/src/main_sections/routes.rs) when the
   subscriber lags the broadcast), and `replay_gap` + `terminal_replacement` on the observation
-  stream (from `RecoverableChatUpdate` in
-  [`recoverable_chat.rs`](../../crates/lash/src/recoverable_chat.rs)). All three funnel into
+  stream (from `SessionObservationStreamItem` in
+  [`host_streams.rs`](../../examples/agent-workbench/src/main_sections/routes/host_streams.rs)). All three funnel into
   the same `recoverFromState` single-flight snapshot recovery. `resident_replacement` takes a
   narrower path: it refetches resident authority while preserving provisional transcript rows.
 - **Snapshot recovery with staleness rejection.** `beginStateRecovery` /

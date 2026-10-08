@@ -96,7 +96,7 @@ pub(crate) struct StateSnapshot {
 pub(crate) struct StateReadSnapshot {
     #[serde(flatten)]
     pub(crate) state: StateSnapshot,
-    pub(crate) transcript: Vec<lash::transcript::TranscriptRowRecord>,
+    pub(crate) transcript: Vec<crate::ChatRow>,
 }
 
 impl std::ops::Deref for StateReadSnapshot {

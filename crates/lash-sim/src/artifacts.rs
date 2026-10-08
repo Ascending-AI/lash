@@ -432,7 +432,6 @@ pub struct FinalValueSemanticProof {
     pub session_id: SessionId,
     pub turn_index: usize,
     pub final_value: Value,
-    pub assistant_output_text: String,
     pub final_value_event_count: usize,
     pub assistant_prose_delta_count: usize,
     pub facts: RuntimeFinalValueInvariantFacts,

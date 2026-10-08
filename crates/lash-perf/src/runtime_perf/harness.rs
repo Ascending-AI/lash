@@ -537,9 +537,9 @@ pub(crate) fn validate_runtime_perf_turn(
     match &turn.outcome {
         TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text }) => {
             let valid = if matches!(scenario, RuntimePerfScenario::OpenAiCompatStream) {
-                text.contains(expected) || turn.assistant_output.safe_text.contains(expected)
+                text.contains(expected)
             } else {
-                text.trim() == expected || turn.assistant_output.safe_text.trim() == expected
+                text.trim() == expected
             };
             if valid {
                 return Ok(());
@@ -581,11 +581,11 @@ pub(crate) fn validate_runtime_perf_turn(
         }
         TurnOutcome::Stopped(stop) => {
             anyhow::bail!(
-                "runtime perf scenario {} turn {} stopped with {:?}; assistant_output={:?}",
+                "runtime perf scenario {} turn {} stopped with {:?}; errors={:?}",
                 scenario.name(),
                 turn_index + 1,
                 stop,
-                turn.assistant_output
+                turn.errors
             );
         }
     }

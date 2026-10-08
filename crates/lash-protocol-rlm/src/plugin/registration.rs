@@ -40,10 +40,6 @@ pub(super) fn register_rlm_protocol_plugin(
             budget_tokens: config.continue_as_soft_warn_tokens,
         },
     )?;
-    reg.output().transcript_projector(
-        lash_core::hook_key!("rlm-transcript"),
-        Arc::new(crate::projection::transcript::RlmTranscriptProjector),
-    )?;
     reg.execution().code_executor(code_executor)?;
     reg.output()
         .assistant_prose_projector(Arc::new(RlmAssistantProseProjector {

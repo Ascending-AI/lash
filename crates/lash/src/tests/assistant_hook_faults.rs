@@ -72,12 +72,7 @@ async fn transcript(core: &LashCore, id: &str) -> Result<Vec<(String, String)>> 
         .read_model()
         .messages
         .iter()
-        .map(|message| {
-            (
-                crate::turn::message_role(message).to_owned(),
-                crate::turn::message_text(message),
-            )
-        })
+        .map(super::fixtures::role_and_text)
         .collect())
 }
 

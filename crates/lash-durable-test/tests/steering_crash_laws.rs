@@ -359,9 +359,9 @@ impl Steering {
             .transcript()
             .await
             .map_err(|error| format!("read the transcript: {error}"))?
-            .into_records()
+            .into_entries()
             .into_iter()
-            .filter(|row| row.provenance.input_id.as_ref() == Some(&steer_input()))
+            .filter(|entry| entry.provenance.input_id.as_ref() == Some(&steer_input()))
             .count();
         Ok((bound, applications, rows))
     }

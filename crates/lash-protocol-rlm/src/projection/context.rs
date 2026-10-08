@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn corrupt_rlm_history_refuses_projection_and_transcript() {
-        use lash_core::transcript::TranscriptRowProjectorPlugin as _;
+        use lash_core::transcript::TranscriptDecoderPlugin as _;
         let foreign = lash_core::ProtocolEvent {
             plugin_id: "foreign".into(),
             payload: serde_json::json!(null),
@@ -462,8 +462,8 @@ mod tests {
             );
             assert!(rlm_history_projection(&projection).is_err());
             assert!(
-                crate::projection::transcript::RlmTranscriptProjector
-                    .project_event(&event)
+                crate::projection::transcript::RlmTranscriptDecoder
+                    .decode_event(&event)
                     .is_err()
             );
         }

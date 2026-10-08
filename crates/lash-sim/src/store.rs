@@ -507,7 +507,6 @@ impl ModelStore {
                     semantic_value: None,
                     terminal_event_count: 0,
                     assistant_prose_delta_count: 1,
-                    assistant_output_text: text.clone(),
                     semantic_channel_observed: false,
                 };
                 let mut observed = json!({

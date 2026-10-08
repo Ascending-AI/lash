@@ -90,7 +90,6 @@ pub struct AssembledTurn {
     /// Cancellation evidence, when the turn was cancelled, rides this outcome
     /// — see [`crate::TurnOutcome::cancellation`].
     pub outcome: crate::TurnOutcome,
-    pub assistant_output: AssistantOutput,
     pub execution: TurnExecutionMetrics,
     #[serde(default)]
     pub token_usage: TokenUsage,

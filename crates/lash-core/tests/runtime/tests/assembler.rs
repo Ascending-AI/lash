@@ -23,7 +23,6 @@ fn assembler_uses_assistant_message_outcome_without_recovery_issue_when_no_strea
             text: "settled answer".to_string()
         })
     );
-    assert_eq!(out.assistant_output.safe_text, "settled answer");
     assert!(
         out.errors
             .iter()
@@ -65,19 +64,21 @@ fn interrupted_assembler_does_not_reuse_assistant_before_latest_user_message() {
         },
     );
 
-    let out = RecordedTurnAssembly::default().finish(
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::Done);
+    let out = assembler.finish(
         state.to_snapshot(),
-        Some(lash_core::facade_support::TurnCancellationEvidence::internal("assembler-test")),
+        None,
         None,
         &TerminationPolicy::default(),
     );
 
-    assert!(matches!(
-        &out.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-    ));
-    assert!(out.assistant_output.safe_text.is_empty());
-    assert!(out.assistant_output.raw_text.is_empty());
+    assert_eq!(
+        out.outcome,
+        TurnOutcome::Finished(TurnFinish::AssistantMessage {
+            text: String::new()
+        })
+    );
 }
 
 #[test]
@@ -111,14 +112,11 @@ fn assembler_prefers_state_output_when_streamed_text_is_a_truncated_prefix() {
         &TerminationPolicy::default(),
     );
     assert_eq!(
-        out.assistant_output.safe_text,
-        "You graduated with a degree in Business Administration."
+        out.outcome,
+        TurnOutcome::Finished(TurnFinish::AssistantMessage {
+            text: "You graduated with a degree in Business Administration.".to_string()
+        })
     );
-    assert_eq!(
-        out.assistant_output.raw_text,
-        "You graduated with a degree in Business Administration."
-    );
-    assert_eq!(out.assistant_output.state, OutputState::Usable);
 }
 
 #[test]
@@ -127,9 +125,8 @@ fn assembler_state_output_excludes_tool_call_payload() {
     // part followed by a tool-call part whose `content` is the raw JSON
     // arguments. On interrupt the assembler falls back to the last
     // assistant message's parts; concatenating EVERY part's content
-    // leaks the tool-call JSON into safe_text and the UI then renders it
-    // as a literal AssistantText block. Only Text/Prose/Image parts
-    // should appear in safe_text.
+    // leaks the tool-call JSON into the recovered assistant text. Only
+    // Text/Prose/Attachment parts belong to it.
     let mut state = default_state();
     append_message(
         &mut state,
@@ -157,22 +154,20 @@ fn assembler_state_output_excludes_tool_call_payload() {
             reply_marker: None,
         },
     );
-    let assembler = RecordedTurnAssembly::default();
+    let mut assembler = RecordedTurnAssembly::default();
+    assembler.record(&SessionStreamEvent::Done);
     let out = assembler.finish(
         state.to_snapshot(),
-        Some(lash_core::facade_support::TurnCancellationEvidence::internal("assembler-test")),
+        None,
         None,
         &TerminationPolicy::default(),
     );
-    assert!(matches!(
-        &out.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-    ));
     assert_eq!(
-        out.assistant_output.safe_text,
-        "Searching for the relevant code."
+        out.outcome,
+        TurnOutcome::Finished(TurnFinish::AssistantMessage {
+            text: "Searching for the relevant code.".to_string()
+        })
     );
-    assert!(!out.assistant_output.raw_text.contains("tool_calls"));
 }
 
 #[test]

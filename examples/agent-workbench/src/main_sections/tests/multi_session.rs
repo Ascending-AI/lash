@@ -116,7 +116,7 @@ fn transcript_code_languages(snapshot: &StateReadSnapshot) -> Vec<String> {
     snapshot
         .transcript
         .iter()
-        .filter(|row| row.kind == lash::transcript::TranscriptRowKind::CodeBlock)
+        .filter(|row| row.kind == crate::ChatRowKind::CodeBlock)
         .filter_map(|row| row.content.language.clone())
         .collect()
 }

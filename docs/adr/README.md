@@ -71,7 +71,7 @@ The generated region below is checked against the live filenames and headings.
 | 0030 | [The session model is recorded at creation](0030-the-session-profile-is-resolved-once-at-open.md) |
 | 0031 | [Execution evidence is provider-reported fact](0031-execution-evidence-is-provider-reported-fact.md) |
 | 0032 | [Attempt history rides inside the result](0032-attempt-history-rides-inside-the-result.md) |
-| 0033 | [Final-output attribution is host policy](0033-final-output-attribution-is-host-policy.md) |
+| 0033 | [Final-output attribution and presentation are host policy](0033-final-output-attribution-is-host-policy.md) |
 | 0034 | [Harness evolution lives outside the runtime repository](0034-harness-evolution-lives-outside-the-runtime-repository.md) |
 | 0035 | [Frontends are independent host applications](0035-frontends-are-independent-host-applications.md) |
 | 0036 | [Stream termination is explicit dialect policy](0036-stream-termination-is-explicit-dialect-policy.md) |
@@ -161,7 +161,7 @@ The generated region below is checked against the live filenames and headings.
 | 0126 | [Session config changes are typed owner commands](0126-session-config-changes-are-typed-owner-commands.md) |
 | 0127 | [Usage is result data; hosts meter spend](0127-usage-is-result-data-hosts-meter-spend.md) |
 | 0128 | [Tool hooks compose as transforms, then checks](0128-tool-hooks-compose-as-transforms-then-checks.md) |
-| 0129 | [The transcript row stream is the only chat projection](0129-the-transcript-row-stream-is-the-only-chat-projection.md) |
+| 0129 | [Committed history is typed facts a host renders](0129-committed-history-is-typed-facts-a-host-renders.md) |
 | 0131 | [Durable types declare their version surface](0131-durable-types-declare-their-version-surface.md) |
 | 0132 | [Durability is state-first over the lash store: actors, epoch fences, no replay](0132-durability-is-state-first-over-the-lash-store.md) |
 | 0133 | [Prompt sections are keyed, trusted, and placed by the host](0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md) |

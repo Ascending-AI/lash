@@ -34,7 +34,7 @@ pub(crate) enum ObservationPayload {
     },
     Committed {
         base_revision: u64,
-        rows: Vec<lash::transcript::TranscriptRowRecord>,
+        rows: Vec<crate::ChatRow>,
     },
     ResidentChanged,
     AgentFrameSwitched {
@@ -74,10 +74,10 @@ impl ObservationEvent {
             }
             SessionObservationEventPayload::Committed {
                 base_revision,
-                rows,
+                entries,
             } => ObservationPayload::Committed {
                 base_revision: base_revision.as_u64(),
-                rows: rows.clone(),
+                rows: crate::ChatRow::all(entries),
             },
             SessionObservationEventPayload::ResidentChanged => ObservationPayload::ResidentChanged,
             SessionObservationEventPayload::AgentFrameSwitched { frame_id } => {

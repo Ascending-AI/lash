@@ -127,7 +127,7 @@ async fn concurrent_host_appends_settle_through_the_command_lane_exactly_once() 
     let appended = messages
         .messages()
         .iter()
-        .map(lash::message_text)
+        .map(message_text)
         .filter(|text| text.starts_with("fig4202-concurrent-"))
         .collect::<Vec<_>>();
     assert!(

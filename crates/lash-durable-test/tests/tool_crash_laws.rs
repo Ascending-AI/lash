@@ -23,9 +23,9 @@
 //!   activity may precede the redrive's), and the session's committed
 //!   observation holds exactly one outcome for the call. Cut at its
 //!   `turn.commit`, the commit reaches a host following the session's
-//!   recoverable chat from before the turn even when the owner lost the
+//!   observation feed from before the turn even when the owner lost the
 //!   commit's acknowledgement or its life before it published the commit: a
-//!   `TerminalReplacement`, or a `ReplayGap` with the durable head.
+//!   `Committed` event, or a `Gap` with the durable head.
 //! - **Plugin state (FIG-5266):** a tool's plugin-state change commits with
 //!   its outcome (ADR 0132 §5). Cut at its `round.outcome`, the session's
 //!   committed state holds the value the call's committed outcome carries,
@@ -657,12 +657,12 @@ struct Crash {
     /// The host's session and its send, which [`Turn::Activity`] follows.
     host: Mutex<Option<(lash::DurableSession, lash::SendHandle)>>,
     /// The session opened for observation, and the updates of its
-    /// recoverable chat, followed from the head before the turn, which
+    /// observation feed, followed from the head before the turn, which
     /// [`Turn::Activity`] reads.
     chat: Mutex<
         Option<(
             lash::LashSession,
-            tokio::sync::mpsc::UnboundedReceiver<lash::recoverable_chat::RecoverableChatUpdate>,
+            tokio::sync::mpsc::UnboundedReceiver<lash::observe::SessionObservationStreamItem>,
         )>,
     >,
     keep: Mutex<Vec<Box<dyn std::any::Any + Send>>>,
@@ -1044,15 +1044,15 @@ impl Crash {
         violations
     }
 
-    /// The host following the session's recoverable chat from before the
-    /// turn reached the durable head: by the commit's `TerminalReplacement`,
-    /// or by a `ReplayGap` whose snapshot is the head. The session's owner
+    /// The host following the session's observation feed from before the
+    /// turn reached the durable head: by the commit's `Committed` event, or
+    /// by a `Gap` whose snapshot is the head. The session's owner
     /// published it before it released the session, so it is on the live
     /// stream by now: the chat waits for it only [`PUBLISHED_WITHIN`].
     async fn chat_laws(&self) -> Vec<String> {
-        use lash::recoverable_chat::RecoverableChatUpdate;
+        use lash::observe::SessionObservationStreamItem;
         let Some((_observed, mut chat)) = self.chat.lock_recover().take() else {
-            return vec!["the host follows no recoverable chat".to_owned()];
+            return vec!["the host follows no observation feed".to_owned()];
         };
         let factory = self.backend().stores().session_store_factory();
         let head = match lash_core::SessionCommitStore::load_session_head_meta(
@@ -1070,16 +1070,21 @@ impl Crash {
                 Ok(Some(update)) => update,
                 other => {
                     return vec![format!(
-                        "the recoverable chat never reached the head {head:?}: {other:?} \
+                        "the observation feed never reached the head {head:?}: {other:?} \
                          after {seen:#?}"
                     )];
                 }
             };
             let reached = match &update {
-                RecoverableChatUpdate::TerminalReplacement { event, .. } => {
+                SessionObservationStreamItem::Event(event)
+                    if matches!(
+                        event.payload,
+                        lash::observe::SessionObservationEventPayload::Committed { .. }
+                    ) =>
+                {
                     event.revision() >= head
                 }
-                RecoverableChatUpdate::ReplayGap { gap, .. } => gap.latest_revision >= head,
+                SessionObservationStreamItem::Gap { gap, .. } => gap.latest_revision >= head,
                 _ => false,
             };
             seen.push(update);
@@ -1173,12 +1178,10 @@ impl Scenario for Crash {
                 .map_err(|error| format!("open the session for observation: {error}"))?;
             let snapshot = observed
                 .observe()
-                .recoverable_chat_snapshot()
+                .snapshot()
                 .await
                 .map_err(|error| format!("snapshot the session: {error}"))?;
-            let mut chat = observed
-                .observe()
-                .subscribe_recoverable_chat(snapshot.cursor);
+            let mut chat = observed.observe().subscribe_and_recover(snapshot.cursor);
             // The host follows the chat while the deployment runs, as a
             // host's live view does.
             let (updates, received) = tokio::sync::mpsc::unbounded_channel();

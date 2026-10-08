@@ -610,7 +610,6 @@ pub(super) async fn prove_final_value_semantic_channel()
         session_id: result.state.session_id,
         turn_index: result.state.turn_index,
         final_value,
-        assistant_output_text: result.assistant_output.safe_text,
         final_value_event_count: final_value_events.len(),
         assistant_prose_delta_count,
         facts,

@@ -4,11 +4,10 @@ pub(crate) use async_trait::async_trait;
 pub(crate) use lash_core::plugin::StaticPluginFactory;
 pub(crate) use lash_core::runtime::RuntimeSessionState;
 pub(crate) use lash_core::{
-    LiveReplayStore, MessageRole, ProcessHandleView, ProcessWorkWiring, SessionCreationHead,
-    SessionListFilter, SessionPolicy, SessionStoreCreateRequest, SessionView,
-    facade_support::InMemoryLiveReplayStore, facade_support::LashRuntime,
-    facade_support::PluginHost, facade_support::PluginSpec, facade_support::PluginStack,
-    facade_support::RuntimeEnvironment, facade_support::RuntimeHandle,
+    LiveReplayStore, ProcessHandleView, ProcessWorkWiring, SessionCreationHead, SessionListFilter,
+    SessionPolicy, SessionStoreCreateRequest, SessionView, facade_support::InMemoryLiveReplayStore,
+    facade_support::LashRuntime, facade_support::PluginHost, facade_support::PluginSpec,
+    facade_support::PluginStack, facade_support::RuntimeEnvironment, facade_support::RuntimeHandle,
     facade_support::RuntimeHostConfig, facade_support::RuntimeObservation,
     facade_support::SessionSpec,
 };
@@ -16,7 +15,7 @@ pub(crate) use tokio_util::sync::CancellationToken;
 
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
 pub(crate) use lash_core::{
-    DeploymentStore, LlmCallRecord, Message, PluginMessage, ProcessRegistry, ProtocolTurnOptions,
+    DeploymentStore, LlmCallRecord, PluginMessage, ProcessRegistry, ProtocolTurnOptions,
     RuntimeErrorCode, SessionCursor, SessionError, SessionReadView, SessionScope, SessionSnapshot,
     ToolCallRecord, ToolManifest, ToolProvider, ToolState, facade_support::PluginFactory,
     facade_support::SessionObservation, facade_support::SessionObservationSubscription,

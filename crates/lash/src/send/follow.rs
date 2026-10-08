@@ -732,24 +732,9 @@ pub(super) async fn durable_report(
         )
         .await
         .map_err(EmbedError::Durable)?;
-    let assistant_output = match &outcome {
-        TurnOutcome::Finished(lash_core::facade_support::TurnFinish::AssistantMessage { text }) => {
-            lash_core::facade_support::AssistantOutput {
-                safe_text: text.clone(),
-                raw_text: text.clone(),
-                state: lash_core::facade_support::OutputState::Usable,
-            }
-        }
-        _ => lash_core::facade_support::AssistantOutput {
-            safe_text: String::new(),
-            raw_text: String::new(),
-            state: lash_core::facade_support::OutputState::EmptyOutput,
-        },
-    };
     Ok(TurnReport {
         state,
         outcome,
-        assistant_output,
         usage,
         llm_calls,
         failure_evidence: Vec::new(),

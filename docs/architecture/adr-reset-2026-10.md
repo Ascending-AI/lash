@@ -143,6 +143,6 @@ state-first durability. Numbers without a row have no file and are not reused.
 | [0126](../adr/0126-session-config-changes-are-typed-owner-commands.md) | Session config changes are typed owner commands | AMEND | Config resolution commits before publication; unreadable owners park typed. | — |
 | [0127](../adr/0127-usage-is-result-data-hosts-meter-spend.md) | Usage is result data; hosts meter spend | AMEND | Removes the supersedes narration (main-red); resume and `Repeatable` guarantees. | — |
 | [0128](../adr/0128-tool-hooks-compose-as-transforms-then-checks.md) | Tool hooks compose as transforms, then checks | AMEND | Resume wording replaces recorded replay. | — |
-| [0129](../adr/0129-the-transcript-row-stream-is-the-only-chat-projection.md) | The transcript row stream is the only chat projection | KEEP | No durability mechanics; the decision stands as written. | — |
+| [0129](../adr/0129-committed-history-is-typed-facts-a-host-renders.md) | The transcript row stream is the only chat projection | KEEP | No durability mechanics; the decision stands as written. | — |
 | 0130 | Protected realization runs in its own invocation | SUPERSEDE | The store half of realization commits with the tool result. | ADR 0132 §5 |
 | [0131](../adr/0131-durable-types-declare-their-version-surface.md) | Durable types declare their version surface | AMEND | Record kinds declare surfaces for the format set; the journal-version section is retired. | — |

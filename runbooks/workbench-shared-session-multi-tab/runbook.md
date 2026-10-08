@@ -20,7 +20,7 @@ run: a user with the conversation open in two tabs, two devices, or a teammate w
 the same run. It is served by genuinely multi-consumer plumbing — the product stream is a
 per-session `tokio::sync::broadcast` replayed from the caller's cursor
 ([`state.rs`](../../examples/agent-workbench/src/main_sections/state.rs)), and each
-`/api/observations` request opens its **own** `subscribe_recoverable_chat` subscription
+`/api/observations` request opens its **own** `subscribe_and_recover` subscription
 ([`routes.rs`](../../examples/agent-workbench/src/main_sections/routes.rs)) — so no client
 starves another and no client is privileged.
 
