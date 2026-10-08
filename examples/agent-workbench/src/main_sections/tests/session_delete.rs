@@ -153,6 +153,9 @@ async fn an_unconfirmed_tombstone_is_ambiguous_and_a_retry_completes_the_delete(
         .admit_session_id(&session_id, "test.unconfirmed")
         .await
         .expect_err("an ambiguous close must keep refusing new work");
+    assert_eq!(refused.status, StatusCode::CONFLICT);
+    assert_eq!(refused.verdict, AppErrorVerdict::Terminal);
+    assert_eq!(refused.message, retiring_session_message(&session_id));
     assert_eq!(
         refused
             .retirement

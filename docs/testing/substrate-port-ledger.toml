@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1726 rows over 873 files, 4088 laws.
-# By class: mechanical 213, semantic 156, delete 886, replace 471.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 97, L9c 364, L9d 122, L9e 140, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 146, ported 177, deleted 1403.
+# 1736 rows over 873 files, 4098 laws.
+# By class: mechanical 213, semantic 156, delete 907, replace 460.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 368, L9d 124, L9e 141, L9f 125, L9g 98, L9h 124, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 146, ported 177, deleted 1413.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -1647,7 +1647,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported the file to crates/lash/src/tests/stream_evidence.rs on facade turns over SQLite memory (the runtime turn loop it drove went with bbffe67d98, FIG-5208); 7 pass. attempt_reset_clears_response_establishment_before_later_evidence is #[ignore] FIG-5334 (a stopped turn's report carries no typed failure)"
+note = "FIG-5312 ported the file to crates/lash/src/tests/stream_evidence.rs on facade turns over SQLite memory (the runtime turn loop it drove went with bbffe67d98, FIG-5208); FIG-5385 disposes the unstreamed part-boundary duplicate in its named row. attempt_reset_clears_response_establishment_before_later_evidence is #[ignore] FIG-5334 (a stopped turn's report carries no typed failure)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_restore_report.rs"
@@ -1995,7 +1995,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported the generation and effort laws to crates/lash/src/tests/generation_policy.rs (6 pass; an unsupported effort is now refused typed at session creation, ReasoningRefused/UnsupportedEffort, before any provider call) and session_manager_rejects_duplicate_child_session_ids to crates/lash/src/tests/session_create.rs::a_second_create_of_a_session_id_is_refused_already_exists; the runtime's in-process turn loop and drain entry went with bbffe67d98 (FIG-5208) and 0cc1b81d98 (FIG-5196)"
+note = "FIG-5312 ported the generation and effort laws to crates/lash/src/tests/generation_policy.rs (an unsupported effort is now refused typed at session creation, ReasoningRefused/UnsupportedEffort, before any provider call); FIG-5385 disposes the two generation-disposition duplicates in their named rows. Ported session_manager_rejects_duplicate_child_session_ids to crates/lash/src/tests/session_create.rs::a_second_create_of_a_session_id_is_refused_already_exists; the runtime's in-process turn loop and drain entry went with bbffe67d98 (FIG-5208) and 0cc1b81d98 (FIG-5196)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
@@ -2421,7 +2421,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5310: the guarantee is gone. 0cc1b81d98 (FIG-5196) deleted run admission and the binding that kept withheld work on its run until the switch's follow-on, and the follow-on became ordinary session mail at the next ingress position (ADR 0101 §3, fd2db318d6, FIG-5232), so work queued before the switch commits runs first. The new order is pinned on every tier by crates/lash-durable-test/tests/frame_switch_laws.rs::work_queued_before_a_frame_switch_commits_runs_before_its_follow_on, and a withheld wake running once next by crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next"
+note = "FIG-5310: the guarantee is gone. 0cc1b81d98 (FIG-5196) deleted run admission and the binding that kept withheld work on its run until the switch's follow-on, and the follow-on became ordinary session mail at the next ingress position (ADR 0101 §3, fd2db318d6, FIG-5232), so work queued before the switch commits runs first. The new order is pinned by crates/lash-sim/tests/logical_turn.rs::admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once, and a withheld wake running once next by crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next"
 
 [[row]]
 path = "crates/lash-core/tests/runtime_support/effect_recording_authority.rs"
@@ -10445,7 +10445,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported in place on SQLite memory, reading the committed head; the threshold follow-on is attached by frame_task_run (FIG-5232). #[ignore] FIG-5327 (a durable commit records no last_prompt_usage, so pressure never fires and overflow recovery opens no frame): pressure_compaction_opens_a_summary_frame_the_turn_continues_in, standard_compaction_threshold_turn_commits_from_durable_leaf_and_unblocks_compaction, overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in, overflow_recovery_starts_a_frame_without_a_reload"
+note = "FIG-5312 ported in place on SQLite memory, reading the committed head; the threshold follow-on is attached by frame_task_run (FIG-5232). FIG-5385 disposes the pressure and overflow frame duplicates, the residency subject and the repeated-admin duplicate in named rows; the threshold ancestry law passes unignored on SQLite memory, including trace context and the reopened leaf's parent."
 
 [[row]]
 path = "crates/lash/src/tests/standard_compaction_persistence.rs"
@@ -10652,7 +10652,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported the file onto facade turns over SQLite memory (12 pass; continue_as_seed_is_installed_before_the_follow_on_run is new; rlm_abort_drain_preserves_late_reasoning_replay_and_usage passes since FIG-5328). #[ignore] with tickets: rlm_tool_calls_stream_from_live_exec_boundary and rlm_recovered_tool_failure_remains_in_turn_accounting (FIG-5330: the report omits code-cell tool calls and execution metrics); rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes (FIG-5331: no protocol_step trace record). Its journaled-effect-outcome assertions went with the journal (5ad9641f9e)"
+note = "FIG-5312 ported the file onto facade turns over SQLite memory (rlm_abort_drain_preserves_late_reasoning_replay_and_usage passes since FIG-5328). #[ignore] with tickets: rlm_tool_calls_stream_from_live_exec_boundary and rlm_recovered_tool_failure_remains_in_turn_accounting (FIG-5330: the report omits code-cell tool calls and execution metrics); rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes (FIG-5331: no protocol_step trace record). Its journaled-effect-outcome assertions went with the journal (5ad9641f9e)"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/rlm_streaming.rs"
@@ -10674,9 +10674,9 @@ needs = ["turn", "round", "cell"]
 class = "semantic"
 lane = "L9e"
 laws = ["rlm_exec_code_seal_key_survives_continue_as_seed_and_follow_turn"]
-disposition = "replaced-by:crates/lash/src/tests/turn_streaming/rlm_streaming.rs::continue_as_seed_is_installed_before_the_follow_on_run"
+disposition = "covered-by:crates/lash-sim/tests/logical_turn.rs::rlm_continue_as_seed_materializes_in_the_new_frame"
 status = "deleted"
-note = "its seal-key half read the journal (5ad9641f9e; nothing replays, ADR 0132 §2); its seed half is the new law"
+note = "FIG-5385: the journal seal-key subject is deleted (ADR 0132 §2); the sim law covers the continue_as seed and its follow-on."
 
 [[row]]
 path = "crates/lash/src/tests/wrong_authority_redeploy.rs"
@@ -12847,15 +12847,14 @@ path = "crates/lash-perf/src/runtime_perf/harness/tests.rs"
 test = "scenario_wiring_drives_the_benchmark_plugin_list_in_order"
 area = "lash-perf"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "scenario_wiring_drives_the_benchmark_plugin_list_in_order",
 ]
-disposition = "replaced-by:crates/lash-perf/src/runtime_perf/harness/tests.rs::scenario_wiring_drives_the_benchmark_plugin_list_in_order"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "scenario wiring drives the benchmark plugin list in order"
-note = "FIG-5310: the plugin list is built over the in-process lane's effect host; the subagents plugin is now the host's delegation plugin (FIG-5296)"
+note = "FIG-5385: It pins a literal plugin-id list per benchmark scenario (\"benchmark plugin order changed\"). That is a change detector, not a rule."
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/harness/tests.rs"
@@ -14085,15 +14084,14 @@ path = "crates/lash-sim/src/runner/tests.rs"
 test = "cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations"
 area = "lash-sim"
 needs = ["cell"]
-class = "replace"
+class = "delete"
 lane = "L9f"
 laws = [
   "cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations",
 ]
-disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations"
+disposition = "covered-by:crates/lash-sim/src/cache_regression.rs::rlm_live_bound_state_is_prefix_stable_for_every_serializer"
 status = "deleted"
-owed = "cache dialect rlm prompt prefix is byte stable across iterations"
-note = "FIG-5308: restored on the durable SimEngine."
+note = "FIG-5385: Both check that an RLM prompt prefix stays byte-stable across iterations under the Anthropic and Gemini chat cache dialects. The covering law runs 4 serializers over 3 iterations with a global that changes, so a bound variable in the prefix would break it."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -14188,15 +14186,14 @@ path = "crates/lash-sim/src/runner/tests.rs"
 test = "final_value_semantic_channel_proof_uses_runtime_outcome_and_event"
 area = "lash-sim"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9f"
 laws = [
   "final_value_semantic_channel_proof_uses_runtime_outcome_and_event",
 ]
-disposition = "replaced-by:crates/lash-sim/src/runner/tests.rs::final_value_semantic_channel_proof_uses_runtime_outcome_and_event"
+disposition = "covered-by:crates/lash-sim/src/runner/tests.rs::runtime_facade_turn_uses_scripted_transport_and_checks_invariants"
 status = "deleted"
-owed = "final value semantic channel proof uses runtime outcome and event"
-note = "FIG-5308: restored on the durable SimEngine. FIG-5346: un-ignored; a live LashSession adopts the committed head through its runtime's own store, so its report and reads carry the durable turn."
+note = "FIG-5385: `prove_runtime_facade_turn` runs `prove_final_value_semantic_channel` (`runtime_proofs.rs:55`), and `require`s its outcome and events. The covering law asserts its invariant."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -17611,15 +17608,14 @@ path = "examples/agent-workbench/src/main_sections/tests/session_fence.rs"
 test = "a_retiring_session_refuses_use_but_admits_the_delete_retry"
 area = "agent-workbench"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "a_retiring_session_refuses_use_but_admits_the_delete_retry",
 ]
-disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/session_fence.rs::a_retiring_session_refuses_use_but_admits_the_delete_retry"
+disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/session_delete.rs::an_unconfirmed_tombstone_is_ambiguous_and_a_retry_completes_the_delete"
 status = "deleted"
-owed = "a retiring session refuses use but admits the delete retry"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the delete is the route's own retirement through the core's session close; the retiring law's tombstone tail asserts the use refusal, as FIG-5347 admits a delete retry over a tombstone"
+note = "FIG-5385: It calls `settle_retirement_mark` with made-up errors. FIG-5347's fault-injected laws drive the same transitions through real store faults: ambiguous keeps the mark and refuses use, a definitive refusal over a live session lifts it, and a retry is admitted and completes. The fault-injected law now also checks the exact retiring 409, terminal verdict and message."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_fence.rs"
@@ -17776,45 +17772,42 @@ path = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs"
 test = "a_cell_reads_what_an_earlier_cell_bound_in_both_dialects"
 area = "agent-workbench"
 needs = ["cell"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "a_cell_reads_what_an_earlier_cell_bound_in_both_dialects",
 ]
-disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_cell_reads_what_an_earlier_cell_bound_in_both_dialects"
+disposition = "covered-by:crates/lash-durable-test/tests/rlm_session_globals.rs::session_globals_survive_cells_and_reload_and_private_slots_never_do"
 status = "deleted"
-owed = "a cell reads what an earlier cell bound in both dialects"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the rehydration is a second workbench over the same stores"
+note = "FIG-5385: Both check bind, read and rebind across cells. The covering law also checks the BOUND VARIABLES set on every tier. \"Both dialects\" is stale (ADR 0096)."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs"
 test = "a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects"
 area = "agent-workbench"
 needs = ["cell"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects",
 ]
-disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_rehydrated_session_still_reads_its_earlier_bindings_in_both_dialects"
+disposition = "covered-by:crates/lash-durable-test/tests/rlm_session_globals.rs::session_globals_survive_cells_and_reload_and_private_slots_never_do"
 status = "deleted"
-owed = "a rehydrated session still reads its earlier bindings in both dialects"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the rehydration is a second workbench over the same stores"
+note = "FIG-5385: The covering law reads every global by name after two restarts on a new core over the same stores."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs"
 test = "a_name_no_one_has_is_still_refused_in_both_dialects"
 area = "agent-workbench"
 needs = ["cell"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "a_name_no_one_has_is_still_refused_in_both_dialects",
 ]
-disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs::a_name_no_one_has_is_still_refused_in_both_dialects"
+disposition = "covered-by:crates/lash-typescript/tests/scoping_regressions.rs::a_top_level_typo_on_line_40_is_refused_before_any_effect_and_says_where"
 status = "deleted"
-owed = "a name no one has is still refused in both dialects"
-note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: turns run through the chat route; the rehydration is a second workbench over the same stores"
+note = "FIG-5385: The TypeScript scoping law covers TS_UNKNOWN_BINDING before any effect; typescript_dialect.rs::the_code_failure_scenario_renders_a_failed_cell_and_terminates covers the failed-cell rendering and termination."
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests.rs"
@@ -19925,15 +19918,14 @@ path = "crates/lash-perf/src/runtime_perf/measurement/contention.rs"
 test = "writer_contention_smoke_reports_wait_release_latency_and_execution"
 area = "lash-perf"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "writer_contention_smoke_reports_wait_release_latency_and_execution",
 ]
-disposition = "replaced-by:crates/lash-perf/src/runtime_perf/measurement/contention.rs::writer_contention_smoke_reports_wait_release_latency_and_execution"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "the writer-contention scenario reports wait, release-latency and execution samples for same-session and many-session writers"
-note = "FIG-5342: active; unique config write keys and queued append commands witness held-head serialization"
+note = "FIG-5385: Metric-key presence only."
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/measurement/contention.rs"
@@ -19985,15 +19977,14 @@ path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
 test = "stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls"
 area = "lash-perf"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls",
 ]
-disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "durable SQLite turn scenarios report their phases and store calls"
-note = "FIG-5342: active; served runtimes resolve the host probe registry and durable transactions use the measurement decorator"
+note = "FIG-5385: It checks that phase and counter keys are present in a perf report. That is a change detector of the harness's output shape, and the perf run itself fails if a scenario stops running."
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -20045,30 +20036,28 @@ path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
 test = "high_traffic_sqlite_smoke_reports_load_structure"
 area = "lash-perf"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "high_traffic_sqlite_smoke_reports_load_structure",
 ]
-disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_smoke_reports_load_structure"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "the high-traffic SQLite scenario reports its load structure"
-note = "FIG-5342: active; direct delegated SessionTurn starts answer their seeded child task on the served node"
+note = "FIG-5385: Metric-key presence only (`wait.*`, `queue_depth.*`, `knee.*` absent)."
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
 test = "high_traffic_sqlite_knee_smoke_reports_each_step"
 area = "lash-perf"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "high_traffic_sqlite_knee_smoke_reports_each_step",
 ]
-disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_knee_smoke_reports_each_step"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "the high-traffic SQLite knee scenario reports each step"
-note = "FIG-5342: active; each population uses served delegated children and durable transaction measurements"
+note = "FIG-5385: Metric-key presence and step-index layout only."
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -27006,3 +26995,122 @@ disposition = "replaced-by:crates/lash-protocol-rlm/src/plugin/config_owner.rs::
 status = "deleted"
 owed = "creation defaults the format and records the pins"
 note = "FIG-5296 (ADR 0134): the final-answer format no longer depends on whether a session has a parent; the file's other tests are not ledger subjects"
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
+test = "an_output_token_cap_above_the_model_clamps_and_says_so"
+area = "session-shift"
+needs = ["turn", "process"]
+class = "delete"
+lane = "L9d"
+laws = ["an_output_token_cap_above_the_model_clamps_and_says_so"]
+disposition = "covered-by:crates/lash-sim/src/generation_disposition_matrix.rs::runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value"
+status = "deleted"
+note = "FIG-5385: Same guarantee: a 32k cap on a 2,048-token model sends 2,048 and reports `ClampedToCapacity` on the turn's call record. The sim law checks it through the real OpenAI-compatible adapter. The adapter law now also asserts that the recorded session cap stays 32,000."
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
+test = "omitted_generation_options_are_reported_on_the_turn_llm_call_record"
+area = "session-shift"
+needs = ["turn", "process"]
+class = "delete"
+lane = "L9d"
+laws = ["omitted_generation_options_are_reported_on_the_turn_llm_call_record"]
+disposition = "covered-by:crates/lash-sim/src/generation_disposition_matrix.rs::runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value"
+status = "deleted"
+note = "FIG-5385: Its TestProvider makes up the receipt, so it only proves pass-through to `llm_calls[..].attempts[..].generation_disposition`. Both sim laws read a real adapter's receipt from that same field."
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/stream_evidence.rs"
+test = "unstreamed_response_publishes_block_lifecycle_per_text_part"
+area = "streaming"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = ["unstreamed_response_publishes_block_lifecycle_per_text_part"]
+disposition = "covered-by:crates/lash-durable-test/tests/standard_turn_outcomes.rs::standard_runtime_preserves_part_boundaries_when_response_is_not_streamed"
+status = "deleted"
+note = "FIG-5385: Both check that an unstreamed response opens one stream block per text part. The tiered law pins the block ids (`part:0`, `part:1`), the text and the committed parts, on every tier."
+
+[[row]]
+path = "crates/lash/src/tests/turn_streaming/rlm_streaming.rs"
+test = "pending_host_tool_completion_parks_turn_and_resolves_through_core_ingress"
+area = "streaming"
+needs = ["turn", "round", "cell"]
+class = "delete"
+lane = "L9e"
+laws = ["pending_host_tool_completion_parks_turn_and_resolves_through_core_ingress"]
+disposition = "covered-by:crates/lash-sim/src/runner/tests.rs::pending_tool_completion_proof_uses_scheduler_delivered_tool_boundary"
+status = "deleted"
+note = "FIG-5385: Same scenario on a standard turn: it parks, nothing completes before the resolve, the resolve answers `Resolved`, the turn finishes with the value, and a second resolve answers `Conflict`. The sim proof also runs the history invariants."
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "pressure_compaction_opens_a_summary_frame_the_turn_continues_in"
+area = "compaction"
+needs = ["turn"]
+class = "delete"
+lane = "L9c"
+laws = ["pressure_compaction_opens_a_summary_frame_the_turn_continues_in"]
+disposition = "covered-by:crates/lash-durable-test/tests/pressure_frame_crash_proof.rs::a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_memory"
+status = "deleted"
+note = "FIG-5385: The crash proof shows a pressure frame opening, seeded by the summary, before the turn that runs in it, through the same standard-compaction hook (FIG-5355, Done). The \"same resident session / no reload\" assertions describe a runtime that no longer exists. RLM seed coverage: crates/lash-durable-test/tests/pressure_frame_crash_proof.rs::an_rlm_pressure_frame_restarts_the_session_s_globals_from_its_seed."
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in"
+area = "compaction"
+needs = ["turn"]
+class = "delete"
+lane = "L9c"
+laws = ["overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in"]
+disposition = "covered-by:crates/lash-durable-test/tests/pressure_frame_crash_proof.rs::a_pressure_frame_killed_at_every_label_opens_once_on_sqlite_memory"
+status = "deleted"
+note = "FIG-5385: The crash proof's `Overflow` script is this law: a standard overflow, then a recovery frame opens before the next turn, which runs in it."
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "repeated_compactions_use_distinct_physical_parents"
+area = "compaction"
+needs = ["turn"]
+class = "delete"
+lane = "L9c"
+laws = ["repeated_compactions_use_distinct_physical_parents"]
+disposition = "covered-by:crates/lash/src/tests/standard_compaction_persistence.rs::repeated_admin_compactions_distinguish_changed_snapshots"
+status = "deleted"
+note = "FIG-5385: Both check that each repeated admin compaction opens its frame and the head holds the latest summary. This test's own concern was a later parent replaying the earlier compaction child, which was journal replay; nothing replays now (ADR 0132 \u00a72)."
+
+[[row]]
+path = "crates/lash/src/tests/send_handle.rs"
+test = "a_run_admitted_beside_a_non_executing_open_executes"
+area = "send-handle"
+needs = ["turn"]
+class = "delete"
+lane = "L9b"
+laws = ["a_run_admitted_beside_a_non_executing_open_executes"]
+disposition = "covered-by:crates/lash/src/tests/send_handle.rs::a_shift_never_runs_on_a_session_opened_to_observe"
+status = "deleted"
+note = "FIG-5385: Both check that a run never executes on an `observe_with_state` open, and that the actor runs it. The FIG-5091 \"refuse instead of opening its own runtime\" choice is gone, since every turn runs on the actor."
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "overflow_recovery_starts_a_frame_without_a_reload"
+area = "compaction"
+needs = ["turn"]
+class = "delete"
+lane = "L9c"
+laws = ["overflow_recovery_starts_a_frame_without_a_reload"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5385: It asserts resident-runtime internals (\"the resident graph is that frame alone, nothing read the window back\"). The ledger's `frame_residency.rs` row already subject-deleted the \"starts a frame without a reload\" laws: no runtime stays resident across turns since bca2bd4534."
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
+test = "retired_session_cancel_and_tool_refresh_return_the_typed_conflict"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = ["retired_session_cancel_and_tool_refresh_return_the_typed_conflict"]
+disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/session_fence.rs::every_session_bound_route_refuses_a_retired_id_with_the_same_conflict"
+status = "deleted"
+note = "FIG-5385: The session-bound route law covers cancellation and now also includes enqueue_tool_catalog_refresh with the same terminal 409 and message."

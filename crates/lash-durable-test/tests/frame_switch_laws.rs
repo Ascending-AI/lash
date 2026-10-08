@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use lash::persistence::{SessionHeadRef, WindowSelector};
 use lash::tools::{StaticToolExecute, StaticToolProvider};
-use lash::transcript::{CommittedTurn, TranscriptRowKind};
+use lash::transcript::CommittedTurn;
 use lash_core::store::TurnCommitOutcome;
 use lash_core::{ToolCall, ToolControl, ToolOutcome};
 use served::{Tier, WATCHDOG, World};
@@ -115,19 +115,6 @@ async fn committed(session: &lash::DurableSession, count: usize) -> Vec<Committe
     .expect("deadlock watchdog: the expected turns never committed")
 }
 
-/// The texts of a turn's input rows, in order.
-fn user_texts(turn: &CommittedTurn) -> Vec<String> {
-    turn.rows
-        .iter()
-        .filter(|row| {
-            row.suppressed.is_none()
-                && row.kind == TranscriptRowKind::User
-                && row.provenance.input_id.is_some()
-        })
-        .map(|row| row.content.text.clone())
-        .collect()
-}
-
 /// The admitted window of a turn is its admission frame after the turn's
 /// own commit switched frames (ADR 0112 §5, §14.4): a read pinned at the
 /// head the switching turn was admitted on stays anchored at that frame,
@@ -194,58 +181,4 @@ async fn the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame(ti
     world.shutdown().await;
 }
 
-/// A frame switch's follow-on takes the session's next ingress position
-/// (ADR 0101 §3): an input queued while the switching turn runs runs first,
-/// on the new frame, and the follow-on runs the task after it; each runs
-/// once.
-async fn work_queued_before_a_frame_switch_commits_runs_before_its_follow_on(tier: Tier) {
-    const SESSION: &str = "frame-switch-queued-first";
-    let sender = Arc::new(OnceLock::new());
-    let Some(world) = world(tier, SESSION, Arc::clone(&sender)).await else {
-        return;
-    };
-    let session = world.session(SESSION, served::spec(8)).await;
-    served::assert_answered(FIRST, &world.send(&session, FIRST).await);
-    assert!(
-        sender.set(world.core.clone()).is_ok(),
-        "the core is set once"
-    );
-    world.send(&session, SWITCH).await;
-    let turns = committed(&session, 4).await;
-    assert_eq!(
-        turns
-            .iter()
-            .map(|turn| (user_texts(turn), turn.outcome.clone()))
-            .collect::<Vec<_>>(),
-        [
-            (vec![FIRST.to_owned()], TurnCommitOutcome::Completed),
-            (vec![SWITCH.to_owned()], TurnCommitOutcome::FrameSwitch),
-            (vec![QUEUED.to_owned()], TurnCommitOutcome::Completed),
-            (vec![TASK.to_owned()], TurnCommitOutcome::Completed),
-        ],
-        "the queued input runs before the follow-on, and each runs once"
-    );
-    let queued = world.requests(QUEUED);
-    assert_eq!(
-        queued.len(),
-        1,
-        "the queued input's turn asks the model once"
-    );
-    assert!(
-        !queued[0].contains(FIRST) && !queued[0].contains(SWITCH),
-        "the queued input runs on the new frame: {}",
-        queued[0]
-    );
-    let page = std::num::NonZeroU32::new(16).expect("a page size");
-    let all = session
-        .committed_turns(None, page)
-        .await
-        .expect("read the session's committed turns");
-    assert_eq!(all.turns.len(), 4, "nothing runs after the follow-on");
-    world.shutdown().await;
-}
-
-tiered_laws!(
-    the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame,
-    work_queued_before_a_frame_switch_commits_runs_before_its_follow_on,
-);
+tiered_laws!(the_admitted_window_of_a_frame_switching_turn_is_its_admission_frame,);

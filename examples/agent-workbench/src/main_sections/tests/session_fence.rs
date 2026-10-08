@@ -109,66 +109,6 @@ fn a_confirmed_retirement_is_never_lifted() {
     );
 }
 
-/// A retiring session refuses use but admits the delete retry; an ambiguous
-/// delete outcome keeps the mark, a definitive failure follows the durable
-/// fact and lifts it, and once the tombstone exists use is refused with the
-/// deleted conflict.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_retiring_session_refuses_use_but_admits_the_delete_retry() {
-    let workbench = Workbench::silent().await;
-    let state = &workbench.state;
-    let session_id = state.current_session_id();
-    let query = SessionQuery {
-        session_id: Some(session_id.clone()),
-    };
-    state
-        .admit_session(&query, "api.state")
-        .await
-        .expect("a live session is admitted");
-    state.active_turns.begin_retirement(&session_id);
-
-    let error = state
-        .admit_session(&query, "api.state")
-        .await
-        .expect_err("a retiring session refuses use");
-    assert_eq!(error.status, StatusCode::CONFLICT);
-    assert_eq!(error.verdict, AppErrorVerdict::Terminal);
-    assert_eq!(error.message, retiring_session_message(&session_id));
-    state
-        .admit_session_id_for_delete(&session_id, "api.session.delete")
-        .await
-        .expect("a retiring session admits the delete retry");
-
-    state
-        .settle_retirement_mark(&session_id, &Err(AppError::internal("ambiguous")))
-        .await;
-    assert_eq!(
-        state.active_turns.retirement(&session_id),
-        Some(SessionRetirement::Retiring),
-        "an ambiguous outcome keeps the mark"
-    );
-    state
-        .settle_retirement_mark(&session_id, &Err(AppError::conflict("remains live")))
-        .await;
-    assert_eq!(
-        state.active_turns.retirement(&session_id),
-        None,
-        "a definitive failure over a live session lifts the mark"
-    );
-    state
-        .admit_session(&query, "api.state")
-        .await
-        .expect("the session is live again");
-
-    tombstone_session(state, &session_id).await;
-    let error = state
-        .admit_session(&query, "api.state")
-        .await
-        .expect_err("a tombstoned session refuses use");
-    super::recoverable_chat_tests::assert_deleted_session_conflict(&error, &session_id);
-    workbench.shutdown().await;
-}
-
 /// A send that passed its admission read and is held at the claim while a
 /// delete runs to completion is refused at the claim: the typed deleted
 /// conflict, no claim left behind, no user row, no provider call.
@@ -361,6 +301,10 @@ async fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict()
     type RouteCall<'a> =
         std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + 'a>>;
     let routes: Vec<(&'static str, RouteCall<'_>)> = vec![
+        (
+            "enqueue_tool_catalog_refresh",
+            Box::pin(enqueue_tool_catalog_refresh(state, "retired_session_test").map_ok(drop)),
+        ),
         (
             "GET /api/state",
             Box::pin(app_state(State(state.clone()), Query(query())).map_ok(drop)),

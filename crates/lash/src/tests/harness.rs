@@ -125,17 +125,6 @@ impl DecoratedBackend {
         }
     }
 
-    pub(crate) fn session_store_factory(
-        self,
-        decorate: impl FnOnce(
-            Arc<dyn lash_core::DeploymentStore>,
-        ) -> Arc<dyn lash_core::DeploymentStore>,
-    ) -> Self {
-        Self {
-            layered: self.layered.map_session_store_factory(decorate),
-        }
-    }
-
     /// The decorated backend.
     pub(crate) fn into_backend(self) -> lash_core::Backend {
         self.layered.into_backend()

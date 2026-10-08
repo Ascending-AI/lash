@@ -139,28 +139,3 @@ impl ToolProvider for PendingAppTools {
         lash_core::ToolAttemptOutcome::Pending(lash_core::PendingCompletion::new())
     }
 }
-
-/// A provider that calls `app_lookup` once, then answers "done".
-fn tool_roundtrip_provider() -> ProviderHandle {
-    let responses = Arc::new(tokio::sync::Mutex::new(std::collections::VecDeque::from([
-        LlmResponse {
-            parts: vec![LlmOutputPart::ToolCall {
-                call_id: "call-1".to_string(),
-                tool_name: "app_lookup".to_string(),
-                input_json: "{}".to_string(),
-                replay: None,
-            }],
-            response_metadata: Default::default(),
-            ..LlmResponse::default()
-        },
-        text_response("done"),
-    ])));
-    crate::testing::TestProvider::builder()
-        .kind("embed-test")
-        .complete(move |_request| {
-            let responses = Arc::clone(&responses);
-            async move { Ok(responses.lock().await.pop_front().expect("queued response")) }
-        })
-        .build()
-        .into_handle()
-}

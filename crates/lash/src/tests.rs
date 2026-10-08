@@ -277,7 +277,6 @@ mod plugin_build_refusal;
 mod plugin_reopen;
 mod provider_attempts;
 mod replay_origin;
-mod report_state;
 mod response_phase_replay;
 mod run_effects;
 mod send_handle;

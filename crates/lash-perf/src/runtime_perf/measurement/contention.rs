@@ -602,29 +602,6 @@ mod contention_tests {
     use super::*;
 
     #[tokio::test]
-    async fn writer_contention_smoke_reports_wait_release_latency_and_execution() {
-        let result = Box::pin(run_once_writer_contention(
-            RuntimePerfScenario::WriterContention2Workers,
-            1,
-        ))
-        .await
-        .expect("writer contention smoke");
-        eprintln!(
-            "PERF_SCENARIO {}",
-            serde_json::to_string(&result).expect("serialize measurement")
-        );
-        for scope in ["same_session", "many_sessions"] {
-            for phase in ["wait_ms", "release_latency_ms", "execution_ms"] {
-                assert!(
-                    result
-                        .metric_samples_ms
-                        .contains_key(&format!("writer_contention.{scope}.{phase}"))
-                );
-            }
-        }
-    }
-
-    #[tokio::test]
     async fn async_settlement_smoke_drains_every_open_child_span() {
         let result = Box::pin(run_once_async_process_settlement(
             RuntimePerfScenario::AsyncProcessSettlement2Children,

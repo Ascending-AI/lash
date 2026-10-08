@@ -472,6 +472,18 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
         .await
         .expect("handler")
         .expect("turn");
+    assert_eq!(
+        session
+            .admin()
+            .state()
+            .export()
+            .await
+            .policy
+            .generation
+            .output_token_cap,
+        NonZeroUsize::new(32_000),
+        "clamping the wire value preserves the recorded session cap"
+    );
     let bodies = transport.bodies.lock_recover();
     assert_eq!(bodies.len(), 1);
     assert_eq!(bodies[0].pointer("/max_tokens"), Some(&json!(2_048)));
@@ -483,6 +495,7 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
         .find_map(|attempt| attempt.generation_disposition)
         .unwrap_or_else(|| panic!("attempt receipt: {:?}", turn.result.llm_calls));
     assert_eq!(receipt.output_token_cap, Outcome::ClampedToCapacity);
+
     eprintln!(
         "runtime cap disposition matrix: 1 case in {:?}",
         start.elapsed()

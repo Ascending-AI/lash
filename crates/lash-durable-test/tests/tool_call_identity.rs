@@ -638,68 +638,6 @@ async fn code_cells_keep_identity_and_distinguish_fresh_calls(tier: Tier) {
     world.shutdown().await;
 }
 
-/// The prompt tokens the usage law's one model call reports.
-const PROMPT_TOKENS: i64 = 120;
-
-/// FIG-5352: a turn commits its last model call's prompt usage when the pass
-/// that commits it made no model call. The turn's one call answers a cell
-/// whose deferring call parks, so the cell suspends and the session is
-/// released; the pass that resumes the cell from the turn's checkpoint once
-/// the call resolves finishes the turn.
-async fn a_turn_resumed_past_its_last_model_call_commits_that_calls_prompt_usage(tier: Tier) {
-    const NAME: &str = "resumed-prompt-usage";
-    let Some((world, witness)) = world(tier, true).await else {
-        return;
-    };
-    let mut cell = served::cell(&format!(
-        r#"finish(await tools.{DEFERRED}({{ label: "usage", hold: true }}));"#
-    ));
-    cell.usage = lash_core::llm::types::LlmUsage {
-        input_tokens: PROMPT_TOKENS,
-        ..Default::default()
-    };
-    world.script(NAME, vec![cell]);
-    let session = world.session(NAME, served::spec(64)).await;
-    let actor = lash_durable::ActorKey::session(NAME).expect("a session actor key");
-    let (output, ()) = tokio::join!(world.send(&session, NAME), async {
-        // The call resolves only once the suspended turn released its
-        // session: the resolution wakes a pass that resumes the cell.
-        loop {
-            let snapshot = world.backend.durable().actor(&actor).await;
-            if witness.of("usage").len() == 1
-                && matches!(snapshot, Ok(Some(snapshot)) if snapshot.state == lash_durable::ActorState::Waiting)
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-        witness.open();
-    });
-    served::assert_answered("the resumed turn", &output);
-    assert_eq!(
-        world.requests(NAME).len(),
-        1,
-        "the turn called the model once"
-    );
-    let committed = world
-        .core
-        .session(session.session_id().clone())
-        .open()
-        .await
-        .expect("the session opens")
-        .admin()
-        .state()
-        .export()
-        .await
-        .last_prompt_usage;
-    assert_eq!(
-        committed.map(|usage| usage.input_tokens),
-        Some(PROMPT_TOKENS),
-        "the turn commits its model call's prompt usage"
-    );
-    world.shutdown().await;
-}
-
 /// Every trace record the core wrote, in order.
 #[derive(Default)]
 struct Records(Mutex<Vec<lash::tracing::TraceRecord>>);
@@ -852,7 +790,6 @@ tiered_laws!(
     fork_inherits_history_without_execution_queues_waits_or_journals,
     code_cells_keep_identity_and_distinguish_fresh_calls,
     a_retried_call_may_park_and_its_resolution_answers,
-    a_turn_resumed_past_its_last_model_call_commits_that_calls_prompt_usage,
 );
 
 /// The retry trace law runs on SQLite memory.

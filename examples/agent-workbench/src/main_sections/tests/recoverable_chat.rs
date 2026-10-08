@@ -248,30 +248,6 @@ async fn retired_session_admission_precedes_attachment_reads_and_submission() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn retired_session_cancel_and_tool_refresh_return_the_typed_conflict() {
-    let workbench = Workbench::silent().await;
-    let state = &workbench.state;
-    let session_id = state.current_session_id();
-    tombstone_session(state, &session_id).await;
-
-    let cancel_error = state
-        .cancel_turns_for_session_with_driver(
-            &session_id,
-            &state.core.turn_work_driver(),
-            WorkbenchTurnCancelMode::Abort,
-            Duration::from_secs(5),
-        )
-        .await
-        .expect_err("retired session cancellation must be refused");
-    assert_deleted_session_conflict(&cancel_error, &session_id);
-
-    let refresh_error = Box::pin(enqueue_tool_catalog_refresh(state, "retired_session_test"))
-        .await
-        .expect_err("retired session tool refresh must be refused");
-    assert_deleted_session_conflict(&refresh_error, &session_id);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retired_session_http_refusals_record_structured_admission_evidence() {
     let trace = Arc::new(RecordingTrace::default());
     let workbench = Workbench::builder(silent_provider())
