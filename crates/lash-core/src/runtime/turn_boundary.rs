@@ -18,6 +18,7 @@ mod recorded_assembly;
 pub use recorded_assembly::RecordedTurnAssembly;
 #[cfg(feature = "testing")]
 pub use recorded_assembly::classify_output_state;
+pub(in crate::runtime) use recorded_assembly::sanitize_assistant_output;
 
 /// Derive the stable ids of the nodes `graph` appends under `operation`, and
 /// rename them in `state`, its current frame among them.

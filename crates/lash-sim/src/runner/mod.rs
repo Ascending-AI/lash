@@ -43,33 +43,40 @@ use crate::generator::{
 };
 use crate::minimize::{MinimizeError, minimize_trace};
 use crate::oracles::{
-    REPLAY_DETERMINISM_ORACLE, peak_concurrent_live_turns, pending_tool_completion,
+    LiveProviderFailureFacts, REPLAY_DETERMINISM_ORACLE, combine_oracles,
+    live_provider_failure_coverage, peak_concurrent_live_turns, pending_tool_completion,
     runtime_final_value_semantic, runtime_provider_turn, scenario_contract_generated_facts,
 };
 use crate::provider::{
     ProviderWireEvent, ProviderWireHeader, ProviderWireScript, ScriptedLlmHttpExchange,
     ScriptedLlmHttpTransport, ScriptedTransportSchedule,
 };
-use crate::provider_mutations::is_transport_provider_mutation;
+use crate::provider_mutations::{ProviderMutationMatrixCache, is_transport_provider_mutation};
 use crate::replay::{ReplayError, replay_trace};
-use crate::runtime_contracts::runtime_final_value_invariant_facts;
-use crate::runtime_providers::{
-    OPENAI_COMPATIBLE, runtime_provider_components, runtime_script_for_text,
+use crate::runtime_contracts::{
+    RuntimeTurnObservation, require_passed, runtime_agent_frame_invariant_facts,
+    runtime_final_value_invariant_facts, runtime_graph_invariant_facts, runtime_turn_contract,
+    runtime_usage_invariant_facts,
 };
-#[cfg(test)]
-use crate::runtime_providers::{runtime_script_for_turn, scripted_turn_from_provider_boundary};
-use crate::scheduler::{BoundaryEvent, BoundaryKind, BoundaryScheduler};
-#[cfg(test)]
-use crate::scheduler::{RuntimeCompletionFamily, RuntimeCompletionQueue, RuntimeCompletionUnit};
+use crate::runtime_providers::{
+    ANTHROPIC, OPENAI_COMPATIBLE, live_failure_script, runtime_provider_components,
+    runtime_script_for_text, runtime_script_for_turn, runtime_scripts_for_turns,
+    scripted_turn_from_provider_boundary, scripted_turns_from_ingress, suspend_roundtrip_scripts,
+};
+use crate::scheduler::{
+    BoundaryDeliveryLog, BoundaryEvent, BoundaryKind, BoundaryScheduler, RuntimeCompletionFamily,
+    RuntimeCompletionQueue, RuntimeCompletionUnit,
+};
 use crate::stack_policy::{
     SIM_HARNESS_STACK_LIMIT_BYTES, run_on_product_stack, run_on_sim_harness_stack,
 };
-use crate::store::CheckpointWriteCollector;
-use crate::trace::{
-    OracleCensus, OracleStatus, OracleVerdict, SimulationTrace, TraceEventLine, TraceIoError,
-    write_event_lines, write_replay_report, write_trace,
+use crate::store::{
+    CheckpointComponentWriteKind, CheckpointWriteCollector, CheckpointWriteEvent, ModelStore,
 };
-#[cfg(test)]
+use crate::trace::{
+    AbstractWorldView, OracleCensus, OracleStatus, OracleVerdict, SimulationTrace, TraceEventLine,
+    TraceIoError, write_event_lines, write_replay_report, write_trace,
+};
 use lash_durable_test::SimClock;
 
 pub const FIXED_SCRIPT_PROFILE: &str = "tiny-fixed-provider-scripts";
@@ -161,15 +168,18 @@ impl From<WorkloadProfileError> for FixedScriptRunnerError {
 }
 
 mod agent_contracts;
+mod attempt_probe;
 #[cfg(test)]
 mod contract_registry_tests;
 mod contract_support;
 mod fixed_script;
 mod generated_driver;
 mod generated_profiles;
+mod generated_world;
 mod harness;
 mod provider_proofs;
 mod rlm_contracts;
+mod runtime_boundaries;
 mod runtime_completion;
 mod runtime_proofs;
 mod scenario_artifacts;
@@ -192,15 +202,15 @@ pub use runtime_completion::SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS;
 pub(crate) use runtime_proofs::prove_pending_tool_completion_on as prove_pending_tool_completion_for_invariants;
 
 use agent_contracts::*;
+use attempt_probe::*;
 use contract_support::*;
 use fixed_script::*;
 use generated_driver::*;
 use generated_profiles::*;
-#[cfg(test)]
+use generated_world::*;
 use harness::*;
 use provider_proofs::*;
 use rlm_contracts::*;
-#[cfg(test)]
 use runtime_completion::*;
 use runtime_proofs::*;
 use scenario_artifacts::*;

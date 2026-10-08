@@ -397,6 +397,7 @@ path = "examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_reg
 [planned."SIMGEN"]
 owner = "FIG-5359"
 law = "lash-sim's generated worlds run on the durable engine, and the minimizer, state-checker, seeded-mutation, attempt-probe and generated-runner laws run again from their pre-deletion bodies (5ad9641f9e^)"
+path = "crates/lash-sim/src/runner/tests.rs::full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs"
@@ -13298,10 +13299,10 @@ lane = "L9f"
 laws = [
   "generated_backend_failure_seed_records_script_evidence",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/backend_fault.rs::generated_backend_failure_seed_records_script_evidence"
 status = "deleted"
 owed = "generated backend failure seed records script evidence"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/cache_regression.rs"
@@ -13703,10 +13704,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_runtime_graph_failure_across_every_artifact",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_runtime_graph_failure_across_every_artifact"
 status = "deleted"
 owed = "minimizer preserves runtime graph failure across every artifact"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13732,10 +13733,10 @@ lane = "L9f"
 laws = [
   "removing_a_sessions_provider_family_removes_its_checkpoint_evidence",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::removing_a_sessions_provider_family_removes_its_checkpoint_evidence"
 status = "deleted"
 owed = "removing a sessions provider family removes its checkpoint evidence"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13747,10 +13748,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_failing_oracle_id_and_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves failing oracle id and reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13762,10 +13763,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_scheduler_owned_boundary_bug_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves scheduler owned boundary bug reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13777,10 +13778,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_rlm_mini_oracle_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves rlm mini oracle fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13792,10 +13793,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_agent_mini_oracle_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves agent mini oracle fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13807,10 +13808,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_standard_mini_oracle_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves standard mini oracle fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13822,10 +13823,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_standard_max_turn_stop_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves standard max turn stop fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13837,10 +13838,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_rlm_typed_finish_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves rlm typed finish fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13852,10 +13853,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_rlm_default_mode_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves rlm default mode fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13867,10 +13868,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_agent_tuple_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves agent tuple fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13882,10 +13883,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_agent_subagent_child_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves agent subagent child fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13897,10 +13898,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_agent_failed_child_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves agent failed child fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13912,10 +13913,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_provider_mutation_runtime_completion_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves provider mutation runtime completion fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13927,10 +13928,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_backend_retry_runtime_completion_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves backend retry runtime completion fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13942,10 +13943,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_queued_input_operational_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves queued input operational fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/minimize.rs"
@@ -13957,10 +13958,10 @@ lane = "L9f"
 laws = [
   "minimizer_preserves_trigger_wakeup_operational_fixture_reason",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
 status = "deleted"
 owed = "minimizer preserves trigger wakeup operational fixture reason"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -13972,10 +13973,10 @@ lane = "L9f"
 laws = [
   "seeded_duplicate_raw_graph_row_mutation_fails_with_projection_contrast",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/oracles/tests/contract_checks.rs::seeded_duplicate_raw_graph_row_mutation_fails_with_projection_contrast"
 status = "deleted"
 owed = "seeded duplicate raw graph row mutation fails with projection contrast"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/provider_variations.rs"
@@ -14059,10 +14060,10 @@ lane = "L9f"
 laws = [
   "durable_content_law_bites_on_real_run_evidence",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/runner/attempt_probe.rs::durable_content_law_bites_on_real_run_evidence"
 status = "deleted"
 owed = "durable content law bites on real run evidence"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/runner/restate_double_tests.rs"
@@ -14104,10 +14105,10 @@ lane = "L9f"
 laws = [
   "full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/runner/tests.rs::full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler"
 status = "deleted"
 owed = "full random seed 12 keeps modeled provider exchange slots owned by scheduler"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -14119,10 +14120,10 @@ lane = "L9f"
 laws = [
   "runtime_completion_serialization_mutation_guard",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/runner/tests.rs::runtime_completion_serialization_mutation_guard"
 status = "deleted"
 owed = "runtime completion serialization mutation guard"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/runner/tests.rs"
@@ -14283,10 +14284,10 @@ lane = "L9f"
 laws = [
   "seeded_checker_rejects_corrupted_runtime_usage",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/state_checker.rs::seeded_checker_rejects_corrupted_runtime_usage"
 status = "deleted"
 owed = "seeded checker rejects corrupted runtime usage"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -14298,10 +14299,10 @@ lane = "L9f"
 laws = [
   "checker_names_a_declared_session_whose_checkpoints_all_vanished",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/state_checker.rs::checker_names_a_declared_session_whose_checkpoints_all_vanished"
 status = "deleted"
 owed = "checker names a declared session whose checkpoints all vanished"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -14313,10 +14314,10 @@ lane = "L9f"
 laws = [
   "standard_generated_run_checks_commits_and_requires_v3_state",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/state_checker.rs::standard_generated_run_checks_commits_and_requires_their_state"
 status = "deleted"
 owed = "standard generated run checks commits and requires v3 state"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -14328,10 +14329,10 @@ lane = "L9f"
 laws = [
   "promoted_v1_v2_commits_are_skipped_for_their_declared_schema_version",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "subject-deleted"
 status = "deleted"
 owed = "promoted v1 v2 commits are skipped for their declared schema version"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "no v1 or v2 checkpoint-write trace exists to replay: the event schema is v4 since b905a484e4 and no older trace was ever checked in, so FIG-5359 removed the state checker's skip for them (version freeze); a stateless commit of any schema is now red, as standard_generated_run_checks_commits_and_requires_their_state pins."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -14343,10 +14344,10 @@ lane = "L9f"
 laws = [
   "checker_rejects_commit_session_without_runtime_facts_and_leaf_mismatch",
 ]
-disposition = "covered-by:planned:SIMGEN"
+disposition = "covered-by:crates/lash-sim/src/state_checker.rs::checker_rejects_commit_session_without_runtime_facts_and_leaf_mismatch"
 status = "deleted"
 owed = "checker rejects commit session without runtime facts and leaf mismatch"
-note = "FIG-5308: needs a generated workload run (run_generated_workload_for_fixture / GeneratedRuntimeWorld), which 5ad9641f9e (FIG-5190) deleted and L9f (FIG-5184) never rebuilt on the durable engine; owed to FIG-5359 with the planned law SIMGEN. The pre-deletion body at 5ad9641f9e^ is the law to restore."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine and restored the law from its pre-deletion body at 5ad9641f9e^."
 
 [[row]]
 path = "crates/lash-sim/tests/chaos_soak.rs"

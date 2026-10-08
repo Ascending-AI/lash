@@ -74,11 +74,43 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
     })
 }
 
+/// The (provider kind, valid-prose-deltas-before-fault) combos exercised for the
+/// live-provider-failure oracle EVERY seed. Covers more than one provider kind
+/// and more than one fault position so `live_provider_failure_coverage` cannot
+/// pass vacuously on a single degenerate case.
+const LIVE_PROVIDER_FAILURE_COMBOS: &[(&str, usize)] = &[
+    (OPENAI_COMPATIBLE, 1),
+    (OPENAI_COMPATIBLE, 2),
+    (ANTHROPIC, 1),
+];
+
+/// Execute every live-provider-failure combo for a seed, collecting the observed
+/// facts for the per-seed coverage oracle.
+pub(super) async fn drive_live_provider_failure_turns(
+    seed: u64,
+) -> Result<Vec<LiveProviderFailureFacts>, FixedScriptRunnerError> {
+    let mut facts = Vec::with_capacity(LIVE_PROVIDER_FAILURE_COMBOS.len());
+    for (provider_kind, prose_deltas) in LIVE_PROVIDER_FAILURE_COMBOS.iter().copied() {
+        let script = live_failure_script(provider_kind, prose_deltas)
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        facts.push(
+            run_live_turn_facts(
+                seed,
+                provider_kind,
+                script,
+                "malformed_sse_chunk",
+                prose_deltas,
+            )
+            .await?,
+        );
+    }
+    Ok(facts)
+}
+
 /// Run a real `session.send().output()` against `script` on the durable
 /// engine, releasing its scripted-transport SSE events one gate at a time
 /// in timeline order, and record whether the turn terminalized without
 /// committing any output.
-#[cfg(test)]
 pub(super) async fn run_live_turn_facts(
     seed: u64,
     provider_kind: &str,
@@ -153,18 +185,21 @@ pub(super) async fn run_live_turn_facts(
             ),
             Err(_) => (true, false, 0),
         };
-    let committed_prose_in_transcript =
-        session
-            .observe()
-            .read_view()
-            .messages()
-            .iter()
-            .any(|message| {
-                message.parts.iter().any(|part| {
-                    part.content()
-                        .contains(crate::runtime_providers::LIVE_FAILURE_LEAK_PROSE)
-                })
-            });
+    // The transcript the store committed, read as a reconnecting host reads
+    // it: no live session state stands in for it.
+    let committed = session
+        .durable()
+        .read()
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let committed_prose_in_transcript = committed.iter().any(|read_view| {
+        read_view.messages().iter().any(|message| {
+            message.parts.iter().any(|part| {
+                part.content()
+                    .contains(crate::runtime_providers::LIVE_FAILURE_LEAK_PROSE)
+            })
+        })
+    });
     Ok(crate::oracles::LiveProviderFailureFacts {
         provider_kind,
         fault_kind: fault_kind.to_string(),

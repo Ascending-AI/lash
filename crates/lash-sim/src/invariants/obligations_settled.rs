@@ -25,7 +25,7 @@ pub(super) struct ObligationsSettled;
 const INVARIANT: &str = "obligations-settled-or-stalled";
 
 /// The ledger only the recovery pass's relay delivers.
-pub(super) const RELAY_ONLY: &str = "artifact_cleanup_obligations";
+pub(crate) const RELAY_ONLY: &str = "artifact_cleanup_obligations";
 
 /// `StallReason` labels (lash-core-store).
 const STALL_REASONS: [&str; 3] = ["attempts_exhausted", "refused", "undecodable"];

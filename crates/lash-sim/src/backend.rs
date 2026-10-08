@@ -6,7 +6,8 @@
 //! world builds over it serves its own node, which runs every turn the
 //! world sends (FIG-5172). When the simulator records the
 //! checkpoint writes a run commits, it wraps the engine backend's session
-//! factory in an observer, and every other port stays the backend's.
+//! factory in an observer and has the engine's durable port observe the
+//! session commits its owners make; every other port stays the backend's.
 
 use std::sync::Arc;
 
@@ -24,6 +25,8 @@ use crate::store::{CheckpointWriteCollector, ObservedDeploymentStore};
 #[derive(Clone)]
 pub struct SimEngine {
     stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    holds: Arc<crate::session_hold::SessionHolds>,
+    observers: Arc<crate::session_hold::CommitObservers>,
     backend: Backend,
 }
 
@@ -46,10 +49,35 @@ impl SimEngine {
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let stores = Arc::new(stores);
-        let backend = lash::durable::DurableBackendBuilder::new(stores.clone())
-            .build()
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        Ok(Self { stores, backend })
+        let holds = Arc::new(crate::session_hold::SessionHolds::default());
+        let observers = Arc::new(crate::session_hold::CommitObservers::default());
+        let backend = lash::durable::DurableBackendBuilder::new(Arc::new(
+            crate::session_hold::HoldingStoreSet::new(
+                stores.clone(),
+                holds.clone(),
+                observers.clone(),
+            ),
+        ))
+        .build()
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        Ok(Self {
+            stores,
+            holds,
+            observers,
+            backend,
+        })
+    }
+
+    /// Hold `session`'s actor until the hold drops: what is sent to the
+    /// session meanwhile stays pending, and no run of it goes on
+    /// ([`crate::session_hold`]).
+    pub fn hold_session(
+        &self,
+        session: &lash::SessionId,
+    ) -> Result<crate::session_hold::SessionHold, FixedScriptRunnerError> {
+        self.holds
+            .hold(session)
+            .map_err(FixedScriptRunnerError::Runtime)
     }
 
     /// The store set the engine runs over.
@@ -109,6 +137,22 @@ impl SimEngine {
     }
 }
 
+/// Wait for the engine to settle the input `handle` accepted, streaming its
+/// activity to `events`, and keep that activity with the turn's output. The
+/// host never executes the run (D5); it waits.
+pub async fn settle_handle(
+    handle: lash::SendHandle,
+    events: Arc<dyn lash::TurnActivitySink>,
+) -> lash::Result<lash::TurnOutput> {
+    let collected = CollectedTurnActivity {
+        live: Some(events),
+        activities: std::sync::Mutex::new(Vec::new()),
+    };
+    let report = handle.output_into(&collected).await;
+    let activities = std::mem::take(&mut *collected.activities.lock_recover());
+    report.map(|result| lash::TurnOutput { result, activities })
+}
+
 /// The activity a turn streamed, kept for its output and forwarded live.
 struct CollectedTurnActivity {
     live: Option<Arc<dyn lash::TurnActivitySink>>,
@@ -148,6 +192,9 @@ impl lash::TurnActivitySink for DiscardedTurnActivity {
 /// keeps the inner backend's Lashlang artifacts.
 pub struct DecoratedBackend {
     layered: lash_core::testing::runtime_helpers::LayeredBackend,
+    /// The engine's session-commit observers, for a backend over a
+    /// [`SimEngine`].
+    engine_observers: Option<Arc<crate::session_hold::CommitObservers>>,
 }
 
 impl DecoratedBackend {
@@ -155,21 +202,30 @@ impl DecoratedBackend {
     pub fn over(inner: Backend) -> Self {
         Self {
             layered: lash_core::testing::runtime_helpers::LayeredBackend::over(inner),
+            engine_observers: None,
         }
     }
 
     /// `engine`'s backend, undecorated.
     pub fn over_engine(engine: &SimEngine) -> Self {
-        Self::over(engine.backend.clone())
+        Self {
+            engine_observers: Some(engine.observers.clone()),
+            ..Self::over(engine.backend.clone())
+        }
     }
 
     /// Observe the commits made through the session factory into
-    /// `collector`.
+    /// `collector`, and, over a [`SimEngine`], the session commits its
+    /// owners make.
     pub fn observing(self, collector: CheckpointWriteCollector) -> Self {
+        if let Some(observers) = &self.engine_observers {
+            observers.observe(collector.clone());
+        }
         Self {
             layered: self.layered.map_session_store_factory(|factory| {
                 Arc::new(ObservedDeploymentStore::new(factory, collector))
             }),
+            engine_observers: self.engine_observers,
         }
     }
 }

@@ -1400,3 +1400,88 @@ async fn live_provider_failure_oracle_bites_on_a_committing_turn() {
         verdict.message
     );
 }
+
+#[test]
+fn full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler() {
+    let seed = regression_corpus_seed("full-random", 12);
+    assert_eq!(seed, 8_740_143_186_674_533_974);
+    let workload = generate_workload(seed, "full-random", 384).expect("workload");
+    let provider_turn = workload
+        .boundaries
+        .iter()
+        .find(|event| event.boundary_id == "session-001:provider:003")
+        .expect("session-001 provider turn 3");
+    assert_eq!(
+        provider_turn.payload.get("script").and_then(Value::as_str),
+        Some("openai-compatible.chat-runtime-text-stream")
+    );
+    assert_eq!(
+        provider_turn
+            .payload
+            .get("expected_provider_exchange_count")
+            .and_then(Value::as_u64),
+        Some(3)
+    );
+
+    let trace = run_on_sim_harness_stack(
+        "full-random-seed-12-modeled-provider-exchange-slots",
+        SIM_HARNESS_STACK_LIMIT_BYTES,
+        move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(FixedScriptRunnerError::Io)?;
+            runtime.block_on(run_generated_workload_for_fixture(
+                workload,
+                "seed-12-regression",
+            ))
+        },
+    )
+    .expect("seed 12 generated workload");
+    let delivered = trace
+        .events
+        .iter()
+        .find(|event| event.boundary_id == "session-001:provider:003")
+        .expect("delivered provider turn 3");
+    assert_eq!(
+        delivered.observed.get("success").and_then(Value::as_bool),
+        Some(true),
+        "success-required modeled provider turn must not be converted into provider-error terminalization"
+    );
+    assert_eq!(
+        delivered
+            .observed
+            .get("provider_exchange_count")
+            .and_then(Value::as_u64),
+        Some(3),
+        "autonomous queued turns must not consume provider scripts before modeled turn 3"
+    );
+}
+
+#[tokio::test]
+async fn runtime_completion_serialization_mutation_guard() {
+    let seed = regression_corpus_seed("full-random", 12);
+    let workload = generate_workload(seed, "full-random", 384).expect("workload");
+    let mut world = GeneratedRuntimeWorld::new(workload.seed)
+        .await
+        .expect("runtime world");
+    world.serialize_provider_turns = true;
+
+    let (events, _summary) = drive_generated_workload(&mut world, &workload)
+        .await
+        .expect("serialized generated workload");
+    let provider_completions = events
+        .iter()
+        .filter(|event| event.kind == BoundaryKind::Provider)
+        .count();
+
+    assert!(
+        provider_completions > 1,
+        "serialization guard must exercise more than one provider turn"
+    );
+    assert_eq!(
+        peak_concurrent_live_turns(&events),
+        1,
+        "delivered evidence must not show overlapping provider turns under serialized replay"
+    );
+}

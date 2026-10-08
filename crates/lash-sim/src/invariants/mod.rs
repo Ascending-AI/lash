@@ -78,6 +78,7 @@ use std::sync::{Arc, Mutex};
 use lash_core::sync::MutexExt as _;
 use serde::Serialize;
 
+pub(crate) use obligations_settled::RELAY_ONLY as RELAY_ONLY_OBLIGATIONS;
 pub use redrive_resumes::ParkEventRow;
 pub use snapshot::{
     ArtifactRow, CleanupRow, GraphNodeRow, InputRow, ObligationRow, RunRow, StoreSnapshot,

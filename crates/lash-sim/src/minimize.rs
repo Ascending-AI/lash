@@ -950,7 +950,11 @@ fn fixture_boundary_kind(kind: &str) -> Result<BoundaryKind, MinimizeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::oracles::{runtime_usage_monotonic, scheduler_controlled_delivery};
+    use crate::generator::generate_workload;
+    use crate::oracles::{
+        runtime_graph_acyclic, runtime_usage_monotonic, scheduler_controlled_delivery,
+    };
+    use crate::runner::run_generated_workload_for_fixture;
 
     fn synthetic_trace(target: OracleVerdict) -> SimulationTrace {
         let summary = ModelStore::default()
@@ -1048,6 +1052,81 @@ mod tests {
         assert!(!package_dir.join("package.json").exists());
     }
 
+    #[tokio::test]
+    async fn minimizer_preserves_runtime_graph_failure_across_every_artifact() {
+        let workload = generate_workload(5, "fast-random", 24).expect("workload");
+        let mut trace = run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("trace");
+        let rows = trace
+            .durable_writes
+            .iter_mut()
+            .filter_map(|write| write.state.as_mut())
+            .filter_map(|state| state.accepted_raw_rows.as_mut())
+            .filter_map(|raw| raw.get_mut("graph_nodes"))
+            .filter_map(serde_json::Value::as_array_mut)
+            .find(|rows| !rows.is_empty())
+            .expect("seed 5 records accepted raw graph rows");
+        rows.push(rows[0].clone());
+        let target = runtime_graph_acyclic(&trace.durable_writes);
+        assert_eq!(target.status, OracleStatus::Failed);
+        assert!(target.message.contains("duplicate row"));
+        trace.oracle = target.clone();
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        let report = minimize_trace(Path::new("failing.trace.json"), &trace, tmp.path())
+            .expect("minimize runtime graph failure");
+        let minimized = read_trace(&report.minimized_trace_path).expect("minimized trace");
+        let oracle: OracleVerdict = serde_json::from_slice(
+            &std::fs::read(
+                report
+                    .failure_package_path
+                    .parent()
+                    .expect("package directory")
+                    .join("oracle.json"),
+            )
+            .expect("oracle artifact"),
+        )
+        .expect("oracle artifact JSON");
+        let package: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&report.failure_package_path).expect("failure package"),
+        )
+        .expect("failure package JSON");
+
+        assert_eq!(report.target_oracle_id, target.oracle_id);
+        assert_eq!(report.target_oracle_reason, target.message);
+        assert_eq!(minimized.oracle.oracle_id, report.target_oracle_id);
+        assert_eq!(minimized.oracle.status, OracleStatus::Failed);
+        assert_eq!(minimized.oracle.message, report.target_oracle_reason);
+        assert_eq!(oracle.oracle_id, report.target_oracle_id);
+        assert_eq!(oracle.status, OracleStatus::Failed);
+        assert_eq!(oracle.message, report.target_oracle_reason);
+        assert_eq!(
+            package
+                .pointer("/target_oracle/oracle_id")
+                .and_then(serde_json::Value::as_str),
+            Some(report.target_oracle_id.as_str())
+        );
+        assert_eq!(
+            package
+                .pointer("/target_oracle/status")
+                .and_then(serde_json::Value::as_str),
+            Some("failed")
+        );
+        assert_eq!(
+            package
+                .pointer("/target_oracle/message")
+                .and_then(serde_json::Value::as_str),
+            Some(report.target_oracle_reason.as_str())
+        );
+        assert_eq!(
+            package
+                .get("target_oracle_reason")
+                .and_then(serde_json::Value::as_str),
+            Some(report.target_oracle_reason.as_str())
+        );
+    }
+
     #[test]
     fn unsupported_run_only_target_is_diagnosed_without_artifacts() {
         for oracle_id in RUN_ONLY_ORACLES {
@@ -1083,5 +1162,207 @@ mod tests {
         assert!(matches!(err, MinimizeError::Target(_)), "{err}");
         assert!(err.to_string().contains("cannot be re-evaluated"));
         assert!(!tmp.path().join("minimized-regression").exists());
+    }
+
+    #[tokio::test]
+    async fn removing_a_sessions_provider_family_removes_its_checkpoint_evidence() {
+        let workload = generate_workload(1, "fast-random", 72).expect("workload");
+        let mut trace = run_generated_workload_for_fixture(workload, "checkpoint-causality")
+            .await
+            .expect("trace");
+        let contract_attributions = trace
+            .durable_writes
+            .iter()
+            .filter(|write| write.attribution.is_some())
+            .map(|write| write.attributed_session().to_string())
+            .collect::<BTreeSet<_>>();
+        let target = trace
+            .durable_writes
+            .iter()
+            .find(|write| {
+                write.attribution.is_none()
+                    && !contract_attributions.contains(write.attributed_session())
+            })
+            .map(|write| write.attributed_session().to_string())
+            .expect("generated runtime session outside contract attribution");
+        assert!(
+            trace
+                .durable_writes
+                .iter()
+                .any(|write| write.attributed_session() == target),
+            "fixture must start with checkpoint writes for {target}"
+        );
+
+        trace
+            .events
+            .retain(|event| event.actor_alias != target || event.kind != BoundaryKind::Provider);
+        renumber_events(&mut trace);
+        refresh_trace_verdicts(&mut trace, None).expect("refresh minimized trace");
+
+        assert!(
+            trace
+                .durable_writes
+                .iter()
+                .all(|write| write.attributed_session() != target),
+            "removed provider family retained phantom checkpoint writes: {:#?}",
+            trace.durable_writes
+        );
+        let summary = trace
+            .final_summary
+            .sessions
+            .iter()
+            .find(|session| session.alias == target)
+            .expect("target session summary");
+        assert_eq!(summary.checkpoint_commit_count, 0);
+        let transcript = trace.render_transcript();
+        assert!(
+            !transcript
+                .lines()
+                .any(|line| { line.starts_with(&target) && line.contains("Checkpoint") }),
+            "minimized transcript retained phantom checkpoint evidence:\n{transcript}"
+        );
+    }
+
+    /// Every checked-in failure fixture, and whether its oracle's evidence
+    /// is dependency-aware enough that minimizing must remove events.
+    const FAILURE_FIXTURES: &[(&str, &str, bool)] = &[
+        (
+            "operational-coverage-missing-cancellation",
+            include_str!("../failure-fixtures/operational-coverage-missing-cancellation.json"),
+            false,
+        ),
+        (
+            "scheduler-owned-provider-completion-missing-evidence",
+            include_str!(
+                "../failure-fixtures/scheduler-owned-provider-completion-missing-evidence.json"
+            ),
+            false,
+        ),
+        (
+            "rlm-lashlang-cell-missing-continuation",
+            include_str!("../failure-fixtures/rlm-lashlang-cell-missing-continuation.json"),
+            true,
+        ),
+        (
+            "agent-parallel-join-missing-provider-session",
+            include_str!("../failure-fixtures/agent-parallel-join-missing-provider-session.json"),
+            true,
+        ),
+        (
+            "standard-provider-error-missing-parser-matrix",
+            include_str!("../failure-fixtures/standard-provider-error-missing-parser-matrix.json"),
+            true,
+        ),
+        (
+            "standard-max-turn-stop-missing",
+            include_str!("../failure-fixtures/standard-max-turn-stop-missing.json"),
+            false,
+        ),
+        (
+            "rlm-typed-finish-terminal-event-missing",
+            include_str!("../failure-fixtures/rlm-typed-finish-terminal-event-missing.json"),
+            false,
+        ),
+        (
+            "rlm-empty-options-default-mode-broken",
+            include_str!("../failure-fixtures/rlm-empty-options-default-mode-broken.json"),
+            false,
+        ),
+        (
+            "agent-tuple-json-array-shape-broken",
+            include_str!("../failure-fixtures/agent-tuple-json-array-shape-broken.json"),
+            false,
+        ),
+        (
+            "agent-started-process-subagent-child-graph-missing",
+            include_str!(
+                "../failure-fixtures/agent-started-process-subagent-child-graph-missing.json"
+            ),
+            false,
+        ),
+        (
+            "agent-failed-child-task-fail-evidence-missing",
+            include_str!("../failure-fixtures/agent-failed-child-task-fail-evidence-missing.json"),
+            false,
+        ),
+        (
+            "provider-mutation-runtime-completion-missing",
+            include_str!("../failure-fixtures/provider-mutation-runtime-completion-missing.json"),
+            false,
+        ),
+        (
+            "backend-retry-runtime-completion-missing",
+            include_str!("../failure-fixtures/backend-retry-runtime-completion-missing.json"),
+            false,
+        ),
+        (
+            "queued-input-operational-missing",
+            include_str!("../failure-fixtures/queued-input-operational-missing.json"),
+            false,
+        ),
+        (
+            "trigger-wakeup-operational-missing",
+            include_str!("../failure-fixtures/trigger-wakeup-operational-missing.json"),
+            false,
+        ),
+    ];
+
+    /// Each failure fixture's seeded mutation fails the oracle it names
+    /// with its reason, and the minimized trace keeps that oracle and
+    /// reason. Fixtures over one workload share its run.
+    #[tokio::test]
+    async fn minimizer_preserves_every_failure_fixture_oracle_and_reason() {
+        let mut runs = BTreeMap::<(u64, String, usize), SimulationTrace>::new();
+        for (name, body, reduces) in FAILURE_FIXTURES {
+            let fixture: FailingTraceFixture = serde_json::from_str(body).expect("fixture");
+            let key = (
+                fixture.seed,
+                fixture.profile.clone(),
+                fixture.max_boundaries,
+            );
+            if !runs.contains_key(&key) {
+                let workload =
+                    generate_workload(fixture.seed, &fixture.profile, fixture.max_boundaries)
+                        .expect("workload");
+                let trace = run_generated_workload_for_fixture(workload, "bundle")
+                    .await
+                    .unwrap_or_else(|err| panic!("{name}: trace: {err}"));
+                runs.insert(key.clone(), trace);
+            }
+            let mut trace = runs[&key].clone();
+            apply_fixture_mutation(&mut trace, &fixture.mutation)
+                .unwrap_or_else(|err| panic!("{name}: mutation: {err}"));
+            select_fixture_target_oracle(&mut trace, &fixture)
+                .unwrap_or_else(|err| panic!("{name}: target oracle: {err}"));
+            let report = assert_minimized_fixture_preserves_failure(&fixture, trace);
+            assert!(
+                !reduces || report.removed_event_count > 0,
+                "{name}: its mini-oracle fixture should allow dependency-aware event reduction"
+            );
+        }
+    }
+
+    fn assert_minimized_fixture_preserves_failure(
+        fixture: &FailingTraceFixture,
+        trace: SimulationTrace,
+    ) -> MinimizeReport {
+        assert_eq!(trace.oracle.status, OracleStatus::Failed);
+        assert_eq!(trace.oracle.oracle_id, fixture.expected_oracle_id);
+        let expected_oracle_id = trace.oracle.oracle_id.clone();
+        let expected_reason = trace.oracle.message.clone();
+        assert!(expected_reason.contains(&fixture.expected_reason_contains));
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        let report =
+            minimize_trace(Path::new("failing.trace.json"), &trace, tmp.path()).expect("minimize");
+        let minimized = read_trace(&report.minimized_trace_path).expect("minimized trace");
+
+        assert_eq!(report.target_oracle_id, expected_oracle_id);
+        assert_eq!(report.target_oracle_reason, expected_reason);
+        assert_eq!(minimized.oracle.oracle_id, expected_oracle_id);
+        assert_eq!(minimized.oracle.status, OracleStatus::Failed);
+        assert_eq!(minimized.oracle.message, expected_reason);
+        assert!(report.minimized_event_count <= report.original_event_count);
+        report
     }
 }

@@ -338,7 +338,9 @@ fn recovered_assistant_output_from_state(state: &crate::SessionSnapshot) -> Stri
         .unwrap_or_default()
 }
 
-fn sanitize_assistant_output(text: String) -> String {
+/// The host-facing assistant message of `text`: every line loses its
+/// trailing whitespace, and the whole is trimmed.
+pub(in crate::runtime) fn sanitize_assistant_output(text: String) -> String {
     text.lines()
         .map(str::trim_end)
         .collect::<Vec<_>>()

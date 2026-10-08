@@ -3,17 +3,274 @@ use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
 
+pub(super) async fn append_contract_execution_boundaries(
+    events: &mut Vec<crate::scheduler::DeliveredBoundary>,
+    store: &mut ModelStore,
+    seed: u64,
+    checkpoint_writes: CheckpointWriteCollector,
+) -> Result<(), FixedScriptRunnerError> {
+    let start_sequence = events.len();
+    let mut scheduler = BoundaryScheduler::with_events(
+        seed ^ 0x5e_3a_11_ce_c0_de,
+        contract_execution_boundaries(events, &checkpoint_writes).await?,
+    );
+    while let Some(mut delivered) = scheduler.deliver_next_with(|event| store.apply_boundary(event))
+    {
+        delivered.sequence += start_sequence;
+        events.push(delivered);
+    }
+    Ok(())
+}
+
 /// One registered fixed contract execution: the semantic oracle id it proves,
-/// the spec row it mirrors, and the executor that reproduces its result. Registration is a const slice per
+/// the spec row it mirrors, the generated-run boundary it anchors to, and the
+/// executor that reproduces its result. Registration is a const slice per
 /// suite, so replaying one execution is a lookup plus one call.
 pub(super) struct FixedContractRow<E> {
     pub(super) semantic_oracle: &'static str,
     pub(super) source_path: &'static str,
     pub(super) source_scenario: &'static str,
+    pub(super) anchor: FixedContractAnchor,
     pub(super) execute: E,
 }
 
+/// How a fixed contract execution anchors into the generated boundary stream.
+#[derive(Clone, Copy)]
+pub(super) enum FixedContractAnchor {
+    /// `generated_anchor` records the first successful provider boundary.
+    RecordedProvider,
+    /// `generated_anchor` additionally records the real provider-parser
+    /// mutation boundary carrying this mutation name.
+    RecordedProviderMutation(&'static str),
+    /// `generated_anchor` records the tool boundary plus the same-actor
+    /// provider continuation that follows it.
+    RecordedToolThenProvider,
+    /// The actor is the first successful provider boundary's alias; no
+    /// `generated_anchor` evidence is emitted.
+    ProviderActor,
+}
+
 pub(super) type TurnMachineContractExecutor = fn() -> Result<Value, FixedScriptRunnerError>;
+
+async fn contract_execution_boundaries(
+    events: &[crate::scheduler::DeliveredBoundary],
+    checkpoint_writes: &CheckpointWriteCollector,
+) -> Result<Vec<BoundaryEvent>, FixedScriptRunnerError> {
+    let mut next_at = events
+        .iter()
+        .map(|event| event.at)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    let mut proof_events = Vec::new();
+    for row in STANDARD_CONTRACT_ROWS {
+        let execution = contract_execution_payload(row, (row.execute)()?)?;
+        proof_events.push(fixed_contract_execution_boundary(
+            events, next_at, row, execution,
+        )?);
+        next_at = next_at.saturating_add(1);
+    }
+    for row in RLM_CONTRACT_ROWS {
+        let execution = contract_execution_payload(row, (row.execute)()?)?;
+        proof_events.push(fixed_contract_execution_boundary(
+            events, next_at, row, execution,
+        )?);
+        next_at = next_at.saturating_add(1);
+    }
+    for execution in agent_contract_executions().await? {
+        let boundary =
+            fixed_contract_execution_boundary(events, next_at, execution.row, execution.payload)?;
+        for mut write in execution.checkpoint_writes {
+            write.attribution = Some(crate::store::CheckpointAttribution {
+                session_id: SessionId::fixture(boundary.actor_alias.clone()),
+                cause_boundary_id: boundary.boundary_id.clone(),
+            });
+            // Contract proofs execute in isolated facade worlds whose opaque
+            // execution-state identities are intentionally not seed-canonical.
+            // Preserve the durable stored/ref disposition, but do not let those
+            // unstable logical JSON lengths churn the deterministic transcript.
+            for component in &mut write.components {
+                if let CheckpointComponentWriteKind::Stored { logical_bytes } = &mut component.kind
+                {
+                    *logical_bytes = None;
+                }
+            }
+            checkpoint_writes.push(write);
+        }
+        proof_events.push(boundary);
+        next_at = next_at.saturating_add(1);
+    }
+    Ok(proof_events)
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
+fn fixed_contract_execution_boundary<E>(
+    events: &[crate::scheduler::DeliveredBoundary],
+    at: u64,
+    row: &FixedContractRow<E>,
+    mut execution: Value,
+) -> Result<BoundaryEvent, FixedScriptRunnerError> {
+    let contract = row.semantic_oracle;
+    let proof_id = contract.replace(['.', '_'], "-");
+    let actor_alias = match row.anchor {
+        FixedContractAnchor::RecordedProvider => {
+            let provider = first_successful_provider(events).ok_or_else(|| {
+                FixedScriptRunnerError::Assertion(format!(
+                    "could not anchor {contract} execution to a successful generated provider boundary"
+                ))
+            })?;
+            execution
+                .as_object_mut()
+                .expect("contract execution object")
+                .insert(
+                    "generated_anchor".to_string(),
+                    json!({
+                        "provider_boundary": provider.boundary_id,
+                        "actor": provider.actor_alias,
+                        "provider_sequence": provider.sequence,
+                    }),
+                );
+            provider.actor_alias.clone()
+        }
+        FixedContractAnchor::RecordedProviderMutation(mutation) => {
+            let provider = first_successful_provider(events).ok_or_else(|| {
+                FixedScriptRunnerError::Assertion(format!(
+                    "could not anchor {contract} execution to a successful generated provider boundary"
+                ))
+            })?;
+            let parser = events
+                .iter()
+                .find(|event| {
+                    event.kind == BoundaryKind::ProviderMutation
+                        && event
+                            .observed
+                            .get("mutation")
+                            .or_else(|| event.payload.get("mutation"))
+                            .and_then(Value::as_str)
+                            == Some(mutation)
+                        && event
+                            .observed
+                            .pointer(
+                                "/provider_parser_matrix/matrix/real_provider_parser_execution",
+                            )
+                            .and_then(Value::as_bool)
+                            == Some(true)
+                })
+                .ok_or_else(|| {
+                    FixedScriptRunnerError::Assertion(format!(
+                        "could not anchor {contract} execution to real parser mutation `{mutation}`"
+                    ))
+                })?;
+            execution
+                .as_object_mut()
+                .expect("contract execution object")
+                .insert(
+                    "generated_anchor".to_string(),
+                    json!({
+                        "provider_boundary": provider.boundary_id,
+                        "provider_sequence": provider.sequence,
+                        "provider_mutation_boundary": parser.boundary_id,
+                        "mutation": mutation,
+                        "real_provider_parser_execution": true,
+                        "actor": provider.actor_alias,
+                    }),
+                );
+            provider.actor_alias.clone()
+        }
+        FixedContractAnchor::RecordedToolThenProvider => {
+            let Some((tool, provider)) = generated_tool_then_same_actor_provider(events) else {
+                return Err(FixedScriptRunnerError::Assertion(format!(
+                    "could not anchor {contract} execution to tool result and same-actor provider continuation"
+                )));
+            };
+            execution
+                .as_object_mut()
+                .expect("contract execution object")
+                .insert(
+                    "generated_anchor".to_string(),
+                    json!({
+                        "tool_boundary": tool.boundary_id,
+                        "continuation_provider_boundary": provider.boundary_id,
+                        "actor": tool.actor_alias,
+                        "tool_sequence": tool.sequence,
+                        "continuation_provider_sequence": provider.sequence,
+                        "same_actor_continuation": tool.actor_alias == provider.actor_alias
+                            && provider.sequence > tool.sequence,
+                    }),
+                );
+            tool.actor_alias.clone()
+        }
+        FixedContractAnchor::ProviderActor => first_successful_provider(events)
+            .ok_or_else(|| {
+                FixedScriptRunnerError::Assertion(format!(
+                    "could not anchor {contract} execution to a successful generated provider boundary"
+                ))
+            })?
+            .actor_alias
+            .clone(),
+    };
+    Ok(contract_execution_boundary(
+        &actor_alias,
+        &proof_id,
+        at,
+        execution,
+    ))
+}
+
+fn generated_tool_then_same_actor_provider(
+    events: &[crate::scheduler::DeliveredBoundary],
+) -> Option<(
+    &crate::scheduler::DeliveredBoundary,
+    &crate::scheduler::DeliveredBoundary,
+)> {
+    events
+        .iter()
+        .filter(|event| {
+            event.kind == BoundaryKind::Tool
+                && event.observed.get("runtime_tool_output").is_some()
+                && event
+                    .observed
+                    .get("execution_count")
+                    .and_then(Value::as_u64)
+                    == Some(1)
+        })
+        .find_map(|tool| {
+            events
+                .iter()
+                .filter(|provider| {
+                    provider.kind == BoundaryKind::Provider
+                        && provider.actor_alias == tool.actor_alias
+                        && provider.sequence > tool.sequence
+                        && provider.observed.get("success").and_then(Value::as_bool) == Some(true)
+                })
+                .min_by_key(|provider| provider.sequence)
+                .map(|provider| (tool, provider))
+        })
+}
+
+fn contract_execution_boundary(
+    actor_alias: &str,
+    proof_id: &str,
+    at: u64,
+    contract_execution: Value,
+) -> BoundaryEvent {
+    BoundaryEvent::new(
+        format!("{actor_alias}:contract-execution:{proof_id}"),
+        actor_alias.to_string(),
+        BoundaryKind::Trigger,
+        at,
+        format!("contract-execution.{proof_id}"),
+        json!({
+            "session": actor_alias,
+            "source_key": format!("contract-execution/{actor_alias}/{proof_id}"),
+            "started_process": false,
+            "contract_execution": contract_execution,
+        }),
+    )
+}
 
 pub(crate) fn replay_contract_execution(contract: &str) -> Result<Value, FixedScriptRunnerError> {
     if let Some(row) = STANDARD_CONTRACT_ROWS
@@ -403,4 +660,16 @@ pub(super) fn turn_outcome_contract_json(
             "task": task,
         }),
     }
+}
+
+fn first_successful_provider(
+    events: &[crate::scheduler::DeliveredBoundary],
+) -> Option<&crate::scheduler::DeliveredBoundary> {
+    events
+        .iter()
+        .filter(|event| {
+            event.kind == BoundaryKind::Provider
+                && event.observed.get("success").and_then(Value::as_bool) == Some(true)
+        })
+        .min_by_key(|event| event.sequence)
 }

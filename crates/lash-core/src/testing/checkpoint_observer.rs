@@ -52,9 +52,11 @@ impl CheckpointComponent {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum CheckpointComponentWriteKind {
-    /// Decoded plugin state, including the host-owned generations.
+    /// The decoded namespace map: each namespace's values address and
+    /// host-owned generation (FIG-5301). The values bodies are components
+    /// of their own.
     PluginState {
-        state: crate::PluginState,
+        state: lash_core_store::plugin_state::PluginStateMap,
     },
     /// Body present at the commit seam. `logical_bytes` is the size of the
     /// encoding-independent JSON projection used only for human comparison;
@@ -347,11 +349,67 @@ async fn observe_commit(
     mut commit: RuntimeCommit,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
     collector.apply_mutation(&mut commit);
-    let mut event = checkpoint_write_event(&commit);
+    let event = checkpoint_write_event(&commit);
     let budget = crate::testing::measure_runtime_commit_budget(&commit)?;
     let committed_attachment_ids = commit.committed_attachment_ids.clone();
     let result = inner.commit_runtime_state(commit).await?;
     collector.record_manifest(&event.session_id, &result.manifest);
+    record_accepted(
+        inner,
+        collector,
+        event,
+        result.head_revision,
+        budget,
+        committed_attachment_ids,
+    )
+    .await?;
+    Ok(result)
+}
+
+impl CheckpointWriteCollector {
+    /// Record `commit`, which a durable session owner already committed
+    /// through its own transaction (`turn.commit`, ADR 0132 §4): the event
+    /// [`ObservedDeploymentStore`] records for a commit made through the
+    /// factory, with the accepted rows read back from `store`.
+    ///
+    /// # Errors
+    ///
+    /// The commit cannot be measured, or `store` cannot read it back.
+    pub async fn observe_committed(
+        &self,
+        store: &dyn RuntimeStore,
+        commit: &RuntimeCommit,
+    ) -> Result<(), StoreError> {
+        let event = checkpoint_write_event(commit);
+        let budget = crate::testing::measure_runtime_commit_budget(commit)?;
+        let head_revision = store
+            .load_session_head_meta(&event.session_id)
+            .await?
+            .map_or(commit.expected_head_revision.saturating_add(1), |head| {
+                head.head_revision
+            });
+        record_accepted(
+            store,
+            self,
+            event,
+            head_revision,
+            budget,
+            commit.committed_attachment_ids.clone(),
+        )
+        .await
+    }
+}
+
+/// Push `event` as committed at `head_revision`, with the rows `inner`
+/// accepted for it.
+async fn record_accepted(
+    inner: &dyn RuntimeStore,
+    collector: &CheckpointWriteCollector,
+    mut event: CheckpointWriteEvent,
+    head_revision: u64,
+    budget: crate::testing::RuntimeCommitBudgetMeasurement,
+    committed_attachment_ids: Vec<AttachmentId>,
+) -> Result<(), StoreError> {
     if let Some(state) = event.state.as_mut()
         && let Some(accepted) = inner
             .load_session_window(&event.session_id, WindowSelector::Current)
@@ -371,13 +429,13 @@ async fn observe_commit(
     }
     collector.push_runtime_commit(
         CheckpointWriteEvent {
-            revision_after: result.head_revision,
+            revision_after: head_revision,
             ..event
         },
         budget,
         committed_attachment_ids,
     );
-    Ok(result)
+    Ok(())
 }
 
 fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
@@ -397,8 +455,8 @@ fn checkpoint_write_event(commit: &RuntimeCommit) -> CheckpointWriteEvent {
             .map(|body| Some(body.len())),
     );
     if let Some(body) = checkpoint.component_body(crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT) {
-        let state = rmp_serde::from_slice::<crate::PluginState>(body)
-            .expect("runtime plugin state encodes");
+        let state = rmp_serde::from_slice::<lash_core_store::plugin_state::PluginStateMap>(body)
+            .expect("runtime plugin namespace map encodes");
         components.push(CheckpointComponentWrite {
             component: CheckpointComponent::PluginState,
             kind: CheckpointComponentWriteKind::PluginState { state },

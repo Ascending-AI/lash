@@ -1,7 +1,7 @@
 //! Content-level durable-state oracles.
 //!
-//! Compare the scripted provider's wire output against recorded model attempt
-//! results in the engine journal and messages read through fresh graph pages.
+//! Compare the scripted provider's wire output against the model call records
+//! the engine delivered and messages read through fresh graph pages.
 //! The wire decoder is independent of Lash's provider adapters. Failed attempts
 //! retain their reported usage in the same journaled result as successful ones.
 //! The oracle compares every nonzero reported attempt as a separate delta.
@@ -37,6 +37,32 @@ pub struct UsageBuckets {
 impl UsageBuckets {
     fn is_zero(&self) -> bool {
         *self == Self::default()
+    }
+
+    const FIELDS: [&'static str; 5] = [
+        "input_tokens",
+        "output_tokens",
+        "cache_read_input_tokens",
+        "cache_write_input_tokens",
+        "reasoning_output_tokens",
+    ];
+
+    /// Decode the recorded attempt's usage from its JSON rendering, so the oracle
+    /// reads the counters by name rather than through lash's type.
+    fn from_recorded_usage(usage: &Value) -> Result<Self, String> {
+        let field = |name: &str| {
+            usage
+                .get(name)
+                .and_then(Value::as_i64)
+                .ok_or_else(|| format!("recorded usage has no integer `{name}`: {usage}"))
+        };
+        Ok(Self {
+            input_tokens: field(Self::FIELDS[0])?,
+            output_tokens: field(Self::FIELDS[1])?,
+            cache_read_input_tokens: field(Self::FIELDS[2])?,
+            cache_write_input_tokens: field(Self::FIELDS[3])?,
+            reasoning_output_tokens: field(Self::FIELDS[4])?,
+        })
     }
 }
 
@@ -337,6 +363,44 @@ fn google_usage(usage: &Value) -> UsageBuckets {
         cache_write_input_tokens: 0,
         reasoning_output_tokens: thoughts,
     }
+}
+
+/// The provider attempts of every model call the engine recorded for a
+/// session, read from the `ModelCallRecorded` activity it delivered with the
+/// session's turns, once per call. No turn result or emitted wire script is
+/// used to manufacture this evidence: the durable engine keeps no per-attempt
+/// usage row, so its delivered call record is the engine's own record.
+pub fn recorded_usage(activities: &[lash::TurnActivity]) -> Result<Vec<UsageBuckets>, String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut usages = Vec::new();
+    for activity in activities {
+        let lash::TurnEvent::ModelCallRecorded { record } = &activity.event else {
+            continue;
+        };
+        let record = serde_json::to_value(record)
+            .map_err(|error| format!("a model call record does not encode: {error}"))?;
+        let call = record
+            .get("call_id")
+            .map(Value::to_string)
+            .unwrap_or_default();
+        if !seen.insert(call) {
+            continue;
+        }
+        let Some(attempts) = record.get("attempts").and_then(Value::as_array) else {
+            return Err(format!(
+                "a recorded model call has no attempt evidence: {record}"
+            ));
+        };
+        for attempt in attempts {
+            if let Some(usage) = attempt.get("usage").filter(|usage| !usage.is_null()) {
+                let buckets = UsageBuckets::from_recorded_usage(usage)?;
+                if !buckets.is_zero() {
+                    usages.push(buckets);
+                }
+            }
+        }
+    }
+    Ok(usages)
 }
 
 /// Read the committed history through explicit graph pages, and the owner's

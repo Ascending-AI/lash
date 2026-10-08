@@ -11,7 +11,17 @@ pub const SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS: &[BoundaryKind] = &[
     BoundaryKind::Observer,
 ];
 
-#[cfg(test)]
+#[derive(Default)]
+pub(super) struct RuntimeCompletionState {
+    pub(super) opened_sessions: BTreeSet<String>,
+    pub(super) queued_boundaries: BTreeSet<String>,
+    pub(super) provider_completions_by_session: BTreeMap<String, usize>,
+    pub(super) active_provider_turns_by_session: BTreeMap<String, usize>,
+    /// The cross-backend rerun can admit one provider turn at a time so its
+    /// recorded storage observations have a controlled order.
+    pub(super) serialize_provider_turns: bool,
+}
+
 impl RuntimeCompletionState {
     pub(super) fn provider_started(&mut self, actor_alias: &str) {
         *self
@@ -108,7 +118,134 @@ impl RuntimeCompletionState {
             && (!self.serialize_provider_turns || !self.any_provider_active())
     }
 }
-#[cfg(test)]
+
+pub(super) fn split_runtime_completion_boundaries(
+    boundaries: Vec<BoundaryEvent>,
+) -> (Vec<BoundaryEvent>, RuntimeCompletionQueue) {
+    let mut initial = Vec::new();
+    let mut completions = Vec::new();
+    for boundary in boundaries {
+        if is_scheduler_owned_runtime_completion(boundary.kind) {
+            completions.push(boundary);
+        } else {
+            initial.push(boundary);
+        }
+    }
+    (initial, RuntimeCompletionQueue::new(completions))
+}
+
+pub(crate) fn is_scheduler_owned_runtime_completion(kind: BoundaryKind) -> bool {
+    runtime_completion_family(kind).is_some()
+}
+
+pub(super) async fn register_ready_runtime_completions(
+    queue: &mut RuntimeCompletionQueue,
+    state: &mut RuntimeCompletionState,
+    scheduler: &mut BoundaryScheduler,
+    registered_after: &crate::scheduler::DeliveredBoundary,
+    world: &mut GeneratedRuntimeWorld,
+    store: &ModelStore,
+) -> Result<Vec<Value>, FixedScriptRunnerError> {
+    let mut admissions = Vec::new();
+    let ready = queue.take_ready(|event| runtime_completion_ready(event, state));
+    for event in ready {
+        if !runtime_completion_ready(&event, state) {
+            queue.defer(event);
+            continue;
+        }
+        let Some(family) = runtime_completion_family(event.kind) else {
+            return Err(FixedScriptRunnerError::Assertion(format!(
+                "queued runtime completion `{}` has no completion family for {:?}",
+                event.boundary_id, event.kind
+            )));
+        };
+        let units = runtime_completion_units(&event)?;
+        if event.kind == BoundaryKind::Provider {
+            let turn_event = event.clone();
+            let actor_alias = event.actor_alias.clone();
+            let provider_boundary = event.boundary_id.clone();
+            let (_pending, completion_event) =
+                queue.register_pending_event(event, registered_after, family, units);
+            world
+                .start_provider_turn(
+                    turn_event,
+                    completion_event,
+                    scheduler,
+                    &store.queued_next_turn_boundaries(&actor_alias),
+                )
+                .await?;
+            state.provider_started(&actor_alias);
+            admissions
+                .push(json!({"session": actor_alias, "provider_boundary": provider_boundary}));
+        } else {
+            queue.register(scheduler, event, registered_after, family, units);
+        }
+    }
+    Ok(admissions)
+}
+
+pub(super) fn runtime_completion_ready(
+    event: &BoundaryEvent,
+    state: &RuntimeCompletionState,
+) -> bool {
+    match event.kind {
+        BoundaryKind::Provider => {
+            state.next_provider_turn_ready(event)
+                // A serialized cross-backend rerun admits only one live
+                // provider turn at a time.
+                && (!state.serialize_provider_turns || !state.any_provider_active())
+        }
+        BoundaryKind::Observer => {
+            if !state.session_opened(&event.actor_alias) {
+                return false;
+            }
+            let expected_turn_index = event
+                .payload
+                .get("turn_index")
+                .and_then(Value::as_u64)
+                .unwrap_or(0) as usize;
+            state.provider_completed_count(&event.actor_alias) >= expected_turn_index
+        }
+        BoundaryKind::BackendFailure | BoundaryKind::ProviderMutation => {
+            state.session_opened(&event.actor_alias) && !state.provider_active(&event.actor_alias)
+        }
+        BoundaryKind::Cancellation => event
+            .payload
+            .get("target")
+            .and_then(Value::as_str)
+            .is_some_and(|target| state.queued_boundary_exists(target)),
+        BoundaryKind::Tool | BoundaryKind::ExecCode => {
+            state.provider_completed(&event.actor_alias)
+                && state.handler_boundary_ready(&event.actor_alias)
+        }
+        BoundaryKind::DurableEffect => {
+            state.session_opened(&event.actor_alias)
+                && state.handler_boundary_ready(&event.actor_alias)
+        }
+        BoundaryKind::Ingress
+        | BoundaryKind::QueuedIngress
+        | BoundaryKind::ProviderEvent
+        | BoundaryKind::Trigger => false,
+    }
+}
+
+pub(super) fn runtime_completion_family(kind: BoundaryKind) -> Option<RuntimeCompletionFamily> {
+    Some(match kind {
+        BoundaryKind::Provider => RuntimeCompletionFamily::ProviderTurnCompletion,
+        BoundaryKind::Cancellation => RuntimeCompletionFamily::QueuedInputCancellation,
+        BoundaryKind::BackendFailure => RuntimeCompletionFamily::BackendRetryOrFailure,
+        BoundaryKind::ProviderMutation => RuntimeCompletionFamily::ProviderScriptMutation,
+        BoundaryKind::Tool => RuntimeCompletionFamily::ToolReturn,
+        BoundaryKind::ExecCode => RuntimeCompletionFamily::ExecResult,
+        BoundaryKind::DurableEffect => RuntimeCompletionFamily::DurableEffectCompletion,
+        BoundaryKind::Observer => RuntimeCompletionFamily::ObserverSnapshot,
+        BoundaryKind::Ingress
+        | BoundaryKind::QueuedIngress
+        | BoundaryKind::ProviderEvent
+        | BoundaryKind::Trigger => return None,
+    })
+}
+
 pub(super) fn runtime_completion_units(
     event: &BoundaryEvent,
 ) -> Result<Vec<RuntimeCompletionUnit>, FixedScriptRunnerError> {
@@ -170,85 +307,4 @@ pub(super) fn runtime_completion_units(
         | BoundaryKind::Trigger => "runtime:completion",
     };
     Ok(vec![RuntimeCompletionUnit::new(unit, event.at)])
-}
-
-#[cfg(test)]
-pub(super) fn runtime_completion_family(kind: BoundaryKind) -> Option<RuntimeCompletionFamily> {
-    Some(match kind {
-        BoundaryKind::Provider => RuntimeCompletionFamily::ProviderTurnCompletion,
-        BoundaryKind::Cancellation => RuntimeCompletionFamily::QueuedInputCancellation,
-        BoundaryKind::BackendFailure => RuntimeCompletionFamily::BackendRetryOrFailure,
-        BoundaryKind::ProviderMutation => RuntimeCompletionFamily::ProviderScriptMutation,
-        BoundaryKind::Tool => RuntimeCompletionFamily::ToolReturn,
-        BoundaryKind::ExecCode => RuntimeCompletionFamily::ExecResult,
-        BoundaryKind::DurableEffect => RuntimeCompletionFamily::DurableEffectCompletion,
-        BoundaryKind::Observer => RuntimeCompletionFamily::ObserverSnapshot,
-        BoundaryKind::Ingress
-        | BoundaryKind::QueuedIngress
-        | BoundaryKind::ProviderEvent
-        | BoundaryKind::Trigger => return None,
-    })
-}
-
-#[cfg(test)]
-pub(super) fn runtime_completion_ready(
-    event: &BoundaryEvent,
-    state: &RuntimeCompletionState,
-) -> bool {
-    match event.kind {
-        BoundaryKind::Provider => {
-            state.next_provider_turn_ready(event)
-                // A serialized cross-backend rerun admits only one live
-                // provider turn at a time.
-                && (!state.serialize_provider_turns || !state.any_provider_active())
-        }
-        BoundaryKind::Observer => {
-            if !state.session_opened(&event.actor_alias) {
-                return false;
-            }
-            let expected_turn_index = event
-                .payload
-                .get("turn_index")
-                .and_then(Value::as_u64)
-                .unwrap_or(0) as usize;
-            state.provider_completed_count(&event.actor_alias) >= expected_turn_index
-        }
-        BoundaryKind::BackendFailure | BoundaryKind::ProviderMutation => {
-            state.session_opened(&event.actor_alias) && !state.provider_active(&event.actor_alias)
-        }
-        BoundaryKind::Cancellation => event
-            .payload
-            .get("target")
-            .and_then(Value::as_str)
-            .is_some_and(|target| state.queued_boundary_exists(target)),
-        BoundaryKind::Tool | BoundaryKind::ExecCode => {
-            state.provider_completed(&event.actor_alias)
-                && state.handler_boundary_ready(&event.actor_alias)
-        }
-        BoundaryKind::DurableEffect => {
-            state.session_opened(&event.actor_alias)
-                && state.handler_boundary_ready(&event.actor_alias)
-        }
-        BoundaryKind::Ingress
-        | BoundaryKind::QueuedIngress
-        | BoundaryKind::ProviderEvent
-        | BoundaryKind::Trigger => false,
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn is_scheduler_owned_runtime_completion(kind: BoundaryKind) -> bool {
-    runtime_completion_family(kind).is_some()
-}
-
-#[cfg(test)]
-#[derive(Default)]
-pub(super) struct RuntimeCompletionState {
-    pub(super) opened_sessions: BTreeSet<String>,
-    pub(super) queued_boundaries: BTreeSet<String>,
-    pub(super) provider_completions_by_session: BTreeMap<String, usize>,
-    pub(super) active_provider_turns_by_session: BTreeMap<String, usize>,
-    /// The cross-backend rerun can admit one provider turn at a time so its
-    /// recorded storage observations have a controlled order.
-    pub(super) serialize_provider_turns: bool,
 }

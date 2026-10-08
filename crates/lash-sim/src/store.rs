@@ -851,16 +851,12 @@ impl ModelStore {
     }
 
     /// COVERAGE-ONLY abstract model projection of a durable effect under
-    /// crash and redrive: executed once, and the redrive served the recorded
-    /// result.
+    /// crash and redrive: its turn ran the tool body once and committed it,
+    /// and the redrive that resumed the turn was served the recorded result.
     ///
     /// This projection makes generated model states comparable; it is not
     /// evidence for the `durable_effect_exactly_once` runtime oracle, which
     /// reads what the engine did in `runtime_boundaries`.
-    #[expect(
-        clippy::expect_used,
-        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-    )]
     fn project_durable_effect(event: &BoundaryEvent, durable_key: String, result: Value) -> Value {
         let effect_id = event
             .payload
@@ -869,52 +865,6 @@ impl ModelStore {
             .and_then(Value::as_str)
             .unwrap_or(&event.boundary_id)
             .to_string();
-        let envelope = lash_core::RuntimeEffectEnvelope::new(
-            lash_core::RuntimeEffectInvocation::new(
-                lash_core::EffectAddress::new(
-                    durable_effect_scope(&event.actor_alias, &durable_key),
-                    durable_key.clone(),
-                )
-                .expect("abstract durable effect carries an admitted effect scope"),
-                lash_core::RuntimeAttribution::for_session(SessionId::fixture(
-                    event.actor_alias.clone(),
-                )),
-                effect_id.clone(),
-            ),
-            lash_core::RuntimeEffectCommand::ToolAttempt {
-                call: Box::new(lash_core::PreparedToolCall {
-                    call_id: lash_core::ToolCallId::fixture(&effect_id),
-                    provider_call_id: None,
-                    tool_id: lash_core::ToolId::from("tool:sim_opaque_effect"),
-                    tool_name: "sim_opaque_effect".into(),
-                    args: json!({
-                        "durable_key": durable_key,
-                        "session": event.actor_alias,
-                    }),
-                    replay: None,
-                    prepared_payload: json!({"prepared_by": "lash-sim"}),
-                }),
-                execution_grant: None,
-                attempt: 1,
-                max_attempts: 1,
-            },
-        );
-        let envelope_hash = envelope
-            .stable_hash()
-            .expect("abstract durable-effect envelope is serializable");
-        let recorded_intents =
-            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::StartProcess(Box::new(
-                lash_core::StartProcessIntent {
-                    owner: lash_core::RuntimeOwner::Session(SessionId::fixture(
-                        event.actor_alias.clone(),
-                    )),
-                    declaration: lash_core::ProcessStartDeclaration::new(
-                        lash_core::testing::held_engine_input(json!({"durable_key": durable_key})),
-                        lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
-                        lash_core::Lifetime::Detached,
-                    ),
-                },
-            ))]);
         let result_digest = value_digest(&result);
         json!({
             "durable_key": durable_key,
@@ -927,29 +877,22 @@ impl ModelStore {
             "runtime_effect": {
                 "kind": "tool_attempt",
                 "effect_id": effect_id,
-                "replay_key": envelope.invocation.effect_replay_key(),
-                "envelope_hash": envelope_hash,
-                "controller": "runtime_effect_controller",
+                "controller": "durable_turn_tool_round",
                 "local_executor_called": true,
                 "redrive_local_executor_called": false,
             },
-            "runtime_effect_outcome": {
-                "type": "tool_attempt",
-                "launch": {
-                    "status": "done",
-                    "record": {
-                        "call_id": lash_core::ToolCallId::fixture(&effect_id),
-                        "tool": "sim_opaque_effect",
-                        "args": null,
-                        "output": lash_core::ToolCallOutput::success(result),
-                    },
-                    "intents": recorded_intents,
+            "runtime_tool_record": {
+                "provider_call_id": effect_id,
+                "tool": "sim_opaque_effect",
+                "args": {
+                    "durable_key": durable_key,
+                    "session": event.actor_alias,
                 },
+                "output": lash_core::ToolCallOutput::success(result),
             },
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn queued_next_turn_boundaries(&self, session: &str) -> Vec<String> {
         self.queued_input_boundaries
             .iter()
@@ -1071,13 +1014,5 @@ impl ModelDurableEffect {
     }
 }
 
-/// The scope a durable effect runs under: a turn of the effect's session,
-/// one per durable key, so its crash and redrive replay one invocation.
-fn durable_effect_scope(session: &str, durable_key: &str) -> lash_core::ExecutionScope {
-    lash_core::ExecutionScope::turn(
-        SessionId::fixture(session.to_string()),
-        lash_core::TurnId::fixture(format!("lash-sim-runtime-boundaries:{durable_key}")),
-    )
-}
 #[cfg(test)]
 mod tests;

@@ -6,26 +6,19 @@
 //! The script sits at the store trait, so the same arm faults the same call
 //! of the same operation on every backend.
 
-#[cfg(test)]
 use lash_sansio::SessionId;
-#[cfg(test)]
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core::testing::{Outcome, Phase, Script, StoreOp};
-use lash_core::{DeploymentStore, StoreError};
-#[cfg(test)]
 use lash_core::{
-    OperationId, RuntimeCommit, RuntimeSessionState, SessionCreationHead, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest,
+    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, SessionCreationHead,
+    SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
 use serde_json::{Value, json};
 
-#[cfg(test)]
 use crate::runner::FixedScriptRunnerError;
-#[cfg(test)]
 use crate::scheduler::BoundaryEvent;
 
 /// The operation every backend fault arms.
@@ -297,15 +290,30 @@ impl BackendFaultLane {
     }
 }
 
-#[cfg(test)]
+/// The generated runner's backend-failure boundary: one fresh SQLite memory
+/// session per boundary, whose one commit a one-arm script faults.
+pub(crate) struct GeneratedBackendFaultHarness {
+    attempts_by_session_operation: BTreeMap<(String, String), usize>,
+    factory: tokio::sync::OnceCell<Arc<dyn DeploymentStore>>,
+    script_armed: bool,
+}
+
 impl Default for GeneratedBackendFaultHarness {
     fn default() -> Self {
         Self::new(true)
     }
 }
 
-#[cfg(test)]
 impl GeneratedBackendFaultHarness {
+    fn new(script_armed: bool) -> Self {
+        Self {
+            attempts_by_session_operation: BTreeMap::new(),
+            factory: tokio::sync::OnceCell::new(),
+            script_armed,
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn with_script_armed(script_armed: bool) -> Self {
         Self::new(script_armed)
     }
@@ -427,14 +435,6 @@ impl GeneratedBackendFaultHarness {
         Ok(observation)
     }
 
-    fn new(script_armed: bool) -> Self {
-        Self {
-            attempts_by_session_operation: BTreeMap::new(),
-            factory: tokio::sync::OnceCell::new(),
-            script_armed,
-        }
-    }
-
     async fn create_session(
         &self,
         session_id: &SessionId,
@@ -466,15 +466,6 @@ impl GeneratedBackendFaultHarness {
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         Ok(Arc::clone(factory))
     }
-}
-
-/// The generated runner's backend-failure boundary: one fresh SQLite memory
-/// session per boundary, whose one commit a one-arm script faults.
-#[cfg(test)]
-pub(crate) struct GeneratedBackendFaultHarness {
-    attempts_by_session_operation: BTreeMap<(String, String), usize>,
-    factory: tokio::sync::OnceCell<Arc<dyn DeploymentStore>>,
-    script_armed: bool,
 }
 
 #[cfg(test)]
@@ -660,5 +651,40 @@ mod tests {
             backend_failure_observed(&model.summary(), &events).is_passed(),
             "retry and terminal evidence from session-002 must satisfy the law without borrowing session-001"
         );
+    }
+
+    #[tokio::test]
+    async fn generated_backend_failure_seed_records_script_evidence() {
+        let workload = crate::generator::generate_workload(5, "fast-random", 24)
+            .expect("seeded generated workload");
+        let trace = crate::runner::run_generated_workload_for_fixture(workload, "bundle")
+            .await
+            .expect("generated trace");
+        let backend_events = trace
+            .events
+            .iter()
+            .filter(|event| event.kind == BoundaryKind::BackendFailure)
+            .collect::<Vec<_>>();
+        assert!(!backend_events.is_empty());
+        assert!(backend_events.iter().all(|event| {
+            event
+                .observed
+                .pointer("/fault_script/fired")
+                .and_then(Value::as_bool)
+                == Some(true)
+        }));
+        let verdict = trace
+            .oracles
+            .iter()
+            .find(|verdict| verdict.oracle_id == BACKEND_FAILURE_ORACLE)
+            .expect("backend failure verdict");
+        assert!(verdict.is_passed(), "{}", verdict.message);
+        assert_eq!(
+            verdict.observation_class,
+            crate::trace::OracleObservationClass::RealObservation
+        );
+        assert!(trace.oracle.is_passed(), "{}", trace.oracle.message);
+        crate::replay::replay_trace(std::path::Path::new("generated-seed-5.json"), &trace)
+            .expect("model replay carries the recorded script observation");
     }
 }
