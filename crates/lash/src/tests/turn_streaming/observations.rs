@@ -1116,11 +1116,40 @@ async fn remote_reset_and_transcript_projection_agree() -> Result<()> {
             }
         }
     }
+    // Provider block ids are local to an attempt. The remote reset must name
+    // exactly the opaque correlations the core emitted for those blocks.
+    let correlation = |block_id: &str| {
+        replay_events
+            .iter()
+            .find_map(|event| {
+                let lash_core::SessionObservationEventPayload::TurnActivity(activity) =
+                    &event.payload
+                else {
+                    return None;
+                };
+                match &activity.event {
+                    TurnEvent::AssistantProseDelta { block, .. }
+                    | TurnEvent::ReasoningDelta { block, .. }
+                        if block.id == block_id =>
+                    {
+                        Some(activity.correlation_id.0.to_string())
+                    }
+                    _ => None,
+                }
+            })
+            .expect("the abandoned attempt emitted its block")
+    };
     assert_eq!(
         reset_targets,
         vec![
-            (vec!["text:1".to_string()], vec!["reasoning:1".to_string()]),
-            (vec!["text:2".to_string()], vec!["reasoning:2".to_string()]),
+            (
+                vec![correlation("text:1")],
+                vec![correlation("reasoning:1")]
+            ),
+            (
+                vec![correlation("text:2")],
+                vec![correlation("reasoning:2")]
+            ),
         ]
     );
     assert_eq!(

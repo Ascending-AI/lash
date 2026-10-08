@@ -282,7 +282,10 @@ async fn seed(backend: &Backend) {
         LifetimeDecision::Detached,
     )
     .with_execution_env_ref(Some(
-        lash_core_execution::testing::process_execution_env_fixture_ref(),
+        lash_core_execution::testing::process_execution_env_fixture(
+            backend.process_env_store().as_ref(),
+        )
+        .await,
     ));
     registration.engine_config = Some(settings());
     let id = backend
