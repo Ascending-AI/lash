@@ -319,6 +319,7 @@ impl LashRuntime {
             policy: resolved_turn_policy,
             prelude,
             recorded_assembly,
+            answered_cell_calls: Vec::new(),
             host: self.host.clone(),
             turn_id: run.clone(),
             scoped_effect_controller: controller.clone(),

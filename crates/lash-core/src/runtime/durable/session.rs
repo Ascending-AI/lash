@@ -339,6 +339,14 @@ pub trait TurnDrive: Send {
         cell: CodeCell,
     ) -> Result<CellExit, TurnError>;
 
+    /// The tool call records of the cell that last answered the machine, in
+    /// the order the cell made the calls, taken once: the turn's next commit
+    /// records them as a settled round of its own (FIG-5330). Empty for a
+    /// drive that runs no cell.
+    fn answered_cell_calls(&mut self) -> Vec<crate::ToolCallRecord> {
+        Vec::new()
+    }
+
     /// The turn accepted an `Immediate` cancel while its cell ran, and the
     /// phase runner dropped the cell: stop what the cell started that its
     /// future does not own, its tool bodies' cooperative stop among it.

@@ -182,6 +182,8 @@ pub async fn run_phases(
     let mut outcome = None;
     // A settled round's presentation, committed with the turn's next commit.
     let mut carry: Option<DomainWrite> = None;
+    // An answered cell's tool calls, recorded with the turn's next commit.
+    let mut answered_cell: Option<tool_round::AnsweredCell> = None;
     loop {
         let effect = match pending.take() {
             Some(effect) => effect,
@@ -308,6 +310,7 @@ pub async fn run_phases(
                     if let Some(record) = admission {
                         tx.write(record);
                     }
+                    tool_round::record_answered_cell(cx, &mut tx, &row, &mut answered_cell)?;
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
@@ -348,10 +351,11 @@ pub async fn run_phases(
                 // names commits nothing again.
                 let cell = RunSeq(id.0);
                 let named = matches!(row.phase, UnfinishedPhase::Tools { run, .. } if run == cell);
-                if !named || carry.is_some() {
+                if !named || carry.is_some() || answered_cell.is_some() {
                     if let Some(present) = carry.take() {
                         tx.write(present);
                     }
+                    tool_round::record_answered_cell(cx, &mut tx, &row, &mut answered_cell)?;
                     if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                         tx.write(bind);
                     }
@@ -374,6 +378,10 @@ pub async fn run_phases(
                         if ran? == CellExit::Suspended {
                             return Ok(PhaseExit::Suspended { due: None });
                         }
+                        let calls = drive.answered_cell_calls();
+                        if !calls.is_empty() {
+                            answered_cell = Some(tool_round::AnsweredCell { id, calls });
+                        }
                     }
                     None => {
                         drive.stop_cell();
@@ -385,9 +393,12 @@ pub async fn run_phases(
                 model = None;
                 let checkpoint = encode_checkpoint(drive.as_mut())?;
                 let current = iteration(drive.machine());
-                match tool_round::run(cx, drive.as_mut(), &row, id, calls, checkpoint, current)
-                    .await?
-                {
+                let done = tool_round::ModelDone {
+                    checkpoint,
+                    iteration: current,
+                    answered_cell: &mut answered_cell,
+                };
+                match tool_round::run(cx, drive.as_mut(), &row, id, calls, done).await? {
                     RoundExit::Answered(present) => carry = present,
                     RoundExit::CancelRequested => return Ok(PhaseExit::CancelRequested),
                     RoundExit::Suspended { due } => return Ok(PhaseExit::Suspended { due }),
@@ -410,6 +421,7 @@ pub async fn run_phases(
                 if let Some(present) = carry.take() {
                     tx.write(present);
                 }
+                tool_round::record_answered_cell(cx, &mut tx, &row, &mut answered_cell)?;
                 if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {
                     tx.write(bind);
                 }
@@ -467,6 +479,7 @@ pub async fn run_phases(
                 if let Some(present) = carry.take() {
                     tx.write(present);
                 }
+                tool_round::record_answered_cell(cx, &mut tx, &row, &mut answered_cell)?;
                 // The commit settles what the turn's checkpoints delivered:
                 // bound to the run first, as the settlement requires.
                 if let Some(bind) = bind_delivered(drive.as_ref(), &session, &run) {

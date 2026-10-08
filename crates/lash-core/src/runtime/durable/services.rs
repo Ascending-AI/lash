@@ -72,6 +72,8 @@ impl RuntimeTurnServices {
     /// including protocol-refused calls settled before dispatch, in admission
     /// order. This reads every step under the turn's owner, so
     /// an owner change or a gap in live activity cannot drop earlier calls.
+    /// A code cell's tool calls are among them: the turn records them as a
+    /// settled round of its own once the cell answers (FIG-5330).
     /// Cell host operations are not catalog tool calls. Calls that settled
     /// without material have no retained request/output record and remain
     /// accounted for in the omitted-call summary.

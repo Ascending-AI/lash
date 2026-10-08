@@ -491,6 +491,7 @@ impl RuntimeTurnDriver<'_> {
             .as_millis() as u64;
         if let Ok(output) = &result {
             self.recorded_assembly.note_code_outputs(output);
+            self.answered_cell_calls.clone_from(&output.tool_calls);
         }
         match &result {
             Ok(output) => {

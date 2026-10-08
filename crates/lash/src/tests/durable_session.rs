@@ -1682,3 +1682,94 @@ async fn an_rlm_cells_executed_calls_name_the_turns_tool_call_records_after_a_re
     reopened.shutdown().await?;
     Ok(())
 }
+
+/// A turn keeps the tool calls its code cells made (FIG-5330): the cell's
+/// own records of them are pruned as it advances, so the turn records them
+/// with its next commit. The settled turn's tool records, read from the
+/// store after a reopen, are the records the turn streamed, by `call_id`
+/// and in call order.
+#[cfg(feature = "rlm")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_settled_turns_cell_tool_records_are_the_streamed_ones_after_a_reopen() -> Result<()> {
+    fn core(backend: lash_core::Backend) -> Result<LashCore> {
+        explicit_ephemeral_facets(rlm_core_builder_over(backend))
+            .serve_test_llm_profile(
+                text_provider(
+                    "cell-tool-records",
+                    typescript_block(
+                        "const first = await tools.app_lookup({});\n\
+                         const second = await tools.app_lookup({});\n\
+                         finish(\"looked up twice\");",
+                    ),
+                ),
+                mock_llm_profile_spec(),
+            )
+            .tools(Arc::new(AppTools))
+            .build(crate::testing::runtime_lease_owner())
+    }
+    let backend = sqlite_memory_store_backend().await;
+    let session_id = id("cell-tool-records");
+    let run = turn("cell-tool-records-run");
+    let running = core(backend.clone())?;
+    let session = running
+        .session(session_id.clone())
+        .created()
+        .await
+        .open()
+        .await?;
+    let events = RecordingEvents::default();
+    let settled = session
+        .send(crate::TurnInput::text("look up twice"))
+        .id(run.clone())
+        .output_into(&events)
+        .await?;
+    let mut streamed = Vec::new();
+    for activity in events.snapshot().await {
+        if let crate::TurnEvent::ToolCallCompleted {
+            call_id,
+            name,
+            args,
+            output,
+            ..
+        } = activity.event
+            && !streamed
+                .iter()
+                .any(|(id, ..): &(crate::ToolCallId, _, _, _)| *id == call_id)
+        {
+            streamed.push((call_id, name, args, output.value_for_projection()));
+        }
+    }
+    assert_eq!(streamed.len(), 2, "the cell made two tool calls");
+    let recorded = |calls: &[lash_core::ToolCallRecord]| {
+        calls
+            .iter()
+            .map(|record| {
+                (
+                    record.call_id.clone(),
+                    record.tool.clone(),
+                    record.args.clone(),
+                    record.output.value_for_projection(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(recorded(&settled.tool_calls), streamed);
+    assert!(settled.omitted.is_none());
+    drop(session);
+    running.shutdown().await?;
+
+    let reopened = core(backend)?;
+    let report = reopened
+        .session(session_id)
+        .open()
+        .await?
+        .attach_id(run)
+        .output()
+        .await?
+        .result;
+    assert_eq!(report.source, crate::ReportSource::Durable);
+    assert_eq!(recorded(&report.tool_calls), streamed);
+    assert!(report.omitted.is_none());
+    reopened.shutdown().await?;
+    Ok(())
+}

@@ -481,6 +481,10 @@ impl TurnDrive for RuntimeDrive {
         .map_err(runtime)
     }
 
+    fn answered_cell_calls(&mut self) -> Vec<crate::ToolCallRecord> {
+        std::mem::take(&mut self.driver.answered_cell_calls)
+    }
+
     fn stop_cell(&mut self) {
         self.driver.children_stop.cancel();
     }

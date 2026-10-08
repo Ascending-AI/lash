@@ -104,10 +104,19 @@ fn round_error(error: RoundError) -> TurnError {
     }
 }
 
+/// What a round's `model.done` commits beside its admission.
+pub(super) struct ModelDone<'a> {
+    /// The turn's checkpoint, re-delivering the round.
+    pub(super) checkpoint: String,
+    /// The protocol iteration the turn stands in.
+    pub(super) iteration: u32,
+    /// The cell whose answer the turn has yet to record, if any.
+    pub(super) answered_cell: &'a mut Option<AnsweredCell>,
+}
+
 /// Run the tool round of effect `id` over `calls` to its members' outcomes,
 /// admitting it in `model.done` unless the rows already hold it, and answer
-/// the machine. `checkpoint` is the turn's checkpoint, re-delivering this
-/// round, that `model.done` commits.
+/// the machine. `done` is what `model.done` commits beside the admission.
 ///
 /// # Errors
 ///
@@ -118,9 +127,13 @@ pub(super) async fn run(
     row: &TurnRow,
     id: EffectId,
     calls: Vec<PendingToolCall>,
-    checkpoint: String,
-    iteration: u32,
+    done: ModelDone<'_>,
 ) -> Result<RoundExit, TurnError> {
+    let ModelDone {
+        checkpoint,
+        iteration,
+        answered_cell,
+    } = done;
     let session = row.session.clone();
     let owner = OwnerKey::Turn(session.clone(), row.run.clone());
     let opener = EffectOpener::turn(session.clone(), row.run.clone());
@@ -188,6 +201,7 @@ pub(super) async fn run(
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(exec)?;
             let refused = tools.refusal(&calls);
+            record_answered_cell(cx, &mut tx, row, answered_cell)?;
             let written = super::phases::write_run_changes(&*drive, &mut tx, &session, &row.run);
             tx.write(DomainWrite::Turn(TurnWrite::Advance {
                 session: session.clone(),
@@ -349,6 +363,48 @@ pub(super) fn record_refused(
         .map_err(exec)?;
     }
     Ok(())
+}
+
+/// The tool calls of a cell that answered the machine, which the turn's next
+/// commit records.
+#[derive(Debug)]
+pub(super) struct AnsweredCell {
+    /// The cell's effect.
+    pub(super) id: EffectId,
+    /// Its tool call records, in the order the cell made the calls.
+    pub(super) calls: Vec<crate::ToolCallRecord>,
+}
+
+/// Record the tool calls of the cell `answered` names as a settled round of
+/// the turn at the cell's effect, in the transaction that checkpoints past
+/// the cell (FIG-5330). The cell's own records of them are pruned as it
+/// advances, and its answer is their last copy: recorded here, the turn's
+/// settled-round fold reports them beside its other rounds, in call order.
+/// A crash before this commit re-delivers the cell, which answers with them
+/// again from its snapshot.
+pub(super) fn record_answered_cell(
+    cx: &ActorContext,
+    tx: &mut lash_durable::ActorTx,
+    row: &TurnRow,
+    answered: &mut Option<AnsweredCell>,
+) -> Result<(), TurnError> {
+    let Some(AnsweredCell { id, calls }) = answered.take() else {
+        return Ok(());
+    };
+    let completed = calls
+        .into_iter()
+        .map(|record| round::CompletedCall {
+            model_return: crate::ModelToolReturn::from_output(record.tool.clone(), &record.output),
+            call_id: record.call_id,
+            provider_call_id: record.provider_call_id,
+            tool_name: record.tool,
+            args: record.args,
+            output: record.output,
+            intent_outcomes: Vec::new(),
+            replay: None,
+        })
+        .collect::<Vec<_>>();
+    record_refused(cx, tx, row, id, &completed)
 }
 
 fn missing_round(run: RunSeq) -> lash_durable::StoreFailure {
