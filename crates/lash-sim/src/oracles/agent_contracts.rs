@@ -208,7 +208,7 @@ fn check_agent_durable_input_suspension_resolution(
         "work.input_request.opened",
         contract,
     )?;
-    require_agent_no_process_event(result, "process.waiting", contract)?;
+    require_agent_call_wait_pair(result, contract)?;
     Ok(json!({
         "final_value": "approved",
         "await_tool_call_id_present": true,
@@ -559,22 +559,59 @@ pub(super) fn require_agent_process_event(
     }
 }
 
-pub(super) fn require_agent_no_process_event(
-    result: &Value,
-    event_type: &str,
-    contract: &str,
-) -> Result<(), String> {
-    if result
+/// The input call parks once, then resumes that same descriptor on the same
+/// process. Missing, duplicated, mismatched or reversed facts are failures.
+pub(super) fn require_agent_call_wait_pair(result: &Value, contract: &str) -> Result<(), String> {
+    let events = result
         .get("process_events")
         .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .all(|event| event.get("event_type").and_then(Value::as_str) != Some(event_type))
+        .ok_or_else(|| format!("{contract} missing process events"))?;
+    let waits: Vec<_> = events
+        .iter()
+        .filter(|event| {
+            matches!(
+                event.get("event_type").and_then(Value::as_str),
+                Some("process.waiting" | "process.resumed")
+            )
+        })
+        .collect();
+    let [waiting, resumed] = waits.as_slice() else {
+        return Err(format!("{contract} requires one call wait and one resume"));
+    };
+    let descriptor = waiting.pointer("/payload/wait");
+    if waiting.get("event_type").and_then(Value::as_str) != Some("process.waiting")
+        || resumed.get("event_type").and_then(Value::as_str) != Some("process.resumed")
+        || waiting
+            .pointer("/payload/wait/kind/kind")
+            .and_then(Value::as_str)
+            != Some("call")
+        || waiting
+            .pointer("/payload/wait/kind/tool_id")
+            .and_then(Value::as_str)
+            != Some("tool:mock_input_request")
+        || !waiting
+            .pointer("/payload/wait/kind/call_id")
+            .and_then(Value::as_str)
+            .is_some_and(|call| !call.is_empty())
+        || waiting
+            .pointer("/payload/wait/since_ms")
+            .and_then(Value::as_u64)
+            .is_none()
+        || descriptor != resumed.pointer("/payload/wait")
+        || !waiting
+            .get("process_ref")
+            .and_then(Value::as_str)
+            .is_some_and(|id| !id.is_empty())
+        || waiting.get("process_ref") != resumed.get("process_ref")
+        || !waiting
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .zip(resumed.get("sequence").and_then(Value::as_u64))
+            .is_some_and(|(first, second)| first < second)
     {
-        Ok(())
-    } else {
-        Err(format!(
-            "{contract} unexpectedly recorded process event `{event_type}`"
-        ))
+        return Err(format!(
+            "{contract} requires an ordered matching input call wait/resume pair"
+        ));
     }
+    Ok(())
 }

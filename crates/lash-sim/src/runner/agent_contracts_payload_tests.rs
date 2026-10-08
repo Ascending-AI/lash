@@ -1,4 +1,4 @@
-//! The process effect-outcome contract's normalization of replay identity.
+//! Process event normalization preserves semantic facts and identity relations.
 
 use super::*;
 
@@ -21,6 +21,36 @@ fn process_effect_outcome_contract_normalizes_only_opaque_replay_identity() {
         normalize_contract_process_event_payload("process.completed", first.clone()),
         first
     );
+
+    let wait = |call: &str, time: u64, tool: &str| json!({"wait": {"kind": {"kind": "call", "call_id": call, "tool_id": tool}, "since_ms": time}});
+    let normalize_pair = |waiting: Value, resumed: Value| {
+        let mut identities = ContractEventIdentities::default();
+        vec![
+            identities.normalize("process.waiting", waiting),
+            identities.normalize("process.resumed", resumed),
+        ]
+    };
+    let original = normalize_pair(wait("first", 100, "tool:a"), wait("first", 100, "tool:a"));
+    assert_eq!(
+        original,
+        normalize_pair(wait("fresh", 900, "tool:a"), wait("fresh", 900, "tool:a")),
+        "fresh identities retain the same waiting/resumed relationship"
+    );
+    assert_eq!(original[0]["wait"]["kind"]["call_id"], "call-1");
+    assert_eq!(original[0], original[1]);
+    for changed in [
+        wait("other", 100, "tool:a"),
+        wait("first", 101, "tool:a"),
+        wait("first", 100, "tool:b"),
+        json!({"wait": {"kind": {"kind": "signal", "name": "answer"}, "since_ms": 100}}),
+        json!({"wait": {"kind": {"kind": "call", "tool_id": "tool:a"}, "since_ms": 100}}),
+    ] {
+        assert_ne!(
+            original,
+            normalize_pair(wait("first", 100, "tool:a"), changed),
+            "a changed call, timestamp relationship, tool, kind or missing identity stays observable"
+        );
+    }
 }
 
 /// FIG-5386: the durable input row hashes identically on re-execution however

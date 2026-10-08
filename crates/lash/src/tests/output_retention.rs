@@ -300,6 +300,19 @@ finish({ rows });"#,
         panic!("one retained print and one retained final value: {prints:#?} {finals:#?}");
     };
 
+    for retained in [print, finished] {
+        let edges = backend
+            .session_store_factory()
+            .attachment_referrers(&retained.reference.id)
+            .await
+            .expect("read the retained output's referrers");
+        assert!(
+            edges.contains(&lash_core::ArtifactReferrer::Session(
+                session.session_id().clone()
+            )),
+            "the commit holds each retained code output on the session: {edges:?}"
+        );
+    }
     sweep_without_grace(&backend).await;
     assert_eq!(
         stored_text(&backend, &finished.reference).await,

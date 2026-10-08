@@ -658,6 +658,61 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         "unexpected Agent started-process replay failure: {err}"
     );
 
+    // Exercise the wait oracle itself: replay hash validation must not be
+    // the only thing that catches missing or mismatched lifecycle facts.
+    let durable_event =
+        contract_execution_event(&events, "agent.durable_input_suspension_resolution")
+            .expect("durable input execution");
+    let durable_result = durable_event
+        .observed
+        .pointer("/contract_execution/result")
+        .expect("durable input result");
+    require_agent_call_wait_pair(durable_result, "test").expect("the input wait resumes");
+    for (pointer, replacement) in [
+        ("/payload/wait/kind/kind", json!("signal")),
+        ("/payload/wait/kind/tool_id", json!("tool:other")),
+        ("/payload/wait/kind/call_id", json!("other-call")),
+        ("/payload/wait/since_ms", json!(999)),
+        ("/process_ref", json!("other-process")),
+        ("/sequence", json!(0)),
+    ] {
+        let mut changed = durable_result.clone();
+        let resumed = changed["process_events"]
+            .as_array_mut()
+            .expect("events")
+            .iter_mut()
+            .find(|event| event["event_type"] == "process.resumed")
+            .expect("resume");
+        *resumed.pointer_mut(pointer).expect("resume field") = replacement;
+        assert!(
+            require_agent_call_wait_pair(&changed, "test").is_err(),
+            "{pointer}"
+        );
+    }
+    for event_type in ["process.waiting", "process.resumed"] {
+        let mut missing = durable_result.clone();
+        missing["process_events"]
+            .as_array_mut()
+            .expect("events")
+            .retain(|event| event["event_type"] != event_type);
+        assert!(
+            require_agent_call_wait_pair(&missing, "test").is_err(),
+            "missing {event_type}"
+        );
+        let mut duplicated = durable_result.clone();
+        let events = duplicated["process_events"].as_array_mut().expect("events");
+        let duplicate = events
+            .iter()
+            .find(|event| event["event_type"] == event_type)
+            .expect("lifecycle event")
+            .clone();
+        events.push(duplicate);
+        assert!(
+            require_agent_call_wait_pair(&duplicated, "test").is_err(),
+            "duplicated {event_type}"
+        );
+    }
+
     let mut durable_not_suspended = events.clone();
     mutate_contract_execution(
         &mut durable_not_suspended,

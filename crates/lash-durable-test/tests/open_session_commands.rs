@@ -182,7 +182,20 @@ async fn opening_a_historical_frame_is_refused_and_keeps_the_changed_config(tier
             }
         }
     };
-    let before = kept().await;
+    // Applying config settles before its notification is delivered and
+    // retired by a separate head commit. Complete that setup before taking
+    // the refusal's baseline, retaining full config equality below.
+    let before = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        loop {
+            let head = kept().await;
+            if head.config.undelivered_change.is_none() {
+                break head;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the engine retires the delivered config change");
     assert_eq!(before.config.generation, seeded(7));
     let resident_before = state.export().await;
 

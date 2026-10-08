@@ -1212,6 +1212,7 @@ async fn agent_contract_process_event_facts(
     processes: &[AgentContractProcessObservation],
 ) -> Result<Vec<Value>, FixedScriptRunnerError> {
     let mut events = Vec::new();
+    let mut identities = ContractEventIdentities::default();
     for process in processes {
         let mut from = lash::process::ProcessEventsFrom::Start(process.raw_process_id.clone());
         loop {
@@ -1241,7 +1242,7 @@ async fn agent_contract_process_event_facts(
                     "process_ref": process.process_ref.clone(),
                     "sequence": event.sequence,
                     "event_type": event_type,
-                    "payload": normalize_contract_process_event_payload(&event_type, event.payload),
+                    "payload": identities.normalize(&event_type, event.payload),
                 }));
             }
             from = match (page.more, read.cursor) {
@@ -1263,6 +1264,40 @@ async fn agent_contract_process_event_facts(
             ))
     });
     Ok(events)
+}
+
+/// Fresh executions mint different call identities and wall-clock times.
+/// Name them by first appearance, retaining equality across waiting/resumed
+/// facts and distinctions between different calls and wait timestamps.
+#[derive(Default)]
+struct ContractEventIdentities {
+    calls: BTreeMap<String, usize>,
+    wait_times: BTreeMap<u64, usize>,
+}
+
+impl ContractEventIdentities {
+    fn normalize(&mut self, event_type: &str, payload: Value) -> Value {
+        let mut payload = normalize_contract_process_event_payload(event_type, payload);
+        if matches!(event_type, "process.waiting" | "process.resumed")
+            && let Some(wait) = payload.get_mut("wait").and_then(Value::as_object_mut)
+        {
+            if let Some(time) = wait.get("since_ms").and_then(Value::as_u64) {
+                let next = self.wait_times.len() + 1;
+                let ordinal = *self.wait_times.entry(time).or_insert(next);
+                wait.insert("since_ms".to_owned(), json!(ordinal));
+            }
+            if let Some(kind) = wait.get_mut("kind").and_then(Value::as_object_mut)
+                && kind.get("kind").and_then(Value::as_str) == Some("call")
+                && let Some(call) = kind.get("call_id").and_then(Value::as_str)
+                && !call.is_empty()
+            {
+                let next = self.calls.len() + 1;
+                let ordinal = *self.calls.entry(call.to_owned()).or_insert(next);
+                kind.insert("call_id".to_owned(), json!(format!("call-{ordinal}")));
+            }
+        }
+        payload
+    }
 }
 
 fn normalize_contract_process_event_payload(event_type: &str, payload: Value) -> Value {

@@ -581,6 +581,20 @@ impl TurnDrive for RuntimeDrive {
             )
             .await
             .map_err(|error| TurnError::Exec(format!("the turn's head commit: {error}")))?;
+        // Code outputs live inside protocol records, outside the message
+        // parts the boundary can inspect. Acquire their session holds in the
+        // same commit before the execution's staging holds may end (ADR 0124).
+        let mut attachments = std::mem::take(&mut commit.committed_attachment_ids);
+        attachments.extend(
+            driver
+                .recorded_assembly
+                .retained_outputs
+                .iter()
+                .map(|retained| retained.reference.id.clone()),
+        );
+        attachments.sort();
+        attachments.dedup();
+        commit = commit.with_committed_attachments(attachments);
         self.after_commit = AfterCommit {
             state: after_turn.map(|after_turn| after_turn.state),
             finalized: finished
