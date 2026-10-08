@@ -35,11 +35,24 @@ async fn observation_get_preserves_config(path: &str) {
     drop(config);
     drop(session);
     let store = Arc::clone(&state.session_store_factory);
-    let before = store
-        .load_session_head_meta(&session_id)
-        .await
-        .expect("read the head")
-        .expect("the session has a head");
+    // Applying the transaction settles before its plugin notification is
+    // delivered and retired by another head commit. Take the read route's
+    // baseline after that setup write, so it cannot race the GET.
+    let before = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let head = store
+                .load_session_head_meta(&session_id)
+                .await
+                .expect("read the head")
+                .expect("the session has a head");
+            if head.config.undelivered_change.is_none() {
+                break head;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the engine retires the delivered config change");
     assert_eq!(
         before
             .config
