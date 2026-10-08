@@ -741,6 +741,7 @@ pub(crate) async fn apply_runtime_commit_tx(
         crate::session_runs::write_run_terminal_conn(
             &mut *tx,
             &write.into_terminal(commit.session_id.clone(), plan.next_head_revision(), now),
+            chunk_size,
         )
         .await?;
     }

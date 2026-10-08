@@ -22,13 +22,15 @@ pub enum WindowSelector {
     Current,
     /// The head a turn was admitted on (FIG-3682).
     Admitted(SessionHeadRef),
+    /// The window recorded atomically with this run's terminal (D-RUNREPORT).
+    Terminal(TurnId),
 }
 
 /// One session's current frame, read in one snapshot (ADR 0112 §5).
 ///
 /// `window` holds exactly the rows from the frame's `FrameOpen` to the
 /// selected leaf, anchored by [`SessionGraph::anchor`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct SessionWindowRead {
     pub session_id: SessionId,
@@ -471,11 +473,15 @@ pub trait SessionHistoryStore: Send + Sync {
     ///   [`StoreError::TurnBaseNotRetained`].
     /// - `config` is the head's when the frame is the head's current frame,
     ///   and the frame's `FrameOpen` config otherwise.
+    /// - `Terminal(run)` answers the bounded window recorded in the run's
+    ///   terminal transaction, including its config and hydrated checkpoint.
+    ///   Later head writes and revision retention cannot change it. `None`
+    ///   means the run has no recorded window (an unsettled or deleted run).
     /// - Rows are validated as one anchored chain (§5), and a violation is
     ///   [`StoreError::InvalidWindowAnchor`] or
     ///   [`StoreError::StoredDataCorrupt`], never a smaller window.
     ///
-    /// `Ok(None)` means the session has no head row, under `Current` only. A
+    /// Under `Current`, `Ok(None)` means the session has no head row. A
     /// head with no leaf answers an empty, unanchored window.
     async fn load_session_window(
         &self,

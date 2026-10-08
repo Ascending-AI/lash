@@ -35,8 +35,13 @@ crate::statements! {
         /// transaction, and a zero row count means another writer won.
         write_terminal = "UPDATE session_runs
              SET terminal_kind = ?3, terminal_cause_json = ?4,
-                 terminal_head_revision = ?5, terminal_at_ms = ?6
+                 terminal_head_revision = ?5, terminal_at_ms = ?6, terminal_window_json = ?7
              WHERE session_id = ?1 AND run = ?2 AND terminal_kind IS NULL";
+
+        /// The bounded window committed with the terminal, independent of
+        /// the current head and revision retention.
+        select_terminal_window = "SELECT terminal_window_json FROM session_runs
+             WHERE session_id = ?1 AND run = ?2 AND terminal_kind IS NOT NULL";
 
         /// The runs of session `?1` without terminal evidence, in run
         /// order: what its close ends.

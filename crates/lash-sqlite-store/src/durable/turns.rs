@@ -85,7 +85,11 @@ fn encoding(error: &lash_core_execution::StoreError) -> DurableError {
     })
 }
 
-pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite) -> Answer<()> {
+pub(super) fn apply(
+    tx: &crate::conn::FencedTx<'_>,
+    commit: &Committing<'_>,
+    write: &TurnWrite,
+) -> Answer<()> {
     match write {
         TurnWrite::Admit {
             session,
@@ -238,6 +242,9 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                         stored,
                         head_revision.map(integer::<i64>).transpose()?,
                         commit.now.0,
+                        crate::session_runs::terminal_window_json(tx, session).map_err(
+                            |error| rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                        )?,
                     ],
                     |_| Ok(()),
                 )

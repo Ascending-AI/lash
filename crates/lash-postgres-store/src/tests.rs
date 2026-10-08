@@ -1414,3 +1414,50 @@ async fn durable_labels_observe_physical_cost_and_group_members() {
         assert_eq!(observed.histogram_count(name), 2, "{name}");
     }
 }
+
+/// D-RUNREPORT: terminal windows survive later head writes on PostgreSQL.
+#[tokio::test]
+async fn a_terminal_window_is_unchanged_by_later_commits() {
+    let database_url = crate::testing::required_database_url();
+    let database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("connect");
+    let (session, store) = persisted_record_decode_store(&storage, "terminal-window").await;
+    let run = TurnId::fixture("terminal-window");
+    store
+        .end_command_run(&session, &run, 1)
+        .await
+        .expect("terminal");
+    let first = store
+        .load_session_window(
+            &session,
+            lash_core_execution::store::WindowSelector::Terminal(run.clone()),
+        )
+        .await
+        .expect("terminal window")
+        .expect("terminal has a window");
+    let mut later = lash_core_execution::store::window_state(
+        first.clone(),
+        lash_core_execution::FleetFormat::current(),
+    )
+    .expect("stored state")
+    .state;
+    later.turn_index += 1;
+    store
+        .commit_runtime_state(lash_core_execution::RuntimeCommit::persisted_state_for_test(&later))
+        .await
+        .expect("later commit");
+    let again = store
+        .load_session_window(
+            &session,
+            lash_core_execution::store::WindowSelector::Terminal(run),
+        )
+        .await
+        .expect("terminal window")
+        .expect("terminal has a window");
+    assert_eq!(
+        serde_json::to_string(&first).expect("serialize"),
+        serde_json::to_string(&again).expect("serialize")
+    );
+}

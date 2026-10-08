@@ -454,6 +454,7 @@ table lash_session_runs
   column terminal_cause_json text nullable
   column terminal_head_revision bigint nullable
   column terminal_kind text nullable
+  column terminal_window_json text nullable
   unique (session_id) where (admission_json is not null) and (terminal_kind is null)
   primary-key (session_id, run)
 table lash_session_scope_ends

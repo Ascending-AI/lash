@@ -277,12 +277,12 @@ async fn put_checkpoint_blobs_tx(
 }
 
 async fn get_blob_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     blob_ref: &BlobRef,
 ) -> Result<Option<Vec<u8>>, StoreError> {
     sqlx::query_scalar(crate::blobs::blob_sql().shared.select_content.sql())
         .bind(blob_ref.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)
 }
@@ -350,7 +350,7 @@ async fn lock_checkpoint_blobs_tx(
 }
 
 async fn checkpoint_component_bodies_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     manifest: &SessionCheckpoint,
     chunk_size: usize,
 ) -> Result<std::collections::HashMap<String, std::sync::Arc<[u8]>>, StoreError> {
@@ -369,7 +369,7 @@ async fn checkpoint_component_bodies_tx(
                 .sql(),
         )
         .bind(chunk)
-        .fetch_all(crate::observed_sql::executor(&mut **tx))
+        .fetch_all(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
         for row in rows {
@@ -461,7 +461,7 @@ pub(crate) async fn put_checkpoint_tx(
 /// `fleet` is the store's recorded `F`: the manifest and its component
 /// encodings admit the `[N-1, N]` reader window `F` names (FIG-3796).
 pub(crate) async fn get_checkpoint_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     blob_ref: &BlobRef,
     fleet: lash_core_execution::FleetFormat,
     chunk_size: usize,
@@ -506,7 +506,7 @@ pub(crate) async fn get_checkpoint_tx(
 /// `fleet` is the store's recorded `F`: the head-meta JSON admits the
 /// `[N-1, N]` reader window `F` names (FIG-3796).
 pub(crate) async fn load_session_head_meta_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     for_update: bool,
     fleet: lash_core_execution::FleetFormat,
@@ -518,7 +518,7 @@ pub(crate) async fn load_session_head_meta_tx(
     };
     let row = sqlx::query(sql)
         .bind(session_id.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     decode_session_head_meta_row(session_id, row, fleet)

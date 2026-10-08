@@ -1405,25 +1405,9 @@ pub(crate) fn apply_session_checkpoint(
 /// current frame (§9). No resident copy of a durable fact is preserved. The
 /// window names the session in `RuntimeSessionState::session_id`.
 ///
-/// A head no commit has given a graph gets its initial frame here, dated by
-/// the wall clock: the state is a runtime's, about to write that frame. A
-/// read that answers what the store holds adopts through
-/// [`adopt_stored_head`] instead.
+/// A head without a committed graph stays without a frame. Adoption is a
+/// read of durable facts; the first graph write initialises its frame.
 pub fn adopt_durable_head(
-    state: &mut RuntimeSessionState,
-    head: crate::store::SessionWindowRead,
-    fleet_format: crate::store::FleetFormat,
-) -> Result<(), crate::StoreError> {
-    adopt_stored_head(state, head, fleet_format)?;
-    // The config is already adopted, so a checkpointless graph's initial
-    // frame captures it.
-    state.ensure_agent_frame_initialized();
-    Ok(())
-}
-
-/// [`adopt_durable_head`] without the initial frame: `state` is a function
-/// of `head` alone, so a head without a graph leaves it without a frame.
-pub(crate) fn adopt_stored_head(
     state: &mut RuntimeSessionState,
     head: crate::store::SessionWindowRead,
     fleet_format: crate::store::FleetFormat,

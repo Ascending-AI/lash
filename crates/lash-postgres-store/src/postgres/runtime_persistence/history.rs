@@ -36,7 +36,7 @@ pub(crate) async fn read_tx(store: &PostgresStore) -> Result<PgTx<'_>, StoreErro
     Ok(tx)
 }
 
-async fn check_live(tx: &mut PgTx<'_>, session_id: &SessionId) -> Result<(), StoreError> {
+async fn check_live(tx: &mut sqlx::PgConnection, session_id: &SessionId) -> Result<(), StoreError> {
     lash_core_execution::store::validate_session_id(session_id)?;
     let deleted: bool = sqlx::query_scalar(
         crate::session_sql::session_sql()
@@ -45,7 +45,7 @@ async fn check_live(tx: &mut PgTx<'_>, session_id: &SessionId) -> Result<(), Sto
             .sql(),
     )
     .bind(session_id.as_str())
-    .fetch_one(&mut **tx)
+    .fetch_one(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
     if deleted {
@@ -114,12 +114,12 @@ const OWNER_EXIT: &str = "SELECT low.node_id, low.generation, low.parent_node_id
 /// The live head leaf of `session_id`, where [`head_reaches`] starts. `None`
 /// when the session has no head row or its head has no live leaf.
 pub(super) async fn head_leaf_path_node(
-    tx: &mut PgTx<'_>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
 ) -> Result<Option<PathNode>, StoreError> {
     sqlx::query_as::<_, (String, String, i64)>(HEAD_LEAF_PATH_NODE)
         .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
         .map(|(node_id, owner, generation)| {
@@ -132,10 +132,13 @@ pub(super) async fn head_leaf_path_node(
         .transpose()
 }
 
-async fn owner_exit(tx: &mut PgTx<'_>, owner: &SessionId) -> Result<OwnerExit, StoreError> {
+async fn owner_exit(
+    tx: &mut sqlx::PgConnection,
+    owner: &SessionId,
+) -> Result<OwnerExit, StoreError> {
     let Some(row) = sqlx::query(OWNER_EXIT)
         .bind(owner.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
     else {
@@ -182,7 +185,7 @@ async fn owner_exit(tx: &mut PgTx<'_>, owner: &SessionId) -> Result<OwnerExit, S
 /// edge authority). The fork-lineage ceilings that selected the candidate
 /// are never consulted.
 pub(super) async fn head_reaches(
-    tx: &mut PgTx<'_>,
+    tx: &mut sqlx::PgConnection,
     head_leaf: Option<PathNode>,
     candidate: PathNode,
 ) -> Result<bool, StoreError> {
@@ -207,20 +210,20 @@ fn row_path_node(row: &PgRow) -> Result<PathNode, StoreError> {
 }
 
 async fn readable_row(
-    tx: &mut PgTx<'_>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     node_id: &str,
 ) -> Result<Option<PgRow>, StoreError> {
     sqlx::query(READABLE_NODE)
         .bind(node_id)
         .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)
 }
 
 async fn lineage_stamp(
-    tx: &mut PgTx<'_>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
 ) -> Result<LineageStamp, StoreError> {
     let rows = sqlx::query(
@@ -230,7 +233,7 @@ async fn lineage_stamp(
             .sql(),
     )
     .bind(session_id.as_str())
-    .fetch_all(&mut **tx)
+    .fetch_all(&mut *tx)
     .await
     .map_err(store_sqlx_error)?;
     let pairs = rows
@@ -250,14 +253,14 @@ async fn lineage_stamp(
 }
 
 async fn missing_anchor(
-    tx: &mut PgTx<'_>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     node_id: &str,
 ) -> Result<StoreError, StoreError> {
     let tombstoned: Option<bool> =
         sqlx::query_scalar("SELECT tombstoned FROM lash_graph_nodes WHERE node_id = $1")
             .bind(node_id)
-            .fetch_optional(&mut **tx)
+            .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
     Ok(StoreError::HistoryAnchorUnavailable {
@@ -271,6 +274,220 @@ async fn missing_anchor(
     })
 }
 
+pub(crate) async fn window_conn(
+    conn: &mut sqlx::PgConnection,
+    session_id: &SessionId,
+    selector: WindowSelector,
+    fleet: lash_core_execution::FleetFormat,
+    chunk_size: usize,
+    #[cfg(any(test, feature = "testing"))] decoded: Option<&std::sync::atomic::AtomicU64>,
+) -> Result<Option<SessionWindowRead>, StoreError> {
+    check_live(conn, session_id).await?;
+    if let WindowSelector::Terminal(run) = &selector {
+        let json: Option<String> = sqlx::query_scalar(
+            super::super::session_runs::session_runs_sql()
+                .runs
+                .select_terminal_window
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .bind(run.as_str())
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?
+        .flatten();
+        return json
+            .map(|json| {
+                serde_json::from_str(&json)
+                    .map_err(|error| corrupt("RunTerminalWindow", error.to_string()))
+            })
+            .transpose();
+    }
+    read_session_state_version_tx(conn, session_id, false, fleet).await?;
+    let Some(meta) = load_session_head_meta_tx(conn, session_id, false, fleet).await? else {
+        return match selector {
+            WindowSelector::Current | WindowSelector::Terminal(_) => Ok(None),
+            WindowSelector::Admitted(base) => Err(StoreError::TurnBaseNotRetained {
+                revision: base.revision,
+            }),
+        };
+    };
+    let admitted = matches!(selector, WindowSelector::Admitted(_));
+    let (revision, leaf, checkpoint_ref) = match selector {
+        WindowSelector::Current | WindowSelector::Terminal(_) => (
+            meta.head_revision,
+            meta.leaf_node_id.clone(),
+            meta.checkpoint_ref.clone(),
+        ),
+        WindowSelector::Admitted(base) => (base.revision, base.leaf, base.checkpoint),
+    };
+    let checkpoint = match checkpoint_ref.as_ref() {
+        Some(reference) => {
+            let checkpoint = get_checkpoint_tx(conn, reference, fleet, chunk_size).await?;
+            if checkpoint.is_none() {
+                // An admitted base may have been collected since; the
+                // current head's own manifest never is, so its absence is
+                // corruption.
+                return Err(if admitted {
+                    StoreError::TurnBaseNotRetained { revision }
+                } else {
+                    StoreError::CheckpointComponentMissing {
+                        key: "manifest".to_string(),
+                        blob_ref: reference.clone(),
+                    }
+                });
+            }
+            checkpoint
+        }
+        None => None,
+    };
+    let mut config = meta.config.clone();
+    let window = if let Some(leaf) = leaf {
+        let leaf_row = readable_row(conn, session_id, leaf.as_str())
+            .await?
+            .ok_or_else(|| {
+                if admitted {
+                    StoreError::TurnBaseNotRetained { revision }
+                } else {
+                    corrupt("SessionGraph", format!("leaf `{leaf}` is not readable"))
+                }
+            })?;
+        if leaf_row.get::<bool, _>("tombstoned") {
+            return Err(if admitted {
+                StoreError::TurnBaseNotRetained { revision }
+            } else {
+                corrupt("SessionGraph", format!("leaf `{leaf}` is tombstoned"))
+            });
+        }
+        // An admitted base names a leaf the head moved on from; it is
+        // this session's base only while the head still reaches it.
+        if admitted {
+            let head_leaf = head_leaf_path_node(conn, session_id).await?;
+            if !head_reaches(conn, head_leaf, row_path_node(&leaf_row)?).await? {
+                return Err(StoreError::TurnBaseNotRetained { revision });
+            }
+        }
+        let leaf_generation: i64 = leaf_row.get("generation");
+        let frame_id: String = leaf_row.get("frame_node_id");
+        let frame_row = readable_row(conn, session_id, &frame_id)
+            .await?
+            .ok_or_else(|| {
+                corrupt(
+                    "SessionGraph",
+                    format!("frame `{frame_id}` is not readable"),
+                )
+            })?;
+        if frame_row.get::<bool, _>("tombstoned") {
+            return Err(corrupt(
+                "SessionGraph",
+                format!("frame `{frame_id}` is tombstoned"),
+            ));
+        }
+        let first_generation: i64 = frame_row.get("generation");
+        if first_generation < 0 || first_generation > leaf_generation {
+            return Err(corrupt(
+                "SessionGraph",
+                "frame generation exceeds leaf generation",
+            ));
+        }
+        let rows = sqlx::query(WINDOW_ROWS)
+            .bind(session_id.as_str())
+            .bind(first_generation)
+            .bind(leaf_generation)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(store_sqlx_error)?;
+        let mut nodes = Vec::with_capacity(rows.len());
+        for (offset, row) in rows.into_iter().enumerate() {
+            let node_id: String = row.get("node_id");
+            let parent: Option<String> = row.get("parent_node_id");
+            let body: String = row.get("node_json");
+            let body_bytes: i64 = row.get("body_bytes");
+            if body_bytes < 0 || usize::try_from(body_bytes).ok() != Some(body.len()) {
+                return Err(corrupt(
+                    "SessionGraph",
+                    format!("body_bytes differs at `{node_id}`"),
+                ));
+            }
+            let generation: i64 = row.get("generation");
+            if generation != first_generation + i64::try_from(offset).unwrap_or(i64::MAX) {
+                return Err(corrupt(
+                    "SessionGraph",
+                    format!("generation gap at `{node_id}`"),
+                ));
+            }
+            if row.get::<String, _>("frame_node_id") != frame_id {
+                return Err(StoreError::InvalidWindowAnchor {
+                    frame_node_id: frame_id.clone().try_into()?,
+                    violation:
+                        lash_core_execution::store::WindowAnchorViolation::ForeignFramePointer,
+                });
+            }
+            let node =
+                SessionNodeRecord::decode_storage_body_for_fleet(node_id, parent, &body, fleet)
+                    .map_err(|error| corrupt("SessionGraph node", error.to_string()))?;
+            #[cfg(any(test, feature = "testing"))]
+            if let Some(decoded) = decoded {
+                decoded.fetch_add(1, Ordering::Relaxed);
+            }
+            nodes.push(node);
+        }
+        let external_parent: Option<String> = frame_row.get("parent_node_id");
+        let previous_frame_node_id = match external_parent.as_deref() {
+            Some(parent) => {
+                let row = readable_row(conn, session_id, parent)
+                    .await?
+                    .ok_or_else(|| corrupt("SessionGraph", "frame parent is missing"))?;
+                if row.get::<bool, _>("tombstoned")
+                    || row.get::<i64, _>("generation") != first_generation - 1
+                {
+                    return Err(corrupt(
+                        "SessionGraph",
+                        "frame parent is not the preceding live node",
+                    ));
+                }
+                lash_core_execution::FrameNodeId::new(row.get::<String, _>("frame_node_id"))
+                    .map(Some)
+                    .map_err(|error| corrupt("SessionGraph", error.to_string()))?
+            }
+            None => None,
+        };
+        let frame_node_id = lash_core_execution::FrameNodeId::new(frame_id.clone())
+            .map_err(|error| corrupt("SessionGraph", error.to_string()))?;
+        let anchor = lash_core_execution::session_graph::WindowAnchor {
+            frame_node_id,
+            generation: u64_from_sql("SessionGraph", "generation", first_generation)?,
+            external_parent: external_parent.map(TryInto::try_into).transpose()?,
+            previous_frame_node_id,
+        };
+        let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
+        if meta
+            .current_frame_node_id
+            .as_ref()
+            .map(|frame| frame.as_str())
+            != Some(frame_id.as_str())
+        {
+            config = graph
+                .nodes
+                .first()
+                .and_then(|node| node.frame_config())
+                .ok_or_else(|| corrupt("SessionGraph", "frame has no config"))?;
+        }
+        graph
+    } else {
+        lash_core_execution::SessionGraph::default()
+    };
+    let read = SessionWindowRead::new(
+        session_id.clone(),
+        revision,
+        config,
+        window,
+        checkpoint_ref,
+        checkpoint,
+    )?;
+    Ok(Some(read))
+}
+
 #[async_trait::async_trait]
 impl SessionHistoryStore for PostgresStore {
     async fn load_session_window(
@@ -279,202 +496,18 @@ impl SessionHistoryStore for PostgresStore {
         selector: WindowSelector,
     ) -> Result<Option<SessionWindowRead>, StoreError> {
         let mut tx = read_tx(self).await?;
-        check_live(&mut tx, session_id).await?;
-        read_session_state_version_tx(&mut tx, session_id, false, self.fence.fleet()).await?;
-        let Some(meta) =
-            load_session_head_meta_tx(&mut tx, session_id, false, self.fence.fleet()).await?
-        else {
-            return match selector {
-                WindowSelector::Current => Ok(None),
-                WindowSelector::Admitted(base) => Err(StoreError::TurnBaseNotRetained {
-                    revision: base.revision,
-                }),
-            };
-        };
-        let admitted = matches!(selector, WindowSelector::Admitted(_));
-        let (revision, leaf, checkpoint_ref) = match selector {
-            WindowSelector::Current => (
-                meta.head_revision,
-                meta.leaf_node_id.clone(),
-                meta.checkpoint_ref.clone(),
-            ),
-            WindowSelector::Admitted(base) => (base.revision, base.leaf, base.checkpoint),
-        };
-        let checkpoint = match checkpoint_ref.as_ref() {
-            Some(reference) => {
-                let checkpoint = get_checkpoint_tx(
-                    &mut tx,
-                    reference,
-                    self.fence.fleet(),
-                    self.pools.maintenance.checkpoint_ref_chunk as usize,
-                )
-                .await?;
-                if checkpoint.is_none() {
-                    // An admitted base may have been collected since; the
-                    // current head's own manifest never is, so its absence is
-                    // corruption.
-                    return Err(if admitted {
-                        StoreError::TurnBaseNotRetained { revision }
-                    } else {
-                        StoreError::CheckpointComponentMissing {
-                            key: "manifest".to_string(),
-                            blob_ref: reference.clone(),
-                        }
-                    });
-                }
-                checkpoint
-            }
-            None => None,
-        };
-        let mut config = meta.config.clone();
-        let window = if let Some(leaf) = leaf {
-            let leaf_row = readable_row(&mut tx, session_id, leaf.as_str())
-                .await?
-                .ok_or_else(|| {
-                    if admitted {
-                        StoreError::TurnBaseNotRetained { revision }
-                    } else {
-                        corrupt("SessionGraph", format!("leaf `{leaf}` is not readable"))
-                    }
-                })?;
-            if leaf_row.get::<bool, _>("tombstoned") {
-                return Err(if admitted {
-                    StoreError::TurnBaseNotRetained { revision }
-                } else {
-                    corrupt("SessionGraph", format!("leaf `{leaf}` is tombstoned"))
-                });
-            }
-            // An admitted base names a leaf the head moved on from; it is
-            // this session's base only while the head still reaches it.
-            if admitted {
-                let head_leaf = head_leaf_path_node(&mut tx, session_id).await?;
-                if !head_reaches(&mut tx, head_leaf, row_path_node(&leaf_row)?).await? {
-                    return Err(StoreError::TurnBaseNotRetained { revision });
-                }
-            }
-            let leaf_generation: i64 = leaf_row.get("generation");
-            let frame_id: String = leaf_row.get("frame_node_id");
-            let frame_row = readable_row(&mut tx, session_id, &frame_id)
-                .await?
-                .ok_or_else(|| {
-                    corrupt(
-                        "SessionGraph",
-                        format!("frame `{frame_id}` is not readable"),
-                    )
-                })?;
-            if frame_row.get::<bool, _>("tombstoned") {
-                return Err(corrupt(
-                    "SessionGraph",
-                    format!("frame `{frame_id}` is tombstoned"),
-                ));
-            }
-            let first_generation: i64 = frame_row.get("generation");
-            if first_generation < 0 || first_generation > leaf_generation {
-                return Err(corrupt(
-                    "SessionGraph",
-                    "frame generation exceeds leaf generation",
-                ));
-            }
-            let rows = sqlx::query(WINDOW_ROWS)
-                .bind(session_id.as_str())
-                .bind(first_generation)
-                .bind(leaf_generation)
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            let mut nodes = Vec::with_capacity(rows.len());
-            for (offset, row) in rows.into_iter().enumerate() {
-                let node_id: String = row.get("node_id");
-                let parent: Option<String> = row.get("parent_node_id");
-                let body: String = row.get("node_json");
-                let body_bytes: i64 = row.get("body_bytes");
-                if body_bytes < 0 || usize::try_from(body_bytes).ok() != Some(body.len()) {
-                    return Err(corrupt(
-                        "SessionGraph",
-                        format!("body_bytes differs at `{node_id}`"),
-                    ));
-                }
-                let generation: i64 = row.get("generation");
-                if generation != first_generation + i64::try_from(offset).unwrap_or(i64::MAX) {
-                    return Err(corrupt(
-                        "SessionGraph",
-                        format!("generation gap at `{node_id}`"),
-                    ));
-                }
-                if row.get::<String, _>("frame_node_id") != frame_id {
-                    return Err(StoreError::InvalidWindowAnchor {
-                        frame_node_id: frame_id.clone().try_into()?,
-                        violation:
-                            lash_core_execution::store::WindowAnchorViolation::ForeignFramePointer,
-                    });
-                }
-                let node = SessionNodeRecord::decode_storage_body_for_fleet(
-                    node_id,
-                    parent,
-                    &body,
-                    self.fence.fleet(),
-                )
-                .map_err(|error| corrupt("SessionGraph node", error.to_string()))?;
-                #[cfg(any(test, feature = "testing"))]
-                self.decoded_graph_node_bodies
-                    .fetch_add(1, Ordering::Relaxed);
-                nodes.push(node);
-            }
-            let external_parent: Option<String> = frame_row.get("parent_node_id");
-            let previous_frame_node_id = match external_parent.as_deref() {
-                Some(parent) => {
-                    let row = readable_row(&mut tx, session_id, parent)
-                        .await?
-                        .ok_or_else(|| corrupt("SessionGraph", "frame parent is missing"))?;
-                    if row.get::<bool, _>("tombstoned")
-                        || row.get::<i64, _>("generation") != first_generation - 1
-                    {
-                        return Err(corrupt(
-                            "SessionGraph",
-                            "frame parent is not the preceding live node",
-                        ));
-                    }
-                    lash_core_execution::FrameNodeId::new(row.get::<String, _>("frame_node_id"))
-                        .map(Some)
-                        .map_err(|error| corrupt("SessionGraph", error.to_string()))?
-                }
-                None => None,
-            };
-            let frame_node_id = lash_core_execution::FrameNodeId::new(frame_id.clone())
-                .map_err(|error| corrupt("SessionGraph", error.to_string()))?;
-            let anchor = lash_core_execution::session_graph::WindowAnchor {
-                frame_node_id,
-                generation: u64_from_sql("SessionGraph", "generation", first_generation)?,
-                external_parent: external_parent.map(TryInto::try_into).transpose()?,
-                previous_frame_node_id,
-            };
-            let graph = lash_core_execution::SessionGraph::from_window(nodes, leaf, anchor)?;
-            if meta
-                .current_frame_node_id
-                .as_ref()
-                .map(|frame| frame.as_str())
-                != Some(frame_id.as_str())
-            {
-                config = graph
-                    .nodes
-                    .first()
-                    .and_then(|node| node.frame_config())
-                    .ok_or_else(|| corrupt("SessionGraph", "frame has no config"))?;
-            }
-            graph
-        } else {
-            lash_core_execution::SessionGraph::default()
-        };
-        let read = SessionWindowRead::new(
-            session_id.clone(),
-            revision,
-            config,
-            window,
-            checkpoint_ref,
-            checkpoint,
-        )?;
+        let read = window_conn(
+            &mut tx,
+            session_id,
+            selector,
+            self.fence.fleet(),
+            self.pools.maintenance.checkpoint_ref_chunk as usize,
+            #[cfg(any(test, feature = "testing"))]
+            Some(&self.decoded_graph_node_bodies),
+        )
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Some(read))
+        Ok(read)
     }
 
     async fn load_ancestors(

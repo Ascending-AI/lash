@@ -190,7 +190,11 @@ impl LashRuntime {
                 }
             }
         }
-        state.ensure_agent_frame_initialized();
+        // Store-backed opens expose only committed history. The first graph
+        // write initialises its frame; an open must not date one by the clock.
+        if services.store.is_none() {
+            state.ensure_agent_frame_initialized();
+        }
         if state.effective_policy().model.is_none() {
             return Err(SessionError::LlmProfileUnconfigured {
                 session_id: state.session_id.clone(),

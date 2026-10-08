@@ -732,7 +732,20 @@ pub(super) async fn durable_report(
                 format!("turn report token usage overflows {}", overflow.counter()),
             ))
         })?;
-    let state = ctx.session_snapshot().await?;
+    let state = lash_core::store::load_session_window_state(
+        &ctx.parts.store,
+        lash_core::store::WindowSelector::Terminal(run.clone()),
+    )
+    .await
+    .map_err(EmbedError::Store)?
+    .ok_or_else(|| {
+        EmbedError::Store(lash_core::StoreError::StoredDataCorrupt {
+            record_kind: "RunTerminalWindow",
+            message: format!("settled run `{run}` has no recorded session window"),
+        })
+    })?
+    .state
+    .to_snapshot();
     let (tool_calls, omitted) =
         lash_core::runtime::durable::services::RuntimeTurnServices::recorded_tool_calls(
             &ctx.parts.effect_host,

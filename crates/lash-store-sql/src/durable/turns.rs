@@ -66,7 +66,7 @@ crate::statements! {
         /// unfinished.
         end_run = "UPDATE session_runs
              SET terminal_kind = ?3, terminal_cause_json = ?4,
-                 terminal_head_revision = ?5, terminal_at_ms = ?6
+                 terminal_head_revision = ?5, terminal_at_ms = ?6, terminal_window_json = ?7
              WHERE session_id = ?1 AND run = ?2
                AND admission_json IS NOT NULL AND terminal_kind IS NULL
              RETURNING run";

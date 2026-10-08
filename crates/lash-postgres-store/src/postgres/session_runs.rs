@@ -100,6 +100,32 @@ pub(crate) async fn run_terminal_conn(
     .map(Some)
 }
 
+/// Capture the current bounded window in the terminal writer's transaction.
+/// Its hydrated components keep report reads independent of later GC.
+pub(crate) async fn terminal_window_json(
+    conn: &mut PgConnection,
+    session: &SessionId,
+    chunk_size: usize,
+) -> Result<Option<String>, StoreError> {
+    super::runtime_persistence::history::window_conn(
+        conn,
+        session,
+        lash_core_execution::store::WindowSelector::Current,
+        lash_core_execution::FleetFormat::current(),
+        chunk_size,
+        #[cfg(any(test, feature = "testing"))]
+        None,
+    )
+    .await?
+    .map(|window| {
+        serde_json::to_string(&window).map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "RunTerminalWindow",
+            message: error.to_string(),
+        })
+    })
+    .transpose()
+}
+
 /// Write `terminal` in the caller's transaction, deciding it against the
 /// stored evidence first: the same terminal is a no-op, another one is
 /// [`StoreError::RunAlreadyTerminal`].
@@ -115,6 +141,7 @@ pub(crate) async fn run_terminal_conn(
 pub(crate) async fn write_run_terminal_conn(
     conn: &mut PgConnection,
     terminal: &RunTerminal,
+    chunk_size: usize,
 ) -> Result<(), StoreError> {
     let stored = run_terminal_conn(conn, &terminal.session_id, &terminal.run).await?;
     if decide_run_terminal_write(stored.as_ref(), terminal)?
@@ -130,6 +157,11 @@ pub(crate) async fn write_run_terminal_conn(
         .execute(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?;
+    let window = if matches!(terminal.cause, RunTerminalCause::SessionDeleted { .. }) {
+        None
+    } else {
+        terminal_window_json(conn, &terminal.session_id, chunk_size).await?
+    };
     let columns = terminal.to_stored()?;
     let written = sqlx::query(sql.runs.write_terminal.sql())
         .bind(terminal.session_id.as_str())
@@ -143,6 +175,7 @@ pub(crate) async fn write_run_terminal_conn(
                 .transpose()?,
         )
         .bind(sql_i64("terminal instant", columns.at_ms)?)
+        .bind(window)
         .execute(crate::observed_sql::executor(&mut *conn))
         .await
         .map_err(store_sqlx_error)?
@@ -270,6 +303,7 @@ pub(crate) async fn end_refused_run_tx(
     run: &TurnId,
     refusal: &lash_core_execution::RuntimeError,
     at_ms: u64,
+    chunk_size: usize,
 ) -> Result<RunEndOutcome, StoreError> {
     let target = lash_core_execution::engine::RunRef {
         session: session_id.clone(),
@@ -282,7 +316,7 @@ pub(crate) async fn end_refused_run_tx(
             let cause = RunTerminalCause::Refused {
                 refusal: refusal.into(),
             };
-            write_unanswered_run_end_tx(tx, &target, at_ms, cause)
+            write_unanswered_run_end_tx(tx, &target, at_ms, cause, chunk_size)
                 .await
                 .map(RunEndOutcome::Ended)
         }
@@ -297,6 +331,7 @@ pub(crate) async fn end_command_run_tx(
     session: &SessionId,
     run: &TurnId,
     at_ms: u64,
+    chunk_size: usize,
 ) -> Result<RunEndOutcome, StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session).await?;
     if let Some(terminal) = run_terminal_conn(&mut *tx, session, run).await? {
@@ -309,7 +344,7 @@ pub(crate) async fn end_command_run_tx(
         head_revision: None,
         at_ms,
     };
-    write_run_terminal_conn(&mut *tx, &terminal).await?;
+    write_run_terminal_conn(&mut *tx, &terminal, chunk_size).await?;
     Ok(RunEndOutcome::Ended(terminal))
 }
 
@@ -356,6 +391,7 @@ async fn write_unanswered_run_end_tx(
     target: &lash_core_execution::engine::RunRef,
     at_ms: u64,
     cause: RunTerminalCause,
+    chunk_size: usize,
 ) -> Result<RunTerminal, StoreError> {
     let session = &target.session;
     let run = &target.run;
@@ -398,7 +434,7 @@ async fn write_unanswered_run_end_tx(
     // The terminal write applies the run's cancel request's `undelivered`
     // disposition to open input addressed to a turn the run ends
     // (FIG-3927 §2.4, FIG-3946).
-    write_run_terminal_conn(&mut *tx, &terminal).await?;
+    write_run_terminal_conn(&mut *tx, &terminal, chunk_size).await?;
     Ok(terminal)
 }
 
@@ -733,6 +769,7 @@ pub(crate) async fn begin_session_close_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     at_ms: u64,
+    chunk_size: usize,
 ) -> Result<Option<ControlIntent>, StoreError> {
     crate::runtime_persistence::lock_session_history_mutation_tx(tx, session_id).await?;
     if let Some(intent) = close_session_intent_conn(tx, session_id).await? {
@@ -780,6 +817,7 @@ pub(crate) async fn begin_session_close_tx(
                     head_revision: None,
                     at_ms,
                 },
+                chunk_size,
             )
             .await?;
         }
@@ -856,7 +894,15 @@ impl RunStore for PostgresStore {
         lash_core_execution::store::validate_session_id(session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
-        let end = end_refused_run_tx(&mut tx, session_id, run, refusal, at_ms).await?;
+        let end = end_refused_run_tx(
+            &mut tx,
+            session_id,
+            run,
+            refusal,
+            at_ms,
+            self.pools.maintenance.checkpoint_ref_chunk as usize,
+        )
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(end)
     }
@@ -870,7 +916,14 @@ impl RunStore for PostgresStore {
         lash_core_execution::store::validate_session_id(session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool, &self.observer).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
-        let end = end_command_run_tx(&mut tx, session_id, run, at_ms).await?;
+        let end = end_command_run_tx(
+            &mut tx,
+            session_id,
+            run,
+            at_ms,
+            self.pools.maintenance.checkpoint_ref_chunk as usize,
+        )
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(end)
     }

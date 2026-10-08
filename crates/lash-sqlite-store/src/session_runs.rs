@@ -108,6 +108,27 @@ pub(crate) fn run_terminal_conn(
     .map(Some)
 }
 
+/// Capture the current bounded window in the terminal writer's transaction.
+/// Its hydrated components keep report reads independent of later GC.
+pub(crate) fn terminal_window_json(
+    conn: &crate::conn::FencedTx<'_>,
+    session: &SessionId,
+) -> Result<Option<String>, StoreError> {
+    crate::history::window(
+        conn,
+        session,
+        lash_core_execution::store::WindowSelector::Current,
+        lash_core_execution::FleetFormat::current(),
+        &std::sync::atomic::AtomicU64::new(0),
+        conn.operational.checkpoint_ref_chunk.get(),
+    )?
+    .map(|window| {
+        serde_json::to_string(&window)
+            .map_err(|error| stored_data_corrupt("RunTerminalWindow", error.to_string()))
+    })
+    .transpose()
+}
+
 /// Write `terminal` in the caller's transaction, deciding it against the
 /// stored evidence first: the same terminal is a no-op, another one is
 /// [`StoreError::RunAlreadyTerminal`].
@@ -121,7 +142,7 @@ pub(crate) fn run_terminal_conn(
 /// evidence holds no park, whatever kind of run it is, so the write that
 /// ends the run clears its park and appends the feed event its cause names.
 pub(crate) fn write_run_terminal_conn(
-    tx: &Connection,
+    tx: &crate::conn::FencedTx<'_>,
     terminal: &RunTerminal,
 ) -> Result<(), StoreError> {
     let stored = run_terminal_conn(tx, &terminal.session_id, &terminal.run)?;
@@ -137,6 +158,11 @@ pub(crate) fn write_run_terminal_conn(
         params![terminal.session_id.as_str(), terminal.run.as_str()],
     )
     .map_err(sqlite_error)?;
+    let window = if matches!(terminal.cause, RunTerminalCause::SessionDeleted { .. }) {
+        None
+    } else {
+        terminal_window_json(tx, &terminal.session_id)?
+    };
     let columns = terminal.to_stored()?;
     let written = crate::conn::cached_execute(
         tx,
@@ -151,6 +177,7 @@ pub(crate) fn write_run_terminal_conn(
                 .map(|revision| sql_i64("terminal head revision", revision))
                 .transpose()?,
             sql_i64("terminal instant", columns.at_ms)?,
+            window,
         ],
     )
     .map_err(sqlite_error)?;
@@ -272,7 +299,7 @@ fn release_run_rows_conn(
 /// (FIG-4018): the same transaction as a lost run's, ending it with the
 /// refusal.
 pub(crate) fn end_refused_run_conn(
-    tx: &Connection,
+    tx: &crate::conn::FencedTx<'_>,
     session_id: &SessionId,
     run: &TurnId,
     refusal: &lash_core_execution::RuntimeError,
@@ -298,7 +325,7 @@ pub(crate) fn end_refused_run_conn(
 /// empty ends (FIG-4202): its row opens and its terminal is written in one
 /// transaction, arming its scope close.
 pub(crate) fn end_command_run_conn(
-    tx: &Connection,
+    tx: &crate::conn::FencedTx<'_>,
     session: &SessionId,
     run: &TurnId,
     at_ms: u64,
@@ -354,7 +381,7 @@ fn unanswered_run_conn(
 
 /// End an open run no commit answered with `cause`.
 fn write_unanswered_run_end_conn(
-    tx: &Connection,
+    tx: &crate::conn::FencedTx<'_>,
     target: &lash_core_execution::engine::RunRef,
     at_ms: u64,
     cause: RunTerminalCause,
@@ -567,7 +594,7 @@ pub(crate) fn admitted_batches_conn(
 /// at head revision `head_revision`: the commit of a run's final physical
 /// turn ends the run (FIG-3600 S7).
 pub(crate) fn write_commit_run_terminal_conn(
-    tx: &Connection,
+    tx: &crate::conn::FencedTx<'_>,
     commit: &lash_core_execution::store::RuntimeCommit,
     head_revision: u64,
     at_ms: u64,
@@ -761,7 +788,7 @@ pub(crate) fn insert_intent_conn(
 ///
 /// [`ControlIntentStore::begin_session_close`]: lash_core_execution::store::ControlIntentStore::begin_session_close
 pub(crate) fn begin_session_close_conn(
-    tx: &Connection,
+    tx: &crate::conn::FencedTx<'_>,
     session_id: &SessionId,
     at_ms: u64,
 ) -> Result<Option<ControlIntent>, StoreError> {

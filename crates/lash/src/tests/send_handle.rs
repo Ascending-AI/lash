@@ -212,6 +212,118 @@ async fn a_reattached_follower_answers_the_same_durable_report() -> Result<()> {
     Ok(())
 }
 
+/// D-RUNREPORT: a terminal owns its state even after another run commits.
+async fn a_durable_report_is_pinned_to_its_terminal() -> Result<()> {
+    for cancelled in [false, true] {
+        let fixture = fixture(1).await?;
+        let session = fixture
+            .core
+            .session(SessionId::fixture("pinned-report"))
+            .created()
+            .await
+            .durable()
+            .await?;
+        let handle = session
+            .send(TurnInput::text(if cancelled { HELD } else { "first" }))
+            .id(crate::TurnId::fixture("first-run"))
+            .await?;
+        let input = handle.input_id().clone();
+        if cancelled {
+            drop(handle);
+            provider_called(&fixture, 1).await;
+            session.attach(input.clone()).cancel().await?;
+            // Consume cancellation's live call activity before the two
+            // durable followers: observed calls belong to their follower.
+            session.attach(input.clone()).output().await?;
+        } else {
+            handle.output().await?;
+        }
+        let first = session.attach(input.clone()).output().await?;
+        session
+            .send(TurnInput::text("later"))
+            .id(crate::TurnId::fixture("later-run"))
+            .await?
+            .output()
+            .await?;
+        let again = session.attach(input).output().await?;
+        assert_eq!(
+            serde_json::to_string(&first.result)?,
+            serde_json::to_string(&again.result)?,
+            "a later commit changed an old run's report (cancelled={cancelled})"
+        );
+    }
+    Ok(())
+}
+
+/// D-RUNREPORT: reading an unchanged graph-less session invents no timestamp.
+async fn graphless_session_reads_are_identical() -> Result<()> {
+    let fixture = fixture(1).await?;
+    let session = fixture
+        .core
+        .session(SessionId::fixture("graphless-read"))
+        .created()
+        .await
+        .durable()
+        .await?;
+    let store = lash_core::store::SessionStore::new(
+        fixture.core.store_factory.clone(),
+        session.session_id().clone(),
+    )?;
+    let first = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("created head");
+    let again = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("created head");
+    assert_eq!(
+        serde_json::to_vec(&first.state.to_snapshot())?,
+        serde_json::to_vec(&again.state.to_snapshot())?,
+        "window reads adopted the wall clock"
+    );
+    let first = session.read().await?.expect("created head").to_snapshot();
+    let again = session.read().await?.expect("created head").to_snapshot();
+    assert_eq!(
+        serde_json::to_vec(&first)?,
+        serde_json::to_vec(&again)?,
+        "read views adopted the wall clock"
+    );
+    let (_, first) = lash_core::runtime::load_durable_observation_head(&store)
+        .await?
+        .expect("created head");
+    let (_, again) = lash_core::runtime::load_durable_observation_head(&store)
+        .await?
+        .expect("created head");
+    assert_eq!(
+        serde_json::to_vec(&first.to_snapshot())?,
+        serde_json::to_vec(&again.to_snapshot())?,
+        "observation reads adopted the wall clock"
+    );
+    let open = fixture
+        .core
+        .session(session.session_id().clone())
+        .open()
+        .await?;
+    let admin = open.admin().state();
+    let first = admin.export().await;
+    let again = admin.export().await;
+    assert!(
+        first.session_graph.nodes.is_empty(),
+        "admin invented an uncommitted frame"
+    );
+    assert_eq!(
+        serde_json::to_vec(&first)?,
+        serde_json::to_vec(&again)?,
+        "admin reads adopted the wall clock"
+    );
+    Ok(())
+}
+
 /// A settled run whose report no execution in this process can still deposit
 /// answers from the store at once: the follower waits for a live report only
 /// while a run here may still deposit one, never on a run that ran elsewhere
@@ -1456,6 +1568,16 @@ macro_rules! send_handle_laws {
     ($engine:ident) => {
         mod $engine {
             use super::*;
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_durable_report_is_pinned_to_its_terminal() -> Result<()> {
+                super::a_durable_report_is_pinned_to_its_terminal().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn graphless_session_reads_are_identical() -> Result<()> {
+                super::graphless_session_reads_are_identical().await
+            }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_run_whose_live_report_is_gone_answers_its_durable_report() -> Result<()> {

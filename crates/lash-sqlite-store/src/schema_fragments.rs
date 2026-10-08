@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS session_runs (
     terminal_kind           TEXT,
     terminal_cause_json     TEXT,
     terminal_head_revision  INTEGER,
+    terminal_window_json TEXT,
     terminal_at_ms          INTEGER,
     PRIMARY KEY (session_id, run),
     CONSTRAINT ck_session_runs_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL)),

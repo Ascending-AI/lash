@@ -262,7 +262,7 @@ pub(crate) async fn enqueue_queued_work_with_outcome_tx(
 }
 
 async fn read_session_state_version_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut sqlx::PgConnection,
     session_id: &SessionId,
     lock: bool,
     fleet: lash_core_execution::FleetFormat,
@@ -279,7 +279,7 @@ async fn read_session_state_version_tx(
     };
     let marker: Option<Option<i32>> = sqlx::query_scalar(statement)
         .bind(session_id.as_str())
-        .fetch_optional(crate::observed_sql::executor(&mut **tx))
+        .fetch_optional(crate::observed_sql::executor(&mut *tx))
         .await
         .map_err(store_sqlx_error)?;
     let Some(marker) = marker else {
@@ -298,7 +298,7 @@ async fn read_session_state_version_tx(
 
 mod admission;
 pub(crate) use admission::{admit_at_checkpoint_postgres, open_session_command_run_postgres};
-mod history;
+pub(crate) mod history;
 mod session_fault;
 pub(crate) use history::read_tx;
 mod ingress_settlement;

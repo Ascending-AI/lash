@@ -31,7 +31,7 @@ pub fn window_state(
 /// Load the view's session at `selector` as runtime state, after checking
 /// that this build can read its session-state version.
 ///
-/// `Ok(None)` means the session has no head row (`Current` only).
+/// `Ok(None)` means the selector has no stored window.
 pub async fn load_session_window_state(
     store: &SessionStore,
     selector: WindowSelector,
@@ -44,34 +44,18 @@ pub async fn load_session_window_state(
     window_state(read, store.fleet_format()).map(Some)
 }
 
-/// The session's current frame as the store holds it, with nothing a load
-/// adds: two reads of an unchanged store answer the same snapshot. A session
-/// no commit has given a graph answers one without a frame, where
-/// [`load_session_window_state`] opens the initial frame a runtime is about
-/// to write and dates it by the wall clock (FIG-5489).
-///
-/// `Ok(None)` means the session has no head row.
+/// The session's current frame as stored, without materialising a frame no
+/// commit wrote. `Ok(None)` means the session has no head row.
 pub async fn load_stored_session_snapshot(
     store: &SessionStore,
 ) -> Result<Option<crate::SessionSnapshot>, StoreError> {
-    store.read_session_state_version().await?;
-    let Some(read) = store.load_session_window(WindowSelector::Current).await? else {
-        return Ok(None);
-    };
-    validate_window_session(store.session_id(), &read)?;
-    let mut state = crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-        read.config.turn_budget,
-        read.config.max_tool_calls,
-        crate::NoProgressBudget::bounded(12),
-    ));
-    crate::runtime::state::adopt_stored_head(&mut state, read, store.fleet_format())?;
-    Ok(Some(state.to_snapshot()))
+    Ok(load_session_window_state(store, WindowSelector::Current)
+        .await?
+        .map(|loaded| loaded.state.to_snapshot()))
 }
 
-/// with its durable session relation.
-///
-/// Failure evidence is not part of the view; it is paged through
-/// [`SessionHistoryStore::load_failure_evidence_page`](super::SessionHistoryStore::load_failure_evidence_page).
+/// The canonical read-only view of the session's current frame and relation.
+/// Failure evidence is paged through the history store separately.
 pub async fn load_session_read_view(
     store: &SessionStore,
 ) -> Result<Option<crate::SessionReadView>, StoreError> {

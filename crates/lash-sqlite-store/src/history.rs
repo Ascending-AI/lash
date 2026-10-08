@@ -240,7 +240,7 @@ fn lineage(conn: &Connection, session: &SessionId) -> Result<LineageStamp, Store
     ))
 }
 
-fn window(
+pub(crate) fn window(
     conn: &Connection,
     session: &SessionId,
     selector: WindowSelector,
@@ -249,9 +249,29 @@ fn window(
     chunk_size: usize,
 ) -> Result<Option<SessionWindowRead>, StoreError> {
     live(conn, session)?;
+    if let WindowSelector::Terminal(run) = &selector {
+        let json: Option<String> = conn
+            .query_row(
+                crate::session_runs::session_runs_sql()
+                    .runs
+                    .select_terminal_window
+                    .sql(),
+                params![session.as_str(), run.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+            .flatten();
+        return json
+            .map(|json| {
+                serde_json::from_str(&json)
+                    .map_err(|error| corrupt("RunTerminalWindow", error.to_string()))
+            })
+            .transpose();
+    }
     let Some(meta) = try_load_session_head_meta_from_conn(conn, session, fleet)? else {
         return match selector {
-            WindowSelector::Current => Ok(None),
+            WindowSelector::Current | WindowSelector::Terminal(_) => Ok(None),
             WindowSelector::Admitted(base) => Err(StoreError::TurnBaseNotRetained {
                 revision: base.revision,
             }),
@@ -259,7 +279,7 @@ fn window(
     };
     let admitted = matches!(selector, WindowSelector::Admitted(_));
     let (revision, leaf, checkpoint_ref) = match selector {
-        WindowSelector::Current => (
+        WindowSelector::Current | WindowSelector::Terminal(_) => (
             meta.head_revision,
             meta.leaf_node_id.clone(),
             meta.checkpoint_ref.clone(),
