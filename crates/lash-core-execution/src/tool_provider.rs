@@ -400,7 +400,7 @@ impl<'run> AttemptContext<'run> {
     ///
     /// A process's children belong to the chain that started the process, not
     /// to the process's own runtime: they carry the chain's
-    /// originator and its wake target, and the execution scope appears on no
+    /// originator, and the execution scope appears on no
     /// record. The in-attempt start path has always read this off the runtime
     /// execution context (`ProcessStartOptions::spawn_provenance`); a leaf
     /// start declares its child before realization, so it reads the same fact
@@ -1269,8 +1269,8 @@ impl<'a> ToolCall<'a> {
 /// per-call timeout: a body that talks to a slow service bounds its own
 /// wait and reports the failure.
 ///
-/// Effects Lash owns — process starts, signals, cancels, events, triggers and
-/// definitions — are not side effects of the body. A body returns them as
+/// Effects Lash owns — process starts, cancels and definitions — are not
+/// side effects of the body. A body returns them as
 /// declared [`ToolIntents`](crate::ToolIntents), which the runtime realizes
 /// once per intent identity after the attempt's outcome is durable, behind
 /// a first-outcome fence keyed by the call id and the intent's index. A

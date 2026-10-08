@@ -13,7 +13,7 @@ mod production;
 pub use production::parked_call_output;
 mod realization;
 mod retry;
-pub use production::{CellCall, CellHostCalls, CellMember, CellMembers, HostCall};
+pub use production::{CellCall, CellMember, CellMembers};
 mod singleton_run;
 
 pub use crate::runtime::process::{
@@ -23,7 +23,7 @@ pub use crate::runtime::process::{
 pub use crate::tool_run::RunCutRefusal;
 pub use admission::{ToolRoundRefusal, admission_failure, admit_tool_round};
 pub use call_run::{AdmittedToolCall, AttemptEnd, CallEnd};
-pub use context::{ToolDispatchContext, ToolTriggerEffectOutcome};
+pub use context::ToolDispatchContext;
 pub use pending_resolver::{LaunchReceipt, model_visible_intent_outcomes};
 pub use realization::{Realization, RealizationReceipt};
 pub use singleton_run::{
@@ -34,11 +34,8 @@ pub use singleton_run::{
 
 pub(crate) use atomic_attempt::AtomicToolAttempt;
 pub use attempt_coordinator::{ToolAttemptLineage, coordinate_tool_invocation};
+pub use context::ToolCallLaunch;
 pub use context::{ToolCallIds, ToolDispatchOutcome, ToolPreparationOutcome};
-#[cfg(feature = "testing")]
-pub use context::{ToolCallLaunch, ToolTriggerOutcomeBuffer};
-#[cfg(not(feature = "testing"))]
-pub use context::{ToolCallLaunch, ToolTriggerOutcomeBuffer};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use execution::coordinate_prepared_tool_call_launch_with_execution_context;
 pub use hooks::finalize_tool_result_with_execution_context;

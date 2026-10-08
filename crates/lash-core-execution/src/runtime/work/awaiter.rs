@@ -69,17 +69,14 @@ impl ProcessRegistryAwaiter {
     pub async fn await_event(
         &self,
         process_id: &ProcessId,
-        event_type: &str,
+        kind: crate::ProcessEventKind,
         after_sequence: u64,
     ) -> Result<ProcessEvent, PluginError> {
-        if let Some(event) = self
-            .read_event(process_id, event_type, after_sequence)
-            .await?
-        {
+        if let Some(event) = self.read_event(process_id, kind, after_sequence).await? {
             return Ok(event);
         }
         self.wait_for(process_id, || {
-            self.read_event(process_id, event_type, after_sequence)
+            self.read_event(process_id, kind, after_sequence)
         })
         .await
     }
@@ -153,7 +150,7 @@ impl ProcessRegistryAwaiter {
     async fn read_event(
         &self,
         process_id: &ProcessId,
-        event_type: &str,
+        kind: crate::ProcessEventKind,
         after_sequence: u64,
     ) -> Result<Option<ProcessEvent>, PluginError> {
         let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
@@ -195,10 +192,7 @@ impl ProcessRegistryAwaiter {
             let crate::ProcessEventPageEvents::Full(events) = page.events else {
                 unreachable!("full process event query returned a lite page");
             };
-            if let Some(event) = events
-                .into_iter()
-                .find(|event| event.event_type == event_type)
-            {
+            if let Some(event) = events.into_iter().find(|event| event.kind() == kind) {
                 return Ok(Some(event));
             }
             after_sequence = match page.more {

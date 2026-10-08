@@ -4,11 +4,10 @@ use crate::SessionId;
 /// One refusal for a durable identity re-presented with different content.
 ///
 /// The stores fence a re-submitted identity at the point it mutates: a process
-/// registration fingerprint, a process-event replay key, a trigger occurrence
-/// idempotency key. Matching content replays the first writer's result;
-/// differing content cannot, because the identity is already bound. Every such
-/// site returns this one error so the tool-intent front door can map all three
-/// to a single typed host-facing refusal instead of matching prose (FIG-1489).
+/// registration fingerprint or a process-event replay key. Matching content
+/// replays the first writer's result; differing content cannot, because the
+/// identity is already bound. Every such site returns this one error so the
+/// tool-intent front door can map both to a single typed host-facing refusal instead of matching prose (FIG-1489).
 ///
 /// It is spelled as a [`RuntimeError`](crate::RuntimeError) carrying
 /// [`RuntimeErrorCode::DurableIdentityConflict`](crate::RuntimeErrorCode::DurableIdentityConflict)
@@ -32,37 +31,6 @@ pub fn is_durable_identity_conflict(error: &PluginError) -> bool {
         }
         PluginError::RuntimeEffectController(error) => {
             error.code == crate::RuntimeErrorCode::DurableIdentityConflict
-        }
-        _ => false,
-    }
-}
-/// The refusal a trigger store answers an ingest whose occurrence identity
-/// retention has reclaimed (FIG-4513).
-///
-/// A reclaimed occurrence leaves a tombstone under its id. An ingest that
-/// finds the tombstone is a redelivery of an emission that already ran, on a
-/// host with no journal to answer it from: the store writes neither the
-/// occurrence nor a delivery back, and refuses with this error. It carries
-/// [`RuntimeErrorCode::TriggerOccurrenceReclaimed`](crate::RuntimeErrorCode::TriggerOccurrenceReclaimed)
-/// for the reason [`durable_identity_conflict`] carries its code.
-pub fn trigger_occurrence_reclaimed(occurrence_id: &str) -> PluginError {
-    PluginError::Runtime(crate::RuntimeError::new(
-        crate::RuntimeErrorCode::TriggerOccurrenceReclaimed,
-        format!(
-            "trigger occurrence `{occurrence_id}` was recorded and has since been reclaimed by retention"
-        ),
-    ))
-}
-
-/// Whether `error` is the refusal minted by [`trigger_occurrence_reclaimed`],
-/// however many conversions it has crossed.
-pub fn is_trigger_occurrence_reclaimed(error: &PluginError) -> bool {
-    match error {
-        PluginError::Runtime(error) => {
-            error.code == crate::RuntimeErrorCode::TriggerOccurrenceReclaimed
-        }
-        PluginError::RuntimeEffectController(error) => {
-            error.code == crate::RuntimeErrorCode::TriggerOccurrenceReclaimed
         }
         _ => false,
     }
@@ -199,14 +167,6 @@ define_plugin_errors! {
         => Self::HookFailures { causes }
         => crate::RuntimeErrorCode::Plugin.as_str()
         => if causes.iter().all(|cause| cause.failure.class == super::PluginFailureClass::Terminal) { crate::ToolFailureClass::InvalidRequest } else { crate::ToolFailureClass::Unavailable };
-    #[error(transparent)]
-    TriggerOperation(Box<crate::TriggerOperationError>)
-        => PluginError::TriggerOperation(source)
-        => (Box<crate::TriggerOperationError>)
-        => Self::TriggerOperation(source.clone())
-        => Self::TriggerOperation(source)
-        => source.code()
-        => if source.is_terminal() { crate::ToolFailureClass::InvalidRequest } else { crate::ToolFailureClass::Unavailable };
 /// A process cannot run without the behaviour its creation recorded.
     #[error("process engine `{engine_kind}` has no recorded configuration")]
     MissingRecordedProcessConfig { engine_kind: String }
@@ -215,14 +175,6 @@ define_plugin_errors! {
         => Self::MissingRecordedProcessConfig { engine_kind: engine_kind.clone() }
         => Self::MissingRecordedProcessConfig { .. }
         => "missing_recorded_process_config"
-        => crate::ToolFailureClass::InvalidRequest;
-#[error("trigger registration requires an Engine target, received `{kind}`")]
-    InvalidTriggerTarget { kind: String }
-        => PluginError::InvalidTriggerTarget { kind }
-        => { kind: String }
-        => Self::InvalidTriggerTarget { kind: kind.clone() }
-        => Self::InvalidTriggerTarget { .. }
-        => "invalid_trigger_target"
         => crate::ToolFailureClass::InvalidRequest;
 /// The process already accepted a different cancellation request.
     #[error(
@@ -680,24 +632,6 @@ define_plugin_errors! {
         => Self::ProcessChangeCursorPruned { .. }
         => "process_change_cursor_pruned"
         => crate::ToolFailureClass::Internal;
-    /// The cursor predates retained subscription deletion evidence. Resync
-    /// through the atomic subscription snapshot before continuing.
-    #[error(
-        "trigger subscription change cursor {requested_cursor:?} is below tombstone-compaction horizon {tombstone_compaction_horizon:?}; a full relist is required"
-    )]
-    TriggerSubscriptionChangeCursorPruned {
-        requested_cursor: crate::TriggerSubscriptionChangeCursor,
-        tombstone_compaction_horizon: crate::TriggerSubscriptionChangeCursor,
-    }
-        => PluginError::TriggerSubscriptionChangeCursorPruned { requested_cursor, tombstone_compaction_horizon }
-        => {
-        requested_cursor: crate::TriggerSubscriptionChangeCursor,
-        tombstone_compaction_horizon: crate::TriggerSubscriptionChangeCursor,
-    }
-        => Self::TriggerSubscriptionChangeCursorPruned { requested_cursor: *requested_cursor, tombstone_compaction_horizon: *tombstone_compaction_horizon }
-        => Self::TriggerSubscriptionChangeCursorPruned { .. }
-        => "trigger_subscription_change_cursor_pruned"
-        => crate::ToolFailureClass::Internal;
 /// A read of one process's events starts below the prefix its host released
     /// (`release_process_events`). The events at or below the horizon keep
     /// their sequence and replay identity but no longer carry their payload;
@@ -813,25 +747,6 @@ define_plugin_errors! {
         => Self::ReservedProcessEvent { event_type: event_type.clone() }
         => Self::ReservedProcessEvent { .. }
         => "reserved_process_event"
-        => crate::ToolFailureClass::InvalidRequest;
-/// A stored wake-delivery row is keyed by an id other than the one its wake computes.
-    #[error("wake delivery row `{delivery_id}` holds a wake whose identity is `{wake_id}`")]
-    WakeDeliveryIdentityMismatch { delivery_id: String, wake_id: String }
-        => PluginError::WakeDeliveryIdentityMismatch { delivery_id, wake_id }
-        => { delivery_id: String, wake_id: String }
-        => Self::WakeDeliveryIdentityMismatch { delivery_id: delivery_id.clone(), wake_id: wake_id.clone() }
-        => Self::WakeDeliveryIdentityMismatch { .. }
-        => "wake_delivery_identity_mismatch"
-        => crate::ToolFailureClass::InvalidRequest;
-#[error(
-        "process wake delivery format version {found} is incompatible with version {expected}; drain in-flight sessions on the old build before deploying this build, or recreate development/test stores"
-    )]
-    ProcessWakeDeliveryFormatVersionMismatch { expected: u32, found: u32 }
-        => PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
-        => { expected: u32, found: u32 }
-        => Self::ProcessWakeDeliveryFormatVersionMismatch { expected: *expected, found: *found }
-        => Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
-        => "process_wake_delivery_format_version_mismatch"
         => crate::ToolFailureClass::InvalidRequest;
 /// A process-registry continuation was passed to a backend other than the
     /// backend that issued it.
@@ -1008,15 +923,6 @@ impl PluginError {
                     Redrivable
                 }
             }
-            // a trigger operation the store did not carry out names no cause a
-            // retry of the identical request is known to clear.
-            Self::TriggerOperation(error) => {
-                if error.is_terminal() {
-                    Terminal
-                } else {
-                    Redrivable
-                }
-            }
             // a successor holds the lane or the process; this execution's
             // authority is gone and a redrive under a new one proceeds.
             Self::SessionExecutionLeaseLost { .. } | Self::ProcessExecutionSuperseded { .. } => {
@@ -1041,7 +947,6 @@ impl PluginError {
             | Self::StoreRefusal(_)
             | Self::StoredDataCorrupt { .. }
             | Self::MissingRecordedProcessConfig { .. }
-            | Self::InvalidTriggerTarget { .. }
             | Self::ProcessCancelConflict { .. }
             | Self::ParentEnded { .. }
             | Self::StartKeyConflict { .. }
@@ -1063,7 +968,6 @@ impl PluginError {
             | Self::ProcessOutputAttachmentUnavailable { .. }
             | Self::ProcessUnknown { .. }
             | Self::ProcessChangeCursorPruned { .. }
-            | Self::TriggerSubscriptionChangeCursorPruned { .. }
             | Self::ProcessEventsReleased { .. }
             | Self::MonotonicCounterOverflow { .. }
             | Self::ProcessNoLongerRetained { .. }
@@ -1071,8 +975,6 @@ impl PluginError {
             | Self::ProcessAlreadyTerminal { .. }
             | Self::ProcessTerminalOutcomeMismatch { .. }
             | Self::ReservedProcessEvent { .. }
-            | Self::WakeDeliveryIdentityMismatch { .. }
-            | Self::ProcessWakeDeliveryFormatVersionMismatch { .. }
             | Self::ProcessRegistryCursorBackendMismatch { .. } => Terminal,
         }
     }

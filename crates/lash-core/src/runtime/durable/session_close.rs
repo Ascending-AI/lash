@@ -16,18 +16,17 @@
 //! 2. `revoke`: the session's waits are revoked;
 //! 3. `end_scope`: the session's `Until` processes are marked for cancel,
 //!    batched; the step is recorded with the last batch;
-//! 4. `triggers`: once no process is live anywhere in the session's scope
-//!    tree, its trigger subscriptions are deleted;
-//! 5. `artifacts`: the session's storage is deleted, and that delete's
-//!    transaction fences the session's artifact referrers and arms their
+//! 4. `artifacts`: once no process is live anywhere in the session's scope
+//!    tree, the session's storage is deleted, and that delete's transaction
+//!    fences the session's artifact referrers and arms their
 //!    `ArtifactCleanup` obligations (ADR 0113), the one outbox kind a close
 //!    leaves: it deletes bytes outside the database;
-//! 6. `tombstone`: the session's process state is deleted and the close row
+//! 5. `tombstone`: the session's process state is deleted and the close row
 //!    becomes its tombstone, and the actor ends.
 //!
 //! Logical cleanup settles before anything is deleted: no state is deleted
 //! while a process of the session is non-terminal. A parent's terminal does
-//! not mean its children have stopped, so step 4 reads
+//! not mean its children have stopped, so step 4 first reads
 //! `live_until_descendants` of the session, which walks below ended
 //! processes and through the session's turn scopes, whose children a turn's
 //! end marked but which may still be in their grace. While one remains, it
@@ -60,7 +59,7 @@ pub const SESSION_CLOSE_MAIL: &str = "session.close";
 /// The reason a session close's `cancel` step gives the open turn's cancel.
 pub const SESSION_CLOSED: &str = "session_closed";
 
-/// How many of the session's live processes one `triggers` check reads: it
+/// How many of the session's live processes one `artifacts` check reads: it
 /// waits on the first, and every other one is checked again when it wakes.
 const LIVE_PROBE: usize = 1;
 
@@ -216,9 +215,6 @@ pub enum SessionCloseError {
     /// The open turn's cancel failed.
     #[error("the open turn's cancel: {0}")]
     Turn(#[from] TurnError),
-    /// The trigger store did not delete the session's subscriptions.
-    #[error("trigger subscriptions: {0}")]
-    Triggers(crate::PluginError),
     /// The session's storage delete stopped.
     #[error("storage: {0}")]
     Storage(Box<crate::store::MaintenanceFailure<crate::store::SessionBlobReclaimReport>>),
@@ -270,7 +266,7 @@ pub async fn run_session_close(
                 }
                 cx.commit(tx, step.label()).await?;
             },
-            SessionCloseStep::Triggers => {
+            SessionCloseStep::Artifacts => {
                 if let Some(live) = backend
                     .durable()
                     .live_until_descendants(&scope, LIVE_PROBE)
@@ -283,14 +279,6 @@ pub async fn run_session_close(
                     waits::pin_process_terminal(cx, scope.clone(), &live, None).await?;
                     return Ok(Some(SessionCloseExit::Waiting));
                 }
-                backend
-                    .trigger_store()
-                    .delete_session_subscriptions(session)
-                    .await
-                    .map_err(SessionCloseError::Triggers)?;
-                commit_step(cx, cx.begin().await?, session, step).await?;
-            }
-            SessionCloseStep::Artifacts => {
                 backend
                     .session_store_factory()
                     .delete_session(session)
@@ -305,7 +293,7 @@ pub async fn run_session_close(
                     .await
                     .map_err(SessionCloseError::Process)?;
                 let mut tx = cx.begin().await?;
-                // The waits the triggers step pinned on ending processes.
+                // The waits the artifacts step pinned on ending processes.
                 waits::revoke_scope(&mut tx, &scope);
                 tx.ack_seen().give_up(Release::Terminal);
                 commit_step(cx, tx, session, step).await?;

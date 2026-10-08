@@ -137,7 +137,6 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
         session_lifecycle: Arc::new(MockSessionManager::default()),
         session_graph: Arc::new(MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        trigger_router: None,
         process_engines: Default::default(),
         effect_controller: crate::ActorContext::unavailable(),
         direct_completions: crate::DirectCompletionClient::unavailable(
@@ -154,7 +153,6 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         },
         observer: crate::engine::NullObservationSink::arc(),
-        trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::RuntimeAttachmentStore::ephemeral(
             crate::support::sqlite_memory_store_backend()
                 .await

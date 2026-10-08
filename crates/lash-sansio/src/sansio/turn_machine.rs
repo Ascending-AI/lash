@@ -42,16 +42,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
         protocol_run_offset: usize,
     ) -> Self {
-        Self::new_shared_with_turn_causes(config, messages, events, protocol_run_offset, Vec::new())
-    }
-
-    pub fn new_shared_with_turn_causes(
-        config: TurnMachineConfig<M>,
-        messages: MessageSequence,
-        events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
-        protocol_run_offset: usize,
-        turn_causes: Vec<TurnCause>,
-    ) -> Self {
         Self {
             config,
             state: MachineState::PreparingProtocol,
@@ -62,7 +52,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             messages,
             progress_event_cursor: events.len(),
             events,
-            turn_causes,
             protocol_iteration: protocol_run_offset,
             protocol_run_offset,
             cumulative_usage: TokenUsage::default(),
@@ -86,19 +75,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
         messages: MessageSequence,
         turn_events: Vec<SessionHistoryRecord<M::Event>>,
         protocol_run_offset: usize,
-        turn_causes: Vec<TurnCause>,
     ) -> Self {
         let mut events = window.events().clone();
         for event in turn_events {
             events.push(event);
         }
-        let mut machine = Self::new_shared_with_turn_causes(
-            config,
-            messages,
-            events,
-            protocol_run_offset,
-            turn_causes,
-        );
+        let mut machine = Self::new_shared(config, messages, events, protocol_run_offset);
         machine.window = Some(window);
         machine
     }
@@ -318,7 +300,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     .get(window_events..)
                     .unwrap_or_default(),
             ),
-            turn_causes: self.turn_causes.clone(),
             progress_event_cursor: self.progress_event_cursor,
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
@@ -385,7 +366,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
             messages,
             prompt_messages,
             events,
-            turn_causes: checkpoint.turn_causes,
             progress_event_cursor: checkpoint.progress_event_cursor,
             protocol_iteration: checkpoint.protocol_iteration,
             protocol_run_offset: checkpoint.protocol_run_offset,
@@ -426,7 +406,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 messages: &self.messages,
                 prompt_messages: &self.prompt_messages,
                 events: self.events.as_slice(),
-                turn_causes: &self.turn_causes,
                 protocol_iteration: self.protocol_iteration,
                 protocol_run_offset: self.protocol_run_offset,
                 observed_cancellation: self.observed_cancellation.as_ref(),
@@ -755,36 +734,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
-    fn append_turn_causes(&mut self, causes: Vec<TurnCause>) {
-        if causes.is_empty() {
-            return;
-        }
-        let mut existing_ids = self
-            .turn_causes
-            .iter()
-            .map(|cause| cause.id.clone())
-            .collect::<HashSet<_>>();
-        for cause in causes {
-            if !existing_ids.insert(cause.id.clone()) {
-                continue;
-            }
-            self.prompt_messages.push(cause.to_event_message());
-            self.messages.push(cause.to_event_message());
-            self.turn_causes.push(cause);
-        }
-    }
-
     fn handle_checkpoint(
         &mut self,
         checkpoint: CheckpointKind,
         on_empty: CheckpointResumeAction,
         delivery: CheckpointDelivery,
     ) {
-        if !delivery.committed_user_messages.is_empty() || !delivery.turn_causes.is_empty() {
+        if !delivery.committed_user_messages.is_empty() {
             self.prompt_messages
                 .extend(delivery.committed_user_messages.clone());
             self.messages.extend(delivery.committed_user_messages);
-            self.append_turn_causes(delivery.turn_causes);
             if matches!(checkpoint, CheckpointKind::BeforeCompletion) {
                 self.protocol_iteration += 1;
                 if self

@@ -30,7 +30,7 @@ pub use envelope::{
     ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch,
     TurnPrelude, TurnPreludeRef, TurnPreludeStore,
 };
-/// Effect-executor contracts, including process and trigger local-execution capabilities.
+/// Effect-executor contracts, including process local-execution capabilities.
 pub use executor::{
     AdmittedDirectSend, AdmittedScope, AwaitEventKey, AwaitEventWaitIdentity, CommandJournalGuard,
     EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
@@ -38,7 +38,6 @@ pub use executor::{
     ProcessDriveStep, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
     RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeEffectControllerError,
     RuntimeEffectLocalExecutor, RuntimeSleepOptions, SegmentProgress, ServedOnlyRange,
-    TriggerLocalExecution,
 };
 pub use identity_types::{
     RuntimeAttribution, RuntimeEffectKind, RuntimeReplay, RuntimeReplayAttribution, RuntimeSubject,

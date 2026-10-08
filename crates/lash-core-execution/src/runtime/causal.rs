@@ -334,8 +334,8 @@ impl CommandReplayKey {
         Self(key.into())
     }
 
-    /// The command's own replay key: a runtime value's or a trigger
-    /// operation's row, and an aggregate's group key.
+    /// The command's own replay key: a runtime value's row, and an
+    /// aggregate's group key.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -608,25 +608,7 @@ fn project_direct_causal_ref(
             identity.string(process_id);
             identity.u64(*sequence);
         }
-        CausalRef::TriggerOccurrence {
-            occurrence_id,
-            subscription_id,
-            subscription_incarnation,
-            subscription_revision,
-        } => {
-            identity.tag(6);
-            identity.string(occurrence_id);
-            identity.optional(subscription_id.as_deref(), |identity, value| {
-                identity.string(value)
-            });
-            identity.optional(subscription_incarnation.as_deref(), |identity, value| {
-                identity.string(value)
-            });
-            identity.optional(
-                *subscription_revision,
-                crate::stable_identity::IdentityEncoder::u64,
-            );
-        }
+        // Tag 6 (a trigger occurrence) is retired.
         CausalRef::SessionNode {
             session_id,
             node_id,
@@ -683,9 +665,6 @@ pub fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
     fn field(value: &str) -> String {
         format!("{}:{value}", value.len())
     }
-    fn optional_field(value: Option<&str>) -> String {
-        value.map_or_else(|| "0".to_string(), |value| format!("1:{}", field(value)))
-    }
 
     match caused_by {
         CausalRef::Turn {
@@ -712,21 +691,7 @@ pub fn causal_replay_discriminator(caused_by: &CausalRef) -> String {
             process_id,
             sequence,
         } => format!("cause:5:{}:{sequence}:", field(process_id)),
-        CausalRef::TriggerOccurrence {
-            occurrence_id,
-            subscription_id,
-            subscription_incarnation,
-            subscription_revision,
-        } => {
-            let revision =
-                subscription_revision.map_or_else(|| "0".to_string(), |value| format!("1:{value}"));
-            format!(
-                "cause:6:{}:{}:{}:{revision}:",
-                field(occurrence_id),
-                optional_field(subscription_id.as_deref()),
-                optional_field(subscription_incarnation.as_deref()),
-            )
-        }
+        // Tag 6 (a trigger occurrence) is retired.
         CausalRef::SessionNode {
             session_id,
             node_id,
@@ -833,15 +798,6 @@ mod tests {
                     sequence: 0,
                 },
                 "direct-discriminator:v3:blake3:8e1e40c288970d6da166b74e66c8fd393ace16bf4ca2c36edd30d23a65976b1c",
-            ),
-            (
-                CausalRef::TriggerOccurrence {
-                    occurrence_id: "o".to_string(),
-                    subscription_id: Some("s".to_string()),
-                    subscription_incarnation: None,
-                    subscription_revision: Some(0),
-                },
-                "direct-discriminator:v3:blake3:d56a11d6ab13e7e6d320486668f8c684d0d72725161f4f2d655729bd751a9c04",
             ),
             (
                 CausalRef::SessionNode {

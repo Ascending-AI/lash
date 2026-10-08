@@ -130,7 +130,6 @@ pub struct TestExecutionContextBuilder<'run> {
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
     tool_registry: Option<Arc<crate::ToolRegistry>>,
-    trigger_router: Option<crate::TriggerRouter>,
     processes: Arc<dyn crate::ProcessService>,
     process_engines: crate::ProcessEngineRegistry,
     direct_completions: Option<crate::DirectCompletionClient<'run>>,
@@ -222,7 +221,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
             provider: Arc::new(EmptyToolProvider),
             tool_catalog: crate::ToolCatalog::from_tool_definitions(Vec::new()),
             tool_registry: None,
-            trigger_router: None,
             processes: Arc::new(crate::UnavailableProcessService),
             process_engines: match artifact_ports {
                 Some(ports) => process_engines.with_artifact_ports(ports),
@@ -292,11 +290,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
 
     pub fn tool_registry(mut self, tool_registry: Arc<crate::ToolRegistry>) -> Self {
         self.tool_registry = Some(tool_registry);
-        self
-    }
-
-    pub fn trigger_router(mut self, trigger_router: Option<crate::TriggerRouter>) -> Self {
-        self.trigger_router = trigger_router;
         self
     }
 
@@ -543,7 +536,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
             session_lifecycle,
             session_graph,
             processes: self.processes,
-            trigger_router: self.trigger_router,
             effect_controller,
             direct_completions: self.direct_completions.unwrap_or_else(|| {
                 crate::DirectCompletionClient::unavailable(
@@ -559,7 +551,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
                     .expect("test frame identity is non-empty"),
             },
             observer: Arc::new(crate::engine::NullObservationSink),
-            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.attachment_store),
             turn_context: self.turn_context.clone(),
             clock: self.clock,

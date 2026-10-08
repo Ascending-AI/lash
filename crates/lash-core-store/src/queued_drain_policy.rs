@@ -1,16 +1,11 @@
-//! Host-owned selection of how much turn-lane work one run takes.
+//! Host-owned selection of how much next-turn input one run takes.
 //!
-//! Lash owns the *laws* of a composition: of queued work, the queue head must
-//! be turn work, a delivery boundary must admit it, and only batchable turn
-//! work sharing the head's delivery policy may travel with it; of next-turn
-//! host input, only inputs sharing the head's run spec may travel with it.
-//! Either stops at the other family's earliest open row (ADR 0101 §5.2).
-//! What Lash does not own is *how much* of that legal, strictly FIFO-ordered
+//! Lash owns the *laws* of a composition: only next-turn host inputs sharing
+//! the head's run spec may travel with it (ADR 0101 §5.2). What Lash does not own is *how much* of that legal, strictly FIFO-ordered
 //! prefix a host wants to execute in one turn. That is a product decision —
 //! throughput against per-turn context pressure, and which producers may
 //! share a turn — so it is a host policy seam ([`QueuedDrainPolicy`]) rather
-//! than kernel arithmetic. One policy decides for both families; each
-//! candidate names its [`QueuedDrainFamily`].
+//! than kernel arithmetic. Each candidate names its [`QueuedDrainFamily`].
 //!
 //! Each candidate carries its own `authority` and `merge_key`. Lash does not
 //! compare them: it applies no authorization policy. A host that keeps
@@ -63,18 +58,13 @@ use crate::{AdmissionBoundary, QueuedWorkAuthority};
 
 /// The admission family of the rows one drain offers.
 ///
-/// A composition takes rows of one family only: it stops at the other
-/// family's earliest open row (ADR 0101 §5.2), so every candidate of one
-/// [`QueuedDrainRequest`] names the same family.
+/// Every candidate of one [`QueuedDrainRequest`] names the same family.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum QueuedDrainFamily {
     /// Next-turn host input sharing the head's run spec, at an idle
     /// admission. Host input carries no merge key and no authority: its
     /// candidates offer `None` and the default authority.
     HostInput,
-    /// Batchable queued turn work, such as process wakes, sharing the head's
-    /// delivery policy.
-    QueuedTurnWork,
 }
 
 /// One claimable turn-lane row offered to a [`QueuedDrainPolicy`].

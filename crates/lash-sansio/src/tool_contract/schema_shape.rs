@@ -24,8 +24,8 @@ const MAX_SHAPE_DEPTH: usize = 8;
 
 /// The JSON Schema keyword that carries the types JSON Schema cannot say.
 ///
-/// JSON Schema has no vocabulary for a callable process or for a trigger
-/// handle, so a tool contract that traffics in them spells them under this
+/// JSON Schema has no vocabulary for a callable process, so a tool contract
+/// that traffics in one spells it under this
 /// extension keyword. A contract that does not carry it reads as plain JSON
 /// Schema.
 pub const X_LASH_KEYWORD: &str = "x-lash";
@@ -38,8 +38,6 @@ pub enum XLashType {
     Process { signature: XLashSignature },
     /// A process the host can only describe as callable.
     ProcessUnknown,
-    /// A trigger handle over the payload the trigger delivers.
-    Handle { payload: Box<Value> },
 }
 
 /// An ordered process-call signature in schema form.
@@ -60,7 +58,7 @@ pub struct XLashParam {
 
 /// Whether a non-pointer `$ref` names a host data type.
 ///
-/// Named data types are dotted identifiers (`lash.TriggerRegistration`). A URL
+/// Named data types are dotted identifiers (`lash.ProcessRecord`). A URL
 /// or a relative file reference is a JSON Schema construct lash cannot
 /// resolve.
 pub fn is_named_type_reference(reference: &str) -> bool {
@@ -111,8 +109,6 @@ pub enum ShapeKind {
     Named(String),
     /// A process value; `None` when the host only says it is callable.
     Process(Option<ProcessShape>),
-    /// A trigger handle over the payload it delivers.
-    Handle(Box<SchemaShape>),
 }
 
 /// An object's named fields and its stance on keys it does not name.
@@ -593,9 +589,6 @@ impl<'a> ShapeImporter<'a> {
         // it like every other node.
         match XLashType::deserialize(declaration) {
             Ok(XLashType::ProcessUnknown) => ShapeKind::Process(None),
-            Ok(XLashType::Handle { .. }) => {
-                ShapeKind::Handle(Box::new(self.import_at(declaration, "/payload", depth + 1)))
-            }
             Ok(XLashType::Process { signature }) => ShapeKind::Process(Some(ProcessShape {
                 params: signature
                     .params
@@ -747,8 +740,8 @@ mod tests {
         assert_eq!(head.description.as_deref(), Some("First node."));
         assert_eq!(field(head, "next").shape.kind, ShapeKind::Unknown);
         assert_eq!(
-            shape(json!({ "$ref": "lash.TriggerRegistration" })).kind,
-            ShapeKind::Named("lash.TriggerRegistration".to_string())
+            shape(json!({ "$ref": "lash.ProcessRecord" })).kind,
+            ShapeKind::Named("lash.ProcessRecord".to_string())
         );
         assert_eq!(
             shape(json!({ "$ref": "https://example.com/schema.json" })).kind,
@@ -777,10 +770,6 @@ mod tests {
         assert_eq!(
             shape(json!({ "x-lash": { "kind": "process_unknown" } })).kind,
             ShapeKind::Process(None)
-        );
-        assert_eq!(
-            shape(json!({ "x-lash": { "kind": "handle", "payload": { "type": "string" } } })).kind,
-            ShapeKind::Handle(Box::new(ShapeKind::Str.into()))
         );
         assert_eq!(
             shape(json!({ "x-lash": {

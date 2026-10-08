@@ -258,8 +258,6 @@ pub(super) fn turn_effect_executor(
         after_turn_reads: None,
         protocol_turn_options: driver.protocol_turn_options.clone(),
         turn_context: driver.turn_context.clone(),
-        turn_causes: driver.turn_causes.clone(),
-        pending_queued: driver.pending_queued.clone(),
         pending_turn_inputs: driver.pending_turn_inputs.clone(),
         pending_checkpoint_turn_inputs: driver.pending_checkpoint_turn_inputs.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),

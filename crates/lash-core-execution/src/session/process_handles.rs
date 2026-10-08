@@ -135,50 +135,6 @@ impl RuntimeExecutionContext<'_> {
         ToolInvocationReply::from_output(outcome.record.output.clone()).with_record(outcome.record)
     }
 
-    pub(crate) async fn signal_process_handle(
-        &self,
-        call_id: crate::ToolCallId,
-        handle: serde_json::Value,
-        signal_name: String,
-        payload: serde_json::Value,
-    ) -> ToolInvocationReply {
-        let args = json!({
-            "handle": handle.clone(),
-            "signal_name": signal_name.clone(),
-            "payload": payload.clone()
-        });
-        let process_id = match Self::parse_process_handle(&handle) {
-            Ok(parsed) => parsed,
-            Err(err) => {
-                return Self::recorded_process_error(call_id, "signal_process", args, err);
-            }
-        };
-        if let Err(err) = self.authorize_handle(&process_id).await {
-            return Self::recorded_process_error(call_id, "signal_process", args, err.to_string());
-        }
-        let signal_id = format!("process-{call_id}");
-        let result = self
-            .dispatch
-            .processes
-            .signal_possessed(
-                &self.dispatch.owner.runtime_owner(),
-                &process_id,
-                signal_name,
-                signal_id,
-                payload,
-                self.process_scope(self.parent_invocation.clone()),
-            )
-            .await;
-        let output = match result {
-            Ok(event) => ToolCallOutput::success(json!({
-                "process_id": event.process_id,
-                "sequence": event.sequence,
-            })),
-            Err(err) => ToolInvocationReply::error(json!(format!("signal failed: {err}"))).output,
-        };
-        Self::recorded_process_reply(call_id, "signal_process", args, output)
-    }
-
     pub(crate) async fn cancel_process_handle(
         &self,
         call_id: crate::ToolCallId,

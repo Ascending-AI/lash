@@ -17,10 +17,6 @@ pub struct CausalColumns {
     pub call_id: Option<String>,
     pub process_id: Option<ProcessId>,
     pub process_event_sequence: Option<String>,
-    pub occurrence_id: Option<String>,
-    pub subscription_id: Option<String>,
-    pub subscription_incarnation: Option<String>,
-    pub subscription_revision: Option<String>,
     pub node_id: Option<String>,
 }
 
@@ -68,19 +64,6 @@ impl CausalColumns {
                 columns.process_id = Some(process_id.clone());
                 columns.process_event_sequence = Some(sequence.to_string());
             }
-            Some(CausalRef::TriggerOccurrence {
-                occurrence_id,
-                subscription_id,
-                subscription_incarnation,
-                subscription_revision,
-            }) => {
-                columns.kind = Some("trigger_occurrence".to_string());
-                columns.occurrence_id = Some(occurrence_id.clone());
-                columns.subscription_id = subscription_id.clone();
-                columns.subscription_incarnation = subscription_incarnation.clone();
-                columns.subscription_revision =
-                    subscription_revision.map(|value| value.to_string());
-            }
             Some(CausalRef::SessionNode {
                 session_id,
                 node_id,
@@ -102,12 +85,6 @@ impl CausalColumns {
             "tool_call" => &["caused_by_session_id", "caused_by_call_id"],
             "process" => &["caused_by_process_id"],
             "process_event" => &["caused_by_process_id", "caused_by_process_event_sequence"],
-            "trigger_occurrence" => &[
-                "caused_by_occurrence_id",
-                "caused_by_subscription_id",
-                "caused_by_subscription_incarnation",
-                "caused_by_subscription_revision",
-            ],
             "session_node" => &["caused_by_session_id", "caused_by_node_id"],
             _ => return None,
         })
@@ -133,18 +110,6 @@ impl CausalColumns {
         }
         if self.process_event_sequence.is_some() {
             fields.push("caused_by_process_event_sequence");
-        }
-        if self.occurrence_id.is_some() {
-            fields.push("caused_by_occurrence_id");
-        }
-        if self.subscription_id.is_some() {
-            fields.push("caused_by_subscription_id");
-        }
-        if self.subscription_incarnation.is_some() {
-            fields.push("caused_by_subscription_incarnation");
-        }
-        if self.subscription_revision.is_some() {
-            fields.push("caused_by_subscription_revision");
         }
         if self.node_id.is_some() {
             fields.push("caused_by_node_id");
@@ -213,15 +178,6 @@ impl CausalColumns {
                     )?,
                     "caused_by_process_event_sequence",
                 )?,
-            },
-            "trigger_occurrence" => CausalRef::TriggerOccurrence {
-                occurrence_id: codec.required(self.occurrence_id, "caused_by_occurrence_id")?,
-                subscription_id: self.subscription_id,
-                subscription_incarnation: self.subscription_incarnation,
-                subscription_revision: self
-                    .subscription_revision
-                    .map(|value| codec.read_u64_text(value, "caused_by_subscription_revision"))
-                    .transpose()?,
             },
             "session_node" => CausalRef::SessionNode {
                 session_id: codec.required(self.session_id, "caused_by_session_id")?,
@@ -649,18 +605,6 @@ mod identity_tests {
             CausalColumns::encode(Some(&cause))
                 .decode(codec)
                 .expect("u64::MAX process event sequence decodes"),
-            Some(cause)
-        );
-        let cause = CausalRef::TriggerOccurrence {
-            occurrence_id: "occurrence".to_string(),
-            subscription_id: None,
-            subscription_incarnation: None,
-            subscription_revision: Some(u64::MAX),
-        };
-        assert_eq!(
-            CausalColumns::encode(Some(&cause))
-                .decode(codec)
-                .expect("u64::MAX subscription revision decodes"),
             Some(cause)
         );
     }

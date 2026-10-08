@@ -134,12 +134,11 @@ impl ArtifactCleanupLedger for Ledger {
 }
 
 /// Scripted authorities: which journals are settled, what a start key
-/// registered, and where revisions stand.
+/// registered, and whether a frame is retained.
 #[derive(Default)]
 struct Authorities {
     settled: Mutex<Vec<String>>,
     retained: Mutex<Option<RetainedStart>>,
-    subscription: Mutex<Option<SubscriptionRevisionStanding>>,
     frame_retained: Mutex<bool>,
 }
 
@@ -184,17 +183,6 @@ impl ArtifactCleanupAuthorities for Authorities {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone())
-    }
-
-    async fn subscription_revision(
-        &self,
-        _revision: &SubscriptionRevisionId,
-    ) -> Result<SubscriptionRevisionStanding, String> {
-        Ok(self
-            .subscription
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .unwrap_or(SubscriptionRevisionStanding { current: false }))
     }
 }
 
@@ -488,7 +476,6 @@ impl crate::ProcessEngine for Engine {
     ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }
@@ -932,37 +919,6 @@ async fn a_start_that_never_registered_ends_when_its_starter_settles() {
     assert_eq!(env, vec![resolved(&start, Vec::new())]);
     assert_eq!(modules, vec![resolved(&start, Vec::new())]);
     assert_eq!(engine, vec![resolved(&start, Vec::new())]);
-}
-
-/// ADR 0113 §3.4: a revision is held while it is current, and ends only once
-/// its creator settles.
-#[tokio::test]
-async fn a_subscription_revision_waits_for_currency_and_its_creator() {
-    let harness = harness();
-    let creator = journal("register");
-    let revision =
-        SubscriptionRevisionId::new("sub".to_owned(), "inc".to_owned(), 2).expect("revision");
-    let guard = ArtifactCleanup::Await(ReferrerGuard::SubscriptionRevision {
-        revision,
-        creator: creator.clone(),
-    });
-    harness.authorities.settle(&creator);
-    *harness
-        .authorities
-        .subscription
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) =
-        Some(SubscriptionRevisionStanding { current: true });
-    assert_eq!(
-        harness.deliver(guard.clone()).await,
-        Err(DeliveryFailure::NotYet)
-    );
-    *harness
-        .authorities
-        .subscription
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-    assert_eq!(harness.deliver(guard).await, Ok(()));
 }
 
 /// ADR 0113 §2.5: a carry whose bytes are gone stalls the row; any other

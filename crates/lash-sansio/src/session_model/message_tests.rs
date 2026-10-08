@@ -638,8 +638,8 @@ fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
 #[test]
 fn message_origins_written_before_turn_input_provenance_still_deserialize() {
     // Snapshots written before FIG-972 have no turn-input origin: a user
-    // message carried no origin at all, and plugin/process origins are
-    // unchanged. All three shapes must still round-trip.
+    // message carried no origin at all, and plugin origins are unchanged.
+    // Both shapes must still round-trip.
     let legacy = r#"[
         {
             "id":"m_turn_old_input","role":"User",
@@ -649,11 +649,6 @@ fn message_origins_written_before_turn_input_provenance_still_deserialize() {
             "id":"m1","role":"System",
             "parts":[{"id":"m1.p0","kind":"Text","content":"note"}],
             "origin":{"kind":"plugin","plugin_id":"compactor"}
-        },
-        {
-            "id":"m2","role":"Event",
-            "parts":[{"id":"m2.p0","kind":"Text","content":"woke"}],
-            "origin":{"kind":"process","process_id":"p_00000000000070008000000000000001","event_type":"finished","sequence":3}
         }
     ]"#;
     let msgs: Vec<Message> = serde_json::from_str(legacy).expect("legacy snapshot");
@@ -663,16 +658,6 @@ fn message_origins_written_before_turn_input_provenance_still_deserialize() {
         Some(MessageOrigin::Plugin {
             plugin_id: "compactor".to_string(),
             transient: false,
-        })
-    );
-    assert_eq!(
-        msgs[2].origin,
-        Some(MessageOrigin::Process {
-            process_id: ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 1),
-            event_type: "finished".to_string(),
-            sequence: 3,
-            wake_id: None,
-            caused_by: None,
         })
     );
 }

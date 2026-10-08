@@ -5,7 +5,7 @@
 //! itself in its closing state
 //! ([`session_close`](crate::runtime::durable::session_close)): it cancels
 //! its open turn, revokes its waits, ends its `Until` processes and waits
-//! for each to be terminal, deletes its triggers and its storage (whose
+//! for each to be terminal, deletes its storage (whose
 //! transaction arms the `ArtifactCleanup` of what it referred to), deletes
 //! its process state and writes its tombstone. Each step is its own fenced
 //! transaction, so a crash resumes at the step it interrupted, and nothing

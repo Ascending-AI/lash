@@ -72,7 +72,6 @@ pub(crate) struct RuntimeIngressPhase {
     pub(crate) queue: Vec<RuntimeQueueIngress>,
     pub(crate) turn_inputs: Vec<RuntimeTurnInputIngress>,
     pub(crate) cancel_before_commit: Vec<&'static str>,
-    pub(crate) enqueued_classes: Vec<QueuedWorkClass>,
 }
 
 impl RuntimeIngressPhase {
@@ -92,11 +91,6 @@ impl RuntimeIngressPhase {
 
     pub(crate) fn cancel_turn_input_before_commit(mut self, alias: &'static str) -> Self {
         self.cancel_before_commit.push(alias);
-        self
-    }
-
-    pub(crate) fn expect_enqueued_classes(mut self, classes: Vec<QueuedWorkClass>) -> Self {
-        self.enqueued_classes = classes;
         self
     }
 }
@@ -316,7 +310,6 @@ impl From<RuntimeCommitPhase> for RuntimeScenarioPhase {
 #[derive(Clone, Debug)]
 pub(crate) enum RuntimeQueueIngress {
     RefreshToolCatalog { reason: &'static str },
-    ProcessWake { text: &'static str },
 }
 
 impl RuntimeQueueIngress {
@@ -329,22 +322,6 @@ impl RuntimeQueueIngress {
                     reason: (*reason).to_string(),
                 },
             ),
-            Self::ProcessWake { text } => {
-                lash_core::testing::runtime_internals::process_wake_batch_draft(
-                    ProcessWakeDelivery {
-                        version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-                        target_session_id: SessionId::fixture(session_id.to_string()),
-                        process_id: lash_core::ProcessId::fixture(&format!("process:{text}")),
-                        sequence: 1,
-                        event_type: "process.wake".to_string(),
-                        process_caused_by: None,
-                        authority: lash_core::QueuedWorkAuthority::default(),
-                        input: (*text).to_string(),
-                        created_at_ms: 1,
-                        trace_cause: Default::default(),
-                    },
-                )
-            }
         }
     }
 }

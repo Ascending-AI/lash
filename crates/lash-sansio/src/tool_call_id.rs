@@ -89,8 +89,7 @@ impl<'a> ToolCallRoot<'a> {
         Self::handle(handle).map(|handle| Self(RootKind::HostSubmission(handle)))
     }
 
-    /// The minted id of one process: its tool-call input, its code, and every
-    /// trigger delivery bound to it.
+    /// The minted id of one process: its tool-call input and its code.
     pub fn process(process_id: &'a ProcessId) -> Self {
         Self(RootKind::Process(process_id))
     }

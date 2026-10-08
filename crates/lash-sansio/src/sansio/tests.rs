@@ -1,4 +1,3 @@
-use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use std::sync::Arc;
@@ -396,88 +395,6 @@ impl ProtocolDriverHandle for ProseDriver {
     ) -> Vec<DriverAction> {
         Vec::new()
     }
-}
-
-#[test]
-fn chat_context_projector_projects_event_context_as_user_messages() {
-    fn message_text(message: &crate::llm::types::LlmMessage) -> String {
-        message
-            .blocks
-            .iter()
-            .filter_map(|block| match block {
-                crate::llm::types::LlmContentBlock::Text { text, .. } => Some(text.as_ref()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    let cause = TurnCause {
-        id: "wake:abc".to_string(),
-        event_type: "process.wake".to_string(),
-        origin: crate::MessageOrigin::Process {
-            process_id: ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 1),
-            event_type: "process.wake".to_string(),
-            sequence: 7,
-            wake_id: Some("wake:abc".to_string()),
-            caused_by: None,
-        },
-        text: "Background process wake\nProcess: process-1\nEvent: process.wake #7\nWake input:\nblue button pressed".to_string(),
-    };
-    let messages = MessageSequence::from(vec![cause.to_event_message()]);
-    let config = test_config(Arc::new(ProseDriver));
-
-    let active_request = ChatContextProjector
-        .project(ProjectorContext {
-            config: &config,
-            messages: &messages,
-            events: &[],
-            turn_causes: std::slice::from_ref(&cause),
-            protocol_iteration: 0,
-            use_tools: false,
-            environment: &ExecutionEnvironmentSync::default(),
-        })
-        .expect("fixture history projects");
-    assert_eq!(active_request.scope.agent_frame_id, "test-frame");
-    assert!(active_request.messages.iter().any(|message| {
-        message.role == crate::llm::types::LlmRole::User
-            && message_text(message).contains("=== TURN EVENTS ===")
-            && message_text(message).contains("blue button pressed")
-    }));
-    assert!(active_request.messages.iter().all(|message| {
-        message.role != crate::llm::types::LlmRole::System
-            || !message_text(message).contains("blue button pressed")
-    }));
-    let active_mentions = active_request
-        .messages
-        .iter()
-        .filter(|message| message_text(message).contains("blue button pressed"))
-        .count();
-    assert_eq!(
-        active_mentions, 1,
-        "active turn events must not duplicate history"
-    );
-
-    let history_request = ChatContextProjector
-        .project(ProjectorContext {
-            config: &config,
-            messages: &messages,
-            events: &[],
-            turn_causes: &[],
-            protocol_iteration: 1,
-            use_tools: false,
-            environment: &ExecutionEnvironmentSync::default(),
-        })
-        .expect("fixture history projects");
-    assert!(history_request.messages.iter().any(|message| {
-        message.role == crate::llm::types::LlmRole::User
-            && message_text(message).contains("Runtime event:")
-            && message_text(message).contains("blue button pressed")
-    }));
-    assert!(history_request.messages.iter().all(|message| {
-        message.role != crate::llm::types::LlmRole::System
-            || !message_text(message).contains("blue button pressed")
-    }));
 }
 
 struct ExecDriver;
@@ -1524,7 +1441,6 @@ fn checkpoint_user_messages_resume_prepare_protocol_iteration() {
         id: checkpoint_id,
         delivery: CheckpointDelivery {
             committed_user_messages: vec![user_message("one more thing")],
-            ..CheckpointDelivery::default()
         },
     });
 

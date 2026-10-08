@@ -74,18 +74,6 @@ store_error_samples! {
         total_bytes: 2,
         max_bytes: 1,
     },
-    QueuedWorkActionReserveExhaustsContext { .. } => {
-        StoreError::QueuedWorkActionReserveExhaustsContext {
-            max_context_tokens: 1,
-            action_token_reserve: 2,
-        }
-    },
-    QueuedWorkRowExceedsContextWindow { .. } => StoreError::QueuedWorkRowExceedsContextWindow {
-        batch_id: BatchId::from("sampled-batch"),
-        batch_enqueue_seq: 1,
-        rendered_tokens: 2,
-        max_context_tokens: 1,
-    },
     SessionRelationMismatch { .. } => StoreError::SessionRelationMismatch {
         session_id: session(),
         recorded: Box::new(crate::SessionLineage::Root),

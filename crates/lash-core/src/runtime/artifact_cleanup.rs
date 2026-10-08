@@ -23,8 +23,7 @@ use crate::{
     ArtifactStoreId, ModuleArtifactStore, PluginError, ProcessDefinitionDraft, ProcessDefinitionId,
     ProcessDefinitionStore, ProcessEngineRegistry, ProcessExecutionEnvRef,
     ProcessExecutionEnvStore, ProcessId, ProcessInput, ProcessRegistry, ReferrerClaim,
-    ReferrerGuard, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey, SubscriptionRevisionId,
-    TriggerStore, TriggerSubscriptionFilter, TriggerSubscriptionLifecycle, artifact_referrer_ended,
+    ReferrerGuard, ResolvedArtifactCleanup, RuntimeErrorCode, StartKey, artifact_referrer_ended,
 };
 
 /// The record a start key registered, as a start's guard carries onto it.
@@ -36,15 +35,6 @@ pub struct RetainedStart {
     /// The definition a start by id admitted the record from: its record
     /// holds the descriptor and its manifest too (ADR 0113 §3.6).
     pub definition_id: Option<ProcessDefinitionId>,
-}
-
-/// Where a subscription revision stands (ADR 0113 §3.4).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SubscriptionRevisionStanding {
-    /// It is the subscription's current live revision. Every delivery
-    /// reserved under it bound its process in the transaction that recorded
-    /// it, so nothing else holds it.
-    pub current: bool,
 }
 
 /// The authorities a guard asks whether its referrer has ended. Each answer
@@ -62,18 +52,12 @@ pub trait ArtifactCleanupAuthorities: Send + Sync {
 
     /// The record `key` registered, if any.
     async fn retained_start(&self, key: &StartKey) -> Result<Option<RetainedStart>, String>;
-
-    async fn subscription_revision(
-        &self,
-        revision: &SubscriptionRevisionId,
-    ) -> Result<SubscriptionRevisionStanding, String>;
 }
 
 /// The authorities of one store set.
 pub struct StoreSetAuthorities {
     pub sessions: Arc<dyn crate::DeploymentStore>,
     pub processes: Arc<dyn ProcessRegistry>,
-    pub triggers: Arc<dyn TriggerStore>,
     /// The durable rows: whether a turn is still unfinished.
     pub durable: Arc<dyn lash_durable::DurableStore>,
 }
@@ -136,30 +120,6 @@ impl ArtifactCleanupAuthorities for StoreSetAuthorities {
                 input: record.input,
                 definition_id: record.identity.definition_id,
             }))
-    }
-
-    async fn subscription_revision(
-        &self,
-        revision: &SubscriptionRevisionId,
-    ) -> Result<SubscriptionRevisionStanding, String> {
-        // The store has no read by subscription id; the guard is polled at
-        // the relay's maximum backoff, so a listing is affordable here.
-        let current = self
-            .triggers
-            .list_subscriptions(TriggerSubscriptionFilter::default())
-            .await
-            .map_err(|error| error.to_string())?
-            .iter()
-            .any(|record| {
-                record.subscription_id == revision.subscription_id()
-                    && record.incarnation == revision.incarnation()
-                    && record.revision == revision.revision()
-                    && !matches!(
-                        record.lifecycle,
-                        TriggerSubscriptionLifecycle::Tombstoned(_)
-                    )
-            });
-        Ok(SubscriptionRevisionStanding { current })
     }
 }
 
@@ -231,7 +191,6 @@ impl ArtifactCleanupRelay {
             authorities: Arc::new(StoreSetAuthorities {
                 sessions: backend.session_store_factory(),
                 processes: backend.process_registry(),
-                triggers: backend.trigger_store(),
                 durable: Arc::clone(backend.durable()),
             }),
             process_env: backend.process_env_store(),
@@ -287,7 +246,6 @@ impl ArtifactCleanupRelay {
                     }
                     ArtifactReferrer::FrameEnvironment(_)
                     | ArtifactReferrer::ProcessRecord(_)
-                    | ArtifactReferrer::SubscriptionRevision(_)
                     | ArtifactReferrer::Execution(_)
                     | ArtifactReferrer::HostPin(_)
                     | ArtifactReferrer::Session(_)
@@ -328,16 +286,6 @@ impl ArtifactCleanupRelay {
                     } else {
                         self.unregistered_start(start_key, starter).await
                     }
-                }
-                ReferrerGuard::SubscriptionRevision { revision, creator } => {
-                    let standing = authorities
-                        .subscription_revision(revision)
-                        .await
-                        .map_err(retryable_text("subscription read"))?;
-                    if standing.current {
-                        return Ok(Resolution::NotYet);
-                    }
-                    Ok(settled_or_not_yet(self.journal_settled(creator).await?))
                 }
                 ReferrerGuard::Upload {
                     upload,

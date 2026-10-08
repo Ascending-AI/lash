@@ -14,11 +14,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use lash_durable::domain::{ParkEventKind, ParkEventRow, SIGNAL_MAIL};
+use lash_durable::domain::{ParkEventKind, ParkEventRow, WaitPurpose};
 use lash_durable::runner::{Runner, RunnerConfig, Stopped};
-use lash_durable::{
-    ActorKey, ActorState, CommitLabel, DurableError, MailKind, MailTx, NoProbe, NodeId, NodeSpec,
-};
+use lash_durable::{ActorKey, ActorState, DurableError, NoProbe, NodeId, NodeSpec};
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -32,10 +30,10 @@ use crate::runtime::actor::waits::{self, ParkDeadline, Resolution, WaitDeadline}
 use crate::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use crate::{
     Ancestry, Backend, BackendParts, CancelOrigin, DurableSettings, EngineAction, EngineEvent,
-    EngineState, EngineStateFormat, LifetimeDecision, ProcessEngine, ProcessId, ProcessInfraError,
-    ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessSignal, ProcessSignalIdentity, ScopeGrant, ScopeId, StepName, StepRequest, ToolCallId,
-    ToolCallOutput, ToolCancellation,
+    EngineState, EngineStateFormat, HostWaitKind, KeyName, LifetimeDecision, ProcessEngine,
+    ProcessId, ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
+    ProcessRegistration, ScopeGrant, ScopeId, StepName, StepRequest, ToolCallId, ToolCallOutput,
+    ToolCancellation,
 };
 use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
@@ -70,6 +68,9 @@ const LONG: Duration = Duration::from_secs(60);
 
 /// How long a law waits for the processes it drives to settle.
 const SETTLE: Duration = Duration::from_secs(20);
+
+/// The key an `await_key` process pins for the host to name its peer.
+const PEER_KEY: &str = "peer";
 
 /// The activation-loop budget of every law's backend.
 const LOOP_BUDGET: u32 = 3;
@@ -146,7 +147,6 @@ fn note(tag: &str, event: &EngineEvent) {
     let event = match event {
         EngineEvent::Started { .. } => "started".to_owned(),
         EngineEvent::StepSettled { .. } => "step_settled".to_owned(),
-        EngineEvent::Signal(_) => "signal".to_owned(),
         EngineEvent::Cancelled { origin, .. } => format!("cancelled:{}", origin_name(*origin)),
         EngineEvent::ProcessEnded { .. } => "process_ended".to_owned(),
         EngineEvent::ProcessWaitTimedOut { .. } => "process_wait_timed_out".to_owned(),
@@ -174,8 +174,8 @@ fn origin_name(origin: CancelOrigin) -> String {
 /// - `await`: awaits process `await` within `deadline_ms` (until its scope
 ///   ends when it names none), and ends
 ///   with what it saw;
-/// - `await_signal`: idles until a signal names the process to await, then
-///   behaves as `await`;
+/// - `await_key`: pins a host key and waits for its resolution, which names
+///   the process to await, then behaves as `await`;
 /// - `retry`: runs one `law_flaky` step, whose first attempt fails with a
 ///   known failure its `Repeatable` contract retries, and ends with how
 ///   the step settled;
@@ -306,6 +306,11 @@ impl ProcessEngine for LawEngine {
                     site: None,
                 }]),
                 "await" => await_action(&script)?,
+                "await_key" => EngineAction::PinKey {
+                    name: KeyName(PEER_KEY.to_owned()),
+                    kind: HostWaitKind::Custom,
+                    bound: crate::ParkBound::UntilScopeEnd,
+                },
                 "complete" => ended(json!({"real_terminal": true})),
                 "retry" => law_step("flaky", LAW_FLAKY),
                 "park" => law_step("park", LAW_PARK),
@@ -317,9 +322,15 @@ impl ProcessEngine for LawEngine {
                     "payload": outcome.payload(),
                 }))
             }
-            EngineEvent::Signal(signal) if act == "await_signal" => {
-                script["await"] = signal.payload["await"].clone();
-                script["deadline_ms"] = signal.payload["deadline_ms"].clone();
+            EngineEvent::KeyPinned { name, .. } if act == "await_key" => {
+                EngineAction::AwaitExternal { name }
+            }
+            EngineEvent::ExternalResolved {
+                resolution: Resolution::Ok(peer),
+                ..
+            } if act == "await_key" => {
+                script["await"] = peer["await"].clone();
+                script["deadline_ms"] = peer["deadline_ms"].clone();
                 await_action(&script)?
             }
             EngineEvent::Cancelled { .. } if act == "stuck" => EngineAction::Idle,
@@ -384,7 +395,6 @@ impl ProcessEngine for LawEngine {
     ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }
@@ -416,7 +426,7 @@ fn step_entries(call: &ToolCallId) -> u32 {
 fn step_tool(step: &StepRequest) -> &str {
     match step {
         StepRequest::Tool { tool, .. } => tool.as_str(),
-        StepRequest::Engine { .. } | StepRequest::Host { .. } => "",
+        StepRequest::Engine { .. } => "",
     }
 }
 
@@ -1048,15 +1058,29 @@ pub async fn w1_await_process_times_out_and_its_awaiters_cancel_ends_it(
     Ok(())
 }
 
-/// Send `signal`'s payload to `process` as its mail.
-async fn signal(backend: &Backend, process: &ProcessId, payload: Value) -> LawResult {
-    let identity = ProcessSignalIdentity::new(process.clone(), "await", tag("signal"))
-        .map_err(|error| LawBroken(error.to_string()))?;
-    let body = serde_json::to_string(&ProcessSignal::new(identity, payload))
-        .map_err(|error| LawBroken(error.to_string()))?;
-    let mut tx = MailTx::new();
-    tx.append(actor(process)?, MailKind::new(SIGNAL_MAIL), body);
-    backend.commit_mail(tx, CommitLabel::MAIL_PROCESS).await?;
+/// Resolve the key `process` pinned with `peer`, the process it awaits:
+/// how a host tells a process something after it started.
+async fn tell_peer(backend: &Backend, process: &ProcessId, peer: Value) -> LawResult {
+    let actor = actor(process)?;
+    let started = Instant::now();
+    let pinned = loop {
+        if let Some(row) = backend
+            .durable()
+            .pending_waits(&actor)
+            .await?
+            .into_iter()
+            .find(|row| matches!(row.purpose, WaitPurpose::Custom { .. }))
+        {
+            break row.id;
+        }
+        ensure!(
+            started.elapsed() < SETTLE,
+            "the process pinned its peer key within {SETTLE:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    let key = waits::PinnedKey::of(&pinned);
+    waits::resolve_host(backend, key.as_str(), Resolution::Ok(peer)).await?;
     Ok(())
 }
 
@@ -1076,15 +1100,15 @@ pub async fn w1_an_await_cycle_ends_by_a_timeout_and_is_cancellable(
     let serving = serve(&backend);
     let short = u64::try_from(SHORT.as_millis()).unwrap_or(u64::MAX);
     let long = u64::try_from(LONG.as_millis()).unwrap_or(u64::MAX);
-    let a = root(&backend, payload(&tag("w1a"), "await_signal")).await?;
-    let b = root(&backend, payload(&tag("w1b"), "await_signal")).await?;
-    signal(
+    let a = root(&backend, payload(&tag("w1a"), "await_key")).await?;
+    let b = root(&backend, payload(&tag("w1b"), "await_key")).await?;
+    tell_peer(
         &backend,
         &a,
         json!({ "await": b.as_str(), "deadline_ms": short }),
     )
     .await?;
-    signal(
+    tell_peer(
         &backend,
         &b,
         json!({ "await": a.as_str(), "deadline_ms": short }),
@@ -1110,15 +1134,15 @@ pub async fn w1_an_await_cycle_ends_by_a_timeout_and_is_cancellable(
              end: {end} (the other: {other_end})"
         );
     }
-    let c = root(&backend, payload(&tag("w1c"), "await_signal")).await?;
-    let d = root(&backend, payload(&tag("w1d"), "await_signal")).await?;
-    signal(
+    let c = root(&backend, payload(&tag("w1c"), "await_key")).await?;
+    let d = root(&backend, payload(&tag("w1d"), "await_key")).await?;
+    tell_peer(
         &backend,
         &c,
         json!({ "await": d.as_str(), "deadline_ms": long }),
     )
     .await?;
-    signal(
+    tell_peer(
         &backend,
         &d,
         json!({ "await": c.as_str(), "deadline_ms": long }),

@@ -452,8 +452,8 @@ mod tests {
     /// FIG-3090: a start whose referrer is fenced before acquisition still
     /// leaves the registered process holding its environment.
     ///
-    /// This is the trigger-delivery shape: the registration names an environment
-    /// a subscription already published. A concurrent attempt fences the
+    /// This is the host-published shape: the registration names an environment
+    /// a host pin already published. A concurrent attempt fences the
     /// shared start referrer before this attempt acquires; the runtime then
     /// acquires the same bytes directly for the registered process.
     #[tokio::test]
@@ -468,7 +468,7 @@ mod tests {
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let bytes = env_spec.to_store_bytes().expect("encode environment");
         let inner: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
-        // The subscription's own edge, exactly as a registered trigger holds it.
+        // The host pin's own edge, exactly as a host holds it.
         let subscription = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
         let subscription_claim =
             crate::ReferrerClaim::unguarded(subscription.clone()).expect("subscription pin claim");
@@ -679,8 +679,8 @@ mod tests {
     }
 
     /// A process command an execution context issues runs as its store-local
-    /// effect through `ActorContext::process_effect`, the one path a signal,
-    /// a start, a cancel or a session's process delete takes.
+    /// effect through `ActorContext::process_effect`, the one path a start, a
+    /// cancel or a session's process delete takes.
     #[tokio::test]
     async fn a_process_start_issued_through_the_actor_context_registers_its_process() {
         let key = "actor-context-start";

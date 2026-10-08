@@ -73,9 +73,6 @@ pub struct CompatDescriptor {
 ///             "CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs",
 ///             "CREATE TABLE IF NOT EXISTS lash_processes",
 ///             "CREATE TABLE IF NOT EXISTS lash_process_events",
-///             "CREATE TABLE IF NOT EXISTS lash_trigger_subscriptions",
-///             "CREATE TABLE IF NOT EXISTS lash_trigger_occurrences",
-///             "CREATE TABLE IF NOT EXISTS lash_trigger_deliveries",
 ///             "CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts",
 ///         ),
 ///     ),
@@ -96,11 +93,10 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 1;
 
 /// The SQLite database's version: its `lash_compat` row and its entry in the
 /// release stamp. A SQLite deployment is one database file (ADR 0132 §12),
-/// so this one number versions every table the file holds: the durable core,
-/// the process registry and the trigger store.
+/// so this one number versions every table the file holds: the durable core
+/// and the process registry.
 ///
-/// It is the 1.0 baseline: `schema.rs`, `trigger_schema.rs` and
-/// `schema_fragments.rs` provision the whole database at version 1, and the
+/// It is the 1.0 baseline: `schema.rs` and `schema_fragments.rs` provision the whole database at version 1, and the
 /// migration catalog carries no step before it (FIG-5191). A database stamped
 /// below it, or by a newer release whose reader floor is above it, is refused
 /// typed by [`admit`]; it is never upgraded in place or silently recreated. A database file in the retired three-file
@@ -120,10 +116,6 @@ pub const POSTGRES_SCHEMA_VERSION: u32 = 1;
 ///     roots(path = "crates/lash-sansio/src/session_model/mod.rs", TurnOutcome, ErrorEnvelope),
 ///     items(
 ///         path = "crates/lash-sqlite-store/src/schema.rs", SCHEMA, PROCESS_SCHEMA,
-///         elide = "sql_idempotent_index",
-///     ),
-///     items(
-///         path = "crates/lash-sqlite-store/src/trigger_schema.rs", TRIGGER_SCHEMA,
 ///         elide = "sql_idempotent_index",
 ///     ),
 ///     items(

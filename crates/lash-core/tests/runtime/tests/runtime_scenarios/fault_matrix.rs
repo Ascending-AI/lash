@@ -79,22 +79,6 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         }),
     },
     DurableFaultMatrixRow {
-        id: "trigger-delivery-reserve-start-crash-window",
-        evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-sqlite-store",
-            test_target: Some("conformance"),
-            filter: Some("trigger_delivery_recovery"),
-        }),
-    },
-    DurableFaultMatrixRow {
-        id: "trigger-delivery-prune-orphan-retention",
-        evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-sqlite-store",
-            test_target: Some("conformance"),
-            filter: Some("trigger_capture_route_and_compaction_refusal_matrix"),
-        }),
-    },
-    DurableFaultMatrixRow {
         id: "sqlite-backend-conformance",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
@@ -269,7 +253,7 @@ fn durable_fault_matrix_target_name_is_not_a_test_filter() {
         "--locked",
         "--test",
         "conformance",
-        "trigger_capture_route_and_compaction_refusal_matrix",
+        "settlement_is_predicated_on_the_run",
     ]
     .map(str::to_string)
     .to_vec();

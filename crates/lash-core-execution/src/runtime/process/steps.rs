@@ -1,11 +1,10 @@
 //! How a host process engine's steps run (ADR 0132 §10; L6, FIG-5175).
 //!
-//! A [`StepRequest`] names a catalog tool, one of the engine's own bodies
-//! that its registration declares ([`EngineSteps`](super::EngineSteps)), or
-//! one of its host steps ([`EngineHostSteps`](super::EngineHostSteps)). The
+//! A [`StepRequest`] names a catalog tool or one of the engine's own bodies
+//! that its registration declares ([`EngineSteps`](super::EngineSteps)). The
 //! process actor admits it as an admitted execution (S4) under the tool's
-//! declared [`ExecutionPolicy`] (an engine body's is a pinned `Repeatable`, a
-//! host step's `Once`) and an [`ExecutionLimit`] within the tool ceiling,
+//! declared [`ExecutionPolicy`] (an engine body's is a pinned `Repeatable`)
+//! and an [`ExecutionLimit`] within the tool ceiling,
 //! commits that admission with the state that asked for it, and only then
 //! runs the body. A step runs the admitted-execution lifecycle a round
 //! member runs ([`lifecycle`](crate::runtime::actor::round::lifecycle)): a
@@ -113,9 +112,6 @@ pub struct ProcessStepTools {
     pub catalog: Arc<ToolCatalog>,
     /// The round tools over it, owned by the process.
     pub tools: Arc<dyn RoundTools>,
-    /// The execution context a host step runs over: the round tools'
-    /// context, running inside the process.
-    pub host: crate::RuntimeExecutionContext<'static>,
 }
 
 /// Why an activation's step tools are not there.
@@ -329,25 +325,6 @@ pub fn tool_step_settled(process: &ProcessId, settled: SettledOutput) -> Settled
             SettledOutput::Interrupted
         }
         (settled, _) => settled,
-    }
-}
-
-/// A host step's answer as `process`'s step answer: `output` as the
-/// outcome's material, owned by the process. A host step's answer is final,
-/// failure or not: it never repeats.
-#[must_use]
-pub fn host_step_output(process: &ProcessId, output: &crate::ToolCallOutput) -> SettledOutput {
-    match serde_json::to_string(output) {
-        Ok(text) => SettledOutput::Completed(Material::journal_local(
-            MaterialOwner::Process {
-                process_id: process.clone(),
-            },
-            MaterialRole::AttemptOutput,
-            text,
-        )),
-        // An answer that does not encode reached no durable form: the
-        // operation may or may not have taken effect.
-        Err(_) => SettledOutput::Interrupted,
     }
 }
 

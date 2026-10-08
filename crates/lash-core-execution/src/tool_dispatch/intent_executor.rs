@@ -12,7 +12,6 @@ pub struct IntentRealizationContext<'run> {
     pub effect_controller: crate::ActorContext,
     pub owner: crate::ExecutionOwner,
     pub processes: Arc<dyn crate::ProcessService>,
-    pub trigger_router: Option<crate::TriggerRouter>,
     pub process_engines: crate::ProcessEngineRegistry,
     pub parent_invocation: Option<crate::RuntimeInvocation>,
     pub process_lineage: Option<crate::ProcessLineage>,
@@ -29,7 +28,6 @@ impl<'run> ToolDispatchContext<'run> {
             effect_controller: context.effect_controller.clone(),
             owner: context.owner.clone(),
             processes: Arc::clone(&context.processes),
-            trigger_router: context.trigger_router.clone(),
             process_engines: context.process_engines.clone(),
             parent_invocation: context.parent_invocation.clone(),
             process_lineage: context.process_lineage.clone(),
@@ -53,9 +51,9 @@ impl IntentRealizationContext<'_> {
 }
 
 /// Realize a final's `intents`: each intent's outcome, and the store-local
-/// effects a process start or a signal stages, which commit with the call's
-/// outcome under its owner's epoch fence (ADR 0132 §5). Nothing here writes
-/// a process row, a signal or its mail.
+/// effects a process start stages, which commit with the call's outcome
+/// under its owner's epoch fence (ADR 0132 §5). Nothing here writes a
+/// process row.
 ///
 /// # Errors
 ///
@@ -110,12 +108,6 @@ pub async fn execute_final_tool_intents(
             intent_kind = intent.kind().as_str(),
             replay_key = %identity.replay_key,
         );
-        if let crate::ToolIntent::RegisterTrigger(registration) = intent
-            && let Some(refusal) = validate_trigger_registration_authority(context, registration)
-        {
-            outcomes.push(span.in_scope(|| refused(index, intent.kind(), Some(identity), refusal)));
-            continue;
-        }
         let result = execute_one(context, intent, &identity, child_trace_hook)
             .instrument(span.clone())
             .await;
@@ -433,58 +425,12 @@ fn refused(
     }
 }
 
-pub(super) fn validate_trigger_registration_authority(
-    context: &IntentRealizationContext<'_>,
-    intent: &crate::RegisterTriggerIntent,
-) -> Option<crate::ToolIntentRefusalReason> {
-    let expected_owner = match crate::resolve_trigger_owner_scope(
-        &context.owner.runtime_owner(),
-        context.process_originator.as_ref(),
-    ) {
-        Ok(owner) => owner,
-        Err(error) => {
-            return Some(crate::ToolIntentRefusalReason::CommandFailed {
-                cause: crate::ToolIntentCommandFailure::from(&error),
-            });
-        }
-    };
-    if intent.owner_scope != expected_owner {
-        return Some(crate::ToolIntentRefusalReason::ForeignTriggerOwnerScope {
-            expected: expected_owner,
-            recorded: intent.owner_scope.clone(),
-        });
-    }
-    let expected_actor = match (&context.process_originator, &context.owner) {
-        (Some(originator), _) => originator.clone(),
-        (
-            None,
-            crate::ExecutionOwner::SessionFrame {
-                session_id,
-                agent_frame_id,
-            },
-        ) => crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
-            session_id.clone(),
-            agent_frame_id.clone(),
-        )),
-        (None, crate::ExecutionOwner::Process { process_id }) => {
-            let error = crate::runtime::not_a_session_runtime("trigger_actor", process_id);
-            return Some(crate::ToolIntentRefusalReason::CommandFailed {
-                cause: crate::ToolIntentCommandFailure::from(&error),
-            });
-        }
-    };
-    (intent.actor != expected_actor).then(|| crate::ToolIntentRefusalReason::ForeignTriggerActor {
-        expected: expected_actor,
-        recorded: intent.actor.clone(),
-    })
-}
-
 #[expect(
     clippy::expect_used,
     reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
 )]
 /// Realize one intent: its outcome, and the store-local effect a process
-/// start or a signal stages instead of writing.
+/// start stages instead of writing.
 async fn execute_one(
     context: &IntentRealizationContext<'_>,
     intent: &crate::ToolIntent,
@@ -547,24 +493,6 @@ async fn execute_one(
                     .map(crate::runtime::actor::round::StoreLocalEffect::ProcessStart),
             ))
         }
-        crate::ToolIntent::SignalProcess(intent) => {
-            let signal = crate::ProcessSignal::new(
-                crate::ProcessSignalIdentity::new(
-                    intent.process_id.clone(),
-                    intent.signal_name.clone(),
-                    identity.replay_key.clone(),
-                )?,
-                intent.payload.clone(),
-            );
-            let effect = context
-                .processes
-                .stage_recorded_signal(&intent.owner, &signal, scope)
-                .await?;
-            Ok((
-                crate::ToolIntentRealized::SignalProcess(Box::new(signal)),
-                Some(effect),
-            ))
-        }
         crate::ToolIntent::CancelProcess(intent) => {
             let record = context
                 .processes
@@ -576,48 +504,6 @@ async fn execute_one(
                 )?),
                 None,
             ))
-        }
-        crate::ToolIntent::EmitProcessEvent(intent) => {
-            let event = context
-                .processes
-                .emit_event_recorded_intent(
-                    &intent.owner,
-                    &intent.process_id,
-                    intent.event_type.clone(),
-                    identity.replay_key.clone(),
-                    intent.payload.clone(),
-                    scope,
-                )
-                .await?;
-            Ok((
-                crate::ToolIntentRealized::EmitProcessEvent(Box::new(event)),
-                None,
-            ))
-        }
-        crate::ToolIntent::EmitTrigger(intent) => {
-            // The router owns the whole emission, but the durable declaration
-            // owns its occurrence identity. Stamp the request with that
-            // declaration's replay key so two declarations cannot collapse
-            // merely because their callers reused a key. A redrive retains the
-            // same replay key, so it ingests the same occurrence, or is served
-            // its recorded ingest, and replays the same deterministic delivery
-            // starts. A redrive with no journal, after retention reclaimed the
-            // occurrence, is refused by the store and writes nothing
-            // (FIG-4513).
-            // `emit_recorded` settles the report those two dedupe points make
-            // replay-varying, so the recorded `Executed` result is byte-stable.
-            let router = context.trigger_router.as_ref().ok_or_else(|| {
-                crate::PluginError::Session(
-                    "trigger store is unavailable in this runtime".to_string(),
-                )
-            })?;
-            // Boxed because the drain future is already near the coordinator's
-            // large-future budget and emission adds a delivery-start frame.
-            let mut request = intent.request.clone();
-            request.idempotency_key = identity.replay_key.clone();
-            let report =
-                Box::pin(router.emit_recorded(request, &context.effect_controller)).await?;
-            Ok((crate::ToolIntentRealized::EmitTrigger(report), None))
         }
         crate::ToolIntent::PublishDefinition(intent) => realize_definition(
             context,
@@ -648,19 +534,6 @@ async fn execute_one(
                 None,
             )
         }),
-        crate::ToolIntent::RegisterTrigger(intent) => {
-            let router = context.trigger_router.as_ref().ok_or_else(|| {
-                crate::PluginError::Session(
-                    "trigger store is unavailable in this runtime".to_string(),
-                )
-            })?;
-            Ok((
-                crate::ToolIntentRealized::RegisterTrigger(
-                    register_recorded_trigger(context, router, identity, intent).await?,
-                ),
-                None,
-            ))
-        }
     }
 }
 
@@ -708,72 +581,6 @@ async fn realize_definition(
     }
 }
 
-/// Install one recorded subscription draft through the trigger effect the
-/// foreground registration path uses, keyed by the declaration's replay key so
-/// a redrive re-installs the same subscription instead of a second one.
-#[expect(
-    clippy::expect_used,
-    reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
-)]
-async fn register_recorded_trigger(
-    context: &IntentRealizationContext<'_>,
-    router: &crate::TriggerRouter,
-    identity: &crate::ToolIntentIdentity,
-    intent: &crate::RegisterTriggerIntent,
-) -> Result<Box<crate::TriggerMutationReceipt>, crate::PluginError> {
-    let scoped = context.effect_controller.clone();
-    let draft = intent.draft.clone();
-    let invocation = crate::RuntimeEffectInvocation::new(
-        crate::EffectAddress::new(
-            scoped.execution_scope().clone(),
-            identity.replay_key.clone(),
-        )
-        .expect("tool-intent execution carries an admitted effect scope"),
-        context.parentless_attribution(),
-        identity.replay_key.clone(),
-    )
-    .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
-        identity.clone(),
-    ));
-    // The registration holds the revision it commits before it commits,
-    // under the intent's journal (ADR 0113 §3.4).
-    let creator = scoped
-        .execution_scope()
-        .journal_identity()
-        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-    let store: Arc<dyn crate::TriggerStore> =
-        Arc::new(crate::triggers::RevisionReferrerTriggerStore::new(
-            router.store(),
-            context.process_engines.clone(),
-            creator,
-        ));
-    let outcome = scoped
-        .tool_effect(
-            crate::RuntimeEffectEnvelope::new(
-                invocation,
-                crate::RuntimeEffectCommand::Trigger {
-                    command: Box::new(crate::TriggerCommand::Register {
-                        owner_scope: intent.owner_scope.clone(),
-                        actor: intent.actor.clone(),
-                        draft,
-                    }),
-                },
-            ),
-            crate::RuntimeEffectLocalExecutor::triggers(store),
-        )
-        .await
-        .map_err(crate::PluginError::RuntimeEffectController)?
-        .into_trigger()
-        .map_err(crate::PluginError::RuntimeEffectController)?
-        .map_err(|error| crate::PluginError::TriggerOperation(Box::new(error)))?;
-    match outcome {
-        crate::TriggerCommandOutcome::Mutation { receipt } => Ok(receipt),
-        other => Err(crate::PluginError::Session(format!(
-            "trigger registration returned a non-mutation outcome: {other:?}"
-        ))),
-    }
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -783,12 +590,10 @@ mod tests {
         crate::RuntimeOwner::Session(crate::SessionId::fixture(id))
     }
 
-    fn signal(owner: &crate::RuntimeOwner, payload: serde_json::Value) -> crate::ToolIntent {
-        crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
+    fn cancel(owner: &crate::RuntimeOwner, index: usize) -> crate::ToolIntent {
+        crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
             owner: owner.clone(),
-            process_id: crate::process_id_for_test("process-1"),
-            signal_name: "continue".to_string(),
-            payload,
+            process_id: crate::process_id_for_test(&format!("process-{index}")),
         })
     }
 
@@ -797,7 +602,7 @@ mod tests {
         for recorded in [0, 1, 2, 4] {
             let intents = crate::ToolIntents {
                 protocol_version: recorded,
-                intents: vec![signal(&session("session"), serde_json::json!({"value": 1}))],
+                intents: vec![cancel(&session("session"), 1)],
             };
             assert_eq!(
                 admit_batch(&session("session"), &intents),
@@ -810,7 +615,7 @@ mod tests {
     fn admission_is_all_or_nothing_for_total_count_overflow() {
         let intents = crate::ToolIntents::v3(
             (0..=crate::TOOL_INTENT_MAX_COUNT)
-                .map(|index| signal(&session("session"), serde_json::json!({"index": index})))
+                .map(|index| cancel(&session("session"), index))
                 .collect(),
         );
         assert_eq!(
@@ -826,34 +631,17 @@ mod tests {
     fn admission_is_all_or_nothing_for_per_kind_overflow() {
         let intents = crate::ToolIntents::v3(
             (0..=crate::TOOL_INTENT_MAX_PER_KIND)
-                .map(|index| signal(&session("session"), serde_json::json!({"index": index})))
+                .map(|index| cancel(&session("session"), index))
                 .collect(),
         );
         assert_eq!(
             admit_batch(&session("session"), &intents),
             Some(crate::ToolIntentRefusalReason::PerKindBudgetExceeded {
-                kind: crate::ToolIntentKind::SignalProcess,
+                kind: crate::ToolIntentKind::CancelProcess,
                 actual: 17,
                 maximum: 16,
             })
         );
-    }
-
-    #[test]
-    fn admission_is_all_or_nothing_for_canonical_byte_overflow() {
-        let intents = crate::ToolIntents::v3(vec![signal(
-            &session("session"),
-            serde_json::json!({"payload": "x".repeat(crate::TOOL_INTENT_MAX_CANONICAL_BYTES)}),
-        )]);
-        assert!(matches!(
-            admit_batch(&session("session"), &intents),
-            Some(
-                crate::ToolIntentRefusalReason::CanonicalByteBudgetExceeded {
-                    maximum: crate::TOOL_INTENT_MAX_CANONICAL_BYTES,
-                    ..
-                }
-            )
-        ));
     }
 
     /// A start carrying `payload` as its declared input under an execution
@@ -982,8 +770,8 @@ mod tests {
     #[test]
     fn admission_refuses_the_entire_batch_on_owner_mismatch() {
         let intents = crate::ToolIntents::v3(vec![
-            signal(&session("session"), serde_json::json!({"index": 0})),
-            signal(&session("other-session"), serde_json::json!({"index": 1})),
+            cancel(&session("session"), 0),
+            cancel(&session("other-session"), 1),
         ]);
         assert_eq!(
             admit_batch(&session("session"), &intents),

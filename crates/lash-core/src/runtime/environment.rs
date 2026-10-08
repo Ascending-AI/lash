@@ -46,7 +46,7 @@ pub struct RuntimeEnvironment {
     pub(crate) work: RuntimeWork,
 
     /// The host config and its one backend, which supplies the session-store
-    /// factory, the trigger store and the process-definition registry every
+    /// factory and the process-definition registry every
     /// runtime built from this environment reaches (ADR 0102, D2).
     pub core: RuntimeHostConfig,
 }
@@ -217,43 +217,5 @@ impl RuntimeEnvironment {
     pub fn with_work_ports(mut self, process: ProcessWorkWiring) -> Self {
         self.work = RuntimeWork::processes(process);
         self
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The trigger store is the backend's, stamping from the backend's clock.
-    #[tokio::test]
-    async fn the_trigger_store_stamps_from_the_backend_clock() {
-        const NOW_MS: u64 = 4_200_000;
-        let clock = Arc::new(crate::testing::TestClock::new(NOW_MS));
-        let stores = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock)
-            .await
-            .expect("open a SQLite memory store set");
-        let backend = lash_conformance::backend_over(Arc::new(stores));
-
-        let env = RuntimeEnvironment::builder(RuntimeHostConfig::new(
-            backend,
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        ))
-        .build();
-        let plan = env
-            .core
-            .trigger_store()
-            .plan_occurrence(&crate::TriggerOccurrenceRequest::new(
-                "fig1982.clock",
-                "resolved-core-clock",
-                serde_json::Value::Null,
-                "fig1982:resolved-core-clock",
-            ))
-            .await
-            .expect("plan clock probe");
-        let crate::TriggerOccurrencePlan::Fresh { occurrence, .. } = plan else {
-            panic!("a fresh store holds no occurrence: {plan:?}");
-        };
-        assert_eq!(occurrence.occurred_at_ms, NOW_MS);
     }
 }

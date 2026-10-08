@@ -20,14 +20,6 @@ pub(in crate::runtime) use durable::DurableTurn;
 pub(in crate::runtime) use resident_session::ResidentSessionContinuity;
 pub use resident_session::ResidentSessionState;
 
-fn queued_work_batch_ids(queued: &crate::AdmittedQueuedWork) -> Vec<crate::BatchId> {
-    queued
-        .batches
-        .iter()
-        .map(|batch| batch.batch_id.clone())
-        .collect()
-}
-
 fn turn_phase_id(parent_turn_id: &TurnId, phase: &str) -> TurnId {
     parent_turn_id.with_suffix(format_args!(":{phase}"))
 }
@@ -68,53 +60,6 @@ pub(in crate::runtime) fn emit_turn_started(
             correlation_id: None,
             event: TurnEvent::TurnStarted {
                 turn_id: turn_id.clone(),
-            },
-        },
-    );
-}
-
-pub(in crate::runtime) fn emit_queued_work_started(
-    observer: &TurnObserver,
-    cursor: &mut crate::engine::ObservationCursor,
-    turn_id: &TurnId,
-    boundary: crate::AdmissionBoundary,
-    queued: &crate::AdmittedQueuedWork,
-    causes: Vec<crate::TurnCause>,
-) {
-    cursor.observe(
-        &observer.for_turn(turn_id),
-        crate::engine::ObservedEvent::Activity {
-            correlation_id: None,
-            event: TurnEvent::QueuedWorkStarted {
-                boundary,
-                batch_ids: queued_work_batch_ids(queued)
-                    .into_iter()
-                    .map(crate::BatchId::into_inner)
-                    .collect(),
-                causes,
-            },
-        },
-    );
-}
-
-pub(in crate::runtime) fn send_queued_work_started_event(
-    event_tx: &TurnObserver,
-    cursor: &mut crate::engine::ObservationCursor,
-    boundary: crate::AdmissionBoundary,
-    queued: &crate::AdmittedQueuedWork,
-    causes: Vec<crate::TurnCause>,
-) {
-    cursor.observe(
-        event_tx,
-        crate::engine::ObservedEvent::Activity {
-            correlation_id: None,
-            event: TurnEvent::QueuedWorkStarted {
-                boundary,
-                batch_ids: queued_work_batch_ids(queued)
-                    .into_iter()
-                    .map(crate::BatchId::into_inner)
-                    .collect(),
-                causes,
             },
         },
     );

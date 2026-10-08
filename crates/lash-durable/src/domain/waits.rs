@@ -76,8 +76,6 @@ pub enum WaitKind {
     Custom,
     /// A process's terminal.
     ProcessTerminal,
-    /// A signal.
-    Signal,
     /// A durable sleep.
     Timer,
     /// The end of the turn a `SessionTurn` process runs in its child
@@ -100,7 +98,6 @@ impl WaitKind {
             Self::ToolCompletion => "tool_completion",
             Self::Custom => "custom",
             Self::ProcessTerminal => "process_terminal",
-            Self::Signal => "signal",
             Self::Timer => "timer",
             Self::ChildSession => "child_session",
         }
@@ -113,7 +110,6 @@ impl WaitKind {
             Self::ToolCompletion,
             Self::Custom,
             Self::ProcessTerminal,
-            Self::Signal,
             Self::Timer,
             Self::ChildSession,
         ]
@@ -186,11 +182,6 @@ pub enum WaitPurpose {
         /// Its optional deadline, fixed at minting.
         deadline: Option<DurableInstant>,
     },
-    /// A signal.
-    Signal {
-        /// Its optional deadline, fixed at minting.
-        deadline: Option<DurableInstant>,
-    },
     /// A sleep always has a due time.
     Timer {
         /// The time the timer must elapse.
@@ -207,7 +198,6 @@ impl WaitPurpose {
             Self::Custom { .. } => WaitKind::Custom,
             Self::ProcessTerminal { .. } => WaitKind::ProcessTerminal,
             Self::ChildSession { .. } => WaitKind::ChildSession,
-            Self::Signal { .. } => WaitKind::Signal,
             Self::Timer { .. } => WaitKind::Timer,
         }
     }
@@ -220,8 +210,7 @@ impl WaitPurpose {
             Self::ToolCompletion { deadline, .. }
             | Self::Custom { deadline, .. }
             | Self::ProcessTerminal { deadline, .. }
-            | Self::ChildSession { deadline, .. }
-            | Self::Signal { deadline } => *deadline,
+            | Self::ChildSession { deadline, .. } => *deadline,
         }
     }
 
@@ -252,7 +241,6 @@ impl WaitPurpose {
             (WaitKind::ChildSession, Some(process), deadline) => {
                 Some(Self::ChildSession { process, deadline })
             }
-            (WaitKind::Signal, None, deadline) => Some(Self::Signal { deadline }),
             (WaitKind::Timer, None, Some(deadline)) => Some(Self::Timer { deadline }),
             _ => None,
         }

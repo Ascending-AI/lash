@@ -22,7 +22,6 @@ mod tools;
 mod trace;
 pub(in crate::runtime) use trace::TurnPhaseSpan;
 
-pub(in crate::runtime) use crate::runtime::turn_loop::send_queued_work_started_event;
 pub(super) use events::{emit_semantic_response_parts, send_turn_input_applications};
 use handlers::foreground_exec_graph_key;
 pub(super) use trace::protocol_step_trace_event;
@@ -54,8 +53,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) after_turn_reads: Option<Arc<dyn crate::plugin::SessionReadService>>,
     pub(super) protocol_turn_options: crate::ProtocolTurnOptions,
     pub(super) turn_context: crate::TurnContext,
-    pub(super) turn_causes: Vec<crate::TurnCause>,
-    pub(super) pending_queued: Vec<crate::AdmittedQueuedWork>,
     pub(super) pending_turn_inputs: Vec<crate::AdmittedTurnInputs>,
     pub(super) pending_checkpoint_turn_inputs: Option<crate::AdmittedTurnInputs>,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,

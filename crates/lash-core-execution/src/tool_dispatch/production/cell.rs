@@ -4,8 +4,7 @@
 //! point admits it under the policy, limit and completion wait its tool
 //! declares ([`CellMembers::pin`]), and its body runs between its `x_start`
 //! and its `x_outcome`: a tool call's admission checks, attempt and
-//! decision, as a round member's do, or a host call (a trigger command)
-//! once. Its request is the [`CellMember`] itself, which the cell's
+//! decision, as a round member's do. Its request is the [`CellMember`] itself, which the cell's
 //! snapshot keeps for as long as the call is open, so any owner builds its
 //! body again. The cell is answered from the call's committed outcome alone
 //! ([`CellMembers::reply`]).
@@ -17,12 +16,9 @@
 //! call's is; an owner without the candidate reconciles the admission's
 //! export instead, which the exporter dedupes (FIG-5395).
 
-use std::future::Future;
-use std::pin::Pin;
-
 use super::round::{
-    MemberEnd, answered, catalog_policies, completed_answer, discharge_member, member_body,
-    member_output, member_pin, present_resolved, resolved_member,
+    catalog_policies, completed_answer, discharge_member, member_body, member_pin,
+    present_resolved, resolved_member,
 };
 use super::*;
 use crate::runtime::actor::round::{
@@ -109,40 +105,12 @@ impl CellCall {
     }
 }
 
-/// A call a cell's host answers itself rather than through a catalog tool:
-/// a trigger command. It is admitted `Once`, so a crash inside it is
-/// `Interrupted`, never a second write.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HostCall {
-    /// The call's lash-minted identity.
-    pub id: crate::ToolCallId,
-    /// The host operation it performs.
-    pub operation: String,
-    /// Its payload.
-    pub payload: serde_json::Value,
-}
-
-impl HostCall {
-    fn pending(&self) -> crate::sansio::PendingToolCall {
-        crate::sansio::PendingToolCall {
-            call_id: self.id.clone(),
-            provider_call_id: None,
-            tool_name: self.operation.clone(),
-            args: self.payload.clone(),
-            replay: None,
-        }
-    }
-}
-
 /// One admitted call of a cell, as its member's request carries it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CellMember {
     /// A catalog tool call.
     Tool(CellCall),
-    /// A call the host answers itself.
-    Host(HostCall),
 }
 
 impl CellMember {
@@ -151,7 +119,6 @@ impl CellMember {
     pub fn id(&self) -> &crate::ToolCallId {
         match self {
             Self::Tool(call) => &call.id,
-            Self::Host(call) => &call.id,
         }
     }
 
@@ -172,18 +139,6 @@ impl CellMember {
     pub fn decode(request: &[u8]) -> Result<Self, String> {
         serde_json::from_slice(request).map_err(|error| error.to_string())
     }
-}
-
-/// The host's own calls: what a [`HostCall`]'s body runs. Its answer is the
-/// host's encoding, handed back to it by [`CellMembers::reply`].
-pub trait CellHostCalls: Send + Sync {
-    /// Run `call` once over the cell's `context`, to its end: a host call
-    /// is one store write, never stopped halfway.
-    fn run(
-        &self,
-        context: RuntimeExecutionContext<'static>,
-        call: HostCall,
-    ) -> Pin<Box<dyn Future<Output = serde_json::Value> + Send>>;
 }
 
 /// The tools a cell's calls run: the catalog of the cell's execution
@@ -291,12 +246,11 @@ fn reply(call: &crate::sansio::PendingToolCall, output: &SettledOutput) -> ToolI
     answer
 }
 
-/// The member bodies of one cell: its catalog tools and its host's own
-/// calls, by the call each admitted member names. A call is known once the
+/// The member bodies of one cell: its catalog tools, by the call each
+/// admitted member names. A call is known once the
 /// cell admitted it, or once a resumed cell's snapshot names it open.
 pub struct CellMembers {
     tools: CellTools,
-    host: Arc<dyn CellHostCalls>,
     calls: Mutex<BTreeMap<crate::ToolCallId, CellMember>>,
     /// The trace candidates of the tool calls this owner proposed, until
     /// their admission is known to have committed.
@@ -305,7 +259,7 @@ pub struct CellMembers {
 
 impl CellMembers {
     /// The members of the cell `owner` runs over `context`: its tool calls
-    /// on `context`'s catalog, its host calls run by `host`.
+    /// on `context`'s catalog.
     ///
     /// # Errors
     ///
@@ -314,7 +268,6 @@ impl CellMembers {
     pub fn new(
         context: &RuntimeExecutionContext<'_>,
         owner: crate::EffectOpener,
-        host: Arc<dyn CellHostCalls>,
     ) -> Result<Self, crate::RuntimeEffectControllerError> {
         let context = context.to_static().ok_or_else(|| {
             crate::RuntimeEffectControllerError::new(
@@ -324,7 +277,6 @@ impl CellMembers {
         })?;
         Ok(Self {
             tools: CellTools { context, owner },
-            host,
             calls: Mutex::default(),
             candidates: Mutex::default(),
         })
@@ -332,16 +284,14 @@ impl CellMembers {
 
     /// Propose the trace admission of `member`, a tool call, requested at
     /// `now_ms`: the scope the cell's admission of it retains. The candidate
-    /// is held until the call's first body is built. `None` for a host call,
-    /// or without tracing.
+    /// is held until the call's first body is built. `None` without
+    /// tracing.
     pub fn propose_trace(
         &self,
         member: &CellMember,
         now_ms: u64,
     ) -> Option<lash_trace::DurableTraceScope> {
-        let CellMember::Tool(call) = member else {
-            return None;
-        };
+        let CellMember::Tool(call) = member;
         let proposal = self
             .tools
             .context
@@ -385,19 +335,11 @@ impl CellMembers {
     }
 
     /// What `member` is admitted as at `now_ms`: a tool call as its tool
-    /// declares it ([`CellTools::pin`]), a host call, one store write, `Once`
-    /// under the control-phase bound.
+    /// declares it ([`CellTools::pin`]).
     #[must_use]
     pub fn pin(&self, member: &CellMember, now_ms: u64) -> MemberPin {
-        match member {
-            CellMember::Tool(call) => self.tools.pin(call, now_ms),
-            CellMember::Host(call) => member_pin(
-                &self.tools.context,
-                None,
-                crate::ToolId::new(format!("cell-host:{}", call.operation)),
-                now_ms,
-            ),
-        }
+        let CellMember::Tool(call) = member;
+        self.tools.pin(call, now_ms)
     }
 
     /// The policies the catalog declares now.
@@ -407,14 +349,11 @@ impl CellMembers {
     }
 
     /// What the cell is answered with for `member`, from its committed
-    /// `output` alone. A host call's answer is the success value its host
-    /// encoded.
+    /// `output` alone.
     #[must_use]
     pub fn reply(&self, member: &CellMember, output: &SettledOutput) -> ToolInvocationReply {
-        match member {
-            CellMember::Tool(call) => reply(&call.pending(), output),
-            CellMember::Host(call) => reply(&call.pending(), output),
-        }
+        let CellMember::Tool(call) = member;
+        reply(&call.pending(), output)
     }
 
     fn member(&self, execution: &AdmittedExecution) -> Option<CellMember> {
@@ -435,22 +374,6 @@ impl MemberBodies for CellMembers {
                 self.admitted(execution);
                 self.tools.body(&call, execution)
             }
-            Some(CellMember::Host(call)) => {
-                let host = Arc::clone(&self.host);
-                let owner = self.tools.owner.clone();
-                let context = self.tools.context.clone();
-                Box::new(move |_| {
-                    Box::pin(async move {
-                        let pending = call.pending();
-                        let answer = host.run(context, call).await;
-                        member_output(
-                            &owner,
-                            MemberEnd::Final(answered(&pending, ToolCallOutput::success(answer))),
-                        )
-                        .into()
-                    })
-                })
-            }
             None => unknown_member(),
         }
     }
@@ -463,8 +386,7 @@ impl MemberBodies for CellMembers {
     ) -> SettledOutput {
         match self.member(execution) {
             Some(CellMember::Tool(call)) => self.tools.resolved(&call, parked, resolution),
-            // Only a tool call parks.
-            _ => SettledOutput::Interrupted,
+            None => SettledOutput::Interrupted,
         }
     }
 

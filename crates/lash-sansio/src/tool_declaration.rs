@@ -217,13 +217,13 @@ mod tests {
     #[test]
     fn with_intents_keeps_vocabulary_order_without_duplicates() {
         let declaration = ToolDeclaration::default().with_intents([
-            ToolIntentKind::EmitTrigger,
+            ToolIntentKind::CancelProcess,
             ToolIntentKind::StartProcess,
-            ToolIntentKind::EmitTrigger,
+            ToolIntentKind::CancelProcess,
         ]);
         assert_eq!(
             declaration.intents,
-            vec![ToolIntentKind::StartProcess, ToolIntentKind::EmitTrigger]
+            vec![ToolIntentKind::StartProcess, ToolIntentKind::CancelProcess]
         );
         declaration
             .validate()

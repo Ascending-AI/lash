@@ -152,9 +152,9 @@ pub use sansio::{
     CompletedToolCall, ContextProjector, DriverAction, DriverContextView, Effect, EffectId,
     ExpandedRow, ExpandedWrapper, LlmCallError, ModelToolCalls, PendingToolCall, PendingWork,
     ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SavedTurn,
-    TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, TurnCause, TurnCheckpoint,
-    TurnCheckpointContent, TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig,
-    TurnProtocol, TurnWindow, TurnWindowPin, UnitTurnProtocol, render_turn_causes_prompt,
+    TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, TurnCheckpoint, TurnCheckpointContent,
+    TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig, TurnProtocol, TurnWindow,
+    TurnWindowPin, UnitTurnProtocol,
 };
 pub use schema_contract::{
     OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,

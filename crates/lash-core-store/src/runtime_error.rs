@@ -417,12 +417,6 @@ runtime_error_codes! {
         Plugin = "plugin" => Terminal,
         // the selected queued work cannot be admitted; the same selection is refused again.
         QueuedWork = "queued_work" => Terminal,
-        // one queued row alone exceeds the window; the same row exceeds it again.
-        /// One queued row alone renders larger than the whole model context window,
-        /// so no drain policy can make it fit and an automatic drain cannot execute
-        /// it (FIG-1313). Retrying the identical drain fails identically until the
-        /// row is cancelled or the window grows.
-        QueuedWorkRowExceedsContextWindow = "queued_work_row_exceeds_context_window" => Terminal,
         // a contained panic of the process body; the same body panics the same way.
         ProcessPanicked = "process_panicked" => Terminal,
         // the target process is outside the visible set.
@@ -449,8 +443,7 @@ runtime_error_codes! {
         /// holds different content for.
         ///
         /// The stores fence re-submitted identities at the point they mutate: a
-        /// process registration fingerprint, a process-event replay key, a trigger
-        /// occurrence idempotency key. Matching content replays the first writer's
+        /// process registration fingerprint or a process-event replay key. Matching content replays the first writer's
         /// result; differing content cannot, because the identity is already bound.
         /// Retrying the same changed payload fails identically, so this is terminal
         /// rather than retryable. Hosts see it as one refusal vocabulary at the
@@ -470,20 +463,6 @@ runtime_error_codes! {
         /// A host rail was handed a start key of a family lash derives for its
         /// own start paths (ADR 0107): a host mints only host keys.
         StartKeyFamilyRefused = "start_key_family_refused" => Terminal,
-        // the occurrence's tombstone outlives every redelivery it answers.
-        /// An ingest named an occurrence retention reclaimed (FIG-4513).
-        TriggerOccurrenceReclaimed = "trigger_occurrence_reclaimed" => Terminal,
-        // the provider said nothing about the grant; the same delivery is asked again.
-        /// A trigger delivery's start asked the host to restore its captured
-        /// provider route, and the provider did not answer (FIG-4554). Nothing
-        /// was recorded; the emission's retry asks again under the same
-        /// identity.
-        TriggerRouteUnavailable = "trigger_route_unavailable" => Retryable,
-        // the provider withdrew the captured grant, and nothing re-resolves it.
-        /// A trigger delivery's start asked the host to restore its captured
-        /// provider route, and the provider revoked or refuses it (FIG-4554).
-        /// Nothing registered, and nothing re-resolves the source.
-        TriggerRouteRevoked = "trigger_route_revoked" => Terminal,
         // the target was replaced by a retention tombstone.
         /// ADR 0051 effect-host implementor diagnostic for a process-command
         /// refusal whose terminal target has been replaced by a retention tombstone.
@@ -491,16 +470,6 @@ runtime_error_codes! {
         // a newer incarnation durably superseded this one.
         // no process execution is wired for this call.
         ProcessRegistryUnavailable = "process_registry_unavailable" => Terminal,
-        // the durable signal wait settled cancelled.
-        ProcessSignalWaitCancelled = "process_signal_wait_cancelled" => Terminal,
-        // the wait moved to a successor segment; this segment ends at a
-        // boundary, and no retry of it waits again.
-        /// A process segment's signal wait was handed to a successor segment on
-        /// the drain's wake (FIG-3799): the wait stays open and the body stops on
-        /// it, for its continuation to wait again. Never a guest-visible outcome.
-        ProcessSignalWaitHandedOver = "process_signal_wait_handed_over" => Terminal,
-        // the durable signal wait settled timed out.
-        ProcessSignalWaitTimeout = "process_signal_wait_timeout" => Terminal,
         // the wait moved to the Run's successor segment; this segment ends
         // at a boundary, and no retry of it waits again.
         /// A Run's durable wait was handed to the Run's successor segment on the
@@ -769,8 +738,6 @@ runtime_error_codes! {
         TurnTerminalInvalidResolution = "turn_terminal_invalid_resolution" => Terminal,
         // the terminal is unknown or durably revoked.
         TurnTerminalUnknownOrRevoked = "turn_terminal_unknown_or_revoked" => Terminal,
-        // no trigger store is wired.
-        TriggerStoreUnavailable = "trigger_store_unavailable" => Terminal,
     }
     // No semantic renames are retained yet. Removed replacement-abort codes
     // remain foreign: they did not mean the current replay-divergence code.

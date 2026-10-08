@@ -3,8 +3,8 @@
 use super::super::ActorContext;
 
 impl ActorContext {
-    /// The tool effects, run in place and recorded nowhere: a tool attempt,
-    /// its presentation and the trigger commands its intents issue. Their
+    /// The tool effects, run in place and recorded nowhere: a tool attempt
+    /// and its presentation. Their
     /// durability is the admitted execution that runs the call (ADR 0132
     /// §5): a round member's `x_outcome`, or a code cell's snapshot (§8).
     /// Any other command is refused.
@@ -19,8 +19,9 @@ impl ActorContext {
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         match &envelope.command {
             crate::RuntimeEffectCommand::ToolAttempt { .. }
-            | crate::RuntimeEffectCommand::PresentToolResult { .. }
-            | crate::RuntimeEffectCommand::Trigger { .. } => local.run_in_place(envelope).await,
+            | crate::RuntimeEffectCommand::PresentToolResult { .. } => {
+                local.run_in_place(envelope).await
+            }
             other => Err(crate::RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
                 format!("{:?} is not a tool effect", other.kind()),

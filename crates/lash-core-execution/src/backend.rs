@@ -12,7 +12,7 @@ use lash_durable::{
 use crate::runtime::actor::projection::ProjectionProviders;
 use crate::{
     AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessExecutionEnvStore,
-    ProcessRegistry, TriggerStore,
+    ProcessRegistry,
 };
 
 /// The identity of one store set: the storage it names, such as a SQLite
@@ -413,11 +413,6 @@ impl Backend {
         self.inner.stores.process_registry()
     }
 
-    /// The durable trigger subscriptions and occurrences.
-    pub fn trigger_store(&self) -> Arc<dyn TriggerStore> {
-        self.inner.stores.trigger_store()
-    }
-
     /// The store of process execution environments.
     pub fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
         self.inner.stores.process_env_store()
@@ -508,9 +503,6 @@ pub trait StoreSet: Send + Sync {
 
     /// The durable registry of background processes.
     fn process_registry(&self) -> Arc<dyn ProcessRegistry>;
-
-    /// The durable trigger subscriptions and occurrences.
-    fn trigger_store(&self) -> Arc<dyn TriggerStore>;
 
     /// The store of process execution environments.
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore>;

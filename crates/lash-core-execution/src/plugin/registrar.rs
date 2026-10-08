@@ -126,7 +126,6 @@ pub(crate) struct PluginContributions {
     /// Each plugin's pure state reducers, by name (K10).
     pub(crate) state_reducers: BTreeMap<String, BTreeMap<String, super::StateReducer>>,
     pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
-    pub(crate) triggers: Vec<crate::TriggerEvent>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
     pub(crate) before_turn_hooks: Vec<RegisteredHook<BeforeTurnHook>>,
     pub(crate) tool_args_transforms: Vec<RegisteredHook<ToolArgsTransformHook>>,
@@ -178,16 +177,6 @@ pub struct ToolRegistrations<'a> {
 impl ToolRegistrations<'_> {
     pub fn provider(self, provider: Arc<dyn ToolProvider>) -> Result<(), PluginError> {
         self.reg.add_tool_provider(provider)
-    }
-}
-
-pub struct TriggerEventRegistrations<'a> {
-    reg: &'a mut PluginRegistrar,
-}
-
-impl TriggerEventRegistrations<'_> {
-    pub fn declare(self, event: crate::TriggerEvent) -> Result<(), PluginError> {
-        self.reg.add_trigger(event)
     }
 }
 
@@ -779,10 +768,6 @@ impl PluginRegistrar {
         ToolRegistrations { reg: self }
     }
 
-    pub fn triggers(&mut self) -> TriggerEventRegistrations<'_> {
-        TriggerEventRegistrations { reg: self }
-    }
-
     pub fn tool_catalog(&mut self) -> ToolCatalogRegistrations<'_> {
         ToolCatalogRegistrations { reg: self }
     }
@@ -838,22 +823,6 @@ impl PluginRegistrar {
             CallbackSlot::ToolProvider,
             provider,
         );
-        Ok(())
-    }
-
-    fn add_trigger(&mut self, event: crate::TriggerEvent) -> Result<(), PluginError> {
-        if self
-            .contributions
-            .triggers
-            .iter()
-            .any(|existing| existing.key() == event.key())
-        {
-            return Err(PluginError::Registration(format!(
-                "duplicate trigger occurrence `{}.{}.{}`",
-                event.resource_type, event.alias, event.event
-            )));
-        }
-        self.contributions.triggers.push(event);
         Ok(())
     }
 

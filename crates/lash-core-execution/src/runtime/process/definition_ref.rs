@@ -12,8 +12,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::events::ProcessEventType;
-
 /// The visible kind of the engine that owns a definition.
 ///
 /// A durable process row records this string, so the type exists to stop the
@@ -260,18 +258,12 @@ impl ProcessDefinitionRef {
 pub struct ProcessDefinitionResolution {
     /// The authoritative signature, read from the engine's stored artifact.
     pub signature: ProcessSignature,
-    /// The signal event types the definition declares or infers.
-    pub signals: Vec<ProcessEventType>,
 }
 
 impl ProcessDefinitionResolution {
-    pub fn new(
-        signature: impl Into<ProcessSignature>,
-        signals: impl IntoIterator<Item = ProcessEventType>,
-    ) -> Self {
+    pub fn new(signature: impl Into<ProcessSignature>) -> Self {
         Self {
             signature: signature.into(),
-            signals: signals.into_iter().collect(),
         }
     }
 }

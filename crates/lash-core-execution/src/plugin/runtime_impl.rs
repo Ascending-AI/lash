@@ -95,7 +95,6 @@ pub enum PluginSessionMaterializationRequest<'a> {
 struct BuiltSessionContributions {
     plugins: Vec<Arc<dyn SessionPlugin>>,
     contributions: PluginContributions,
-    triggers: crate::TriggerEventCatalog,
 }
 
 /// The recorded facts a plugin session is built under: the session's tool
@@ -450,7 +449,6 @@ impl PluginHost {
             let BuiltSessionContributions {
                 plugins,
                 contributions,
-                triggers,
             } = self.build_session_contributions(&ctx, Arc::clone(&session.state))?;
             let registry = build_tool_registry(&contributions, session.tool_snapshot.clone())?;
             let tools = Arc::clone(&registry) as Arc<dyn ToolProvider>;
@@ -471,7 +469,6 @@ impl PluginHost {
                     tool_registry: registry,
                     tools,
                     session_extensions,
-                    triggers,
                 });
         }
         self.register_session(&session.owner, session)?;
@@ -604,14 +601,9 @@ impl PluginHost {
         contributions
             .context_pressure_hooks
             .sort_by_key(|entry| std::cmp::Reverse(entry.0));
-        let triggers = crate::TriggerEventCatalog::from_events(contributions.triggers.clone())
-            .map_err(|message| {
-                PluginError::Registration(format!("invalid trigger event catalog: {message}"))
-            })?;
         Ok(BuiltSessionContributions {
             plugins,
             contributions,
-            triggers,
         })
     }
 

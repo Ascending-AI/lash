@@ -88,19 +88,57 @@ pub struct ObservedProcess {
     pub child_session_id: Option<SessionId>,
 }
 
+/// One lifecycle fact of a process's log, as a host observes it. It travels
+/// as its kind's spelling and payload, exactly as the log stores it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    into = "ObservedProcessEventRecord",
+    try_from = "ObservedProcessEventRecord"
+)]
 pub struct ObservedProcessEvent {
     pub sequence: u64,
-    pub event_type: String,
+    pub fact: super::ProcessLifecycleFact,
     pub occurred_at_ms: u64,
-    pub payload: serde_json::Value,
+}
+
+/// The wire form of an [`ObservedProcessEvent`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct ObservedProcessEventRecord {
+    sequence: u64,
+    event_type: String,
+    occurred_at_ms: u64,
+    payload: serde_json::Value,
+}
+
+impl From<ObservedProcessEvent> for ObservedProcessEventRecord {
+    fn from(event: ObservedProcessEvent) -> Self {
+        Self {
+            sequence: event.sequence,
+            event_type: event.fact.event_type().to_owned(),
+            occurred_at_ms: event.occurred_at_ms,
+            payload: event.fact.payload(),
+        }
+    }
+}
+
+impl TryFrom<ObservedProcessEventRecord> for ObservedProcessEvent {
+    type Error = PluginError;
+
+    fn try_from(record: ObservedProcessEventRecord) -> Result<Self, Self::Error> {
+        Ok(Self {
+            sequence: record.sequence,
+            fact: super::ProcessLifecycleFact::decode(&record.event_type, record.payload)?,
+            occurred_at_ms: record.occurred_at_ms,
+        })
+    }
 }
 
 /// Payload-free event metadata for list and timeline views.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservedProcessEventLite {
     pub sequence: u64,
-    pub event_type: String,
+    #[serde(rename = "event_type")]
+    pub kind: super::ProcessEventKind,
 }
 
 pub type ObservedProcessEventPage =
@@ -372,7 +410,7 @@ impl ProcessWorkObserver {
                                 .into_iter()
                                 .map(|event| ObservedProcessEventLite {
                                     sequence: event.sequence,
-                                    event_type: event.event_type,
+                                    kind: event.kind,
                                 })
                                 .collect(),
                         )
@@ -455,9 +493,8 @@ impl From<ProcessEvent> for ObservedProcessEvent {
     fn from(event: ProcessEvent) -> Self {
         Self {
             sequence: event.sequence,
-            event_type: event.event_type,
+            fact: event.fact,
             occurred_at_ms: event.occurred_at,
-            payload: event.payload,
         }
     }
 }

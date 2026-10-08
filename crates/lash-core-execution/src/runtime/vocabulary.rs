@@ -229,11 +229,6 @@ pub enum TurnEvent {
     TurnStarted {
         turn_id: TurnId,
     },
-    QueuedWorkStarted {
-        boundary: crate::AdmissionBoundary,
-        batch_ids: Vec<String>,
-        causes: Vec<crate::TurnCause>,
-    },
     /// The run's construction restored the session's persisted tool state
     /// and some persisted id had no registered source (FIG-5134). It
     /// follows the run's first `TurnStarted`; a clean restore emits nothing.
@@ -465,12 +460,6 @@ pub trait DeploymentStore:
     /// A retry in a deleted scope returns `StoreError::SessionDeleted`, before
     /// and after receipt pruning. The permanent identity tombstone is exempt.
     /// No daemon, clock read or live policy lookup runs this operation.
-    ///
-    /// Trigger mutation receipts are evidence under this same lever (FIG-4108):
-    /// ownerless (host/platform) receipts go by age alone, session-owned
-    /// receipts once their owner is durably deleted and no outstanding
-    /// delivery still names it. A resent mutation whose receipt was reclaimed
-    /// re-evaluates against current state rather than replaying.
     ///
     /// The host tool-intent submission ledger is evidence under it too
     /// (FIG-1509): a row admitted before the bound is reclaimed once its owner

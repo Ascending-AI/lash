@@ -71,7 +71,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 manager.model_tool_process_service(),
                 effect_controller,
                 direct_completions,
-                manager.trigger_router(),
                 manager.process_engines().clone(),
                 observer,
                 chronological_projection,

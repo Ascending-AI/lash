@@ -68,8 +68,6 @@ pub enum FencedWrite {
     IngressSettlement,
     /// Session-head publication (`D4`).
     SessionHeadPublication,
-    /// Wake-delivery settlement out of the enqueuing claim (`D8`).
-    WakeDeliverySettlement,
 }
 
 impl FencedWrite {
@@ -79,7 +77,6 @@ impl FencedWrite {
             Self::IngressAdmission => "ingress.admit",
             Self::IngressSettlement => "ingress.settle",
             Self::SessionHeadPublication => "session_head.publish",
-            Self::WakeDeliverySettlement => "wake_delivery.settle",
         }
     }
 }
@@ -227,70 +224,4 @@ pub fn require_single_writer_head_publication(
         session_id: session_id.clone(),
         backend,
     })
-}
-
-// ---------------------------------------------------------------------------
-// D7 — "is this wake delivery still in my enqueuing claim?"
-// ---------------------------------------------------------------------------
-
-/// The claim columns a locked wake-delivery row carries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WakeDeliveryClaimFacts<'a> {
-    /// The row's `state` column, compared against the enqueuing literal.
-    pub state: &'a str,
-    pub claim_token: Option<&'a str>,
-}
-
-/// The one answer to "is this wake delivery still in my enqueuing claim?"
-/// (`D8`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WakeDeliveryClaimVerdict {
-    /// The row is enqueuing under this claim token: settle it.
-    Held,
-    /// No delivery row exists.
-    Absent,
-    /// The row left the enqueuing state: another worker already settled it.
-    NotEnqueuing,
-    /// The row is enqueuing under a different claim token.
-    Superseded,
-}
-
-impl WakeDeliveryClaimVerdict {
-    /// Whether the claim still owns the delivery.
-    pub fn is_held(self) -> bool {
-        matches!(self, Self::Held)
-    }
-
-    /// Stable label for diagnostics and tests.
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Held => "held",
-            Self::Absent => "absent",
-            Self::NotEnqueuing => "not_enqueuing",
-            Self::Superseded => "superseded",
-        }
-    }
-}
-
-/// Decide whether a wake delivery is still inside the presenter's enqueuing
-/// claim (`D8`).
-///
-/// `enqueuing_state` is the backend's spelling of the enqueuing state literal,
-/// passed in rather than hardcoded so the verdict and the SQL backstop read the
-/// same vocabulary.
-pub fn wake_delivery_claim_verdict(
-    observed: Option<WakeDeliveryClaimFacts<'_>>,
-    presented_claim_token: &str,
-    enqueuing_state: &str,
-) -> WakeDeliveryClaimVerdict {
-    let Some(observed) = observed else {
-        return WakeDeliveryClaimVerdict::Absent;
-    };
-    if observed.state != enqueuing_state {
-        return WakeDeliveryClaimVerdict::NotEnqueuing;
-    }
-    if observed.claim_token != Some(presented_claim_token) {
-        return WakeDeliveryClaimVerdict::Superseded;
-    }
-    WakeDeliveryClaimVerdict::Held
 }

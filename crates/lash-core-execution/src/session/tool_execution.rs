@@ -386,7 +386,6 @@ impl RuntimeExecutionContext<'_> {
                     call_id: call_id.clone(),
                 },
                 &possession,
-                &outcome.triggers,
             )?;
             for intent_outcome in crate::tool_dispatch::model_visible_intent_outcomes(&outcome) {
                 model_return.parts.push(crate::ModelToolReturnPart::text(
@@ -564,15 +563,9 @@ impl RuntimeExecutionContext<'_> {
         resolution: crate::Resolution,
         resolver: Option<&crate::PendingResolver>,
         attempts: Vec<lash_trace::TraceRetryAttempt>,
-        mut triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
     ) -> ToolDispatchOutcome {
-        // The resume's own producers write into buffers fresh to this
-        // resume, so what they commit is captured into the outcome rather
-        // than into a buffer a sibling attempt may still be writing into.
         let mut resumed_dispatch = (*self.dispatch).clone();
         resumed_dispatch.observation_call_key = Some(self.call_observation_key(call_key));
-        resumed_dispatch.trigger_outcomes =
-            crate::tool_dispatch::ToolTriggerOutcomeBuffer::default();
         // The parked row keeps the call's name, not its tool id: the catalog
         // names the id while the tool is still a member.
         let tool_id = crate::tool_dispatch::resolve_callable_manifest(&self.dispatch, &tool_name)
@@ -589,7 +582,7 @@ impl RuntimeExecutionContext<'_> {
             replay: None,
             prepared_payload: serde_json::Value::Null,
         });
-        let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
+        crate::tool_dispatch::settle_completed_pending_tool_call(
             &resumed_dispatch,
             ids,
             &prepared,
@@ -597,19 +590,7 @@ impl RuntimeExecutionContext<'_> {
             resolver,
             attempts,
         )
-        .await;
-        triggers.extend(resumed_dispatch.trigger_outcomes.drain());
-        outcome.triggers = triggers;
-        outcome
-    }
-
-    pub fn restore_tool_trigger_outcomes(
-        &self,
-        outcomes: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
-    ) {
-        for outcome in outcomes {
-            self.dispatch.trigger_outcomes.enqueue(outcome);
-        }
+        .await
     }
 
     pub(crate) async fn await_process_with_cancellation(

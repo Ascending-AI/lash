@@ -1,5 +1,5 @@
 //! The durable process record and its closed lifecycle projection.
-use super::super::events::{ProcessEventType, ProcessTerminal};
+use super::super::events::ProcessTerminal;
 use super::super::validation::prepare_process_registration;
 use super::{
     Ancestry, LifetimeDecision, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId,
@@ -25,12 +25,6 @@ pub enum WaitKind {
         call_id: crate::ToolCallId,
         tool_id: crate::ToolId,
     },
-    Signal {
-        name: String,
-        event_type: String,
-        key: String,
-        ordinal: u64,
-    },
 }
 
 impl WaitState {
@@ -38,14 +32,13 @@ impl WaitState {
     /// durable process execution.
     pub fn key(&self) -> &str {
         match &self.kind {
-            WaitKind::Signal { key, .. } => key,
             WaitKind::Call { call_id, .. } => call_id.as_str(),
         }
     }
 }
 
-/// Durable process lifecycle fold. Observer membership and wake subscription
-/// are queryable edge state, audited by events but deliberately not projected
+/// Durable process lifecycle fold. Observer membership is queryable edge
+/// state, audited by events but deliberately not projected
 /// into this record.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessRecord {
@@ -67,8 +60,6 @@ pub struct ProcessRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_capability: Option<SessionId>,
     pub identity: ProcessIdentity,
-    #[serde(default)]
-    pub event_types: Vec<ProcessEventType>,
     pub provenance: ProcessProvenance,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<ProcessExecutionEnvRef>,
@@ -125,7 +116,7 @@ impl ProcessLifecycleState {
 
     /// A representative state of `status`, for fixtures that need a record
     /// in a status and do not care what put it there: a terminal status
-    /// holds a minimal outcome of that status, and `waiting` a signal wait.
+    /// holds a minimal outcome of that status, and `waiting` a call wait.
     pub fn fixture(status: ProcessStatus) -> Self {
         let settled = |output| Self::Terminal {
             outcome: ProcessTerminal::from_tool_output(output),
@@ -134,11 +125,9 @@ impl ProcessLifecycleState {
             ProcessStatus::Running => Self::running(),
             ProcessStatus::Waiting => Self::Waiting {
                 wait: WaitState {
-                    kind: WaitKind::Signal {
-                        name: "fixture".to_string(),
-                        event_type: "signal.fixture".to_string(),
-                        key: "fixture".to_string(),
-                        ordinal: 1,
+                    kind: WaitKind::Call {
+                        call_id: crate::ToolCallId::fixture("fixture"),
+                        tool_id: crate::ToolId::from("fixture"),
                     },
                     since_ms: 0,
                 },
@@ -276,7 +265,6 @@ impl ProcessRecord {
             ancestry: registration.ancestry,
             session_capability: registration.session_capability,
             identity: registration.identity,
-            event_types: registration.event_types,
             provenance: registration.provenance,
             env_ref: registration.env_ref,
             engine_config: registration.engine_config,

@@ -9,8 +9,8 @@
 //!
 //! Events, in order: a cancel not yet delivered (`Cancelled`, once, with its
 //! grace); `Started` before the first transition; the event the last
-//! transition asked for at once (`KeyPinned`, `Emitted`); a settled step;
-//! a signal from the mailbox; the end of what the process is blocked on,
+//! transition asked for at once (`KeyPinned`); a settled step; the end of
+//! what the process is blocked on,
 //! which for a wait is its row's committed winner (a resolution, a timeout
 //! or a revocation), never the live state of what it waited for.
 //! With none, the steps run their admitted-execution lifecycle
@@ -48,7 +48,7 @@ use lash_core_store::tool_run::{
 };
 use lash_durable::domain::{
     CANCEL_MAIL, ExecKey, OwnerKey, ParkEventWrite, ProcessActorRow, ProcessWrite, RunSeq,
-    SIGNAL_MAIL, ScopeKey, SnapshotRev, SnapshotWrite, WaitState, WaitWrite,
+    ScopeKey, SnapshotRev, SnapshotWrite, WaitState, WaitWrite,
 };
 use lash_durable::runner::{Activation, Exit, Owned};
 use lash_durable::{
@@ -74,7 +74,7 @@ use crate::runtime::process::engine_state::{
 use crate::runtime::process::steps::{ProcessSteps, StepRefusal, StepRuntime};
 use crate::{
     ActorContext, AdmittedScope, Backend, CancelOrigin, ProcessEngine, ProcessId, ProcessInput,
-    ProcessRecord, ProcessSignal, ToolCallId,
+    ProcessRecord, ToolCallId,
 };
 
 /// The activation of claimed process actors: one per node, routed by
@@ -298,7 +298,7 @@ impl ProcessActivation {
     /// commit that writes the process's row already (a transition) or that
     /// of an ended process (its cascade) carries it: on PostgreSQL an owner
     /// commit locks its actor row before the process row, and a host's
-    /// signal append the other way round, so a commit that did not lock the
+    /// event append the other way round, so a commit that did not lock the
     /// process row, as a release to `waiting`, must not start to.
     pub(super) fn record_published(
         &self,
@@ -588,7 +588,6 @@ impl ProcessActivation {
                 &mut tx,
                 process,
                 &record,
-                row.state_rev,
                 &mut driver,
                 action,
                 now,
@@ -896,7 +895,6 @@ impl ProcessActivation {
                         key: waits::PinnedKey::new(pinned.key.clone()),
                     }
                 }
-                Immediate::Emitted => EngineEvent::Emitted,
             }));
         }
         if let Some((step, outcome)) = settled_step(driver, fold) {
@@ -905,21 +903,6 @@ impl ProcessActivation {
                 step: step.request.step().clone(),
                 outcome,
             }));
-        }
-        if let Some(mail) = tx
-            .mail()
-            .iter()
-            .find(|mail| mail.kind.as_str() == SIGNAL_MAIL)
-            .cloned()
-        {
-            let signal: ProcessSignal = serde_json::from_str(&mail.body)
-                .map_err(|error| corrupt("a process signal", error))?;
-            tx.ack_through(mail.seq);
-            *driver
-                .delivered_signals
-                .entry(signal.identity.signal_name().to_owned())
-                .or_default() += 1;
-            return Ok(Next::Event(EngineEvent::Signal(signal)));
         }
         let mut due = driver
             .grace_until
@@ -1024,7 +1007,6 @@ impl ProcessActivation {
         tx: &mut ActorTx,
         process: &ProcessId,
         record: &ProcessRecord,
-        state_rev: u64,
         driver: &mut Driver,
         action: EngineAction,
         now: DurableInstant,
@@ -1185,63 +1167,15 @@ impl ProcessActivation {
                 driver.blocked = Some(Blocked::Sleep { until: until.0 });
             }
             EngineAction::Idle => driver.blocked = Some(Blocked::Idle),
-            EngineAction::AwaitSignal { name } => {
-                let event_type = match crate::process_signal_event_type(&name) {
-                    Ok(event_type) => event_type,
-                    Err(error) => return Ok(Some(refused(error.to_string()))),
-                };
-                let ordinal = driver
-                    .delivered_signals
-                    .get(&name)
-                    .copied()
-                    .unwrap_or_default()
-                    .saturating_add(1);
-                let key = crate::process_signal_wait_key(process, &name, ordinal);
-                driver.blocked = Some(Blocked::Idle);
-                // A standing wait is entered once: an unrelated event that
-                // leaves the engine waiting on it records nothing.
-                if record.wait().is_none_or(|wait| wait.key() != key) {
-                    let wait = crate::WaitState {
-                        kind: crate::WaitKind::Signal {
-                            name,
-                            event_type,
-                            key,
-                            ordinal,
-                        },
-                        since_ms: millis(now),
-                    };
-                    append_event(
-                        tx,
-                        process,
-                        crate::ProcessEventAppendRequest::wait_entered(process, &wait),
-                    );
-                }
-                return Ok(None);
-            }
-            EngineAction::Emit {
-                event_type,
-                payload,
-            } => {
-                tx.write(DomainWrite::Process(ProcessWrite::Emit {
-                    process: process.clone(),
-                    event_type: event_type.name.clone(),
-                    payload_json: payload.to_string(),
-                    replay_key: format!("process:{process}:emit:{state_rev}"),
-                    wake_suppressed: false,
-                }));
-                driver.immediate = Some(Immediate::Emitted);
-            }
             EngineAction::Terminal(outcome) => return Ok(Some(outcome)),
         }
-        // A call stays waiting while its own step remains in flight.
-        // Other transitions still clear a signal wait.
+        // A call stays waiting while its own step remains in flight; any
+        // other transition ends the wait the record shows.
         if let Some(wait) = record.wait()
-            && match &wait.kind {
-                crate::WaitKind::Signal { .. } => true,
-                crate::WaitKind::Call { call_id, .. } => {
-                    !driver.steps.values().any(|step| step.call == *call_id)
-                }
-            }
+            && !driver
+                .steps
+                .values()
+                .any(|step| step.call.as_str() == wait.key())
         {
             append_event(
                 tx,
@@ -1341,7 +1275,6 @@ fn record_effect(
     }
     let operation = match &step.request {
         StepRequest::Tool { tool, .. } => tool.as_str().to_owned(),
-        StepRequest::Host { operation, .. } => operation.clone(),
         StepRequest::Engine { kind, .. } => kind.0.clone(),
     };
     let occurrence = crate::runtime::process::ProcessEffectOccurrence::new(
@@ -1396,12 +1329,11 @@ pub(super) fn append_event(
     process: &ProcessId,
     request: crate::ProcessEventAppendRequest,
 ) {
-    tx.write(DomainWrite::Process(ProcessWrite::Emit {
+    tx.write(DomainWrite::Process(ProcessWrite::AppendEvent {
         process: process.clone(),
-        event_type: request.event_type,
-        payload_json: request.payload.to_string(),
+        event_type: request.fact.event_type().to_owned(),
+        payload_json: request.fact.payload().to_string(),
         replay_key: request.replay.map(|replay| replay.key).unwrap_or_default(),
-        wake_suppressed: request.wake_suppressed,
     }));
 }
 

@@ -335,7 +335,7 @@ impl ProcessDefinition {
     }
 }
 
-/// What a start or a trigger names: a definition value or a bare id.
+/// What a start names: a definition value or a bare id.
 ///
 /// Exactly one of `{definition}` or `{definition_id}`; anything else is
 /// refused.

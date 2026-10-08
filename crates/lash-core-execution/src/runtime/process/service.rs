@@ -2,14 +2,13 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::plugin::PluginError;
 
-use super::events::{ProcessAwaitOutput, ProcessEvent, ProcessSignal};
+use super::events::ProcessAwaitOutput;
 use super::model::{
     ProcessCancelReceipt, ProcessHandleView, ProcessListMode, ProcessRecord, ProcessStartOptions,
     ProcessStartRegistration, ProcessStartRequest,
 };
 use super::op_scope::ProcessOpScope;
 use super::start_staging::StagedProcessStart;
-use crate::runtime::actor::round::StoreLocalEffect;
 
 /// Optional factory-scoped filter for the session process tools only.
 ///
@@ -217,58 +216,6 @@ pub trait ProcessService: Send + Sync {
         Ok(cancelled)
     }
 
-    /// Stage `signal`, a recorded tool intent's, as a store-local effect of
-    /// the call that sends it (ADR 0132 §5): its append is admitted against
-    /// the target as it stands, and only the commit that records the call's
-    /// outcome appends and mails it.
-    async fn stage_recorded_signal(
-        &self,
-        owner: &crate::RuntimeOwner,
-        signal: &ProcessSignal,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<StoreLocalEffect, PluginError>;
-
-    async fn emit_event(
-        &self,
-        _session_id: &SessionId,
-        _process_id: &ProcessId,
-        _event_type: String,
-        _replay_key: String,
-        _payload: serde_json::Value,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessEvent, PluginError> {
-        Err(PluginError::Session(
-            "process event emission is unavailable in this runtime".to_string(),
-        ))
-    }
-
-    /// Journal-first event emission used only by the recorded intent protocol.
-    ///
-    /// Called from shift code, so a replaying engine calls it again for an
-    /// event the drain already landed, under the same `replay_key`; the effect
-    /// controller answers the repeat with the recorded event. As for
-    /// [`Self::stage_recorded_start`], anything an implementation does
-    /// outside that boundary is keyed by the replay key.
-    async fn emit_event_recorded_intent(
-        &self,
-        owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        event_type: String,
-        replay_key: String,
-        payload: serde_json::Value,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessEvent, PluginError>;
-
-    async fn signal_possessed(
-        &self,
-        owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessEvent, PluginError>;
-
     async fn transfer(
         &self,
         from_session_id: &SessionId,
@@ -355,45 +302,6 @@ impl ProcessService for UnavailableProcessService {
         _identity: crate::ToolIntentIdentity,
         _scope: ProcessOpScope<'_>,
     ) -> Result<ProcessRecord, PluginError> {
-        Err(PluginError::Session(
-            "processes are unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn signal_possessed(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        _process_id: &ProcessId,
-        _signal_name: String,
-        _signal_id: String,
-        _payload: serde_json::Value,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessEvent, PluginError> {
-        Err(PluginError::Session(
-            "process signalling is unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn stage_recorded_signal(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        _signal: &ProcessSignal,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<StoreLocalEffect, PluginError> {
-        Err(PluginError::Session(
-            "processes are unavailable in this runtime".to_string(),
-        ))
-    }
-
-    async fn emit_event_recorded_intent(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        _process_id: &ProcessId,
-        _event_type: String,
-        _replay_key: String,
-        _payload: serde_json::Value,
-        _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessEvent, PluginError> {
         Err(PluginError::Session(
             "processes are unavailable in this runtime".to_string(),
         ))

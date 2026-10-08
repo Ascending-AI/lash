@@ -21,7 +21,7 @@ mod round;
 pub use round::parked_call_output;
 mod settlement;
 
-pub use cell::{CellCall, CellHostCalls, CellMember, CellMembers, HostCall};
+pub use cell::{CellCall, CellMember, CellMembers};
 
 pub(crate) struct ProductionToolHandlers<'run> {
     context: RuntimeExecutionContext<'run>,
@@ -72,7 +72,6 @@ struct Prepared {
 struct Captured {
     original: Option<ToolCallOutput>,
     output: ToolCallOutput,
-    triggers: Vec<super::ToolTriggerEffectOutcome>,
     occurrence: crate::plugin::ToolHookOccurrence,
     intents: ToolIntents,
     /// The typed refusal of the start the call declared, which settled the
@@ -263,7 +262,6 @@ impl<'run> ProductionToolHandlers<'run> {
         output: ToolCallOutput,
         occurrence: crate::plugin::ToolHookOccurrence,
         intents: ToolIntents,
-        triggers: Vec<super::ToolTriggerEffectOutcome>,
     ) -> Result<Captured, String> {
         let dispatch = self.dispatch(&prepared.input).await?;
         let view = crate::plugin::PreparedCallReadView::new(prepared.call.clone());
@@ -290,7 +288,6 @@ impl<'run> ProductionToolHandlers<'run> {
             output: outcome.record.output,
             occurrence,
             intents,
-            triggers,
             start_refusal: None,
         })
     }
@@ -504,7 +501,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             .map_err(|error| error.to_string())?;
         let mut dispatch = self.dispatch(&prepared.input).await?;
         dispatch.observer = attempt.stream.clone();
-        dispatch.trigger_outcomes = Default::default();
         dispatch.tools = dispatch
             .plugins
             .resolve_context_tool_bindings(std::slice::from_ref(&prepared.input.binding.executable))
@@ -648,7 +644,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
             let capture = Captured {
                 original: None,
                 output: ToolCallOutput::cancelled(cancellation.with_origin(origin)),
-                triggers: Vec::new(),
                 occurrence: crate::plugin::ToolHookOccurrence::Attempt {
                     attempt: attempt.attempt,
                 },
@@ -707,7 +702,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 attempt: attempt.attempt,
                             },
                             ToolIntents::default(),
-                            dispatch.trigger_outcomes.drain(),
                         )
                         .await?;
                     Ok(SingletonBodyOutcome::Failed {
@@ -734,7 +728,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 attempt: attempt.attempt,
                             },
                             ToolIntents::default(),
-                            dispatch.trigger_outcomes.drain(),
                         )
                         .await?;
                     capture.start_refusal = Some(outcome);
@@ -755,7 +748,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                 attempt: attempt.attempt,
                             },
                             ToolIntents::default(),
-                            dispatch.trigger_outcomes.drain(),
                         )
                         .await?;
                     Ok(SingletonBodyOutcome::Failed {
@@ -763,31 +755,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                         suggested_delay_ms: None,
                     })
                 } else {
-                    let mut pending = pending;
-                    let announcement = match super::atomic_attempt::stage_park_announcement(
-                        enclosing_process.as_ref(),
-                        &mut pending,
-                    ) {
-                        Ok(announcement) => announcement,
-                        Err(failure) => {
-                            let capture = self
-                                .capture_output(
-                                    prepared,
-                                    ToolCallOutput::failure(*failure),
-                                    crate::plugin::ToolHookOccurrence::Attempt {
-                                        attempt: attempt.attempt,
-                                    },
-                                    ToolIntents::default(),
-                                    dispatch.trigger_outcomes.drain(),
-                                )
-                                .await?;
-                            return Ok(SingletonBodyOutcome::Failed {
-                                output: encode(&capture)?,
-                                suggested_delay_ms: None,
-                            });
-                        }
-                    };
-                    let mut store_local: Vec<_> = announcement.into_iter().collect();
+                    let mut store_local = Vec::new();
                     let launch = match &pending.resolved_by {
                         Some(crate::PendingResolver::DeclaredStart(start)) => {
                             let (receipt, effect) = self
@@ -812,7 +780,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                                             attempt: attempt.attempt,
                                         },
                                         ToolIntents::default(),
-                                        dispatch.trigger_outcomes.drain(),
                                     )
                                     .await?;
                                 capture.start_refusal = Some(receipt.outcome);
@@ -869,7 +836,6 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                             attempt: attempt.attempt,
                         },
                         intents,
-                        dispatch.trigger_outcomes.drain(),
                     )
                     .await?;
                 let output = encode(&captured)?;

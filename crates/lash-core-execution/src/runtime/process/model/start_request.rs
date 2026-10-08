@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use super::super::events::{ProcessEventType, default_process_event_types};
 use super::{
     LifetimeDecision, ProcessProvenance, ProcessStartRegistration, ProcessStartTarget, SessionId,
 };
@@ -27,12 +26,8 @@ pub struct ProcessStartDeclaration {
     pub originator: super::ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<super::DeclaredProcessIdentity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observers: Vec<SessionId>,
-    #[serde(default)]
-    pub event_types: Vec<ProcessEventType>,
 }
 
 impl ProcessStartDeclaration {
@@ -49,9 +44,7 @@ impl ProcessStartDeclaration {
             env_ref: None,
             originator,
             identity: None,
-            wake_session_id: None,
             observers: Vec::new(),
-            event_types: default_process_event_types(),
         }
     }
 
@@ -65,33 +58,11 @@ impl ProcessStartDeclaration {
         self
     }
 
-    pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
-        self.wake_session_id = wake_session_id;
-        self
-    }
-
     pub fn with_observers(
         mut self,
         observers: impl IntoIterator<Item = impl Into<SessionId>>,
     ) -> Self {
         self.observers = observers.into_iter().map(Into::into).collect();
-        self
-    }
-
-    pub fn with_event_types(
-        mut self,
-        event_types: impl IntoIterator<Item = ProcessEventType>,
-    ) -> Self {
-        self.event_types = event_types.into_iter().collect();
-        self
-    }
-
-    /// Adds event types to those already carried by this declaration.
-    pub fn with_extra_event_types(
-        mut self,
-        event_types: impl IntoIterator<Item = ProcessEventType>,
-    ) -> Self {
-        self.event_types.extend(event_types);
         self
     }
 
@@ -106,9 +77,7 @@ impl ProcessStartDeclaration {
             env_ref: self.env_ref,
             originator: self.originator,
             identity: self.identity,
-            wake_session_id: self.wake_session_id,
             observers: self.observers,
-            event_types: self.event_types,
             // A declared start runs under the scope of the intent that
             // declared it; realization supplies that cause.
             trace_cause: lash_trace::TraceCause::Root,
@@ -138,12 +107,8 @@ pub struct ProcessStartRequest {
     pub originator: super::ProcessOriginator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identity: Option<super::DeclaredProcessIdentity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub observers: Vec<SessionId>,
-    #[serde(default)]
-    pub event_types: Vec<ProcessEventType>,
     /// What caused the start, for telemetry: a detached host start links
     /// the caller's context. The registration that inserts the process
     /// retains it; a retry under the start's key reads the retained cause
@@ -170,9 +135,7 @@ impl ProcessStartRequest {
             env_ref: None,
             originator,
             identity: None,
-            wake_session_id: None,
             observers: Vec::new(),
-            event_types: default_process_event_types(),
             trace_cause: lash_trace::TraceCause::Root,
         }
     }
@@ -230,8 +193,7 @@ impl ProcessStartRequest {
     ///
     /// `start_key_family_refused` for a request that carries a key of a
     /// family lash derives for its own start paths: a host mints only host
-    /// keys, so a host rail never adopts a tool intent's or a trigger
-    /// delivery's process.
+    /// keys, so a host rail never adopts a tool intent's process.
     pub fn keyed_in(self, scope: &crate::ActorContext) -> Result<Self, crate::PluginError> {
         match &self.start_key {
             Some(start_key) if start_key.is_host_supplied() => Ok(self),
@@ -261,13 +223,6 @@ impl ProcessStartRequest {
         self
     }
 
-    /// Sets the wake session id carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
-        self.wake_session_id = wake_session_id;
-        self
-    }
-
     /// Sets the observers carried by a `ProcessStartRequest` for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn with_observers(
@@ -275,26 +230,6 @@ impl ProcessStartRequest {
         observers: impl IntoIterator<Item = impl Into<SessionId>>,
     ) -> Self {
         self.observers = observers.into_iter().map(Into::into).collect();
-        self
-    }
-
-    /// Sets the event types carried by a `ProcessStartRequest` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_event_types(
-        mut self,
-        event_types: impl IntoIterator<Item = ProcessEventType>,
-    ) -> Self {
-        self.event_types = event_types.into_iter().collect();
-        self
-    }
-
-    /// Sets the extra event types carried by a `ProcessStartRequest` for store and
-    /// durable-substrate implementors while persisting and coordinating durable process execution.
-    pub fn with_extra_event_types(
-        mut self,
-        event_types: impl IntoIterator<Item = ProcessEventType>,
-    ) -> Self {
-        self.event_types.extend(event_types);
         self
     }
 
@@ -308,9 +243,7 @@ impl ProcessStartRequest {
             env_ref: self.env_ref,
             originator: self.originator,
             identity: self.identity,
-            wake_session_id: self.wake_session_id,
             observers: self.observers,
-            event_types: self.event_types,
         }
     }
 
@@ -323,9 +256,7 @@ impl ProcessStartRequest {
             self.lifetime,
         )
         .with_start_key(self.start_key)
-        .with_event_types(self.event_types)
         .with_execution_env_ref(self.env_ref)
-        .with_wake_session_id(self.wake_session_id)
         .with_trace(lash_trace::TraceScopeOffer::caused_by(self.trace_cause));
         if let Some(identity) = self.identity {
             registration = registration.with_declared_identity(identity);

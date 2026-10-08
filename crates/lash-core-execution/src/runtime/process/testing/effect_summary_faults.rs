@@ -91,7 +91,7 @@ impl EffectSummaryAppendFaults {
     ) -> Result<(), PluginError> {
         let carried = requests
             .iter()
-            .filter(|request| request.event_type == self.event_type)
+            .filter(|request| request.kind().as_str() == self.event_type)
             .cloned()
             .collect::<Vec<_>>();
         if carried.is_empty() {
@@ -191,17 +191,6 @@ impl ProcessEventLog for EffectSummaryAppendFaults {
     ) -> Result<crate::ProcessEventReadOutcome<crate::ProcessEventPage>, PluginError> {
         self.inner
             .event_page_after(process_id, after_sequence, limit, mode)
-            .await
-    }
-
-    async fn count_events_through(
-        &self,
-        process_id: &ProcessId,
-        event_type: &str,
-        up_to_sequence: u64,
-    ) -> Result<u64, PluginError> {
-        self.inner
-            .count_events_through(process_id, event_type, up_to_sequence)
             .await
     }
 

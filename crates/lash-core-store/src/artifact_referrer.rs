@@ -30,7 +30,7 @@ use crate::{ProcessId, SessionId};
 /// version_guard(
 ///     roots(
 ///         ArtifactReferrerKind, ArtifactReferrer, StoredReferrer, FrameEnvironmentId,
-///         SubscriptionRevisionId, HostArtifactPin, UploadReferrerId, AttachmentUploadId,
+///         HostArtifactPin, UploadReferrerId, AttachmentUploadId,
 ///     ),
 ///     roots(path = "crates/lash-sansio/src/effect_identity.rs", EffectJournalIdentity),
 ///     items(
@@ -104,7 +104,6 @@ impl fmt::Display for ReferrerStore {
 pub enum ArtifactReferrerKind {
     FrameEnvironment,
     ProcessRecord,
-    SubscriptionRevision,
     Start,
     StartInput,
     Execution,
@@ -116,10 +115,9 @@ pub enum ArtifactReferrerKind {
 
 impl ArtifactReferrerKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 9] = [
         Self::FrameEnvironment,
         Self::ProcessRecord,
-        Self::SubscriptionRevision,
         Self::Start,
         Self::StartInput,
         Self::Execution,
@@ -129,15 +127,13 @@ impl ArtifactReferrerKind {
         Self::Source,
     ];
 
-    /// `frame_environment`, `process_record`, `subscription_revision`,
-    /// `start`, `start_input`, `execution`, `host_pin`, `session`, `upload`,
-    /// `source`.
+    /// `frame_environment`, `process_record`, `start`, `start_input`,
+    /// `execution`, `host_pin`, `session`, `upload`, `source`.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::FrameEnvironment => "frame_environment",
             Self::ProcessRecord => "process_record",
-            Self::SubscriptionRevision => "subscription_revision",
             Self::Start => "start",
             Self::StartInput => "start_input",
             Self::Execution => "execution",
@@ -166,11 +162,7 @@ impl ArtifactReferrerKind {
     pub const fn requires_guard(self) -> bool {
         matches!(
             self,
-            Self::Execution
-                | Self::Start
-                | Self::StartInput
-                | Self::SubscriptionRevision
-                | Self::Upload
+            Self::Execution | Self::Start | Self::StartInput | Self::Upload
         )
     }
     /// Whether this referrer may hold immutable artifacts.
@@ -180,7 +172,6 @@ impl ArtifactReferrerKind {
             self,
             Self::FrameEnvironment
                 | Self::ProcessRecord
-                | Self::SubscriptionRevision
                 | Self::Start
                 | Self::Execution
                 | Self::HostPin
@@ -229,7 +220,6 @@ impl fmt::Display for ArtifactReferrerKind {
 pub enum ArtifactReferrer {
     FrameEnvironment(FrameEnvironmentId),
     ProcessRecord(ProcessId),
-    SubscriptionRevision(SubscriptionRevisionId),
     Start(StartKey),
     /// One starter's input staging, independent of earlier uses of the key.
     StartInput {
@@ -261,7 +251,6 @@ impl ArtifactReferrer {
         match self {
             Self::FrameEnvironment(_) => ArtifactReferrerKind::FrameEnvironment,
             Self::ProcessRecord(_) => ArtifactReferrerKind::ProcessRecord,
-            Self::SubscriptionRevision(_) => ArtifactReferrerKind::SubscriptionRevision,
             Self::Start(_) => ArtifactReferrerKind::Start,
             Self::StartInput { .. } => ArtifactReferrerKind::StartInput,
             Self::Execution(_) => ArtifactReferrerKind::Execution,
@@ -281,11 +270,6 @@ impl ArtifactReferrer {
                 json_text(&(id.session_id.as_str(), id.frame_node_id.as_str()))
             }
             Self::ProcessRecord(id) => id.to_string(),
-            Self::SubscriptionRevision(id) => json_text(&(
-                id.subscription_id.as_str(),
-                id.incarnation.as_str(),
-                id.revision,
-            )),
             Self::Start(key) => key.as_str().to_owned(),
             Self::StartInput { start_key, starter } => {
                 json_text(&(start_key.as_str(), starter.key()))
@@ -329,14 +313,6 @@ impl ArtifactReferrer {
             ArtifactReferrerKind::ProcessRecord => Self::ProcessRecord(
                 ProcessId::parse(id).map_err(|error| malformed(kind, error.to_string()))?,
             ),
-            ArtifactReferrerKind::SubscriptionRevision => {
-                let (subscription_id, incarnation, revision): (String, String, u64) =
-                    json_parse(kind, id)?;
-                Self::SubscriptionRevision(
-                    SubscriptionRevisionId::new(subscription_id, incarnation, revision)
-                        .map_err(|error| malformed(kind, error.to_string()))?,
-                )
-            }
             ArtifactReferrerKind::Start => Self::Start(
                 StartKey::parse_rendered(id).map_err(|error| malformed(kind, error.to_string()))?,
             ),
@@ -443,60 +419,6 @@ impl FrameEnvironmentId {
     #[must_use]
     pub fn frame_node_id(&self) -> &FrameNodeId {
         &self.frame_node_id
-    }
-}
-
-/// One revision of one trigger subscription incarnation.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SubscriptionRevisionId {
-    subscription_id: String,
-    incarnation: String,
-    revision: u64,
-}
-
-impl SubscriptionRevisionId {
-    /// Refuses an empty id or incarnation and revision 0.
-    ///
-    /// # Errors
-    ///
-    /// [`ArtifactReferrerError::Malformed`] for any of those.
-    pub fn new(
-        subscription_id: String,
-        incarnation: String,
-        revision: u64,
-    ) -> Result<Self, ArtifactReferrerError> {
-        let kind = ArtifactReferrerKind::SubscriptionRevision;
-        if subscription_id.is_empty() {
-            return Err(malformed(kind, "empty subscription id"));
-        }
-        if incarnation.is_empty() {
-            return Err(malformed(kind, "empty incarnation"));
-        }
-        if revision == 0 {
-            return Err(malformed(kind, "revision 0"));
-        }
-        reject_nul(kind, &subscription_id)?;
-        reject_nul(kind, &incarnation)?;
-        Ok(Self {
-            subscription_id,
-            incarnation,
-            revision,
-        })
-    }
-
-    #[must_use]
-    pub fn subscription_id(&self) -> &str {
-        &self.subscription_id
-    }
-
-    #[must_use]
-    pub fn incarnation(&self) -> &str {
-        &self.incarnation
-    }
-
-    #[must_use]
-    pub fn revision(&self) -> u64 {
-        self.revision
     }
 }
 
@@ -722,10 +644,6 @@ pub enum ReferrerGuard {
         start_key: StartKey,
         starter: EffectJournalIdentity,
     },
-    SubscriptionRevision {
-        revision: SubscriptionRevisionId,
-        creator: EffectJournalIdentity,
-    },
     Upload {
         upload: UploadReferrerId,
         expires_at_ms: u64,
@@ -744,9 +662,6 @@ impl ReferrerGuard {
                 start_key: start_key.clone(),
                 starter: starter.clone(),
             },
-            Self::SubscriptionRevision { revision, .. } => {
-                ArtifactReferrer::SubscriptionRevision(revision.clone())
-            }
             Self::Upload { upload, .. } => ArtifactReferrer::Upload(upload.clone()),
             Self::SessionGraphRetired(session) => ArtifactReferrer::Session(session.clone()),
         }
@@ -896,10 +811,6 @@ enum StoredCleanupBody {
         starter: EffectJournalIdentity,
     },
     AwaitStartInput,
-    AwaitSubscriptionRevision {
-        #[serde(with = "journal_identity")]
-        creator: EffectJournalIdentity,
-    },
 }
 
 impl ArtifactCleanup {
@@ -954,11 +865,6 @@ impl ArtifactCleanup {
                     starter: starter.clone(),
                 },
                 ReferrerGuard::StartInput { .. } => StoredCleanupBody::AwaitStartInput,
-                ReferrerGuard::SubscriptionRevision { creator, .. } => {
-                    StoredCleanupBody::AwaitSubscriptionRevision {
-                        creator: creator.clone(),
-                    }
-                }
                 ReferrerGuard::Upload { expires_at_ms, .. } => {
                     StoredCleanupBody::AwaitUploadExpiry {
                         expires_at_ms: *expires_at_ms,
@@ -1013,13 +919,6 @@ impl ArtifactCleanup {
                 starter: starter.clone(),
             },
             (
-                StoredCleanupBody::AwaitSubscriptionRevision { creator },
-                ArtifactReferrer::SubscriptionRevision(revision),
-            ) => ReferrerGuard::SubscriptionRevision {
-                revision: revision.clone(),
-                creator,
-            },
-            (
                 StoredCleanupBody::AwaitUploadExpiry { expires_at_ms },
                 ArtifactReferrer::Upload(upload),
             ) => ReferrerGuard::Upload {
@@ -1050,7 +949,6 @@ impl StoredCleanupBody {
             Self::AwaitSessionGraphRetired => "await_session_graph_retired",
             Self::AwaitStart { .. } => "await_start",
             Self::AwaitStartInput => "await_start_input",
-            Self::AwaitSubscriptionRevision { .. } => "await_subscription_revision",
         }
     }
 }
@@ -1170,13 +1068,6 @@ fn malformed(kind: ArtifactReferrerKind, detail: impl Into<String>) -> ArtifactR
     }
 }
 
-fn reject_nul(kind: ArtifactReferrerKind, text: &str) -> Result<(), ArtifactReferrerError> {
-    if text.contains('\0') {
-        return Err(malformed(kind, "the id contains NUL"));
-    }
-    Ok(())
-}
-
 impl schemars::JsonSchema for ArtifactReferrer {
     fn schema_name() -> std::borrow::Cow<'static, str> {
         "ArtifactReferrer".into()
@@ -1221,10 +1112,6 @@ mod tests {
                 FrameNodeId::new("frame-\"1\"").expect("frame node id"),
             )),
             ArtifactReferrer::ProcessRecord(ProcessId::fixture("record")),
-            ArtifactReferrer::SubscriptionRevision(
-                SubscriptionRevisionId::new("sub".to_owned(), "inc".to_owned(), 3)
-                    .expect("revision"),
-            ),
             ArtifactReferrer::Start(start_key()),
             ArtifactReferrer::StartInput {
                 start_key: start_key(),
@@ -1273,10 +1160,6 @@ mod tests {
             FrameNodeId::new("f").expect("frame node id"),
         ));
         assert_eq!(frame.canonical_id(), r#"["s","f"]"#);
-        let revision = ArtifactReferrer::SubscriptionRevision(
-            SubscriptionRevisionId::new("sub".to_owned(), "inc".to_owned(), 7).expect("revision"),
-        );
-        assert_eq!(revision.canonical_id(), r#"["sub","inc",7]"#);
         assert_eq!(
             ArtifactReferrer::Execution(journal()).canonical_id(),
             r#"{"version":2,"kind":"turn","session_id":"session","execution_id":"turn"}"#
@@ -1314,7 +1197,6 @@ mod tests {
         for (kind, id) in [
             ("frame_environment", r#"["s"]"#),
             ("frame_environment", r#"["","f"]"#),
-            ("subscription_revision", r#"["sub","inc",0]"#),
             ("process_record", "not-a-process"),
             ("start", "process-start:x"),
             ("execution", "{}"),
@@ -1396,11 +1278,6 @@ mod tests {
             ReferrerGuard::StartInput {
                 start_key: start_key(),
                 starter: journal(),
-            },
-            ReferrerGuard::SubscriptionRevision {
-                revision: SubscriptionRevisionId::new("sub".into(), "inc".into(), 1)
-                    .expect("revision"),
-                creator: journal(),
             },
             ReferrerGuard::Upload {
                 upload: UploadReferrerId::mint("s".into()),

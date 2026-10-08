@@ -8,64 +8,6 @@ pub enum CancelHint {
     CancelExternalWork,
 }
 
-/// One process event a deferring tool declares, which the runtime appends when
-/// the call actually parks.
-///
-/// A recorded attempt body cannot append process events itself — its
-/// [`AttemptContext`](crate::AttemptContext) has no route to them. A tool that
-/// must announce its durable wait (the await key an external resolver will
-/// deliver against) therefore *declares* the announcement on its
-/// [`PendingCompletion`] and the runtime performs the append at park time. The
-/// event exists if and only if the park happened: there is no point at which
-/// the announcement is durable and the wait is merely hoped for.
-///
-/// The replay key is required rather than optional. The announcement is
-/// re-declared on every redrive of the attempt, so the key is what makes the
-/// append idempotent within the process.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PendingAnnouncement {
-    /// Process event type to append, e.g. `process.yield`.
-    pub event_type: String,
-    /// Event payload. It usually names the await key the resolver will use.
-    pub payload: serde_json::Value,
-    /// Replay key making the append idempotent under redrive.
-    pub replay_key: String,
-}
-
-impl PendingAnnouncement {
-    /// Declares one replay-keyed process event for the runtime to append when
-    /// the deferring call parks.
-    pub fn new(
-        event_type: impl Into<String>,
-        payload: serde_json::Value,
-        replay_key: impl Into<String>,
-    ) -> Self {
-        Self {
-            event_type: event_type.into(),
-            payload,
-            replay_key: replay_key.into(),
-        }
-    }
-
-    /// The rows that announce this park on `process`. The wake its event type
-    /// declares is withheld when they commit: the session it would reach is
-    /// the session parked on the announced call, and re-prompting that turn
-    /// against its own unsettled wait is not something a tool should be able
-    /// to cause by describing its park. The event is still appended and still
-    /// visible to observers.
-    pub(crate) fn into_rows(
-        self,
-        process: crate::ProcessId,
-    ) -> crate::runtime::actor::round::ParkAnnouncementRows {
-        crate::runtime::actor::round::ParkAnnouncementRows {
-            process,
-            event_type: self.event_type,
-            payload_json: self.payload.to_string(),
-            replay_key: self.replay_key,
-        }
-    }
-}
-
 /// Who delivers the outcome of a parked call.
 ///
 /// A plain [`ToolOutcome::Pending`] names nobody: an out-of-band actor holds
@@ -226,17 +168,14 @@ pub enum DeclaredStartRefused {
     CompletionUnavailable,
 }
 
-/// Configuration carried by a [`ToolOutcome::Pending`] result: what to do if it is cancelled, and
-/// any process event the runtime announces when the call parks.
+/// Configuration carried by a [`ToolOutcome::Pending`] result: what to do if
+/// it is cancelled, and what resolves it.
 ///
-/// Defaults to [`CancelHint::CancelExternalWork`] and no announcement.
+/// Defaults to [`CancelHint::CancelExternalWork`].
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PendingCompletion {
     /// What the runtime signals about out-of-band work if the call is cancelled.
     pub on_cancel: CancelHint,
-    /// Process event the runtime appends when this call parks, if any.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub announcement: Option<PendingAnnouncement>,
     /// Runtime-owned fact that resolves this wait, if the call named one.
     ///
     /// `None` is the out-of-band shape: something outside the runtime holds the
@@ -250,7 +189,6 @@ impl Default for PendingCompletion {
     fn default() -> Self {
         Self {
             on_cancel: CancelHint::CancelExternalWork,
-            announcement: None,
             resolved_by: None,
         }
     }
@@ -260,16 +198,6 @@ impl PendingCompletion {
     /// Constructs deferred-completion policy with external-work cancellation enabled.
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Use it to announce the durable wait — typically the await key an
-    /// external resolver delivers against — from a recorded attempt that
-    /// cannot append process events itself. The runtime performs the append
-    /// after it has taken the completion key and before the call is parked, so
-    /// the announcement and the wait land together or not at all.
-    pub fn announcing(mut self, announcement: PendingAnnouncement) -> Self {
-        self.announcement = Some(announcement);
-        self
     }
 
     /// Use it when the outcome is a fact the runtime can already observe

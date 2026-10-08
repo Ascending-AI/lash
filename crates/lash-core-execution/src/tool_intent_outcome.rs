@@ -3,23 +3,9 @@ use serde::{Deserialize, Serialize};
 
 macro_rules! realized_payload {
     (StartProcess) => { crate::ProcessHandleView };
-    (SignalProcess) => { Box<crate::ProcessSignal> };
     (CancelProcess) => { crate::ProcessCancelReceipt };
-    (EmitProcessEvent) => { Box<crate::ProcessEvent> };
-    (EmitTrigger) => { crate::facade_support::TriggerEmitReport };
     (GetDefinition) => { Box<crate::ProcessDefinition> };
     (PublishDefinition) => { Box<crate::ProcessDefinition> };
-    (RegisterTrigger) => { Box<crate::TriggerMutationReceipt> };
-}
-
-macro_rules! realized_model_value {
-    (RegisterTrigger, $result:expr) => {
-        crate::trigger_handle_outcome_value($result)
-            .map_err(|error| <serde_json::Error as serde::ser::Error>::custom(error))
-    };
-    ($variant:ident, $result:expr) => {
-        serde_json::to_value($result)
-    };
 }
 
 macro_rules! define_realized {
@@ -35,7 +21,7 @@ macro_rules! define_realized {
             /// Serialize only at the model presentation boundary.
             pub fn model_value(&self) -> Result<serde_json::Value, serde_json::Error> {
                 match self {
-                    $(Self::$variant(result) => realized_model_value!($variant, result),)*
+                    $(Self::$variant(result) => serde_json::to_value(result),)*
                 }
             }
         }
@@ -70,14 +56,6 @@ pub enum ToolIntentRefusalReason {
         expected: crate::RuntimeOwner,
         recorded: crate::RuntimeOwner,
     },
-    ForeignTriggerOwnerScope {
-        expected: crate::TriggerOwnerScope,
-        recorded: crate::TriggerOwnerScope,
-    },
-    ForeignTriggerActor {
-        expected: crate::ProcessOriginator,
-        recorded: crate::ProcessOriginator,
-    },
     CommandFailed {
         cause: crate::ToolIntentCommandFailure,
     },
@@ -107,8 +85,6 @@ impl ToolIntentRefusalReason {
             Self::CanonicalByteBudgetExceeded { .. } => "canonical_byte_budget_exceeded".into(),
             Self::PerKindBudgetExceeded { .. } => "per_kind_budget_exceeded".into(),
             Self::OwnerMismatch { .. } => "owner_mismatch".into(),
-            Self::ForeignTriggerOwnerScope { .. } => "foreign_trigger_owner_scope".into(),
-            Self::ForeignTriggerActor { .. } => "foreign_trigger_actor".into(),
             Self::CommandFailed { cause } => cause.code(),
             Self::MintingRunCancelled => "minting_run_cancelled".into(),
             Self::DeclaredStartIdentityMismatch { .. } => "declared_start_identity_mismatch".into(),
@@ -146,12 +122,6 @@ impl ToolIntentRefusalReason {
             ),
             Self::OwnerMismatch { expected, recorded } => format!(
                 "{code}: the intent names owner `{recorded}`; the attempt ran under owner `{expected}`"
-            ),
-            Self::ForeignTriggerOwnerScope { expected, recorded } => format!(
-                "{code}: the registration names owner scope {recorded:?}; the attempt resolves {expected:?}"
-            ),
-            Self::ForeignTriggerActor { expected, recorded } => format!(
-                "{code}: the registration names actor {recorded:?}; the attempt resolves {expected:?}"
             ),
             Self::CommandFailed { cause } => format!("{code}: {cause}"),
             Self::MintingRunCancelled => {

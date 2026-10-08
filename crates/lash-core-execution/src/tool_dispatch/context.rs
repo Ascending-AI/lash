@@ -1,6 +1,4 @@
-use std::sync::{Arc, Mutex};
-
-use lash_sansio::sync::MutexExt;
+use std::sync::Arc;
 
 use crate::plugin::{
     PluginSession, SessionGraphService, SessionLifecycleService, SessionStateService,
@@ -9,36 +7,6 @@ use crate::{
     PreparedToolCall, ToolCallRecord, ToolCatalog, ToolFailure, ToolFailureClass, ToolOutcome,
     ToolProvider,
 };
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ToolTriggerEffectOutcome {
-    pub source_type: String,
-    pub source_key: String,
-    pub occurrence_id: String,
-    #[serde(default)]
-    pub payload: serde_json::Value,
-    pub idempotency_key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<serde_json::Value>,
-    pub deliveries: Vec<crate::TriggerDeliveryEmitReceipt>,
-}
-
-#[derive(Clone, Default)]
-pub struct ToolTriggerOutcomeBuffer {
-    queue: Arc<Mutex<Vec<ToolTriggerEffectOutcome>>>,
-}
-
-impl ToolTriggerOutcomeBuffer {
-    pub fn enqueue(&self, outcome: ToolTriggerEffectOutcome) {
-        let mut queue = self.queue.lock_recover();
-        queue.push(outcome);
-    }
-
-    pub fn drain(&self) -> Vec<ToolTriggerEffectOutcome> {
-        let mut queue = self.queue.lock_recover();
-        queue.drain(..).collect()
-    }
-}
 
 #[derive(Clone)]
 pub struct ToolDispatchContext<'run> {
@@ -53,7 +21,6 @@ pub struct ToolDispatchContext<'run> {
     pub session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub session_graph: Arc<dyn SessionGraphService>,
     pub processes: Arc<dyn crate::ProcessService>,
-    pub trigger_router: Option<crate::TriggerRouter>,
     /// The engines a definition resolves against.
     pub process_engines: crate::ProcessEngineRegistry,
     pub effect_controller: crate::ActorContext,
@@ -83,7 +50,6 @@ pub struct ToolDispatchContext<'run> {
     /// emits (ADR 0099 §3's live half of the split); a dispatch that serves no
     /// turn stream carries [`NullObservationSink`](crate::engine::NullObservationSink).
     pub observer: Arc<dyn crate::engine::ObservationSink>,
-    pub trigger_outcomes: ToolTriggerOutcomeBuffer,
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
     pub turn_context: crate::TurnContext,
     pub clock: Arc<dyn crate::Clock>,
@@ -191,7 +157,6 @@ impl<'run> ToolDispatchContext<'run> {
             session_lifecycle: Arc::clone(&self.session_lifecycle),
             session_graph: Arc::clone(&self.session_graph),
             processes: Arc::clone(&self.processes),
-            trigger_router: self.trigger_router.clone(),
             process_engines: self.process_engines.clone(),
             effect_controller: self.effect_controller.clone(),
             direct_completions: self.direct_completions.to_static()?,
@@ -200,7 +165,6 @@ impl<'run> ToolDispatchContext<'run> {
             execution_env_spec: self.execution_env_spec.clone(),
             owner: self.owner.clone(),
             observer: Arc::clone(&self.observer),
-            trigger_outcomes: self.trigger_outcomes.clone(),
             attachment_store: Arc::clone(&self.attachment_store),
             turn_context: self.turn_context.clone(),
             clock: Arc::clone(&self.clock),
@@ -219,10 +183,6 @@ pub struct ToolDispatchOutcome {
     pub intents: crate::ToolIntents,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
-    /// Trigger receipts the attempts emitted, applied exactly once at the
-    /// opener's incorporation boundary.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -283,7 +243,6 @@ pub(super) fn outcome(
         attempts: Vec::new(),
         intents: crate::ToolIntents::default(),
         intent_outcomes: Vec::new(),
-        triggers: Vec::new(),
     }
 }
 

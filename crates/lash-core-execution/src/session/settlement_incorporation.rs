@@ -2,10 +2,9 @@
 //!
 //! One operation — [`RuntimeExecutionContext::incorporate_tool_facts`] —
 //! applies every logical semantic channel exactly once per
-//! [`SettlementSource`]: possession is granted and trigger receipts are
-//! restored as evidence. It never
-//! executes a declaration, never emits a delivery, never re-runs a projector,
-//! and never meters spend: hosts meter provider attempts (ADR 0127).
+//! [`SettlementSource`]: possession is granted. It never executes a
+//! declaration, never emits a delivery, never re-runs a projector, and never
+//! meters spend: hosts meter provider attempts (ADR 0127).
 //!
 //! Idempotence is carried, not hoped for: [`IncorporationLedger`] records the
 //! incorporated sources and travels with the execution context wherever
@@ -29,7 +28,6 @@ pub use lash_core_store::effect_opener::{IncorporationLedger, SettlementSource};
 pub struct Incorporated {
     pub source: Option<SettlementSource>,
     pub possession: Vec<ProcessId>,
-    pub triggers: usize,
 }
 
 impl<'run> RuntimeExecutionContext<'run> {
@@ -41,7 +39,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self,
         source: SettlementSource,
         possession: &[ProcessId],
-        triggers: &[crate::tool_dispatch::ToolTriggerEffectOutcome],
     ) -> Result<Incorporated, RuntimeEffectControllerError> {
         let mut ledger = self.incorporation_ledger().lock_recover();
         if ledger.incorporated.contains(&source) {
@@ -52,12 +49,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
         // The caller supplies the identities realized by recorded declarations.
         self.restore_started_process_ids(possession);
-        self.restore_tool_trigger_outcomes(triggers.to_vec());
         ledger.incorporated.insert(source.clone());
         Ok(Incorporated {
             source: Some(source),
             possession: possession.to_vec(),
-            triggers: triggers.len(),
         })
     }
 

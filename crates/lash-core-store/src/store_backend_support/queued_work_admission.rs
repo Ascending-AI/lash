@@ -18,13 +18,9 @@ fn require_source_key_kind(
     let Some(source_key) = source_key else {
         return Ok(());
     };
-    let owner = if source_key.starts_with("command:") {
-        Some("session_command")
-    } else if source_key.starts_with("process:") {
-        Some("process_wake")
-    } else {
-        None
-    };
+    let owner = source_key
+        .starts_with("command:")
+        .then_some("session_command");
     if owner.is_some_and(|owner| owner != kind) {
         return Err(StoreError::IngressReservedSourceKey {
             session_id: session_id.clone(),
@@ -35,20 +31,17 @@ fn require_source_key_kind(
     Ok(())
 }
 
-/// Validate a queued producer before deduplication or allocation. Reserved
-/// prefixes belong to ingress kinds, and a wake must also prove its source.
+/// Validate a queued producer before deduplication or allocation: the
+/// reserved `command:` prefix belongs to session commands.
 pub fn validate_queued_work_draft(draft: &QueuedWorkBatchDraft) -> Result<(), StoreError> {
-    let kind = match draft.kind() {
-        crate::QueuedWorkKind::Control => "session_command",
-        crate::QueuedWorkKind::Turn => "process_wake",
-    };
-    require_source_key_kind(&draft.session_id, draft.source_key.as_deref(), kind)?;
-    draft
-        .validate_process_wake_source()
-        .map_err(StoreError::Backend)
+    require_source_key_kind(
+        &draft.session_id,
+        draft.source_key.as_deref(),
+        "session_command",
+    )
 }
 
-/// Inputs cannot use the command or wake namespace, even on a retry.
+/// Inputs cannot use the command namespace, even on a retry.
 pub fn validate_turn_input_source_key(
     draft: &crate::PendingTurnInputDraft,
 ) -> Result<(), StoreError> {

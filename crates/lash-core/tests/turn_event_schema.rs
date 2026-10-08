@@ -16,12 +16,11 @@ use lash_core::SessionId;
 use lash_core::TurnId;
 use std::collections::BTreeSet;
 
-use lash_core::runtime::AdmissionBoundary;
 use lash_core::{
-    AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, MessageOrigin,
-    PluginRuntimeEvent, ProtocolPosition, TokenUsage, ToolCallOutput, ToolFailure,
-    ToolFailureClass, ToolIntentExecutionOutcome, ToolIntentIdentity, TurnActivity, TurnActivityId,
-    TurnCause, TurnEvent, TurnInputApplication,
+    AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, PluginRuntimeEvent,
+    ProtocolPosition, TokenUsage, ToolCallOutput, ToolFailure, ToolFailureClass,
+    ToolIntentExecutionOutcome, ToolIntentIdentity, TurnActivity, TurnActivityId, TurnEvent,
+    TurnInputApplication,
 };
 use serde_json::json;
 
@@ -45,7 +44,6 @@ macro_rules! turn_event_tags {
 
 turn_event_tags! {
     TurnStarted => "turn_started",
-    QueuedWorkStarted => "queued_work_started",
     ToolRestoreReported => "tool_restore_reported",
     ModelRequestStarted => "model_request_started",
     CheckpointRecorded => "checkpoint_recorded",
@@ -111,33 +109,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
             json!({
                 "type": "turn_started",
                 "turn_id": "turn-1",
-            }),
-        ),
-        (
-            "queued_work_started",
-            TurnEvent::QueuedWorkStarted {
-                boundary: AdmissionBoundary::Idle,
-                batch_ids: vec!["batch-1".to_string()],
-                causes: vec![TurnCause {
-                    id: "cause-1".to_string(),
-                    event_type: "process_wake".to_string(),
-                    origin: MessageOrigin::Plugin {
-                        plugin_id: "p".to_string(),
-                        transient: false,
-                    },
-                    text: "hello".to_string(),
-                }],
-            },
-            json!({
-                "type": "queued_work_started",
-                "boundary": "idle",
-                "batch_ids": ["batch-1"],
-                "causes": [{
-                    "id": "cause-1",
-                    "event_type": "process_wake",
-                    "origin": { "kind": "plugin", "plugin_id": "p" },
-                    "text": "hello",
-                }],
             }),
         ),
         (

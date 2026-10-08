@@ -4,194 +4,17 @@
 
 use super::*;
 use crate::store::{MaintenanceFailure, MaintenanceStop, SessionBlobReclaimReport};
-use crate::triggers::*;
 use lash_core_execution::testing::ProcessRegistryFaults;
 use lash_sansio::sync::MutexExt as _;
-
-/// A trigger store whose next `delete_session_subscriptions` answers an
-/// injected refusal.
-struct TriggerFault {
-    inner: Arc<dyn TriggerStore>,
-    next: Mutex<Option<crate::PluginError>>,
-}
-
-#[async_trait::async_trait]
-impl TriggerStore for TriggerFault {
-    async fn execute_command(
-        &self,
-        operation_id: &str,
-        command: TriggerCommand,
-    ) -> Result<TriggerEffectResult, crate::PluginError> {
-        self.inner.execute_command(operation_id, command).await
-    }
-
-    async fn list_subscriptions(
-        &self,
-        filter: TriggerSubscriptionFilter,
-    ) -> Result<Vec<TriggerSubscriptionRecord>, crate::PluginError> {
-        self.inner.list_subscriptions(filter).await
-    }
-
-    async fn subscriptions_changed_since(
-        &self,
-        cursor: TriggerSubscriptionChangeCursor,
-        limit: usize,
-    ) -> Result<
-        (
-            Vec<TriggerSubscriptionChange>,
-            TriggerSubscriptionChangeCursor,
-        ),
-        crate::PluginError,
-    > {
-        self.inner.subscriptions_changed_since(cursor, limit).await
-    }
-
-    async fn list_subscriptions_with_cursor(
-        &self,
-    ) -> Result<
-        (
-            Vec<TriggerSubscriptionRecord>,
-            TriggerSubscriptionChangeCursor,
-        ),
-        crate::PluginError,
-    > {
-        self.inner.list_subscriptions_with_cursor().await
-    }
-
-    async fn compact_subscription_tombstones(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> Result<usize, crate::PluginError> {
-        self.inner
-            .compact_subscription_tombstones(cutoff_epoch_ms)
-            .await
-    }
-
-    async fn delete_session_subscriptions(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<usize, crate::PluginError> {
-        if let Some(error) = self.next.lock_recover().take() {
-            return Err(error);
-        }
-        self.inner.delete_session_subscriptions(session_id).await
-    }
-
-    async fn plan_occurrence(
-        &self,
-        request: &TriggerOccurrenceRequest,
-    ) -> Result<TriggerOccurrencePlan, crate::PluginError> {
-        self.inner.plan_occurrence(request).await
-    }
-
-    async fn list_occurrences(
-        &self,
-        filter: TriggerOccurrenceFilter,
-    ) -> Result<Vec<TriggerOccurrenceRecord>, crate::PluginError> {
-        self.inner.list_occurrences(filter).await
-    }
-
-    async fn list_deliveries_by_occurrence_id(
-        &self,
-        occurrence_id: &str,
-    ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
-        self.inner
-            .list_deliveries_by_occurrence_id(occurrence_id)
-            .await
-    }
-
-    async fn list_deliveries_by_subscription_id(
-        &self,
-        subscription_id: &str,
-    ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
-        self.inner
-            .list_deliveries_by_subscription_id(subscription_id)
-            .await
-    }
-
-    async fn list_deliveries_by_process_id(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
-        self.inner.list_deliveries_by_process_id(process_id).await
-    }
-
-    async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
-        self.inner.list_deliveries().await
-    }
-
-    async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, crate::PluginError> {
-        self.inner.list_delivery_process_ids().await
-    }
-
-    async fn list_delivery_retention_candidates(
-        &self,
-    ) -> Result<Vec<TriggerDeliveryRetentionCandidate>, crate::PluginError> {
-        self.inner.list_delivery_retention_candidates().await
-    }
-
-    async fn list_session_owner_ids_for_retention(
-        &self,
-    ) -> Result<Vec<SessionId>, crate::PluginError> {
-        self.inner.list_session_owner_ids_for_retention().await
-    }
-
-    async fn reconcile_trigger_retention(
-        &self,
-        candidates: &[TriggerDeliveryRetentionCandidate],
-        deleted_session_ids: &[SessionId],
-    ) -> Result<TriggerRetentionReconciliationReport, crate::PluginError> {
-        self.inner
-            .reconcile_trigger_retention(candidates, deleted_session_ids)
-            .await
-    }
-
-    async fn delete_delivery_retention_candidates(
-        &self,
-        candidates: &[TriggerDeliveryRetentionCandidate],
-    ) -> Result<usize, crate::PluginError> {
-        self.inner
-            .delete_delivery_retention_candidates(candidates)
-            .await
-    }
-
-    async fn reclaim_trigger_occurrences(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> TriggerOccurrenceReclamationResult {
-        self.inner
-            .reclaim_trigger_occurrences(cutoff_epoch_ms)
-            .await
-    }
-
-    async fn forget_trigger_tombstones(
-        &self,
-        written_before_epoch_ms: u64,
-    ) -> Result<usize, crate::StoreError> {
-        self.inner
-            .forget_trigger_tombstones(written_before_epoch_ms)
-            .await
-    }
-
-    async fn prune_non_fired_occurrences(
-        &self,
-        cutoff_epoch_ms: u64,
-    ) -> Result<usize, crate::PluginError> {
-        self.inner
-            .prune_non_fired_occurrences(cutoff_epoch_ms)
-            .await
-    }
-}
 
 /// The fault decorators one law arms.
 #[derive(Default)]
 struct Faults {
-    triggers: Mutex<Option<Arc<TriggerFault>>>,
     storage: Mutex<Option<Arc<crate::testing::runtime_helpers::RecordingDeploymentStore>>>,
     registry: Mutex<Option<Arc<ProcessRegistryFaults>>>,
 }
 
-/// The injected refusal of the trigger and process-state steps.
+/// The injected refusal of the process-state step.
 fn injected(step: SessionCloseStep) -> crate::PluginError {
     crate::PluginError::Registration(format!("injected {step:?} failure"))
 }
@@ -212,11 +35,7 @@ fn partial() -> SessionBlobReclaimReport {
 /// and closes the session.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_there() {
-    for failing in [
-        SessionCloseStep::Triggers,
-        SessionCloseStep::Artifacts,
-        SessionCloseStep::Tombstone,
-    ] {
+    for failing in [SessionCloseStep::Artifacts, SessionCloseStep::Tombstone] {
         let faults = Arc::new(Faults::default());
         let world = {
             let faults = Arc::clone(&faults);
@@ -225,17 +44,8 @@ async fn a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_
                 DurableSettings::default(),
                 Vec::new(),
                 move |stores| {
-                    let (triggers, storage, registry) =
-                        (Arc::clone(&faults), Arc::clone(&faults), faults);
+                    let (storage, registry) = (Arc::clone(&faults), faults);
                     stores
-                        .map_trigger_store(move |inner| {
-                            let fault = Arc::new(TriggerFault {
-                                inner,
-                                next: Mutex::new(None),
-                            });
-                            *triggers.triggers.lock_recover() = Some(Arc::clone(&fault));
-                            fault
-                        })
                         .map_session_store_factory(move |inner| {
                             let recording = Arc::new(
                                 crate::testing::runtime_helpers::RecordingDeploymentStore::over(
@@ -274,14 +84,6 @@ async fn a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_
             .expect("drain the close request");
 
         match failing {
-            SessionCloseStep::Triggers => {
-                let fault = faults
-                    .triggers
-                    .lock_recover()
-                    .clone()
-                    .expect("trigger fault");
-                *fault.next.lock_recover() = Some(injected(failing));
-            }
             SessionCloseStep::Artifacts => {
                 faults
                     .storage
@@ -306,10 +108,6 @@ async fn a_failed_close_step_answers_its_typed_cause_and_the_next_claim_resumes_
             .expect_err("the faulted step fails the close's pass");
         match (failing, &error) {
             (
-                SessionCloseStep::Triggers,
-                super::super::session_close::SessionCloseError::Triggers(source),
-            )
-            | (
                 SessionCloseStep::Tombstone,
                 super::super::session_close::SessionCloseError::Process(source),
             ) => {

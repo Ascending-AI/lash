@@ -45,7 +45,6 @@ use state::PluginStateRegistry;
 pub(crate) use state::{Proposal, collect_proposals, propose, propose_all};
 mod tool_catalog;
 mod tool_hooks;
-mod trigger_registry;
 
 pub(crate) use actions::{
     ErasedPluginOperationInvokeFuture, PluginCommandHandler, PluginOperationContext,
@@ -73,8 +72,7 @@ pub use config::{
 };
 pub use error::{
     PluginError, PluginErrorClass, ToolIntentCommandFailure, ToolIntentRuntimeFailure,
-    durable_identity_conflict, is_durable_identity_conflict, is_trigger_occurrence_reclaimed,
-    trigger_occurrence_reclaimed,
+    durable_identity_conflict, is_durable_identity_conflict,
 };
 pub use history::{
     CompactionContext, ContextCompaction, ContextCompactor, ContextError, ContextPressureContext,
@@ -106,7 +104,7 @@ pub use registrar::{
     ContextRegistrations, ExecutionRegistrations, OutputRegistrations,
     PluginOperationRegistrations, PluginRegistrar, ProtocolRegistrations, SessionRegistrations,
     ToolCallRegistrations, ToolCatalogRegistrations, ToolRegistrations, ToolResultRegistrations,
-    TriggerEventRegistrations, TurnRegistrations,
+    TurnRegistrations,
 };
 pub(crate) use registrar::{PluginContributions, RegisteredHook};
 pub use registry::{
@@ -160,7 +158,7 @@ pub(crate) use tool_hooks::{
     displaced_terminals, failed_check, failed_transform,
 };
 pub(crate) fn builtin_plugin_declarations() -> Vec<PluginDeclaration> {
-    let declarations = vec![trigger_registry::TriggerResourcePluginFactory::declaration()];
+    let declarations: Vec<PluginDeclaration> = Vec::new();
     #[cfg(not(test))]
     return declarations;
     #[cfg(test)]
@@ -176,8 +174,7 @@ pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
     // Protocol plugins must be registered by the embedder before calling
     // `PluginHost::build_session`. Unit tests use an in-tree fake to avoid
     // a dev-dep cycle through the protocol crates.
-    let factories: Vec<Arc<dyn PluginFactory>> =
-        vec![Arc::new(trigger_registry::TriggerResourcePluginFactory)];
+    let factories: Vec<Arc<dyn PluginFactory>> = Vec::new();
     #[cfg(not(test))]
     return factories;
 

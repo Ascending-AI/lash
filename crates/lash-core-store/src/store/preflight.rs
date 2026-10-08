@@ -367,8 +367,8 @@ fn parse_release(release: &str) -> Option<ParsedRelease> {
 
 /// One schema-carrying database inside a deployment, and its verdict.
 ///
-/// A SQLite deployment has several — durable core, process registry, triggers,
-/// effect replay — that version independently and can disagree; PostgreSQL has
+/// A SQLite deployment has several — durable core, process registry, effect
+/// replay — that version independently and can disagree; PostgreSQL has
 /// one component stamp. Reporting them individually is what lets a refusal
 /// name the database that refused rather than the deployment.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -19,7 +19,6 @@ mod served_only;
 pub use served_only::ServedOnly;
 mod task_panic;
 mod tool_attempt;
-mod trigger;
 mod turn_cancel_wait;
 pub use turn_cancel_wait::{ProcessTurnCancellation, TurnCancelWait};
 
@@ -35,8 +34,6 @@ pub use lash_core_store::admitted_scope::AdmittedScope;
 pub use lash_core_store::effect_opener::EffectOpener;
 #[cfg(feature = "testing")]
 pub(crate) use process_local::process_terminal_resolution;
-
-pub use trigger::TriggerLocalExecution;
 
 use crate::ProcessRegistry;
 
@@ -193,7 +190,6 @@ enum LocalTarget {
     },
     Process(Box<ProcessLocalExecution>),
     Definition(ProcessDefinitionLocalExecution),
-    Trigger(TriggerLocalExecution),
     TurnAcceptance(Arc<dyn crate::TurnInputStore>),
     /// The recorded presentation boundary's local work (ADR 0099 §6,
     /// FIG-3420): run the session's ordered presentation steps once over the
@@ -634,17 +630,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    pub fn triggers(store: Arc<dyn crate::TriggerStore>) -> Self {
-        Self {
-            state: RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(
-                TriggerLocalExecution { store },
-            )),
-            replay_trace: None,
-            served_only: None,
-            issued: crate::trace::StepIssue::default(),
-        }
-    }
-
     pub(crate) fn language_runtime_value_with<F, Fut>(run: F) -> Self
     where
         F: FnOnce(RuntimeEffectEnvelope) -> Fut + Send + 'run,
@@ -896,24 +881,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     ),
                 ))
             }
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
-                // A store-backed replay driver hands every opened command to
-                // `execute`; a trigger command runs on its own target.
-                let RuntimeEffectCommand::Trigger { command } = envelope.command else {
-                    return Err(RuntimeEffectControllerError::new(
-                        crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
-                        format!(
-                            "trigger executor cannot execute {} command directly",
-                            envelope.command.kind().as_str()
-                        ),
-                    ));
-                };
-                let operation_id = envelope.invocation.effect_id().to_string();
-                let result = execution.execute(&operation_id, *command).await?;
-                Ok(RuntimeEffectOutcome::Trigger {
-                    result: Box::new(result),
-                })
-            }
             RuntimeEffectLocalExecutorState::Target(LocalTarget::Presentation(execution)) => {
                 record_plugin_state(plugins, kind, address, execution.execute(envelope)).await
             }
@@ -949,42 +916,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             }
         }
     }
-
-    /// Executes trigger work for effect-host implementors while executing or replaying a runtime
-    /// effect.
-    pub async fn execute_trigger(
-        self,
-        invocation: crate::RuntimeEffectInvocation,
-        command: crate::TriggerCommand,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        let operation_id = invocation.effect_id().to_string();
-        match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
-                let result = execution.execute(&operation_id, command).await?;
-                Ok(RuntimeEffectOutcome::Trigger {
-                    result: Box::new(result),
-                })
-            }
-            RuntimeEffectLocalExecutorState::Runner(runner)
-            | RuntimeEffectLocalExecutorState::Target(LocalTarget::OwnedRunner(runner)) => {
-                runner
-                    .execute(
-                        RuntimeEffectEnvelope::new(
-                            invocation,
-                            RuntimeEffectCommand::Trigger {
-                                command: Box::new(command),
-                            },
-                        ),
-                        None,
-                    )
-                    .await
-            }
-            _ => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "no trigger executor is available for trigger command",
-            )),
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -1002,7 +933,6 @@ impl RuntimeEffectLocalRunner for TestingRuntimeEffectLocalRunner<'_> {
 fn tool_attempt_outcome(outcome: crate::ToolAttemptEffectOutcome) -> RuntimeEffectOutcome {
     RuntimeEffectOutcome::ToolAttempt {
         launch: Box::new(outcome.launch),
-        triggers: outcome.triggers,
     }
 }
 

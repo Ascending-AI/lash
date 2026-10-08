@@ -22,7 +22,6 @@ mod tool_attempt;
 pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
-pub use execution_context::resolve_trigger_owner_scope;
 pub(crate) use execution_context::runtime_ops;
 pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
 pub(crate) use execution_context::{
@@ -539,7 +538,6 @@ impl Session {
         let input = crate::ProtocolBuildInput {
             tool_catalog: Arc::clone(&tool_catalog),
             plugin_extensions: self.plugins().extensions().clone(),
-            trigger_events: self.plugins().triggers().clone(),
             writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
         };
         let driver = self.plugins().protocol_driver();
@@ -587,7 +585,6 @@ impl Session {
             .build_preamble(crate::ProtocolBuildInput {
                 tool_catalog: Arc::clone(&tool_catalog),
                 plugin_extensions: self.plugins().extensions().clone(),
-                trigger_events: self.plugins().triggers().clone(),
                 writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
             });
         let handle = ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
@@ -615,7 +612,6 @@ impl Session {
             .build_preamble(crate::ProtocolBuildInput {
                 tool_catalog: Arc::new(crate::ToolCatalog::from_tool_definitions(Vec::new())),
                 plugin_extensions: self.plugins().extensions().clone(),
-                trigger_events: self.plugins().triggers().clone(),
                 writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
             });
         Arc::new(preamble)
@@ -757,7 +753,6 @@ impl Session {
         processes: Arc<dyn crate::ProcessService>,
         effect_controller: crate::ActorContext,
         direct_completions: crate::DirectCompletionClient<'run>,
-        trigger_router: Option<crate::TriggerRouter>,
         process_engines: crate::ProcessEngineRegistry,
         observer: Arc<dyn crate::engine::ObservationSink>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
@@ -779,7 +774,6 @@ impl Session {
             session_lifecycle,
             session_graph,
             processes,
-            trigger_router,
             process_engines,
             effect_controller,
             direct_completions: direct_completions.clone(),
@@ -791,7 +785,6 @@ impl Session {
                 agent_frame_id,
             },
             observer,
-            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.services.attachment_store),
             turn_context: turn_context.clone(),
             clock: Arc::clone(&self.services.clock),

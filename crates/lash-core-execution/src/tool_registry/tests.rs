@@ -1139,11 +1139,9 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
         }
 
         fn intent() -> crate::ToolIntent {
-            crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+            crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
                 owner: crate::RuntimeOwner::Session(SessionId::from("registry-test")),
                 process_id: crate::process_id_for_test("pinned-process"),
-                event_type: "pinned.intent".to_string(),
-                payload: json!({ "route": "id" }),
             })
         }
     }
@@ -1190,10 +1188,9 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
     let [intent] = intents.intents.as_slice() else {
         panic!("the single execute route returns its declared intents")
     };
-    let crate::ToolIntent::EmitProcessEvent(intent) = intent else {
+    let crate::ToolIntent::CancelProcess(intent) = intent else {
         panic!("the declared intent reaches the caller verbatim")
     };
-    assert_eq!(intent.event_type, "pinned.intent");
     assert_eq!(
         intent.process_id,
         crate::process_id_for_test("pinned-process")

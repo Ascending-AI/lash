@@ -46,15 +46,13 @@ pub trait RuntimeExecutionContextRuntimeOps<'run>: Sized {
     #[must_use]
     fn with_tracing(self, tracing: Option<RuntimeExecutionTracing>) -> Self;
 
-    /// Run this execution inside `process`, whose deliveries wake
-    /// `wake_session_id`: what it reads off the process it runs in (its id,
-    /// originator, captured environment and wake target) and what the
+    /// Run this execution inside `process`: what it reads off the process it
+    /// runs in (its id, originator and captured environment) and what the
     /// children it starts inherit come from the process's recorded facts.
     #[must_use]
     fn with_process_execution(
         self,
         process: &crate::ProcessRecord,
-        wake_session_id: Option<crate::SessionId>,
         event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self;
 
@@ -136,7 +134,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
     fn with_process_execution(
         mut self,
         process: &crate::ProcessRecord,
-        wake_session_id: Option<crate::SessionId>,
         event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self {
         // The lineage the process's body starts children under (FIG-3607 R1),
@@ -151,7 +148,6 @@ impl<'run> RuntimeExecutionContextRuntimeOps<'run> for RuntimeExecutionContext<'
             process_id: process.id.clone(),
             originator: process.provenance.originator.clone(),
             env_ref: process.env_ref.clone(),
-            wake_session_id,
             event_context: event_context.into(),
         });
         self

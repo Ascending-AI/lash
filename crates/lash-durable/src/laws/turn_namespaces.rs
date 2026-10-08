@@ -70,8 +70,10 @@ pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_
         session: id.clone(),
         run: run.clone(),
         admission: RunAdmissionRecord::Turn {
-            took: AdmittedTurnRows::Batch {
-                id: lash_sansio::BatchId::from("namespace-batch"),
+            took: AdmittedTurnRows::Inputs {
+                ids: lash_core_store::store::AdmittedInputIds::one(lash_sansio::InputId::from(
+                    "namespace-batch",
+                )),
             },
             trace: None,
         },

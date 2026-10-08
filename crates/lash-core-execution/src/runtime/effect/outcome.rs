@@ -414,11 +414,10 @@ mod tests {
         let effect_cause = crate::CausalRef::Effect {
             address: effect_address.clone(),
         };
-        let trigger_cause = crate::CausalRef::TriggerOccurrence {
-            occurrence_id: "direct-occurrence".to_string(),
-            subscription_id: Some("direct-subscription".to_string()),
-            subscription_incarnation: Some("direct-incarnation".to_string()),
-            subscription_revision: Some(9),
+        let event_process = crate::process_id_for_test("direct-event-process");
+        let event_cause = crate::CausalRef::ProcessEvent {
+            process_id: event_process.clone(),
+            sequence: 9,
         };
 
         super::emit_llm_trace_started(
@@ -435,7 +434,7 @@ mod tests {
             super::direct_trace_context(
                 &crate::RuntimeOwner::Session(session_id.clone()),
                 Some("direct-completed"),
-                Some(&trigger_cause),
+                Some(&event_cause),
             ),
             &crate::LlmResponse::default(),
             "test/model",
@@ -467,13 +466,7 @@ mod tests {
         );
         assert_eq!(
             records[1].context.parent_graph_node_id.as_deref(),
-            Some(
-                format!(
-                    "trigger:{}",
-                    serde_json::to_string(&trigger_cause).expect("trigger cause serializes")
-                )
-                .as_str()
-            )
+            Some(format!("process:{event_process}:9").as_str())
         );
         assert_eq!(
             records[2].context.parent_graph_node_id.as_deref(),

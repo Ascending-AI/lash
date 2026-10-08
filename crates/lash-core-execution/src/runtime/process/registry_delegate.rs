@@ -246,17 +246,6 @@ macro_rules! delegate_process_event_log {
                     .await
             }
 
-            async fn count_events_through(
-                &self,
-                process_id: &$crate::ProcessId,
-                event_type: &str,
-                up_to_sequence: u64,
-            ) -> Result<u64, $crate::PluginError> {
-                self.$inner
-                    .count_events_through(process_id, event_type, up_to_sequence)
-                    .await
-            }
-
             async fn recent_events(
                 &self,
                 process_id: &$crate::ProcessId,
@@ -466,21 +455,6 @@ macro_rules! delegate_process_observer_registry {
                 self.$inner.observers_for_process(process_id).await
             }
 
-            async fn wake_target(
-                &self,
-                process_id: &ProcessId,
-            ) -> Result<Option<$crate::SessionId>, $crate::PluginError> {
-                self.$inner.wake_target(process_id).await
-            }
-
-            async fn retarget_subscription(
-                &self,
-                process_id: &ProcessId,
-                target: Option<&str>,
-            ) -> Result<(), $crate::PluginError> {
-                self.$inner.retarget_subscription(process_id, target).await
-            }
-
             async fn delete_session_process_state(
                 &self,
                 session_id: &SessionId,
@@ -534,10 +508,9 @@ macro_rules! delegate_process_retention {
                 &self,
                 cutoff_epoch_ms: u64,
                 watermark: $crate::ProjectionWatermark,
-                trigger_store: Option<&dyn $crate::TriggerStore>,
             ) -> Result<usize, $crate::PluginError> {
                 self.$inner
-                    .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
+                    .compact_process_tombstones(cutoff_epoch_ms, watermark)
                     .await
             }
 

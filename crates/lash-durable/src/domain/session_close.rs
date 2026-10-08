@@ -29,8 +29,6 @@ pub enum SessionCloseStep {
     Revoke,
     /// End the session's `Until` processes, batched.
     EndScope,
-    /// Delete the session's triggers.
-    Triggers,
     /// Arm the session's artifact cleanup.
     Artifacts,
     /// Write the tombstone and delete the session's state.
@@ -39,11 +37,10 @@ pub enum SessionCloseStep {
 
 impl SessionCloseStep {
     /// Every step, in order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 5] = [
         Self::Cancel,
         Self::Revoke,
         Self::EndScope,
-        Self::Triggers,
         Self::Artifacts,
         Self::Tombstone,
     ];
@@ -55,7 +52,6 @@ impl SessionCloseStep {
             Self::Cancel => "cancel",
             Self::Revoke => "revoke",
             Self::EndScope => "end_scope",
-            Self::Triggers => "triggers",
             Self::Artifacts => "artifacts",
             Self::Tombstone => "tombstone",
         }
@@ -83,7 +79,6 @@ impl SessionCloseStep {
             Self::Cancel => CommitLabel::SESSION_CLOSE_CANCEL,
             Self::Revoke => CommitLabel::SESSION_CLOSE_REVOKE,
             Self::EndScope => CommitLabel::SESSION_CLOSE_END_SCOPE,
-            Self::Triggers => CommitLabel::SESSION_CLOSE_TRIGGERS,
             Self::Artifacts => CommitLabel::SESSION_CLOSE_ARTIFACTS,
             Self::Tombstone => CommitLabel::SESSION_CLOSE_TOMBSTONE,
         }

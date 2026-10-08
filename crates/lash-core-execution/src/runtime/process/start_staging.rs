@@ -18,10 +18,9 @@
 //!
 //! Every start runs this one sequence in three parts: a prepare that admits,
 //! stages and mints the registration before any transaction
-//! ([`stage_process_start`]); the transaction that applies the
-//! registration, the registrar's own or a trigger start's, which binds its
-//! delivery in the same commit; and the adoption of what was staged once the
-//! row committed ([`StartStaging::adopt`]).
+//! ([`stage_process_start`]); the registrar's transaction that applies the
+//! registration; and the adoption of what was staged once the row committed
+//! ([`StartStaging::adopt`]).
 
 use std::sync::Arc;
 
@@ -41,8 +40,8 @@ use crate::{
 };
 
 /// The artifact stores a referrer acquires through, and the cleanup ledger
-/// its guards arm in (ADR 0113 §2.1, §2.4): what a process start, a trigger
-/// revision and a definition publication need to hold every artifact a
+/// its guards arm in (ADR 0113 §2.1, §2.4): what a process start and a
+/// definition publication need to hold every artifact a
 /// [`ProcessEngine::start_artifacts`](super::ProcessEngine::start_artifacts)
 /// name points at, whichever store holds it.
 #[derive(Clone)]
@@ -306,10 +305,6 @@ pub struct ProcessStartStores<'a> {
     /// The journal of the scope running the start: the authority of the
     /// start's `AwaitStart` guard (ADR 0113 §3.3).
     pub starter: &'a lash_sansio::EffectJournalIdentity,
-    /// The captured provider route a trigger delivery's start restores
-    /// inside the recorded admission this registration runs in. `None` for
-    /// every other start, and for a delivery with nothing to restore.
-    pub trigger_route: Option<&'a crate::TriggerRouteRestore>,
 }
 
 impl<'a> ProcessStartStores<'a> {
@@ -341,7 +336,7 @@ impl RegisteredProcessStart {
 
     /// The registration the started process runs, from the one the start
     /// submitted. A start by id is resolved at realization (ADR 0113 §3.6):
-    /// the process runs the engine input, identity and event types its
+    /// the process runs the engine input and identity its
     /// record holds, never the unresolved id. Any other start runs what it
     /// submitted. Every start runs under the configuration its record holds.
     #[must_use]
@@ -364,7 +359,6 @@ impl RegisteredProcessStart {
             ProcessStartTarget::Definition { .. } => {
                 let mut resolved = registration.with_input(Arc::clone(&self.record.input));
                 resolved.identity = self.record.identity.clone();
-                resolved.event_types = self.record.event_types.clone();
                 resolved
             }
         }
@@ -575,8 +569,7 @@ pub async fn stage_store_local_start(
 }
 
 /// A process start staged and its registration prepared, before the
-/// transaction that applies the registration: the registrar's own, or a
-/// trigger start's.
+/// registrar's transaction that applies the registration.
 pub struct PreparedProcessStart<'a> {
     /// What the start staged, adopted once the registration commits.
     pub staging: StartStaging<'a>,
@@ -601,8 +594,8 @@ pub struct StartStaging<'a> {
 /// step of a start before the transaction that registers it. Nothing here
 /// writes a process row.
 ///
-/// The host's live services (the session catalog, the session-turn admission
-/// and a trigger delivery's route restorer) are asked here, while no process
+/// The host's live services (the session catalog and the session-turn
+/// admission) are asked here, while no process
 /// holds the key. A terminal refusal while none does ends `Start(key)`.
 ///
 /// # Errors
@@ -628,7 +621,6 @@ pub async fn stage_process_start<'a>(
     });
     let prepared = async {
         require_host_session_live(stores, &registration).await?;
-        restore_trigger_route(stores, &start_key).await?;
         if let Some(admit) = stores.session_turn_admission {
             let fresh = stores
                 .registry
@@ -695,38 +687,6 @@ async fn require_host_session_live(
     ))
 }
 
-/// Ask the host to restore a trigger delivery's captured provider route,
-/// for a start no process holds yet (FIG-4554).
-///
-/// The restorer is a live host service, so it is asked here, inside the
-/// start's recorded admission, and never ahead of the command: a replay
-/// after the route was revoked reads the recorded registration instead of
-/// asking again. A refusal is the admission's outcome, recorded with its
-/// class, so a replay after the route came back reproduces it; the
-/// reservation stays owed, and its recovery starts it.
-///
-/// A process already holding the key is this start, registered by an attempt
-/// that never recorded it or by the delivery's first shift. The restorer
-/// serves new work only, so the retained start is served unasked.
-async fn restore_trigger_route(
-    stores: &ProcessStartStores<'_>,
-    start_key: &StartKey,
-) -> Result<(), RuntimeEffectControllerError> {
-    let Some(route) = stores.trigger_route else {
-        return Ok(());
-    };
-    if stores
-        .registry
-        .get_process_by_start_key(start_key)
-        .await?
-        .is_some()
-    {
-        return Ok(());
-    }
-    let restorer: &dyn crate::TriggerRouteRestorer = route.restorer();
-    Ok(restorer.restore(route.capture()).await?)
-}
-
 /// End `Start(key)` after a terminal refusal, unless a process already holds
 /// the key: then the registered row is the start's outcome, and its guard
 /// carries onto it.
@@ -765,8 +725,8 @@ async fn abandon_start(
     Ok(())
 }
 
-/// The journal of a start that runs as its own runtime operation: a trigger
-/// delivery's start, or a local start with no causal effect (ADR 0113 §3.3).
+/// The journal of a start that runs as its own runtime operation: a local
+/// start with no causal effect (ADR 0113 §3.3).
 ///
 /// No execution journals under it, so it never settles on its own: the
 /// start's staging claims are its lifecycle. Its registration carries them
@@ -1352,18 +1312,16 @@ async fn stage_definition<'a>(
     let kind = resolved.draft.engine_kind().as_str().to_owned();
     let payload = resolved.start_payload(args)?;
     let declared_label = registration.identity.label.clone();
-    let (mut identity, _) = engines.admit(&kind, &payload, env_spec).await?.into_parts();
-    let signals = engines
-        .resolve(&resolved.draft.unclaimed_reference())
-        .await
-        .map_err(crate::PluginError::from)?
-        .signals;
+    let mut identity = engines
+        .admit(&kind, &payload, env_spec)
+        .await?
+        .into_identity();
     identity.definition_id = Some(resolved.id().clone());
     let id = resolved.id().clone();
     let registration = registration
         .clone()
         .with_input(Arc::new(ProcessInput::Engine { kind, payload }))
-        .with_admitted_identity(super::AdmittedProcessIdentity::admitted(identity, signals))
+        .with_admitted_identity(super::AdmittedProcessIdentity::admitted(identity))
         .with_host_facing_label(declared_label);
     Ok((
         StagedDefinition {

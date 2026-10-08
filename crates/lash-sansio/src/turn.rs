@@ -16,7 +16,6 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     pub model: crate::llm_profile::LlmProfileConfig,
     pub messages: MessageSequence,
     pub events: crate::AppendVec<crate::SessionHistoryRecord<M::Event>>,
-    pub turn_causes: Vec<crate::TurnCause>,
     pub protocol_run_offset: usize,
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
     pub turn_budget: crate::TurnBudget,
@@ -35,7 +34,7 @@ pub struct PreparedTurnMachine<M: TurnProtocol = UnitTurnProtocol> {
 }
 
 pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMachine<M> {
-    let machine = TurnMachine::new_shared_with_turn_causes(
+    let machine = TurnMachine::new_shared(
         TurnMachineConfig {
             model_tool_calls: input.model_tool_calls,
             protocol_driver: input.turn_driver_preamble.config.protocol.clone(),
@@ -56,7 +55,6 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
         input.messages,
         input.events,
         input.protocol_run_offset,
-        input.turn_causes,
     );
 
     PreparedTurnMachine {

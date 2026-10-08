@@ -13,10 +13,9 @@
 //! more than one input arm carries one fixture per arm, because an arm nobody
 //! spells is an arm neither validator is proved to refuse.
 
-use super::super::events::{ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSpec};
 use super::super::model::{
     Ancestry, Lifetime, LifetimeDecision, ProcessExecutionEnvRef, ProcessInput, ProcessProvenance,
-    ProcessRegistration, ScopeGrant, ScopeId, TerminalProcessStatus,
+    ProcessRegistration, ScopeGrant, ScopeId,
 };
 use super::super::validation::ProcessRegistrationRefusal;
 
@@ -45,20 +44,6 @@ pub fn accepted_process_registration() -> ProcessRegistration {
 
 fn env_ref() -> Option<ProcessExecutionEnvRef> {
     Some(ProcessExecutionEnvRef::new(FIXTURE_ENV_REF.to_string()))
-}
-
-fn with_event_type(event_type: ProcessEventType) -> ProcessRegistration {
-    let mut registration = accepted_process_registration();
-    registration.event_types.push(event_type);
-    registration
-}
-
-fn custom_event_type(name: &str, semantics: ProcessEventSemanticsSpec) -> ProcessEventType {
-    ProcessEventType {
-        name: name.to_string(),
-        payload_schema: crate::JsonSchema::any(),
-        semantics,
-    }
 }
 
 /// A session-turn input with an otherwise valid definition key.
@@ -121,48 +106,6 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
         }
         ProcessRegistrationRefusal::EmptySessionTurnDefinitionKey => {
             vec![host_registration(session_turn_input("  "))]
-        }
-        ProcessRegistrationRefusal::EmptyEventTypeName => vec![with_event_type(custom_event_type(
-            "  ",
-            ProcessEventSemanticsSpec::default(),
-        ))],
-        ProcessRegistrationRefusal::DuplicateEventType => {
-            let mut registration = with_event_type(custom_event_type(
-                "app.duplicated",
-                ProcessEventSemanticsSpec::default(),
-            ));
-            registration.event_types.push(custom_event_type(
-                "app.duplicated",
-                ProcessEventSemanticsSpec::default(),
-            ));
-            vec![registration]
-        }
-        ProcessRegistrationRefusal::ReservedRuntimeEventType => {
-            // Redeclares a reserved name the defaults already carry, with a
-            // schema the runtime does not own; pushing a second copy would trip
-            // the duplicate rule first.
-            let mut registration = accepted_process_registration();
-            let declared = registration
-                .event_types
-                .iter_mut()
-                .find(|event_type| event_type.name == "process.waiting")
-                .expect("the default event types declare `process.waiting`");
-            declared.payload_schema =
-                crate::JsonSchema::admit(serde_json::json!({"type": "object"}))
-                    .expect("valid declared payload schema");
-            vec![registration]
-        }
-        ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput => {
-            vec![with_event_type(custom_event_type(
-                "app.terminal",
-                ProcessEventSemanticsSpec {
-                    terminal: Some(ProcessTerminalSpec {
-                        status: TerminalProcessStatus::Failed,
-                        await_output: None,
-                    }),
-                    ..ProcessEventSemanticsSpec::default()
-                },
-            ))]
         }
     }
 }

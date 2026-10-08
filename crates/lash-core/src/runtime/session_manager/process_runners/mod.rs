@@ -18,29 +18,21 @@ impl RuntimeSessionServices {
 
     /// The tools `process`'s steps run (ADR 0132 §10): its own plugin
     /// session's catalog, the round tools that pin and run a catalog tool as
-    /// a turn's round does, under `cx`, the process actor's claimed context,
-    /// and the context its host steps run over. Both run inside `process`:
-    /// what a tool reads off the process it runs in, and what the children it
-    /// starts inherit (its lineage, originator, captured environment and wake
-    /// target), are the process's committed facts, read once when the
-    /// activation builds its tools.
+    /// a turn's round does, under `cx`, the process actor's claimed context.
+    /// They run inside `process`: what a tool reads off the process it runs
+    /// in, and what the children it starts inherit (its lineage, originator
+    /// and captured environment), are the process's committed facts, read
+    /// once when the activation builds its tools.
     ///
     /// # Errors
     ///
-    /// The surface does not resolve, or the process's wake target cannot be
-    /// read.
+    /// The surface does not resolve.
     pub(in crate::runtime) async fn process_step_tools(
         &self,
         cx: crate::ActorContext,
         process: &crate::ProcessRecord,
     ) -> Result<crate::runtime::ProcessStepTools, crate::PluginError> {
         use lash_core_execution::core_internal::RuntimeExecutionContextRuntimeOps as _;
-        let registry = self.current.host.process_registry().ok_or_else(|| {
-            crate::PluginError::Session(
-                "process registry is unavailable in this runtime".to_string(),
-            )
-        })?;
-        let wake_session_id = registry.wake_target(&process.id).await?;
         self.current.plugins.materialize()?;
         let surface = self.current.plugins.pin_resolved_tool_surface()?;
         let catalog = Arc::clone(&surface.catalog);
@@ -58,17 +50,13 @@ impl RuntimeSessionServices {
         .with_fleet_format(core.session_store_factory().fleet_format())
         .with_tool_material_store(core.backend().tool_material_store())
         .with_process_work(self.current.host.work.process_wiring().cloned())
-        .with_process_execution(process, wake_session_id, None);
+        .with_process_execution(process, None);
         let tools = context
             .round_tools(crate::EffectOpener::Process {
                 process_id: process.id.clone(),
             })
             .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-        Ok(crate::runtime::ProcessStepTools {
-            catalog,
-            tools,
-            host: context,
-        })
+        Ok(crate::runtime::ProcessStepTools { catalog, tools })
     }
 
     /// The dispatch a process's tool steps run on (ADR 0132 §10): `surface`,
@@ -100,7 +88,6 @@ impl RuntimeSessionServices {
             session_lifecycle: services.lifecycle_service(),
             session_graph: services.graph_service(),
             processes: services.model_tool_process_service(),
-            trigger_router: services.trigger_router(),
             process_engines: services.process_engines().clone(),
             effect_controller,
             direct_completions,
@@ -111,7 +98,6 @@ impl RuntimeSessionServices {
             // A process's steps have no host lane: the dispatch observes
             // nowhere.
             observer: crate::engine::NullObservationSink::arc(),
-            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.current.host.core.durability.attachment_store),
             turn_context: crate::TurnContext::default(),
             clock: Arc::clone(&self.current.host.core.clock),

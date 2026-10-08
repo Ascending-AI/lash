@@ -87,9 +87,9 @@ pub use record_schema_version::{
 pub use crate::session_graph::RealizedNodeTimestamp;
 pub use crate::session_store_factory_types::{RetainedRevision, Retention, SessionLookup, Target};
 pub use admission_plan::{
-    IngressRowId, IngressSettlement, RUN_ADMISSION_STEP, TurnLaneStop, deferred_wake_records,
-    plan_checkpoint_input_admission, plan_next_turn_input_admission, require_admitted_to_run,
-    require_open_command, turn_input_state_after_admission,
+    IngressRowId, IngressSettlement, RUN_ADMISSION_STEP, plan_checkpoint_input_admission,
+    plan_next_turn_input_admission, require_admitted_to_run, require_open_command,
+    turn_input_state_after_admission,
 };
 pub use artifact_cleanup::{ArtifactCleanupLedger, CleanupUpsert};
 pub use attachment_referrers::{
@@ -114,9 +114,8 @@ pub use control_intent::{
 pub use error::{AnchorUnavailable, StoreError, StoreFault, StoreRefusal, WindowAnchorViolation};
 pub use fencing::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET, FencedWrite, HeadPublicationVerdict,
-    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, fenced_write_applied,
-    head_publication_verdict, require_fenced_write_applied, require_single_writer_head_publication,
-    wake_delivery_claim_verdict,
+    fenced_write_applied, head_publication_verdict, require_fenced_write_applied,
+    require_single_writer_head_publication,
 };
 pub use fleet_format::{
     DurableRecord, FLEET_FORMAT_VERSION, FLEET_WRITABLE_RANGE, FleetFormat, FleetFormatState,
@@ -154,10 +153,7 @@ pub use preflight::{
     StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
     compare_releases, release_stamp_advances,
 };
-pub use queued_work::{
-    AdmissionRefusal, PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass,
-    TurnWorkPrefix, TurnWorkSelection,
-};
+pub use queued_work::{PendingSessionWorkOrdering, PendingWorkOrderingKey};
 pub use realization::{admit_runtime_commit_budget, commit_runtime_state_verified};
 pub use recovery_leader::*;
 pub use retention::{RetentionBound, RetentionReport};
@@ -971,14 +967,12 @@ impl dyn TurnInputStore {
     }
 }
 
-/// Durable queued work (ADR 0101, `queued_work_batches`): process wakes and
-/// session commands, with their lifecycle reads.
+/// Durable queued work (ADR 0101, `queued_work_batches`): session commands,
+/// with their lifecycle reads.
 ///
-/// Batches enter here and wait open. A run admits turn work
-/// ([`RunStore::admit_run`], [`RunStore::admit_at_checkpoint`]), the
-/// command lane applies session commands
+/// Batches enter here and wait open. The command lane applies them
 /// ([`open_session_command_run`](Self::open_session_command_run)), and only
-/// the admitting run's or the applying commit settles them
+/// the applying commit settles them
 /// ([`SessionCommitStore::commit_runtime_state`], FIG-3927).
 #[async_trait::async_trait]
 pub trait QueuedWorkStore: Send + Sync {
@@ -993,7 +987,7 @@ pub trait QueuedWorkStore: Send + Sync {
     }
 
     /// Persist a queued-work batch and expose whether receiver idempotency
-    /// absorbed it. The wake driver uses this for delivery evidence.
+    /// absorbed it.
     ///
     /// Admission records the draft's
     /// [`submission_digest`](crate::QueuedWorkBatchDraft::submission_digest)
@@ -1010,8 +1004,7 @@ pub trait QueuedWorkStore: Send + Sync {
     /// The session's leading open session-command run, for the command lane
     /// to apply (ADR 0101 §4, design §2.7). Takes no admission.
     ///
-    /// The run is returned only when the earliest open batch is classified
-    /// as [`QueuedWorkClass::SessionCommand`]. Every command is a run of one
+    /// Every command is a run of one
     /// ([`SESSION_COMMAND_BATCHES_PER_RUN`](crate::store::queued_work::SESSION_COMMAND_BATCHES_PER_RUN)),
     /// applied alone in the commit that settles it. The applying commit
     /// settles the rows
@@ -1055,8 +1048,7 @@ pub trait QueuedWorkStore: Send + Sync {
 
     /// Project the earliest open session-command and next-turn-input ordering
     /// keys without hydrating either payload family. The session-command side
-    /// is the open queued-work rows whose durable `work_kind` is `control`, so
-    /// `cancel` rows — which preempt on their own path — enter neither side.
+    /// is the open queued-work rows, so `cancel` rows — which preempt on their own path — enter neither side.
     /// Both sides exclude admitted rows, as the corresponding list read does.
     async fn pending_session_work_ordering(
         &self,

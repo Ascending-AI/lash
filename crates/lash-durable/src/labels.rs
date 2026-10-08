@@ -99,11 +99,6 @@ impl CommitLabel {
     /// `cascade.batch`: One batch of a scope's `Until` children marked for cancel.
     pub const CASCADE_BATCH: Self = Self::new("cascade.batch");
 
-    // Triggers (L6).
-    /// `trigger.start`: A trigger occurrence recorded with its deliveries, each
-    /// bound to the process it started, whose actor is created ready.
-    pub const TRIGGER_START: Self = Self::new("trigger.start");
-
     // VM (V0, then L7).
     /// `cell.snapshot+admit`: A snapshot, its broker ledger and the admission of the operations it issued.
     pub const CELL_SNAPSHOT_ADMIT: Self = Self::new("cell.snapshot+admit");
@@ -121,8 +116,6 @@ impl CommitLabel {
     pub const SESSION_CLOSE_REVOKE: Self = Self::new("session.close.revoke");
     /// `session.close.end_scope`: Close step: one batch of the session's `Until` processes ended.
     pub const SESSION_CLOSE_END_SCOPE: Self = Self::new("session.close.end_scope");
-    /// `session.close.triggers`: Close step: the session's triggers deleted.
-    pub const SESSION_CLOSE_TRIGGERS: Self = Self::new("session.close.triggers");
     /// `session.close.artifacts`: Close step: the session's artifact cleanup armed.
     pub const SESSION_CLOSE_ARTIFACTS: Self = Self::new("session.close.artifacts");
     /// `session.close.tombstone`: Close step: the tombstone written and state deleted.
@@ -164,7 +157,7 @@ impl CommitLabel {
     }
 
     /// Every label in the catalog, L1's lease labels first.
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 46] = [
         Self::CLAIM,
         Self::HEARTBEAT,
         Self::REAP,
@@ -199,7 +192,6 @@ impl CommitLabel {
         Self::PROCESS_CANCEL,
         Self::PROCESS_TERMINAL,
         Self::CASCADE_BATCH,
-        Self::TRIGGER_START,
         Self::CELL_SNAPSHOT_ADMIT,
         Self::CELL_INJECT,
         Self::CELL_SNAPSHOT,
@@ -207,7 +199,6 @@ impl CommitLabel {
         Self::SESSION_CLOSE_CANCEL,
         Self::SESSION_CLOSE_REVOKE,
         Self::SESSION_CLOSE_END_SCOPE,
-        Self::SESSION_CLOSE_TRIGGERS,
         Self::SESSION_CLOSE_ARTIFACTS,
         Self::SESSION_CLOSE_TOMBSTONE,
         Self::MAIL_SESSION,

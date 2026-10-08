@@ -36,10 +36,6 @@ pub(super) struct Driver {
     pub(super) blocked: Option<Blocked>,
     /// An event the next transition receives at once.
     pub(super) immediate: Option<Immediate>,
-    /// How many signals of each name the engine was handed: the ordinal of
-    /// the next wait on a name is one past its count.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub(super) delivered_signals: BTreeMap<String, u64>,
     /// The settled effect occurrences past the per-node cap, by node and
     /// outcome class: recorded once, with the terminal.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -123,8 +119,6 @@ pub(super) enum Immediate {
         /// The key.
         name: KeyName,
     },
-    /// The event the last transition emitted is committed.
-    Emitted,
 }
 
 /// A wait id as the driver stores it: 32 lowercase hex digits.

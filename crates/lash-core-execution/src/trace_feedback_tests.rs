@@ -82,8 +82,8 @@ fn tool_scope_owner_stays_on_the_admitted_run_across_physical_turns() {
     }
     assert_eq!(scopes[0], scopes[1]);
     let parent = DurableTraceScope {
-        scope: TraceScopeId::admission(TraceScopeOwner::TriggerOccurrence {
-            occurrence_id: "occurrence".into(),
+        scope: TraceScopeId::admission(TraceScopeOwner::Process {
+            process_id: crate::process_id_for_test("parent"),
         }),
         cause: TraceCause::Root,
         anchor: TraceAnchor::Untraced,

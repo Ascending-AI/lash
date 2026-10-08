@@ -40,7 +40,6 @@ pub mod observation_sink;
 pub mod prompt;
 pub mod sansio_transcript;
 pub mod tool_fixtures;
-mod trigger_context;
 
 /// A recording or fault layer over any effect host (FIG-3580).
 pub use crate::runtime::process::{
@@ -50,7 +49,6 @@ pub use execution_context_builder::*;
 #[cfg(any(test, feature = "testing"))]
 pub use observation_sink::ChannelObservationSink;
 pub use tool_fixtures::{FIXTURE_ECHO_TOOL, FixtureTools, fixture_echo_definition};
-pub use trigger_context::*;
 
 use std::future::Future;
 use std::pin::Pin;
@@ -246,12 +244,11 @@ impl crate::ProcessEngine for HeldProcessEngine {
     ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }
 
-/// Engine fixture for trigger-delivery tests that need to exercise the real
+/// Engine fixture for start tests that need to exercise the real
 /// engine-only start contract without publishing unrelated language artifacts.
 #[cfg(any(test, feature = "testing"))]
 pub struct FixtureProcessEngine;
@@ -342,7 +339,6 @@ impl crate::ProcessEngine for FixtureProcessEngine {
     ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }
@@ -1101,11 +1097,6 @@ pub async fn execute_effect_locally(
             };
             Ok(crate::RuntimeEffectOutcome::Process { result })
         }
-        crate::RuntimeEffectCommand::Trigger { command } => {
-            local_executor
-                .execute_trigger(envelope.invocation, *command)
-                .await
-        }
         _ => local_executor.execute(envelope).await,
     }
 }
@@ -1256,14 +1247,12 @@ pub fn code_execution_context_with_process_dependencies<'run>(
     ports: impl Into<TestExecutionPorts>,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
-    trigger_router: Option<crate::TriggerRouter>,
     processes: Arc<dyn crate::ProcessService>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
 ) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .provider(provider)
         .tool_catalog(tool_catalog)
-        .trigger_router(trigger_router)
         .processes(processes)
         .execution_env_spec(execution_env_spec)
         .build()
@@ -1290,7 +1279,6 @@ pub fn code_execution_context_for_process<'run>(
         .into_runtime()
         .with_process_execution(
             &crate::ProcessRecord::from_registration(registration.clone(), process_id),
-            registration.wake_session_id.clone(),
             None,
         )
 }
@@ -1389,7 +1377,7 @@ fn build_atomic_tool_dispatch<'run>(
 
 /// Execute a recorded tool-intent drain through the production process-command
 /// route while retaining a small, backend-neutral differential-test surface.
-/// Its starts and signals come back staged: the outcome commit that records
+/// Its starts come back staged: the outcome commit that records
 /// the call, which this drain has none of, is what writes them.
 pub async fn execute_tool_intents_with_services(
     scoped_effect_controller: crate::ActorContext,
@@ -1428,59 +1416,11 @@ pub fn staged_start_record(
     }
 }
 
-/// Execute a recorded tool-intent drain with the production trigger router.
-///
-/// Durable-adapter tests use this narrow seam to prove replay refusal before
-/// trigger-store ingestion.
-pub async fn execute_tool_intents_with_services_and_trigger_router(
-    scoped_effect_controller: crate::ActorContext,
-    processes: Arc<dyn crate::ProcessService>,
-    trigger_router: crate::TriggerRouter,
-    process_engines: crate::ProcessEngineRegistry,
-    session_id: &SessionId,
-    tool_call_id: &crate::ToolCallId,
-    intents: &crate::ToolIntents,
-) -> Result<crate::tool_dispatch::Realization, crate::RuntimeEffectControllerError> {
-    execute_tool_intents_with_services_and_hook_and_trigger_router(
-        scoped_effect_controller,
-        processes,
-        Some((trigger_router, process_engines)),
-        session_id,
-        tool_call_id,
-        intents,
-        None,
-    )
-    .await
-}
-
 /// Execute a recorded tool-intent drain through the production process-command
 /// route and notify a test hook after a child Start has committed.
 pub async fn execute_tool_intents_with_services_and_hook(
     scoped_effect_controller: crate::ActorContext,
     processes: Arc<dyn crate::ProcessService>,
-    session_id: &SessionId,
-    tool_call_id: &crate::ToolCallId,
-    intents: &crate::ToolIntents,
-    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
-) -> Result<crate::tool_dispatch::Realization, crate::RuntimeEffectControllerError> {
-    execute_tool_intents_with_services_and_hook_and_trigger_router(
-        scoped_effect_controller,
-        processes,
-        None,
-        session_id,
-        tool_call_id,
-        intents,
-        child_trace_hook,
-    )
-    .await
-}
-
-async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
-    scoped_effect_controller: crate::ActorContext,
-    processes: Arc<dyn crate::ProcessService>,
-    // The trigger router, with the engines that hold the revisions its
-    // registrations commit (ADR 0113 §3.4).
-    triggers: Option<(crate::TriggerRouter, crate::ProcessEngineRegistry)>,
     session_id: &SessionId,
     tool_call_id: &crate::ToolCallId,
     intents: &crate::ToolIntents,
@@ -1500,12 +1440,6 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
         .session_lifecycle(Arc::new(MockSessionManager::default()))
         .processes(processes)
         .dispatch_parent_invocation(parent_invocation);
-    let builder = match triggers {
-        Some((router, engines)) => builder
-            .trigger_router(Some(router))
-            .process_engines(engines),
-        None => builder,
-    };
     let dispatch = build_atomic_tool_dispatch(builder);
     let context = dispatch.intent_realization_context();
     crate::tool_dispatch::execute_final_tool_intents(
@@ -1523,7 +1457,7 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
 ///
 /// The FIG-1127 review found that stubbing the sibling routes here made the
 /// harness structurally incapable of reaching `await_process`, `cancel`,
-/// `signal`, `list_visible` and `transfer` — the routes that turned out to be
+/// `list_visible` and `transfer` — the routes that turned out to be
 /// unguarded. The stubs are gone: this service now mirrors the production
 /// routing decision per method, so a route that journals in production journals
 /// here too.
@@ -1594,8 +1528,8 @@ impl EffectBackedProcessService {
         outcome.into_process().map_err(crate::PluginError::from)
     }
 
-    /// The process executor production stages a call's starts and signals
-    /// on, over this service's stores.
+    /// The process executor production stages a call's starts on, over
+    /// this service's stores.
     fn stager(&self) -> Result<crate::runtime::ProcessLocalExecution, crate::PluginError> {
         crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&self.registry),
@@ -1789,72 +1723,6 @@ impl crate::ProcessService for EffectBackedProcessService {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
             _ => unreachable!("cancel command returns cancel outcome"),
         }
-    }
-
-    async fn signal_possessed(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let command = crate::ProcessCommand::Signal {
-            signal: crate::ProcessSignal::new(
-                crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
-                payload,
-            ),
-        };
-        match self.execute(scope, command).await? {
-            crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
-            _ => unreachable!("signal command returns signal outcome"),
-        }
-    }
-
-    async fn stage_recorded_signal(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        signal: &crate::ProcessSignal,
-        _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::runtime::actor::round::StoreLocalEffect, crate::PluginError> {
-        Ok(self.stager()?.stage_signal(signal).await?)
-    }
-
-    async fn emit_event(
-        &self,
-        _session_id: &SessionId,
-        process_id: &ProcessId,
-        event_type: String,
-        replay_key: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let command = crate::ProcessCommand::EmitEvent {
-            process_id: process_id.clone(),
-            request: crate::ProcessEventAppendRequest::new(event_type, payload)
-                .with_replay_key(replay_key),
-        };
-        match self.execute(scope, command).await? {
-            crate::ProcessEffectOutcome::EmitEvent { event, .. } => Ok(*event),
-            _ => unreachable!("emit-event command returns emit-event outcome"),
-        }
-    }
-
-    async fn emit_event_recorded_intent(
-        &self,
-        owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        event_type: String,
-        replay_key: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let session_id = crate::plugin::require_session_owner(owner, "emit_event_recorded_intent")?;
-        self.emit_event(
-            session_id, process_id, event_type, replay_key, payload, scope,
-        )
-        .await
     }
 
     async fn transfer(
@@ -2084,8 +1952,8 @@ impl MockSessionManager {
         })
     }
 
-    /// The process executor production stages a call's starts and signals
-    /// on, over the mock's registry.
+    /// The process executor production stages a call's starts on, over
+    /// the mock's registry.
     fn stager(&self) -> Result<crate::runtime::ProcessLocalExecution, PluginError> {
         crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(self.registry()?),
@@ -2262,53 +2130,6 @@ impl crate::ProcessService for MockSessionManager {
                 Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
             )
             .await
-    }
-
-    async fn signal_possessed(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, PluginError> {
-        let signal = crate::ProcessSignal::new(
-            crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
-            payload,
-        );
-        self.registry()?
-            .append_event(process_id, signal.append_request())
-            .await
-            .map(|result| result.event)
-    }
-
-    async fn stage_recorded_signal(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        signal: &crate::ProcessSignal,
-        _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::runtime::actor::round::StoreLocalEffect, PluginError> {
-        Ok(self.stager()?.stage_signal(signal).await?)
-    }
-
-    async fn emit_event_recorded_intent(
-        &self,
-        _owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        event_type: String,
-        replay_key: String,
-        payload: serde_json::Value,
-        _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, PluginError> {
-        self.registry()?
-            .append_event(
-                process_id,
-                crate::ProcessEventAppendRequest::new(event_type, payload)
-                    .with_replay_key(replay_key),
-            )
-            .await
-            .map(|result| result.event)
     }
 
     async fn transfer(

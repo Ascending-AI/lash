@@ -6,58 +6,6 @@ use crate::{ToolCall, ToolOutcome, ToolProvider};
 
 struct NoopTools;
 
-#[test]
-fn trigger_owner_scope_uses_root_session_or_explicit_host_binding() {
-    assert_eq!(
-        resolve_trigger_owner_scope(
-            &crate::RuntimeOwner::Session(SessionId::from("root-session")),
-            None
-        )
-        .unwrap(),
-        crate::TriggerOwnerScope::session("root-session")
-    );
-    let root = crate::ProcessOriginator::session(crate::SessionScope::new("root-session"));
-    assert_eq!(
-        resolve_trigger_owner_scope(
-            &crate::RuntimeOwner::Session(SessionId::from("ignored")),
-            Some(&root)
-        )
-        .unwrap(),
-        crate::TriggerOwnerScope::session("root-session")
-    );
-    let frame = crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
-        "root-session",
-        crate::facade_support::frame_node_id(&SessionId::from("root-session"), "agent-frame"),
-    ));
-    assert_eq!(
-        resolve_trigger_owner_scope(
-            &crate::RuntimeOwner::Session(SessionId::from("ignored")),
-            Some(&frame)
-        )
-        .unwrap(),
-        crate::TriggerOwnerScope::session("root-session"),
-        "agent frames inherit the root session namespace"
-    );
-    let named_host = crate::ProcessOriginator::host_scoped("automation-a");
-    assert_eq!(
-        resolve_trigger_owner_scope(
-            &crate::RuntimeOwner::Session(SessionId::from("ignored")),
-            Some(&named_host)
-        )
-        .unwrap(),
-        crate::TriggerOwnerScope::host("automation-a").unwrap()
-    );
-    assert!(
-        resolve_trigger_owner_scope(
-            &crate::RuntimeOwner::Session(SessionId::from("ignored")),
-            Some(&crate::ProcessOriginator::host())
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("bare host authority")
-    );
-}
-
 #[async_trait::async_trait]
 impl ToolProvider for NoopTools {
     fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
@@ -98,7 +46,6 @@ fn test_execution_context_with_env_store(
         session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
         session_graph: Arc::new(crate::testing::MockSessionManager::default()),
         processes: Arc::new(crate::UnavailableProcessService),
-        trigger_router: None,
         process_engines: crate::ProcessEngineRegistry::default(),
         effect_controller: crate::ActorContext::unavailable()
             .scoped(crate::AdmittedScope::runtime_operation(
@@ -119,7 +66,6 @@ fn test_execution_context_with_env_store(
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
         },
         observer: std::sync::Arc::new(crate::engine::NullObservationSink),
-        trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -161,7 +107,6 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
         process_id: crate::process_id_for_test("host-process"),
         originator: crate::ProcessOriginator::host_scoped("automation"),
         env_ref: None,
-        wake_session_id: None,
         event_context: None,
     });
     assert_eq!(
@@ -175,7 +120,6 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
         process_id: crate::process_id_for_test("session-process"),
         originator: crate::ProcessOriginator::session(crate::SessionScope::new("origin-session")),
         env_ref: None,
-        wake_session_id: None,
         event_context: None,
     });
     assert_eq!(
@@ -183,50 +127,6 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
             .invocation
             .attribution,
         crate::RuntimeAttribution::for_session("origin-session")
-    );
-}
-
-#[tokio::test]
-async fn execution_context_without_process_execution_returns_typed_error_from_append_and_signal() {
-    let ctx = test_execution_context();
-
-    let append_err = ctx
-        .append_process_events(vec![crate::ProcessEventAppendRequest::new(
-            "test.event",
-            serde_json::json!({}),
-        )])
-        .await
-        .unwrap_err();
-
-    let crate::PluginError::RuntimeEffectController(append_effect_err) = append_err else {
-        panic!("expected PluginError::RuntimeEffectController, got {append_err:?}");
-    };
-    assert_eq!(
-        append_effect_err.code,
-        crate::RuntimeErrorCode::ProcessRegistryUnavailable
-    );
-    assert_eq!(
-        append_effect_err.message,
-        "process execution is unavailable outside a durable process execution"
-    );
-
-    let signal_err = ctx
-        .signal_process_by_id(
-            &crate::process_id_for_test("proc-1"),
-            "sig-1",
-            "sig-id-1".to_string(),
-            serde_json::json!({}),
-        )
-        .await
-        .unwrap_err();
-
-    assert_eq!(
-        signal_err.code,
-        crate::RuntimeErrorCode::ProcessRegistryUnavailable
-    );
-    assert_eq!(
-        signal_err.message,
-        "process execution is unavailable outside a durable process execution"
     );
 }
 

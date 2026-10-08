@@ -5,7 +5,7 @@ use crate::{AttachmentRef, ToolCallRecord};
 ///
 /// `operation` and `outcome` are the model-safe execution ledger. Host records
 /// are attached only when the source dispatch resolved to a host tool call;
-/// trigger and other host-internal dispatches therefore carry `None`.
+/// host-internal dispatches therefore carry `None`.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ExecutedCall {
     pub operation: String,

@@ -285,22 +285,6 @@ pub enum StoreError {
         total_bytes: usize,
         max_bytes: usize,
     },
-    #[error(
-        "queued-work action reserve {action_token_reserve} exhausts model context window {max_context_tokens}"
-    )]
-    QueuedWorkActionReserveExhaustsContext {
-        max_context_tokens: usize,
-        action_token_reserve: usize,
-    },
-    #[error(
-        "queued-work row `{batch_id}` at enqueue sequence {batch_enqueue_seq} renders to at least {rendered_tokens} tokens, exceeding model context window {max_context_tokens}; the row remains pending for host review"
-    )]
-    QueuedWorkRowExceedsContextWindow {
-        batch_id: BatchId,
-        batch_enqueue_seq: u64,
-        rendered_tokens: usize,
-        max_context_tokens: usize,
-    },
     /// A rebind declared a lineage that disagrees with the one durably
     /// recorded for this session.
     ///
@@ -710,10 +694,7 @@ pub enum StoreError {
     /// A queued-work submission reused session `session_id`'s source key
     /// `source_key` with a digest other than the one batch
     /// `existing_batch_id` recorded (ADR 0101 §8). Nothing was stored; the
-    /// existing batch, open or a tombstone, is unchanged. A process wake's
-    /// refusal is that wake's terminal: the session's redelivery floor rose
-    /// to its sequence in the refusing transaction, which committed
-    /// (FIG-4487).
+    /// existing batch, open or a tombstone, is unchanged.
     #[error(
         "queued work source_key `{source_key}` for session `{session_id}` is already bound to batch `{existing_batch_id}` with different submitted content"
     )]
@@ -975,8 +956,6 @@ impl StoreError {
             | Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
             | Self::CommitByteBudgetExceeded { .. }
-            | Self::QueuedWorkActionReserveExhaustsContext { .. }
-            | Self::QueuedWorkRowExceedsContextWindow { .. }
             | Self::SessionRelationMismatch { .. }
             | Self::SessionNotFound { .. }
             | Self::ForeignSessionRequest { .. }
@@ -1115,9 +1094,6 @@ impl StoreError {
             Self::RecordEncodingFailed { .. } => Code::RecordEncodingFailed,
             Self::ArtifactReferrerEnded { .. } => Code::ArtifactReferrerEnded,
             Self::ArtifactMissing { .. } => Code::ArtifactMissing,
-            Self::QueuedWorkRowExceedsContextWindow { .. } => {
-                Code::QueuedWorkRowExceedsContextWindow
-            }
             Self::PendingTurnInputSourceKeyConflict { .. }
             | Self::QueuedWorkSourceKeyConflict { .. }
             | Self::PendingTurnInputIdConflict { .. }
@@ -1127,8 +1103,7 @@ impl StoreError {
             Self::IngressTurnAddressUnknown { .. } => Code::TurnAddressUnknown,
             Self::IngressReservedSourceKey { .. } => Code::IngressReservedSourceKey,
 
-            Self::QueuedWorkActionReserveExhaustsContext { .. }
-            | Self::SessionRelationMismatch { .. }
+            Self::SessionRelationMismatch { .. }
             | Self::SessionNotFound { .. }
             | Self::ForeignSessionRequest { .. }
             | Self::InvalidWindowAnchor { .. }
@@ -1203,8 +1178,6 @@ impl StoreError {
             Self::TurnOutcomeMaterializationRefused { .. }
             | Self::CommitNodeBudgetExceeded { .. }
             | Self::CommitByteBudgetExceeded { .. }
-            | Self::QueuedWorkActionReserveExhaustsContext { .. }
-            | Self::QueuedWorkRowExceedsContextWindow { .. }
             | Self::SessionRelationMismatch { .. }
             | Self::ForeignSessionRequest { .. }
             | Self::HistoryNodeTooLarge { .. }
@@ -1385,10 +1358,6 @@ impl StoreError {
             Self::Contended => "Contended",
             Self::CommitNodeBudgetExceeded { .. } => "CommitNodeBudgetExceeded",
             Self::CommitByteBudgetExceeded { .. } => "CommitByteBudgetExceeded",
-            Self::QueuedWorkActionReserveExhaustsContext { .. } => {
-                "QueuedWorkActionReserveExhaustsContext"
-            }
-            Self::QueuedWorkRowExceedsContextWindow { .. } => "QueuedWorkRowExceedsContextWindow",
             Self::SessionRelationMismatch { .. } => "SessionRelationMismatch",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
             Self::StoreSessionMismatch { .. } => "StoreSessionMismatch",

@@ -590,63 +590,11 @@ pub enum StoreLocalEffect {
     /// Start a process: its registry row, its observers and its actor,
     /// ready.
     ProcessStart(ProcessStartRows),
-    /// Send a signal: its event on the target, its mail and the target's
-    /// wake.
-    SignalSend(SignalSendRows),
-    /// Announce a parked call's wait on the process it runs inside: the
-    /// event its pending completion declared, journaled with the park and
-    /// waking nobody.
-    ParkAnnouncement(ParkAnnouncementRows),
-    /// Create a trigger subscription.
-    TriggerCreate(StoreLocalRows),
-    /// Delete a trigger subscription.
-    TriggerDelete(StoreLocalRows),
     /// Spawn a child session.
     ChildSessionSpawn(StoreLocalRows),
     /// A tool's plugin-state resolutions: they ride its `x_outcome` record
     /// and publish from it once it committed.
     PluginState(StagedPluginState),
-}
-
-impl StoreLocalEffect {
-    /// The effect that sends `signal`.
-    ///
-    /// # Errors
-    ///
-    /// A signal that does not encode.
-    pub fn signal(signal: &crate::ProcessSignal) -> Result<Self, crate::PluginError> {
-        Ok(Self::SignalSend(SignalSendRows {
-            process: signal.identity.process_id().clone(),
-            signal_json: serde_json::to_string(signal).map_err(|error| {
-                crate::PluginError::Session(format!("failed to encode a signal: {error}"))
-            })?,
-        }))
-    }
-}
-
-/// The rows of one signal sent as a store-local effect.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SignalSendRows {
-    /// The target.
-    pub process: crate::ProcessId,
-    /// The signal, encoded.
-    pub signal_json: String,
-}
-
-/// The event a parked call announces its wait with, as a store-local
-/// effect: appended once, under its replay key, in the transaction that
-/// records the park, so the announcement exists if and only if the park
-/// does.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ParkAnnouncementRows {
-    /// The process the call runs inside.
-    pub process: crate::ProcessId,
-    /// The event's type.
-    pub event_type: String,
-    /// Its payload, encoded.
-    pub payload_json: String,
-    /// Its replay key.
-    pub replay_key: String,
 }
 
 /// The rows of one store-local effect no producer stages yet.

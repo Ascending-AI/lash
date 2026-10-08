@@ -80,7 +80,6 @@ impl PluginExtensions {
 pub struct PluginSpec {
     pub extension_contributions: Vec<PluginExtensionContribution>,
     pub tool_providers: Vec<Arc<dyn ToolProvider>>,
-    pub triggers: Vec<crate::TriggerEvent>,
     pub tool_catalog_contributors: Vec<(HookKey, ToolCatalogContributor)>,
     pub before_turn_hooks: Vec<(HookKey, BeforeTurnHook)>,
     pub tool_args_transforms: Vec<(HookKey, ToolArgsTransformHook)>,
@@ -120,11 +119,6 @@ impl PluginSpec {
 
     pub fn with_tool_provider(mut self, provider: Arc<dyn ToolProvider>) -> Self {
         self.tool_providers.push(provider);
-        self
-    }
-
-    pub fn with_trigger_event(mut self, event: crate::TriggerEvent) -> Self {
-        self.triggers.push(event);
         self
     }
 
@@ -1045,9 +1039,6 @@ impl SessionPlugin for SpecPlugin {
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         for provider in &self.spec.tool_providers {
             reg.tools().provider(Arc::clone(provider))?;
-        }
-        for event in &self.spec.triggers {
-            reg.triggers().declare(event.clone())?;
         }
         for (key, contributor) in &self.spec.tool_catalog_contributors {
             reg.tool_catalog()

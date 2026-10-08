@@ -532,18 +532,6 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
             .await
     }
 
-    async fn count_events_through(
-        &self,
-        process_id: &ProcessId,
-        event_type: &str,
-        up_to_sequence: u64,
-    ) -> Result<u64, crate::PluginError> {
-        self.take_events_read_fault()?;
-        self.inner
-            .count_events_through(process_id, event_type, up_to_sequence)
-            .await
-    }
-
     async fn recent_events(
         &self,
         process_id: &ProcessId,
@@ -667,10 +655,9 @@ impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults
         &self,
         cutoff_epoch_ms: u64,
         watermark: crate::ProjectionWatermark,
-        trigger_store: Option<&dyn crate::TriggerStore>,
     ) -> Result<usize, crate::PluginError> {
         self.inner
-            .compact_process_tombstones(cutoff_epoch_ms, watermark, trigger_store)
+            .compact_process_tombstones(cutoff_epoch_ms, watermark)
             .await
     }
 

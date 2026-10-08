@@ -66,12 +66,14 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
             session: id.clone(),
             run: run.clone(),
             admission: RunAdmissionRecord::Turn {
-                took: AdmittedTurnRows::Batch {
-                    id: lash_sansio::BatchId::from(if *run == first {
-                        "first-batch"
-                    } else {
-                        "second-batch"
-                    }),
+                took: AdmittedTurnRows::Inputs {
+                    ids: lash_core_store::store::AdmittedInputIds::one(lash_sansio::InputId::from(
+                        if *run == first {
+                            "first-batch"
+                        } else {
+                            "second-batch"
+                        },
+                    )),
                 },
                 trace: None,
             },

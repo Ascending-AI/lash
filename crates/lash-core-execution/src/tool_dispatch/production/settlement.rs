@@ -15,11 +15,6 @@ impl ProductionToolHandlers<'_> {
                 message,
             )
         };
-        let captured: Option<Captured> = capture
-            .and_then(SingletonCapture::output)
-            .map(decode)
-            .transpose()
-            .map_err(fault)?;
         // An isolated final's presentation is the descriptor of the process
         // it started, which the session now possesses.
         let isolated = matches!(capture, Some(SingletonCapture::Isolated { .. }));
@@ -72,16 +67,11 @@ impl ProductionToolHandlers<'_> {
             })
             .chain(started.map(|descriptor| descriptor.process_id))
             .collect::<Vec<_>>();
-        let triggers = captured
-            .as_ref()
-            .map(|capture| capture.triggers.clone())
-            .unwrap_or_default();
         self.context.incorporate_tool_facts(
             crate::session::SettlementSource::Invocation {
                 call_id: call_id.clone(),
             },
             &possession,
-            &triggers,
         )?;
         if observe {
             let mut cursor = self

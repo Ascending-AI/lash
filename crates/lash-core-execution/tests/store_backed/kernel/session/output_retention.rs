@@ -29,7 +29,6 @@ fn settled() -> crate::tool_dispatch::ToolDispatchOutcome {
         attempts: Vec::new(),
         intents: crate::ToolIntents::default(),
         intent_outcomes: Vec::new(),
-        triggers: Vec::new(),
     }
 }
 

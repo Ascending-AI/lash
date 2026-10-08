@@ -129,9 +129,6 @@ pub trait ProcessQuery: Send + Sync {
 
     /// Return the candidate ids retained as terminal-process tombstones,
     /// preserving input order.
-    ///
-    /// Cross-store retention uses this to remove trigger deliveries only after
-    /// their deterministic process ids have been durably pruned.
     async fn filter_tombstoned_process_ids(
         &self,
         process_ids: &[ProcessId],
@@ -247,7 +244,7 @@ pub trait ProcessRegistrar: Send + Sync {
     ) -> Result<ProcessRecord, PluginError>;
 }
 
-/// Observer edges, subscription targeting, and session-scoped routing cleanup.
+/// Observer edges and session-scoped observer cleanup.
 ///
 /// Requires [`ProcessQuery`]: observer semantics are defined against the
 /// identity and liveness facts of the observed rows, and the provided methods
@@ -331,24 +328,10 @@ pub trait ProcessObserverRegistry: ProcessQuery {
         process_id: &ProcessId,
     ) -> Result<Vec<SessionId>, PluginError>;
 
-    /// The session `process_id`'s wake deliveries target: the one its start
-    /// recorded, or the latest [`Self::retarget_subscription`] set. `None`
-    /// when it wakes nothing. A process whose row is gone is refused as
-    /// [`ProcessQuery::get_process`] refuses it.
-    async fn wake_target(&self, process_id: &ProcessId) -> Result<Option<SessionId>, PluginError>;
-
-    /// Append a subscription-retarget audit event, update the indexed target,
-    /// and discard pending deliveries to the old target atomically.
-    async fn retarget_subscription(
-        &self,
-        process_id: &ProcessId,
-        target: Option<&str>,
-    ) -> Result<(), PluginError>;
-
-    /// Remove observer edges and wake routing owned by a deleted session.
+    /// Remove observer edges owned by a deleted session.
     ///
     /// This bulk session-lifecycle cleanup deliberately does not append
-    /// per-process observer or retarget audit events.
+    /// per-process observer audit events.
     async fn delete_session_process_state(
         &self,
         session_id: &SessionId,
@@ -362,13 +345,12 @@ pub trait ProcessObserverRegistry: ProcessQuery {
 /// point reads.
 #[async_trait::async_trait]
 pub trait ProcessEventLog: ProcessQuery {
-    /// This unfenced path is reserved for host signal/cancel coordination.
-    /// Process engines append no event themselves: an engine's events are
-    /// its `Emit` actions, appended by the process activation.
-    /// Signal events must be constructed by [`super::events::ProcessSignal::append_request`].
-    /// Raw `signal.*` requests return [`PluginError::ReservedProcessEvent`],
-    /// even if they carry a replay key. This rule also applies to batches
-    /// and lifecycle preludes.
+    /// This unfenced path is reserved for host cancel coordination. Process
+    /// engines append no event themselves: lash appends every lifecycle fact
+    /// an activation commits. A runtime-owned fact (an effect outcome or
+    /// omission, an observer change) is refused with
+    /// [`PluginError::ReservedProcessEvent`], even if it carries a replay key.
+    /// This rule also applies to batches.
     async fn append_event(
         &self,
         process_id: &ProcessId,
@@ -433,17 +415,6 @@ pub trait ProcessEventLog: ProcessQuery {
     ) -> Result<ProcessEventReadOutcome<ProcessEventPage>, PluginError> {
         self.event_page_after(process_id, 0, limit, mode).await
     }
-
-    /// This is the signal-ordinal query: the Nth occurrence of a signal event
-    /// resolves the Nth durable wait key. The default scans the event log;
-    /// store backends override it with a COUNT so per-signal cost stays flat
-    /// instead of growing with a long-lived process's history.
-    async fn count_events_through(
-        &self,
-        process_id: &ProcessId,
-        event_type: &str,
-        up_to_sequence: u64,
-    ) -> Result<u64, PluginError>;
 
     /// The most recent `limit` events, in ascending sequence order.
     ///
@@ -634,17 +605,12 @@ pub trait ProcessToolIntents: Send + Sync {
 #[async_trait::async_trait]
 pub trait ProcessRetention: Send + Sync {
     /// Delete payload-free tombstones older than `cutoff_epoch_ms` without
-    /// outrunning a trusted projection or orphaning outstanding trigger
-    /// deliveries. `NoProjector` permits free compaction; `UpTo(cursor)` retains
-    /// deletion entries beyond that cursor. When `trigger_store` is configured,
-    /// the registry first obtains its complete outstanding-delivery process-id
-    /// survey and structurally excludes matching tombstones. A survey failure
-    /// aborts compaction. `None` is reserved for runtimes with no trigger store.
+    /// outrunning a trusted projection. `NoProjector` permits free
+    /// compaction; `UpTo(cursor)` retains deletion entries beyond that cursor.
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,
         watermark: ProjectionWatermark,
-        trigger_store: Option<&dyn crate::TriggerStore>,
     ) -> Result<usize, PluginError>;
 
     /// Release the payloads of `process_id`'s events at or below `through`,
@@ -654,10 +620,9 @@ pub trait ProcessRetention: Send + Sync {
     /// event and never lowers a horizon an earlier release raised, so the
     /// call is idempotent and repeated cleanup reports nothing new. A released
     /// event keeps its row: sequence, type, replay key and a digest of its
-    /// payload. Sequence allocation and signal ordinals therefore do not move,
-    /// and a writer that re-presents a released event's replay key — a
-    /// segment or Run attempt replaying its journal, a host retrying a signal
-    /// — coalesces on the digest exactly as it would on the payload, or is
+    /// payload. Sequence allocation therefore does not move, and a writer
+    /// that re-presents a released event's replay key — a segment or Run
+    /// attempt replaying its journal — coalesces on the digest exactly as it would on the payload, or is
     /// refused as a conflict. Releasing therefore needs no proof that every
     /// such writer has finished, which storage cannot observe.
     ///
@@ -666,8 +631,8 @@ pub trait ProcessRetention: Send + Sync {
     /// rather than skipping the released events, and the recent-event tail
     /// never returns one. The host must finish projecting that prefix and
     /// accept the typed expiry of any event reader that still needs it.
-    /// Execution state is retained separately: waits, outcomes and wake
-    /// deliveries are held by the process row, the engine and delivery rows.
+    /// Execution state is retained separately: waits and outcomes are held by
+    /// the process row and the engine.
     /// A pruned process refuses with
     /// [`PluginError::ProcessNoLongerRetained`] and an unknown one with
     /// [`PluginError::ProcessUnknown`].
@@ -681,12 +646,7 @@ pub trait ProcessRetention: Send + Sync {
     /// than `cutoff_epoch_ms`, match `filter` when one is supplied, and have a
     /// process change sequence allowed by the caller's explicit projection
     /// `watermark`, together with their events, observer edges, and lease rows.
-    /// Trigger-delivery rows are never deleted by this operation, including in
-    /// co-located backends. Callers use [`reconcile_pruned_trigger_deliveries`]
-    /// afterward so every backend has one observable reclamation path.
-    /// Session-scoped trigger-mutation receipts follow their owner's ADR 0049
-    /// deletion frontier during reconciliation; host and platform receipts
-    /// remain owned by the trigger store's explicit cutoff lever. A process owns
+    /// A process owns
     /// no session store: the attachments it held are released by its
     /// artifact cleanup (ADR 0124), never by the prune.
     /// Backends must fail toward retaining the terminal process if the prune
@@ -699,10 +659,6 @@ pub trait ProcessRetention: Send + Sync {
     /// maximum waiter lifetime, so callers cannot validate this against a
     /// library-owned bound; retaining terminal rows beyond every still-replayable
     /// waiter is currently an explicit host operational responsibility.
-    /// Occurrence replay eligibility ends when the committed fan-out becomes
-    /// empty during reconciliation. Re-emitting an occurrence id after that
-    /// point is a new ingest; callers must retain an occurrence outside this
-    /// boundary when its replay horizon is longer than process retention.
     ///
     /// ```no_run
     /// use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -720,10 +676,8 @@ pub trait ProcessRetention: Send + Sync {
     ///         .prune_terminal_processes(cutoff, None, ProjectionWatermark::NoProjector)
     ///         .await?;
     ///     eprintln!(
-    ///         "pruned {} processes, {} events, {} trigger deliveries",
-    ///         report.pruned_processes,
-    ///         report.pruned_events,
-    ///         report.pruned_trigger_deliveries
+    ///         "pruned {} processes, {} events",
+    ///         report.pruned_processes, report.pruned_events
     ///     );
     ///     Ok(())
     /// }
@@ -739,8 +693,7 @@ pub trait ProcessRetention: Send + Sync {
     /// would delete right now for the same arguments, in ascending id order,
     /// without deleting anything. The survey applies the prune's complete
     /// eligibility predicate — retired status, `updated_at_ms` before the
-    /// cutoff, the projection `watermark`, no pending or enqueuing wake
-    /// delivery, no parent-end plan, no consumer hold, and `filter` — so a
+    /// cutoff, the projection `watermark`, no parent-end plan, no consumer hold, and `filter` — so a
     /// caller that must reclaim rows the registry does not own (the process's
     /// durable effect journal and its await-event promises) fences exactly the
     /// rows the prune reclaims and never a process the registry keeps. The
@@ -877,12 +830,6 @@ pub trait ProcessClockRebind: Send + Sync {
 ///         unimplemented!()
 ///     }
 ///     async fn observers_for_process(&self, _: &str) -> Result<Vec<SessionId>, PluginError> {
-///         unimplemented!()
-///     }
-///     async fn wake_target(&self, _: &str) -> Result<Option<SessionId>, PluginError> {
-///         unimplemented!()
-///     }
-///     async fn retarget_subscription(&self, _: &str, _: Option<&str>) -> Result<(), PluginError> {
 ///         unimplemented!()
 ///     }
 ///     async fn delete_session_process_state(

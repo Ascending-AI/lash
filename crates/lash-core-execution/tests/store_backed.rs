@@ -16,7 +16,7 @@
 )]
 
 pub use lash_core_execution::JsonSchema;
-/// The relocated tests derive intent and trigger keys as the kernel does.
+/// The relocated tests derive intent and start keys as the kernel does.
 pub use lash_core_execution::core_internal::StartKeyDerivation;
 pub use lash_core_execution::facade_support::*;
 pub use lash_core_execution::testing::kernel_internals::*;

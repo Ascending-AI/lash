@@ -1,6 +1,6 @@
 //! The terminal tombstone every admitted ingress item leaves (ADR 0101 §8).
 //!
-//! An input, a process wake and a session command end the same way: the row
+//! An input and a session command end the same way: the row
 //! stays, with no admission binding, its submitted delivery and digest
 //! unchanged, and a closed [`IngressTerminalCause`] with the instant it was
 //! written. Open-row selection never takes a tombstone, a resubmission under

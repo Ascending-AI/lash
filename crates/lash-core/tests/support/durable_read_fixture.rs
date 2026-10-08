@@ -22,9 +22,8 @@
 //! | Session graph and checkpoints | `graph_nodes`, `session_head`/`sessions`, `session_meta`, `blobs`, `runtime_turn_commits` | Ordered graph nodes and every payload field; checkpoint turn, usage, tool, plugin, and execution state; current and legacy receipt replay |
 //! | Session retention | `session_revisions`, `pins`, `deleted_sessions` | `revisions`, deletion probe, and typed `SessionDeleted` refusal to reopen a retired id |
 //! | Attachments | `attachment_referrer_edges`, `attachment_pending_writes`, `attachment_uploads`, SQLite `artifact_refs`, PostgreSQL's artifact table | The committed session's referrer edge plus process-execution-environment reference recovery |
-//! | Receiver queue | `queued_work_batches`, `pending_turn_inputs` | Queue/input payloads, deterministic ids, and a settled wake's tombstone answering its redelivery |
+//! | Receiver queue | `queued_work_batches`, `pending_turn_inputs` | Queue/input payloads, deterministic ids, and a cancelled command's tombstone answering its redelivery |
 //! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_tombstones` | Process state; every event payload; observers; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
-//! | Triggers | `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries`, `trigger_mutation_receipts` | List/filter, delivery reservation, deterministic receipt replay, and `Unchanged` re-registration |
 //!
 //! The table names above omit PostgreSQL's `lash_` prefix where the logical name is
 //! otherwise identical. PostgreSQL's artifact table is named by role rather than
@@ -38,7 +37,7 @@
 //! `python3 scripts/capture_release_fixtures.py --regenerate`, which runs the two
 //! ignored generators below and freezes their output under `fixtures/release/`.
 //! Generation is deterministic: the generators fix the clock, signing secret,
-//! trigger incarnation, operation ids, and other identity inputs,
+//! operation ids, and other identity inputs,
 //! and normalize the few values a store mints itself, so two runs produce
 //! byte-identical artifacts.
 //!
@@ -67,25 +66,20 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core::runtime::{
-    QueuedWorkPayload, load_process_execution_env, process_wake_batch_draft,
-    publish_process_execution_env,
+    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkPayload, SessionCommand,
+    load_process_execution_env, publish_process_execution_env,
 };
 use lash_core::{
     ArtifactReferrer, AttachmentId, AttachmentReferrers, AttachmentWrite, Clock, DeploymentStore,
     ExecutionScope, JsonSchema, MessageOrigin, MessageRole, OperationId, PartKind,
     PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessCompletionAuthority, ProcessEventAppendRequest,
-    ProcessEventLogTestSupport as _, ProcessEventSemanticsSpec, ProcessEventType,
+    ProcessChangeCursor, ProcessCompletionAuthority, ProcessEventLogTestSupport as _,
     ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessOriginator,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
-    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark, ReferrerClaim,
-    RuntimeCommit, RuntimeSessionState, SessionAppendNode, SessionCreationHead, SessionNodePayload,
-    SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest, StoreError,
-    TokenUsage, TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
-    TriggerInputBinding, TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest,
-    TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-    TurnInput, TurnInputIngress, WaitKind, WaitState,
+    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessProvenance,
+    ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus, ProjectionWatermark,
+    ReferrerClaim, RuntimeCommit, RuntimeSessionState, SessionAppendNode, SessionCreationHead,
+    SessionNodePayload, SessionPolicy, SessionRelation, SessionStoreCreateRequest, StoreError,
+    TokenUsage, TurnInput, TurnInputIngress, WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -135,7 +129,7 @@ fn waiting_process_id() -> ProcessId {
     lash_core::ProcessIdMint::sequential_id_for_testing(1)
 }
 
-fn wake_process_id() -> ProcessId {
+fn running_process_id() -> ProcessId {
     lash_core::ProcessIdMint::sequential_id_for_testing(2)
 }
 
@@ -147,30 +141,31 @@ fn tombstone_process_id() -> ProcessId {
 /// same start again and be answered with the retained process.
 const WAITING_PROCESS_START_KEY: &str = "durable-read-waiting-process";
 const DELETED_SESSION_ID: &str = "durable-read-deleted-session";
-const TRIGGER_KEY: &str = "durable-read-trigger";
-const TRIGGER_REGISTER_OPERATION: &str = "durable-read-trigger-register";
-const QUEUE_WAKE_PROCESS: &str = "durable-read-queue-process";
+const QUEUE_SOURCE_KEY: &str = "durable-read-queued-command";
+const CANCELLED_SOURCE_KEY: &str = "durable-read-cancelled-command";
 
-/// The fixture's queued wake names this process.
-fn queue_wake_process() -> lash_core::runtime::ProcessId {
-    lash_core::runtime::ProcessId::fixture(QUEUE_WAKE_PROCESS)
+/// A session command filed under `source_key`.
+fn fixture_command(source_key: &str, reason: &str) -> QueuedWorkBatchDraft {
+    let mut draft = QueuedWorkBatchDraft::new(
+        SESSION_ID,
+        DeliveryPolicy::EarliestSafeBoundary,
+        SessionCommand::RefreshToolCatalog {
+            reason: reason.into(),
+        },
+    );
+    draft.source_key = Some(source_key.to_string());
+    draft
 }
 
-/// The fixture's one queued row: a process wake, the one turn-work payload.
-fn fixture_wake() -> lash_core::runtime::ProcessWakeDelivery {
-    let process_id = queue_wake_process();
-    lash_core::runtime::ProcessWakeDelivery {
-        version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        target_session_id: SessionId::from(SESSION_ID),
-        process_id: process_id.clone(),
-        sequence: 1,
-        event_type: "process.wake".to_string(),
-        process_caused_by: None,
-        authority: lash_core::runtime::QueuedWorkAuthority::default(),
-        input: "durable read queued task".to_string(),
-        created_at_ms: FIXTURE_WRITE_MS,
-        trace_cause: Default::default(),
-    }
+/// The fixture's one queued row.
+fn fixture_queued_command() -> QueuedWorkBatchDraft {
+    fixture_command(QUEUE_SOURCE_KEY, "durable read queued command")
+}
+
+/// The command the seed files and cancels: its tombstone answers a
+/// redelivery.
+fn fixture_cancelled_command() -> QueuedWorkBatchDraft {
+    fixture_command(CANCELLED_SOURCE_KEY, "durable read cancelled command")
 }
 const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
 
@@ -180,12 +175,7 @@ fn fixture_effect_outcome() -> lash_core::ProcessEffectOccurrence {
         1,
         "tool:fixture",
         lash_core::ProcessEffectOutcomeClass::Failure,
-        Some(
-            lash_core::TriggerOperationError::Invalid {
-                message: "fixture".to_string(),
-            }
-            .failure_code(),
-        ),
+        Some(lash_core::FailureCode::provider("durable-read-fixture")),
         "durable-read-tool-effect:1",
         lash_core::FleetFormat::current(),
     )
@@ -213,9 +203,6 @@ pub struct FixtureHandles {
     pub store: Arc<dyn DeploymentStore>,
     pub processes: Arc<dyn lash_core::ConformanceProcessRegistry>,
     pub process_envs: Arc<dyn ProcessExecutionEnvStore>,
-    pub triggers: Arc<dyn TriggerStore>,
-    /// The durable store a trigger occurrence's start commits through.
-    pub durable: Arc<dyn lash_core::DurableStore>,
 }
 
 impl FixtureHandles {
@@ -258,15 +245,6 @@ pub struct ExpectedFixture {
     pub queue_batch_id: String,
     pub pending_input_id: String,
     pub process_env_ref: ProcessExecutionEnvRef,
-    pub wake_delivery: ProcessWakeDelivery,
-    /// The trigger subscription, occurrence and delivery payloads as this build
-    /// writes them (FIG-1485). One field covers all three tables:
-    /// [`TriggerDeliveryReservation`] carries the occurrence and subscription
-    /// records whole. The read-back assertions on them are deliberately shallow
-    /// — subscription key, enabled flag, reservation status, occurrence payload
-    /// — so an additive field anywhere else in those payloads used to land
-    /// unflagged, which is FIG-1377's class of change in a different store.
-    pub trigger_delivery: TriggerDeliveryReservation,
     /// The projected registration payload of the waiting process (FIG-1485).
     /// A re-registration is answered by its start key and compares no content,
     /// so pinning the whole record is what makes the payload's shape visible.
@@ -395,7 +373,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("retire fixture session through the catalog");
 
     let queued = session
-        .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(fixture_wake()))
+        .enqueue_queued_work(fixture_queued_command())
         .await
         .expect("enqueue fixture queued work");
     let pending = session
@@ -475,45 +453,17 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("persist fixture effect omissions");
 
     lash_core::testing::process_execution_env_fixture(handles.process_envs.as_ref()).await;
-    let wake_process_id = handles
+    let running_process_id = handles
         .processes
-        .register_process(
-            lash_core::testing::held_engine_registration(
-                serde_json::json!({"fixture": "wake"}),
-                ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_extra_event_types([ProcessEventType {
-                name: "fixture.wake".to_string(),
-                payload_schema: JsonSchema::any(),
-                semantics: ProcessEventSemanticsSpec {
-                    wake: Some(ProcessWakeSpec {
-                        when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
-                        input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                    }),
-                    ..ProcessEventSemanticsSpec::default()
-                },
-            }])
-            .with_wake_session_id(Some(SessionId::fixture(SESSION_ID.to_string()))),
-        )
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::json!({"fixture": "running"}),
+            ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
         .await
-        .expect("register fixture wake process")
+        .expect("register fixture running process")
         .id;
-    assert_eq!(wake_process_id, self::wake_process_id());
-    let wake_append = handles
-        .processes
-        .append_event(
-            &wake_process_id,
-            ProcessEventAppendRequest::new(
-                "fixture.wake",
-                serde_json::json!({"wake_input": "durable read wake"}),
-            ),
-        )
-        .await
-        .expect("append fixture wake event");
-    let wake_delivery = wake_append
-        .wake_delivery
-        .expect("wake-semantic fixture event emits a delivery");
+    assert_eq!(running_process_id, self::running_process_id());
 
     let tombstone_process_id = handles
         .processes
@@ -549,69 +499,31 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("prune fixture terminal process to a tombstone");
     assert_eq!(prune.pruned_processes, 1);
 
-    let register_command = fixture_register_command(process_env_ref.clone());
-    let receipt = trigger_receipt(
-        handles.triggers.as_ref(),
-        TRIGGER_REGISTER_OPERATION,
-        register_command,
-    )
-    .await;
-    assert_eq!(receipt.disposition, TriggerMutationOutcome::Created);
-    lash_core::testing::record_trigger_occurrence(
-        handles.triggers.as_ref(),
-        handles.processes.as_ref(),
-        handles.durable.as_ref(),
-        TriggerOccurrenceRequest::new(
-            "fixture.event",
-            "fixture-source",
-            serde_json::json!({"value": 42}),
-            "durable-read-occurrence",
-        ),
-    )
-    .await
-    .expect("record fixture occurrence");
-
-    let wake_batch = session
-        .enqueue_queued_work(process_wake_batch_draft(wake_delivery.clone()))
+    let cancelled_batch = session
+        .enqueue_queued_work(fixture_cancelled_command())
         .await
-        .expect("enqueue fixture process wake at receiver");
-    // The receiver wake sits behind the fixture's queued work, which stays
-    // pending, so the turn lane never reaches it: its host cancel is its
+        .expect("enqueue fixture command to cancel");
+    // The command sits behind the fixture's queued work, which stays
+    // pending, so the command lane never reaches it: its host cancel is its
     // terminal transition.
     session
-        .cancel_queued_work_batch(&wake_batch.batch_id)
+        .cancel_queued_work_batch(&cancelled_batch.batch_id)
         .await
-        .expect("cancel fixture receiver wake")
-        .expect("fixture receiver wake is open");
-    let wake_state = load_fixture_state(&session).await;
-    let wake_operation = OperationId::new(
-        ExecutionScope::runtime_operation("durable-read-wake-settlement"),
+        .expect("cancel fixture command")
+        .expect("fixture command is open");
+    let cancel_state = load_fixture_state(&session).await;
+    let cancel_operation = OperationId::new(
+        ExecutionScope::runtime_operation("durable-read-cancel-settlement"),
         "commit",
     );
-    let wake_commit =
-        RuntimeCommit::persisted_state_with_operation_for_testing(&wake_state, wake_operation);
+    let cancel_commit =
+        RuntimeCommit::persisted_state_with_operation_for_testing(&cancel_state, cancel_operation);
     session
-        .commit_runtime_state(wake_commit)
+        .commit_runtime_state(cancel_commit)
         .await
-        .expect("commit the fixture head after the receiver wake's cancel");
+        .expect("commit the fixture head after the command's cancel");
 
     let read = load_fixture_window(&session).await;
-    let seeded_occurrences = handles
-        .triggers
-        .list_occurrences(TriggerOccurrenceFilter::default())
-        .await
-        .expect("read seeded fixture trigger occurrence");
-    let [seeded_occurrence] = seeded_occurrences.as_slice() else {
-        panic!("fixture seeds exactly one trigger occurrence");
-    };
-    let seeded_deliveries = handles
-        .triggers
-        .list_deliveries_by_occurrence_id(&seeded_occurrence.occurrence_id)
-        .await
-        .expect("read seeded fixture trigger delivery");
-    let [trigger_delivery] = seeded_deliveries.as_slice() else {
-        panic!("fixture seeds exactly one trigger delivery");
-    };
     let waiting_process = handles
         .processes
         .get_process(&waiting_process_id())
@@ -633,8 +545,6 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         queue_batch_id: queued.batch_id.to_string(),
         pending_input_id: pending.input_id.to_string(),
         process_env_ref,
-        wake_delivery,
-        trigger_delivery: trigger_delivery.clone(),
         waiting_process,
     }
 }
@@ -865,19 +775,16 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .expect("durable fixture drift: queued-work read failed");
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].batch_id, expected.queue_batch_id);
-    assert_eq!(
-        queued[0].source_key,
-        Some(lash_core::runtime::process_wake_source_key(
-            &queue_wake_process(),
-            1
-        ))
-    );
+    assert_eq!(queued[0].source_key.as_deref(), Some(QUEUE_SOURCE_KEY));
     assert!(
         matches!(
             &queued[0].payload,
-            QueuedWorkPayload::ProcessWake { wake }
-                if wake.process_id == queue_wake_process()
-                    && wake.input == "durable read queued task"
+            QueuedWorkPayload::SessionCommand { command }
+                if matches!(
+                    command.as_ref(),
+                    SessionCommand::RefreshToolCatalog { reason }
+                        if reason == "durable read queued command"
+                )
         ),
         "durable fixture semantic drift: queued-work payload changed"
     );
@@ -920,9 +827,12 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .expect("durable fixture drift: waiting-process event read failed");
     assert_eq!(process_events.len(), 5);
     assert_eq!(process_events[0].sequence, 1);
-    assert_eq!(process_events[0].event_type, "process.observer_added");
     assert_eq!(
-        process_events[0].payload,
+        process_events[0].fact.event_type(),
+        "process.observer_added"
+    );
+    assert_eq!(
+        process_events[0].fact.payload(),
         serde_json::json!({
             "by": {"kind": "host", "operation_id": "registration"},
             "session": SESSION_ID,
@@ -930,33 +840,33 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         "durable fixture semantic drift: observer-added event payload changed"
     );
     assert_eq!(process_events[1].sequence, 2);
-    assert_eq!(process_events[1].event_type, "process.first_started");
+    assert_eq!(process_events[1].fact.event_type(), "process.first_started");
     assert_eq!(process_events[2].sequence, 3);
-    assert_eq!(process_events[2].event_type, "process.waiting");
+    assert_eq!(process_events[2].fact.event_type(), "process.waiting");
     assert_eq!(
-        process_events[2].payload,
+        process_events[2].fact.payload(),
         serde_json::json!({"wait": fixture_wait_state()}),
         "durable fixture semantic drift: waiting-process event payload changed"
     );
     assert_eq!(
-        process_events[3].event_type,
+        process_events[3].fact.event_type(),
         lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
     );
     assert_eq!(
         lash_core::ProcessEffectOccurrence::decode(
-            process_events[3].payload.clone(),
+            process_events[3].fact.payload(),
             lash_core::FleetFormat::current()
         )
         .expect("decode durable fixture effect outcome"),
         fixture_effect_outcome()
     );
     assert_eq!(
-        process_events[4].event_type,
+        process_events[4].fact.event_type(),
         lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE
     );
     assert_eq!(
         lash_core::ProcessEffectOmissions::decode(
-            process_events[4].payload.clone(),
+            process_events[4].fact.payload(),
             lash_core::FleetFormat::current()
         )
         .expect("decode durable fixture effect omissions"),
@@ -994,38 +904,25 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         handles
             .processes
-            .get_process(&wake_process_id())
+            .get_process(&running_process_id())
             .await
-            .expect("durable fixture drift: wake process read failed")
-            .expect("durable fixture drift: wake process disappeared")
+            .expect("durable fixture drift: running process read failed")
+            .expect("durable fixture drift: running process disappeared")
             .status(),
         ProcessStatus::Running
     );
-    let wake_events = handles
-        .processes
-        .full_event_window(&wake_process_id(), 0)
-        .await
-        .expect("durable fixture drift: wake-process event read failed");
-    assert_eq!(wake_events.len(), 1);
-    assert_eq!(wake_events[0].sequence, 1);
-    assert_eq!(wake_events[0].event_type, "fixture.wake");
-    assert_eq!(
-        wake_events[0].payload,
-        serde_json::json!({"wake_input": "durable read wake"}),
-        "durable fixture semantic drift: wake-process event payload changed"
-    );
-    // The settled wake's tombstone answers its redelivery, and nothing
+    // The cancelled command's tombstone answers its redelivery, and nothing
     // reopens (ADR 0101 §8).
     let redelivery = session
-        .enqueue_queued_work_with_outcome(process_wake_batch_draft(expected.wake_delivery.clone()))
+        .enqueue_queued_work_with_outcome(fixture_cancelled_command())
         .await
-        .expect("durable fixture drift: a settled process wake's redelivery is refused");
+        .expect("durable fixture drift: a cancelled command's redelivery is refused");
     assert!(
         matches!(
             &redelivery,
             lash_core::runtime::QueuedWorkEnqueueOutcome::Existing(batch) if batch.terminal.is_some()
         ),
-        "durable fixture drift: settled process wake was redelivered: {redelivery:?}"
+        "durable fixture drift: cancelled command was redelivered: {redelivery:?}"
     );
 
     match handles.processes.get_process(&tombstone_process_id()).await {
@@ -1040,77 +937,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             "durable fixture drift: process tombstone did not return ProcessNoLongerRetained: {other:?}"
         ),
     }
-    assert_process_change_feed(
-        handles.processes.as_ref(),
-        expected
-            .trigger_delivery
-            .process_id()
-            .expect("delivery started"),
-    )
-    .await;
-
-    let subscriptions = handles
-        .triggers
-        .list_subscriptions(TriggerSubscriptionFilter::for_session(SESSION_ID))
-        .await
-        .expect("durable fixture drift: trigger subscription read failed");
-    assert_eq!(subscriptions.len(), 1);
-    assert_eq!(subscriptions[0].subscription_key, TRIGGER_KEY);
-    assert!(subscriptions[0].lifecycle.enabled());
-    let occurrences = handles
-        .triggers
-        .list_occurrences(TriggerOccurrenceFilter::default())
-        .await
-        .expect("durable fixture drift: trigger occurrence read failed");
-    assert_eq!(occurrences.len(), 1);
-    let deliveries = handles
-        .triggers
-        .list_deliveries_by_occurrence_id(&occurrences[0].occurrence_id)
-        .await
-        .expect("durable fixture drift: trigger delivery read failed");
-    assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].subscription.subscription_key, TRIGGER_KEY);
-    assert!(deliveries[0].subscription.lifecycle.enabled());
-    assert_eq!(
-        deliveries[0].occurrence.payload,
-        serde_json::json!({"value": 42})
-    );
-    assert_eq!(
-        deliveries[0], expected.trigger_delivery,
-        "durable fixture drift: the trigger subscription, occurrence or delivery payload recovered \
-         from the committed rows is not the one the expectations carry"
-    );
-    assert_eq!(
-        subscriptions[0], expected.trigger_delivery.subscription,
-        "durable fixture drift: the subscription read directly disagrees with the one the \
-         delivery row projects"
-    );
-    assert_eq!(
-        occurrences[0], expected.trigger_delivery.occurrence,
-        "durable fixture drift: the occurrence read directly disagrees with the one the delivery \
-         row projects"
-    );
-    let replayed_receipt = trigger_receipt(
-        handles.triggers.as_ref(),
-        TRIGGER_REGISTER_OPERATION,
-        fixture_register_command(expected.process_env_ref.clone()),
-    )
-    .await;
-    assert_eq!(
-        replayed_receipt.record.subscription_id,
-        subscriptions[0].subscription_id
-    );
-    let unchanged = trigger_receipt(
-        handles.triggers.as_ref(),
-        "durable-read-trigger-reregister",
-        fixture_register_command(expected.process_env_ref.clone()),
-    )
-    .await;
-    assert_eq!(
-        unchanged.disposition,
-        TriggerMutationOutcome::Unchanged,
-        "durable fixture identity drift: identical trigger re-registration changed meaning"
-    );
+    assert_process_change_feed(handles.processes.as_ref()).await;
 }
 
 fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>]) {
@@ -1183,7 +1010,7 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
 
 /// `delivered` is the process the fixture occurrence started with its
 /// delivery, in the same commit.
-async fn assert_process_change_feed(processes: &dyn ProcessRegistry, delivered: &ProcessId) {
+async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
     let (first, first_cursor) = processes
         .processes_changed_since(ProcessChangeCursor::initial(), 2)
         .await
@@ -1194,7 +1021,7 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry, delivered: 
         .processes_changed_since(first_cursor, 10)
         .await
         .expect("durable fixture drift: second process-change page failed");
-    assert_eq!(second.len(), 2);
+    assert_eq!(second.len(), 1);
     assert!(final_cursor.store_sequence() > first_cursor.store_sequence());
     let (empty, stable_cursor) = processes
         .processes_changed_since(final_cursor, 10)
@@ -1224,8 +1051,7 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry, delivered: 
         BTreeMap::from([
             (waiting_process_id(), "upsert".to_string()),
             (tombstone_process_id(), "deleted".to_string()),
-            (wake_process_id(), "upsert".to_string()),
-            (delivered.clone(), "upsert".to_string()),
+            (running_process_id(), "upsert".to_string()),
         ]),
         "durable fixture semantic drift: ADR-0020 change-feed rows changed"
     );
@@ -1349,81 +1175,10 @@ fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegis
 
 fn fixture_wait_state() -> WaitState {
     WaitState {
-        kind: WaitKind::Signal {
-            name: "fixture-ready".to_string(),
-            event_type: "process.signal.fixture-ready".to_string(),
-            key: "durable-read-wait-key".to_string(),
-            ordinal: 1,
+        kind: WaitKind::Call {
+            call_id: lash_core::ToolCallId::fixture("durable-read-wait-call"),
+            tool_id: lash_core::ToolId::from("durable-read-wait-tool"),
         },
         since_ms: 123,
-    }
-}
-
-fn fixture_register_command(env_ref: ProcessExecutionEnvRef) -> TriggerCommand {
-    let mut input_template = BTreeMap::new();
-    input_template.insert("event".to_string(), TriggerInputBinding::Event);
-    TriggerCommand::Register {
-        owner_scope: TriggerOwnerScope::session(SESSION_ID),
-        actor: ProcessOriginator::session(SessionScope::new(SESSION_ID)),
-        draft: TriggerSubscriptionDraft {
-            subscription_key: TRIGGER_KEY.to_string(),
-            env_ref,
-            wake_target: Some(SessionScope::new(SESSION_ID)),
-            name: Some("Durable read trigger".to_string()),
-            source_type: "fixture.event".to_string(),
-            source_key: "fixture-source".to_string(),
-            source: serde_json::json!({"fixture": "source"}),
-            payload_schema: JsonSchema::admit(serde_json::json!({
-                "type": "object",
-                "properties": {"value": {"type": "integer"}},
-                "required": ["value"],
-                "additionalProperties": false
-            }))
-            .expect("valid declared payload schema"),
-            source_capture: lash_core::TriggerSourceCapture::provider(
-                ["fixture", "event"],
-                JsonSchema::admit(serde_json::json!({
-                    "type": "object",
-                    "properties": {"fixture": {"type": "string"}},
-                    "additionalProperties": false
-                }))
-                .expect("valid declared payload schema"),
-                "fixture-provider",
-                serde_json::json!({"account": "fixture"}),
-            ),
-            target: ProcessInput::Engine {
-                kind: "durable-read-trigger-target".to_string(),
-                payload: serde_json::json!({"fixture": "trigger"}),
-            }
-            .into(),
-            target_identity: ProcessIdentity::for_definition(
-                lash_core::ProcessDefinitionRef::unclaimed(
-                    "durable-read-trigger-target",
-                    serde_json::json!({"fixture": "trigger"}),
-                ),
-                Some("Durable read trigger target".to_string()),
-            ),
-            event_types: Vec::new(),
-            input_template,
-            target_label: Some("Durable read trigger target".to_string()),
-        },
-    }
-}
-
-async fn trigger_receipt(
-    store: &dyn TriggerStore,
-    operation_id: &str,
-    command: TriggerCommand,
-) -> lash_core::TriggerMutationReceipt {
-    let outcome = store
-        .execute_command(operation_id, command)
-        .await
-        .expect("execute fixture trigger command")
-        .expect("fixture trigger command domain outcome");
-    match outcome {
-        TriggerCommandOutcome::Mutation { receipt } => *receipt,
-        TriggerCommandOutcome::List { .. } | TriggerCommandOutcome::Prune { .. } => {
-            panic!("fixture trigger command must return a mutation receipt")
-        }
     }
 }

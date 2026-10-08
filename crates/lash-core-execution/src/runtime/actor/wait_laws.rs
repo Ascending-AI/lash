@@ -201,7 +201,7 @@ async fn send_cancel(backend: &Backend, actor: &ActorKey) -> LawResult {
 /// that is not an issued wait id is refused `Unknown` and writes nothing: an
 /// id never issued, the key with one digit changed, a truncated key, an
 /// empty key and a spelling that is no id at all. A key of a kind a host
-/// may not resolve (a signal, a process terminal, a timer, a child session)
+/// may not resolve (a process terminal, a timer, a child session)
 /// answers `ReservedKind` and writes nothing, at the host resolve and at the
 /// store. The genuine key still resolves afterwards.
 ///
@@ -268,7 +268,6 @@ pub async fn k1_a_key_that_is_not_an_issued_wait_id_is_refused_and_writes_nothin
     );
     let target = ProcessId::fixture("k1-target");
     for (kind, target) in [
-        (WaitKind::Signal, None),
         (WaitKind::ProcessTerminal, Some(target)),
         (WaitKind::Timer, None),
         (

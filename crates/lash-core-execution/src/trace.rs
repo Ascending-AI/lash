@@ -232,10 +232,6 @@ fn set_span(context: &mut TraceContext, self_id: Option<String>, parent_id: Opti
 
 /// The `Turn` / `ToolCall` arms intentionally mirror [`turn_node_id`] / [`tool_node_id`] so
 /// the cross-session parent reference resolves to a real span.
-#[expect(
-    clippy::expect_used,
-    reason = "a `CausalRef` is an enum of validated string identities, whose serialization has no failing case"
-)]
 fn causal_node_id(caused_by: &crate::CausalRef) -> String {
     match caused_by {
         crate::CausalRef::Turn {
@@ -249,10 +245,6 @@ fn causal_node_id(caused_by: &crate::CausalRef) -> String {
             process_id,
             sequence,
         } => format!("process:{process_id}:{sequence}"),
-        crate::CausalRef::TriggerOccurrence { .. } => format!(
-            "trigger:{}",
-            serde_json::to_string(caused_by).expect("causal references serialize")
-        ),
         crate::CausalRef::SessionNode {
             session_id,
             node_id,
@@ -893,21 +885,6 @@ mod span_identity_tests {
         assert_eq!(
             context.parent_graph_node_id.as_deref(),
             Some("turn:fallback-session:fallback-turn")
-        );
-    }
-
-    #[test]
-    fn trigger_trace_parent_distinguishes_equal_occurrence_ids_by_full_cause() {
-        let parent = |subscription_id: &str| crate::CausalRef::TriggerOccurrence {
-            occurrence_id: "shared-occurrence".to_string(),
-            subscription_id: Some(subscription_id.to_string()),
-            subscription_incarnation: Some("incarnation".to_string()),
-            subscription_revision: Some(7),
-        };
-
-        assert_ne!(
-            causal_node_id(&parent("subscription-a")),
-            causal_node_id(&parent("subscription-b"))
         );
     }
 

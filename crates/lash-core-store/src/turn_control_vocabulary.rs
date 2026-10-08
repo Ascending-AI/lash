@@ -50,65 +50,26 @@ impl PartialEq for TurnCancelAffectedInput {
     }
 }
 impl Eq for TurnCancelAffectedInput {}
-/// One process wake a cancelled turn held undelivered (FIG-3543, ADR 0101
-/// §10).
-///
-/// A wake the turn claimed at its terminal checkpoint and withheld for a
-/// follow-on turn is never completed by the cancel and never dropped: the
-/// cancel commit releases its claim, the row keeps its queue position, and
-/// its process's redelivery floor is unchanged. The request's `undelivered`
-/// disposition governs host-authored input only, so a held wake's
-/// disposition is always [`TurnCancelUndeliveredInputPolicy::Defer`]; only an explicit
-/// host withdrawal drops a wake.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TurnCancelAffectedWake {
-    /// The queued batch that carries the wake: the row a host withdrawal
-    /// names.
-    pub batch_id: crate::BatchId,
-    pub wake: crate::ProcessWakeDelivery,
-    pub disposition: TurnCancelUndeliveredInputPolicy,
-}
-impl TurnCancelAffectedWake {
-    /// The record of a wake a turn cancel deferred.
-    pub fn deferred(batch_id: crate::BatchId, wake: crate::ProcessWakeDelivery) -> Self {
-        Self {
-            batch_id,
-            wake,
-            disposition: TurnCancelUndeliveredInputPolicy::Defer,
-        }
-    }
-}
-impl PartialEq for TurnCancelAffectedWake {
-    fn eq(&self, other: &Self) -> bool {
-        self.batch_id == other.batch_id
-            && self.disposition == other.disposition
-            && serde_json::to_value(&self.wake).ok() == serde_json::to_value(&other.wake).ok()
-    }
-}
-impl Eq for TurnCancelAffectedWake {}
 /// Durable outcome accumulated on a turn-cancel request: the affected-item
-/// record of ADR 0101 §10. Every ingress item the cancel left undelivered is
-/// listed, host input and process wakes alike, each in the order the cancel
-/// settled it.
+/// record of ADR 0101 §10. Every host input the cancel left undelivered is
+/// listed, in the order the cancel settled it.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TurnCancelInputOutcome {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub affected_inputs: Vec<TurnCancelAffectedInput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub affected_wakes: Vec<TurnCancelAffectedWake>,
 }
 impl TurnCancelInputOutcome {
-    /// Reports whether the cancellation affected no item — no active-turn
-    /// input and no held wake — so hosts can skip restore, re-enqueue, or
+    /// Reports whether the cancellation affected no active-turn input, so
+    /// hosts can skip restore, re-enqueue, or
     /// audit work without inspecting the lists.
     pub fn is_empty(&self) -> bool {
-        self.affected_inputs.is_empty() && self.affected_wakes.is_empty()
+        self.affected_inputs.is_empty()
     }
 
-    /// How many items the cancellation affected, inputs and wakes together.
+    /// How many inputs the cancellation affected.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.affected_inputs.len() + self.affected_wakes.len()
+        self.affected_inputs.len()
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -11,7 +11,6 @@ use crate::llm::types::{
     LlmToolChoice, LlmToolSpec,
 };
 use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure, LlmCallError};
-use crate::tool_dispatch::ToolTriggerEffectOutcome;
 use crate::{
     AttachmentCreateMeta, CausalRef, CheckpointDelivery, EffectAddress, ExecResponse,
     ExecutionScope, LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput,
@@ -24,7 +23,7 @@ use super::llm_outcome::{AssistantResponsePlan, AssistantStreamHookState, LlmStr
 
 /// Effect-specific header whose address is present by construction.
 ///
-/// Unlike [`RuntimeInvocation`], this cannot represent a process, trigger, or
+/// Unlike [`RuntimeInvocation`], this cannot represent a process or
 /// session-node subject and cannot carry a second optional replay key. The
 /// descriptive `effect_id` does not participate in journal identity.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -298,22 +297,6 @@ impl ProcessCommand {
                 observers: observers.clone(),
                 execution_context: execution_context.clone(),
             }),
-            Self::Signal { signal } if !signal.trace_cause.is_root() => Some(Self::Signal {
-                signal: signal
-                    .clone()
-                    .with_trace_cause(lash_trace::TraceCause::Root),
-            }),
-            Self::EmitEvent {
-                process_id,
-                request,
-            } if !request.trace_cause.is_root() => {
-                let mut request = request.clone();
-                request.trace_cause = lash_trace::TraceCause::Root;
-                Some(Self::EmitEvent {
-                    process_id: process_id.clone(),
-                    request,
-                })
-            }
             _ => None,
         }
     }
@@ -420,9 +403,6 @@ pub enum RuntimeEffectCommand {
         render: Option<crate::RecordedRender>,
         args: serde_json::Value,
         output: Box<crate::ToolCallOutput>,
-    },
-    Trigger {
-        command: Box<crate::TriggerCommand>,
     },
     Process {
         command: Box<ProcessCommand>,
@@ -562,7 +542,6 @@ impl RuntimeEffectCommand {
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
 
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
-            Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
@@ -635,17 +614,6 @@ pub enum ProcessCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attribution: Option<crate::RuntimeReplayAttribution>,
     },
-    /// Deliver one signal. The command carries the signal as it is
-    /// admitted, never an append request: the append key is derived from the
-    /// signal's identity at admission, so no caller can select another
-    /// (FIG-4299).
-    Signal {
-        signal: crate::ProcessSignal,
-    },
-    EmitEvent {
-        process_id: ProcessId,
-        request: crate::ProcessEventAppendRequest,
-    },
     /// The journaled immutable-definition publish: the descriptor write and
     /// the referrer edges of its artifact closure cross the runtime-effect
     /// seam like every other journaled admission, so a redrive replays the
@@ -695,13 +663,6 @@ enum ProcessCommandDecode {
         requester: String,
         #[serde(default)]
         attribution: Option<crate::RuntimeReplayAttribution>,
-    },
-    Signal {
-        signal: crate::ProcessSignal,
-    },
-    EmitEvent {
-        process_id: ProcessId,
-        request: crate::ProcessEventAppendRequest,
     },
     PublishDefinition {
         draft: crate::ProcessDefinitionDraft,
@@ -765,14 +726,6 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 requester,
                 attribution,
             },
-            ProcessCommandDecode::Signal { signal } => Self::Signal { signal },
-            ProcessCommandDecode::EmitEvent {
-                process_id,
-                request,
-            } => Self::EmitEvent {
-                process_id,
-                request,
-            },
             ProcessCommandDecode::PublishDefinition { draft, module } => {
                 Self::PublishDefinition { draft, module }
             }
@@ -802,8 +755,6 @@ pub struct CheckpointAdmittedSet {
     /// them after this outcome is durable, on the live pass and on replay.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub session_contributions: Vec<crate::plugin::SessionContributions>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub queued_work: Vec<crate::AdmittedQueuedWork>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_inputs: Option<crate::AdmittedTurnInputs>,
     /// What the turn's opener had incorporated when this checkpoint committed
@@ -881,23 +832,6 @@ impl ProcessCommand {
                 crate::runtime::causal::CommandSubKey::ProcessAwait(process_id.as_ref()).to_string()
             }
             Self::Cancel { process_id, .. } => format!("process:cancel:{process_id}"),
-            Self::Signal { signal } => format!(
-                "process:signal:{}:signal.{}:{}",
-                signal.identity.process_id(),
-                signal.identity.signal_name(),
-                signal.identity.signal_id()
-            ),
-            Self::EmitEvent {
-                process_id,
-                request,
-            } => format!(
-                "process:emit-event:{process_id}:{}",
-                request
-                    .replay
-                    .as_ref()
-                    .map(|replay| replay.key.as_str())
-                    .unwrap_or("missing-replay-key")
-            ),
             Self::PublishDefinition { draft, .. } => {
                 format!("process:publish-definition:{}", draft.id())
             }
@@ -938,16 +872,6 @@ pub enum ProcessEffectOutcome {
     Cancel {
         record: Box<ProcessRecord>,
     },
-    Signal {
-        // Boxed for the same reason as the record variants: a fat event should
-        // not size the outcome enum inline through the recursive executor.
-        event: Box<crate::ProcessEvent>,
-    },
-    EmitEvent {
-        event: Box<crate::ProcessEvent>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        wake_delivery: Option<Box<crate::ProcessWakeDelivery>>,
-    },
     Definition {
         definition: Box<crate::ProcessDefinition>,
     },
@@ -959,8 +883,6 @@ const _: () = assert!(std::mem::size_of::<ProcessEffectOutcome>() <= 112);
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolAttemptEffectOutcome {
     pub launch: ToolAttemptLaunch,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1057,8 +979,6 @@ pub enum RuntimeEffectOutcome {
     },
     ToolAttempt {
         launch: Box<ToolAttemptLaunch>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        triggers: Vec<ToolTriggerEffectOutcome>,
     },
 
     /// What the [`PresentToolResult`](RuntimeEffectCommand::PresentToolResult)
@@ -1067,9 +987,6 @@ pub enum RuntimeEffectOutcome {
     /// presentation steps never re-run (ADR 0099 §6, FIG-3420).
     PresentToolResult {
         presentation: Box<super::ToolPresentation>,
-    },
-    Trigger {
-        result: Box<crate::TriggerEffectResult>,
     },
     Process {
         result: ProcessEffectOutcome,

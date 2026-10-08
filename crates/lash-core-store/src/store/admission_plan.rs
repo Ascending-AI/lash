@@ -11,14 +11,12 @@
 //!
 //! This module holds what the backends must not decide on their own: what an
 //! admission takes ([`plan_next_turn_input_admission`],
-//! [`plan_checkpoint_input_admission`]), which rows a settlement
-//! may touch ([`require_admitted_to_run`]), where one composition of the
-//! turn lane stops ([`TurnLaneStop`]).
+//! [`plan_checkpoint_input_admission`]) and which rows a settlement may
+//! touch ([`require_admitted_to_run`]).
 
 use serde::{Deserialize, Serialize};
 
 use super::StoreError;
-use super::queued_work::{QueuedWorkClass, TurnLaneCandidate};
 use crate::{BatchId, InputId, SessionId, TurnId};
 
 /// The `admitted_by` value of the rows a run's own admission step binds
@@ -61,8 +59,7 @@ pub struct IngressSettlement {
     pub completed_batches: Vec<crate::QueuedWorkCompletion>,
     /// Rows handed back open at their own position: the `Defer` disposition.
     /// A released active-turn input names a turn that is over, so it is
-    /// re-deferred to the next turn (FIG-1573). A released wake keeps its
-    /// queue position and its redelivery floor.
+    /// re-deferred to the next turn (FIG-1573).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub released: Vec<IngressRowId>,
     /// Addressed host input a cancellation's `Drop` disposition cancels.
@@ -252,7 +249,7 @@ pub fn turn_input_state_after_admission(
 /// The composition never mixes run specs (FIG-3838): the prefix stops, never
 /// skips, at the first row whose spec differs from its head's. How much of
 /// that eligible prefix one run takes is the host's drain policy's decision,
-/// as for queued turn work (ADR 0101 §5.2): the default takes the head alone,
+/// (ADR 0101 §5.2): the default takes the head alone,
 /// so each next-turn input is its own run and a cancel of one never reaches
 /// another (FIG-4457). A next-turn row keeps its own state when admitted.
 #[must_use]
@@ -275,7 +272,7 @@ pub fn plan_next_turn_input_admission(
                 merge_key: None,
                 authority: crate::QueuedWorkAuthority::default(),
                 // One serialized UTF-8 byte of the input charged as one
-                // token, as queued work charges its rendered causes.
+                // token.
                 projected_tokens: serde_json::to_vec(&row.input).map_or(0, |bytes| bytes.len()),
                 pending_age_ms: now_epoch_ms.saturating_sub(row.enqueued_at_ms),
             })
@@ -342,68 +339,6 @@ pub fn plan_checkpoint_input_admission(
         inputs: rows,
         applications: Vec::new(),
     })
-}
-
-/// Where the turn lane stops a composition of one admission table (ADR 0101
-/// §5, as the FIG-3540 close-out amends it): the `enqueue_seq` of the other
-/// table's earliest open turn-lane row.
-///
-/// Host input and queued turn work take one per-session sequence and form one
-/// FIFO, so a composition of either table takes only rows accepted before that
-/// point. It stops there and never skips it: one turn never takes an item
-/// past an earlier unconsumed item of the other kind. A session command is
-/// the command lane (§4) and stops nothing.
-///
-/// A composition of queued work applies it here, over its candidate scan. A
-/// next-turn input composition carries the same stop as a predicate of its
-/// candidate statement, so the input composition keeps its round-trip budget.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct TurnLaneStop(Option<u64>);
-
-impl TurnLaneStop {
-    /// The stop before `earliest_other_kind`, the other table's earliest open
-    /// turn-lane row; `None` stops nothing.
-    pub const fn before(earliest_other_kind: Option<u64>) -> Self {
-        Self(earliest_other_kind)
-    }
-
-    /// Whether a row at `enqueue_seq` lies before the stop.
-    pub fn admits(self, enqueue_seq: u64) -> bool {
-        self.0.is_none_or(|stop| enqueue_seq < stop)
-    }
-
-    /// How many leading `candidates` a composition of queued work may take. A
-    /// session command is never stopped.
-    pub fn queued_prefix(self, candidates: &[TurnLaneCandidate]) -> usize {
-        candidates
-            .iter()
-            .take_while(|candidate| {
-                candidate.kind.work_class() == QueuedWorkClass::SessionCommand
-                    || self.admits(candidate.enqueue_seq)
-            })
-            .count()
-    }
-}
-
-/// The affected-item records of the process wakes `batches` hold, each
-/// deferred (FIG-3543, ADR 0101 §10): one per batch, in batch order. A cancel commit writes them for the wakes it released; batches that
-/// hold no wake yield none.
-#[must_use]
-pub fn deferred_wake_records(
-    batches: &[crate::QueuedWorkBatch],
-) -> Vec<crate::turn_control_vocabulary::TurnCancelAffectedWake> {
-    batches
-        .iter()
-        .filter_map(|batch| match &batch.payload {
-            crate::QueuedWorkPayload::ProcessWake { wake } => Some(
-                crate::turn_control_vocabulary::TurnCancelAffectedWake::deferred(
-                    batch.batch_id.clone(),
-                    (**wake).clone(),
-                ),
-            ),
-            crate::QueuedWorkPayload::SessionCommand { .. } => None,
-        })
-        .collect()
 }
 
 #[cfg(test)]

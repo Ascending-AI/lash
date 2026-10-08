@@ -6,7 +6,6 @@ use super::definition_ref::{
 };
 use super::engine_state::{EngineAction, EngineEvent, EngineState, EngineStateFormat};
 use super::events::ProcessAwaitOutput;
-use super::events::ProcessEventType;
 use super::model::{ProcessExecutionEnvSpec, ProcessIdentity};
 
 /// Result of one process invocation.
@@ -95,8 +94,8 @@ impl From<ProcessAwaitOutput> for ProcessRunOutcome {
 }
 
 /// A host process engine: a state machine lash advances (ADR 0132 §7; S6
-/// of I0, FIG-5194). See [`super::engine_state`] for the advance contract,
-/// cancel and signals.
+/// of I0, FIG-5194). See [`super::engine_state`] for the advance contract
+/// and cancel.
 ///
 /// No method has a default body: every engine answers every question
 /// (law S1, no silent defaults). Core built-ins (`SessionTurn` and
@@ -171,7 +170,7 @@ pub trait ProcessEngine: Send + Sync {
     ) -> Result<(), super::ArgsMismatch>;
 
     /// What this engine's stored artifact says about a definition reference:
-    /// its authoritative signature and the signal event types it declares.
+    /// its authoritative signature.
     /// The signature on the reference is a claim this method never reads; an
     /// engine that stores no artifacts answers `ProcessSignature::Unknown`.
     ///
@@ -182,8 +181,7 @@ pub trait ProcessEngine: Send + Sync {
     ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal>;
 }
 
-/// A process identity the engine registry produced, and the signal event types
-/// that came with it.
+/// A process identity the engine registry produced.
 ///
 /// This is the only way an identity reaches a
 /// [`ProcessRegistration`](super::model::ProcessRegistration). A
@@ -194,36 +192,27 @@ pub trait ProcessEngine: Send + Sync {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdmittedProcessIdentity {
     identity: ProcessIdentity,
-    signals: Vec<ProcessEventType>,
 }
 
 impl AdmittedProcessIdentity {
-    pub(crate) fn admitted(identity: ProcessIdentity, signals: Vec<ProcessEventType>) -> Self {
-        Self { identity, signals }
+    pub(crate) fn admitted(identity: ProcessIdentity) -> Self {
+        Self { identity }
     }
 
     /// Replay an identity that was admitted once and then durably pinned: a
-    /// trigger subscription's recorded target identity (ADR 0095 — a delivery
-    /// fires the definition pinned at registration and never re-resolves it),
-    /// or a process row a remote peer already created and is now reporting.
+    /// process row a remote peer already created and is now reporting.
     ///
     /// This is a **replay**, never an admission. Do not reach for it on a path
     /// that creates a durable row from caller-supplied input: there the
     /// registry's [`admit`](ProcessEngineRegistry::admit) is the only route,
     /// because it is what checks a signature claim.
     pub fn pinned(identity: ProcessIdentity) -> Self {
-        Self {
-            identity,
-            signals: Vec::new(),
-        }
+        Self { identity }
     }
 
     #[cfg(any(test, feature = "testing"))]
     pub fn for_testing(identity: ProcessIdentity) -> Self {
-        Self {
-            identity,
-            signals: Vec::new(),
-        }
+        Self { identity }
     }
 
     /// Borrow the admitted identity.
@@ -231,13 +220,8 @@ impl AdmittedProcessIdentity {
         &self.identity
     }
 
-    /// Borrow the signal event types the engine resolved for this definition.
-    pub fn signals(&self) -> &[ProcessEventType] {
-        &self.signals
-    }
-
-    pub fn into_parts(self) -> (ProcessIdentity, Vec<ProcessEventType>) {
-        (self.identity, self.signals)
+    pub fn into_identity(self) -> ProcessIdentity {
+        self.identity
     }
 }
 
@@ -288,7 +272,6 @@ pub struct ProcessEngineRegistration {
     engine: Arc<dyn ProcessEngine>,
     admission: ProcessEngineAdmission,
     engine_steps: Option<Arc<dyn super::engine_state::EngineSteps>>,
-    host_steps: Option<Arc<dyn super::engine_state::EngineHostSteps>>,
 }
 
 impl ProcessEngineRegistration {
@@ -307,7 +290,6 @@ impl ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: None,
-            host_steps: None,
         })
     }
 
@@ -318,7 +300,6 @@ impl ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: None,
-            host_steps: None,
         }
     }
 
@@ -330,15 +311,6 @@ impl ProcessEngineRegistration {
         self.engine_steps = Some(steps);
         self
     }
-
-    /// Declare the engine's host steps: what runs a
-    /// [`StepRequest::Host`](super::StepRequest::Host) its `advance` asks
-    /// for.
-    #[must_use]
-    pub fn with_host_steps(mut self, steps: Arc<dyn super::engine_state::EngineHostSteps>) -> Self {
-        self.host_steps = Some(steps);
-        self
-    }
 }
 
 #[derive(Clone, Default)]
@@ -346,7 +318,6 @@ pub struct ProcessEngineRegistry {
     engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
     engine_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
-    host_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineHostSteps>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -356,7 +327,6 @@ pub struct WeakProcessEngineRegistry {
     engines: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
     engine_steps: std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
-    host_steps: std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineHostSteps>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -368,7 +338,6 @@ impl WeakProcessEngineRegistry {
             engines: self.engines.upgrade()?,
             admissions: self.admissions.upgrade()?,
             engine_steps: self.engine_steps.upgrade()?,
-            host_steps: self.host_steps.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
         })
     }
@@ -386,7 +355,6 @@ impl ProcessEngineRegistry {
             engines: Arc::downgrade(&self.engines),
             admissions: Arc::downgrade(&self.admissions),
             engine_steps: Arc::downgrade(&self.engine_steps),
-            host_steps: Arc::downgrade(&self.host_steps),
             artifact_ports: self.artifact_ports.clone(),
         }
     }
@@ -405,20 +373,14 @@ impl ProcessEngineRegistry {
         let mut engines = (*self.engines).clone();
         let mut admissions = (*self.admissions).clone();
         let mut engine_steps = (*self.engine_steps).clone();
-        let mut host_steps = (*self.host_steps).clone();
         let ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: steps,
-            host_steps: hosted,
         } = registration;
         match steps {
             Some(steps) => engine_steps.insert(engine.kind().to_string(), steps),
             None => engine_steps.remove(engine.kind()),
-        };
-        match hosted {
-            Some(hosted) => host_steps.insert(engine.kind().to_string(), hosted),
-            None => host_steps.remove(engine.kind()),
         };
         engines.insert(engine.kind().to_string(), engine);
         admissions.insert(admission.kind().to_string(), admission);
@@ -426,7 +388,6 @@ impl ProcessEngineRegistry {
             engines: Arc::new(engines),
             admissions: Arc::new(admissions),
             engine_steps: Arc::new(engine_steps),
-            host_steps: Arc::new(host_steps),
             artifact_ports: self.artifact_ports,
         }
     }
@@ -465,37 +426,6 @@ impl ProcessEngineRegistry {
             });
         }
         Ok(Arc::clone(steps))
-    }
-
-    /// The body that runs host operation `operation` for processes of
-    /// engine `engine`: the typed refusal, before admission, of a
-    /// [`StepRequest::Host`](super::StepRequest::Host) no registration
-    /// declares.
-    ///
-    /// # Errors
-    ///
-    /// [`EngineStepRefusal`](super::engine_state::EngineStepRefusal) when
-    /// the engine is unknown or declares no host step for `operation`.
-    pub fn host_steps(
-        &self,
-        engine: &str,
-        operation: &str,
-    ) -> Result<Arc<dyn super::engine_state::EngineHostSteps>, super::engine_state::EngineStepRefusal>
-    {
-        use super::engine_state::EngineStepRefusal;
-        if !self.engines.contains_key(engine) {
-            return Err(EngineStepRefusal::UnknownEngine {
-                engine: engine.to_owned(),
-            });
-        }
-        self.host_steps
-            .get(engine)
-            .filter(|steps| steps.serves(operation))
-            .map(Arc::clone)
-            .ok_or_else(|| EngineStepRefusal::UndeclaredHostStep {
-                engine: engine.to_owned(),
-                operation: operation.to_owned(),
-            })
     }
 
     /// Apply one resolved cleanup to every installed engine's own store
@@ -574,7 +504,7 @@ impl ProcessEngineRegistry {
             })?
             .admit(payload, env_spec)?;
         let Some(reference) = identity.definition.clone() else {
-            return Ok(AdmittedProcessIdentity::admitted(identity, Vec::new()));
+            return Ok(AdmittedProcessIdentity::admitted(identity));
         };
         let resolution = match self.resolve(&reference).await {
             Ok(resolution) => resolution,
@@ -588,7 +518,7 @@ impl ProcessEngineRegistry {
             Err(ProcessDefinitionRefusal::UnresolvableDefinition { .. })
                 if reference.signature.is_unknown() =>
             {
-                return Ok(AdmittedProcessIdentity::admitted(identity, Vec::new()));
+                return Ok(AdmittedProcessIdentity::admitted(identity));
             }
             Err(refusal) => return Err(refusal.into()),
         };
@@ -600,10 +530,7 @@ impl ProcessEngineRegistry {
             definition: Some(reference.with_resolved_signature(resolution.signature)),
             ..identity
         };
-        Ok(AdmittedProcessIdentity::admitted(
-            identity,
-            resolution.signals,
-        ))
+        Ok(AdmittedProcessIdentity::admitted(identity))
     }
 
     pub async fn resolve(

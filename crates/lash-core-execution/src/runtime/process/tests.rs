@@ -1,6 +1,3 @@
-use std::collections::BTreeMap;
-
-use super::materialization::select_value;
 use super::*;
 
 fn registration(_id: &str) -> ProcessRegistration {
@@ -19,14 +16,15 @@ fn process_event_old_system_time_json_is_rejected() {
     );
     let plan = prepare_process_event_append(
         &record,
-        ProcessEventAppendRequest::new("process.resumed", serde_json::Value::Null)
-            .with_replay_key("process-old-time-shape:resumed"),
+        ProcessEventAppendRequest::observer_added(
+            &record.id,
+            &crate::SessionId::from("observer"),
+            &ProcessObserverBy::host("old-time-shape"),
+        ),
         1,
         None,
         None,
-        None,
         1_700_000_000_000,
-        None,
         crate::FleetFormat::current(),
     )
     .expect("prepare process event");
@@ -46,142 +44,15 @@ fn process_event_old_system_time_json_is_rejected() {
 }
 
 #[test]
-fn process_wake_input_from_event_payload_prefers_text_field() {
-    let payload = serde_json::json!({
-        "text": "ready",
-        "value": "ignored"
-    });
-
-    assert_eq!(process_wake_input_from_event_payload(&payload), "ready");
-}
-
-#[test]
-fn process_wake_input_from_event_payload_falls_back_to_value_field() {
-    let payload = serde_json::json!({
-        "value": { "status": "ready" }
-    });
-
-    assert_eq!(
-        process_wake_input_from_event_payload(&payload),
-        r#"{"status":"ready"}"#
-    );
-}
-
-#[test]
-fn process_wake_turn_cause_preserves_process_origin() {
-    let process_caused_by = crate::CausalRef::SessionNode {
-        session_id: SessionId::from("target"),
-        node_id: "trigger:button".to_string(),
-    };
-    let wake = wake_delivery("process.ready", Some(process_caused_by.clone()));
-
-    let cause = process_wake_turn_cause(&wake);
-
-    let expected_wake_id = wake.wake_id();
-    assert_eq!(cause.id, expected_wake_id.as_str());
-    assert_eq!(cause.event_type, "process.ready");
-    assert_eq!(
-        cause.text,
-        "Background process wake\nProcess: p_c5546c16360677e5a56c42a3a5c9e20c\nEvent: process.ready #7\nWake input:\nline one\nline two"
-    );
-    assert!(matches!(
-        cause.origin,
-        crate::MessageOrigin::Process {
-            process_id,
-            event_type,
-            sequence,
-            wake_id,
-            caused_by,
-        } if process_id == crate::process_id_for_test("process-1")
-            && event_type == "process.ready"
-            && sequence == 7
-            && wake_id.as_deref() == Some(expected_wake_id.as_str())
-            && caused_by == Some(process_caused_by)
-    ));
-}
-
-fn wake_delivery(
-    event_type: impl Into<String>,
-    process_caused_by: Option<crate::CausalRef>,
-) -> ProcessWakeDelivery {
-    let event_type = event_type.into();
-    ProcessWakeDelivery {
-        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        target_session_id: SessionId::from("target"),
-        process_id: crate::process_id_for_test("process-1"),
-        sequence: 7,
-        event_type: event_type.clone(),
-        process_caused_by,
-        authority: crate::QueuedWorkAuthority::default(),
-        input: "line one\nline two".to_string(),
-        created_at_ms: 123,
-        trace_cause: Default::default(),
-    }
-}
-
-#[test]
-fn selector_extracts_payload_pointer_const_template_and_present() {
-    let payload = serde_json::json!({
-        "line": "done",
-        "wake_input": "wake me"
-    });
-
-    assert_eq!(
-        select_value(&payload, &ProcessValueSelector::Payload).unwrap(),
-        payload
-    );
-    assert_eq!(
-        select_value(
-            &payload,
-            &ProcessValueSelector::Pointer("/line".to_string())
-        )
-        .unwrap(),
-        serde_json::json!("done")
-    );
-    assert_eq!(
-        select_value(
-            &payload,
-            &ProcessValueSelector::Const(serde_json::json!({"ok": true}))
-        )
-        .unwrap(),
-        serde_json::json!({"ok": true})
-    );
-    assert_eq!(
-        select_value(
-            &payload,
-            &ProcessValueSelector::Template {
-                template: "event: {line}".to_string(),
-                fields: BTreeMap::from([(
-                    "line".to_string(),
-                    ProcessValueSelector::Pointer("/line".to_string())
-                )]),
-            },
-        )
-        .unwrap(),
-        serde_json::json!("event: done")
-    );
-    assert_eq!(
-        select_value(
-            &payload,
-            &ProcessValueSelector::Present("/wake_input".to_string())
-        )
-        .unwrap(),
-        serde_json::json!(true)
-    );
-}
-
-#[test]
 fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
     let record = ProcessRecord::from_registration(
         registration("process-repair-waiting"),
         crate::process_id_for_test("process-repair-waiting"),
     );
     let wait = WaitState {
-        kind: WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: "wait-key".to_string(),
-            ordinal: 1,
+        kind: WaitKind::Call {
+            call_id: crate::ToolCallId::fixture("wait-call"),
+            tool_id: crate::ToolId::from("wait-tool"),
         },
         since_ms: 42,
     };
@@ -195,9 +66,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         1,
         None,
         None,
-        None,
         42,
-        None,
         crate::FleetFormat::current(),
     )
     .expect("prepare waiting event");
@@ -212,21 +81,17 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
 
     let terminal = prepare_process_event_append(
         &waiting_record,
-        ProcessEventAppendRequest::new(
-            "process.completed",
-            serde_json::json!({
-                "await_output": ProcessAwaitOutput::from_tool_output(
-                    crate::ToolCallOutput::success(serde_json::json!({"ok": true})),
-                ),
-            }),
-        )
-        .with_replay_key("process-repair-waiting-terminal"),
+        terminal_append_request(
+            &waiting_record.id,
+            &ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::json!({"ok": true}),
+            )),
+            None,
+        ),
         2,
         Some(1),
         None,
-        None,
         43,
-        None,
         crate::FleetFormat::current(),
     )
     .expect("prepare terminal event");
@@ -244,9 +109,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         99,
         Some(2),
         Some(waiting_event),
-        None,
         100,
-        None,
         crate::FleetFormat::current(),
     )
     .expect("stale waiting event should replay without repair");
@@ -265,29 +128,30 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
     );
 }
 
+/// A lifecycle fact that moves no status: an observer joining.
+fn observed(process: &ProcessId, session: &str) -> ProcessEventAppendRequest {
+    ProcessEventAppendRequest::observer_added(
+        process,
+        &crate::SessionId::fixture(session),
+        &ProcessObserverBy::host("tests"),
+    )
+}
+
 #[test]
 fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
-    let registration =
-        registration("process-generic-repair").with_extra_event_types([ProcessEventType {
-            name: "producer.progress".to_string(),
-            payload_schema: crate::JsonSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        }]);
-    let mut stale_record =
-        ProcessRecord::from_registration(registration, crate::process_id_for_test("process"));
+    let mut stale_record = ProcessRecord::from_registration(
+        registration("process-generic-repair"),
+        crate::process_id_for_test("process"),
+    );
     stale_record.updated_at_ms = 0;
-    let request =
-        ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
-            .with_replay_key("process-generic-repair:progress");
+    let request = observed(&stale_record.id, "progress");
     let first = prepare_process_event_append(
         &stale_record,
         request.clone(),
         7,
         None,
         None,
-        None,
         42,
-        None,
         crate::FleetFormat::current(),
     )
     .expect("prepare generic event at a sender-floor boundary");
@@ -301,9 +165,7 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
         100,
         Some(event.sequence),
         Some(event),
-        None,
         100,
-        None,
         crate::FleetFormat::current(),
     )
     .expect("replay generic tail across a sender-floor gap");
@@ -320,26 +182,18 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
 
 #[test]
 fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
-    let registration =
-        registration("process-generic-stale-replay").with_extra_event_types([ProcessEventType {
-            name: "producer.progress".to_string(),
-            payload_schema: crate::JsonSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        }]);
-    let record =
-        ProcessRecord::from_registration(registration, crate::process_id_for_test("process"));
-    let first_request =
-        ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
-            .with_replay_key("process-generic-stale-replay:1");
+    let record = ProcessRecord::from_registration(
+        registration("process-generic-stale-replay"),
+        crate::process_id_for_test("process"),
+    );
+    let first_request = observed(&record.id, "first");
     let first = prepare_process_event_append(
         &record,
         first_request.clone(),
         1,
         None,
         None,
-        None,
         42,
-        None,
         crate::FleetFormat::current(),
     )
     .expect("prepare first generic event");
@@ -354,14 +208,11 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
 
     let second = prepare_process_event_append(
         &first_record,
-        ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 2}))
-            .with_replay_key("process-generic-stale-replay:2"),
+        observed(&record.id, "second"),
         2,
         Some(1),
         None,
-        None,
         100,
-        None,
         crate::FleetFormat::current(),
     )
     .expect("prepare second generic event");
@@ -380,9 +231,7 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
         3,
         Some(2),
         Some(first_event),
-        None,
         200,
-        None,
         crate::FleetFormat::current(),
     )
     .expect("stale generic event should replay without repair");

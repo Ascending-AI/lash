@@ -53,7 +53,6 @@ pub enum RuntimeEffectKind {
     /// without re-running a step.
     PresentToolResult,
     ToolParentEnd,
-    Trigger,
     Process,
     ExecCode,
     /// Durable admission of a turn input (ADR 0069 section 6).
@@ -101,7 +100,6 @@ impl RuntimeEffectKind {
             Self::ToolAttempt => "tool_attempt",
             Self::PresentToolResult => "present_tool_result",
             Self::ToolParentEnd => "tool_parent_end",
-            Self::Trigger => "trigger",
             Self::Process => "process",
             Self::ExecCode => "exec_code",
             Self::AcceptTurnInput => "accept_turn_input",
@@ -237,15 +235,6 @@ pub enum RuntimeSubject {
         sequence: u64,
         event_type: String,
     },
-    TriggerOccurrence {
-        occurrence_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        subscription_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        subscription_incarnation: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        subscription_revision: Option<u64>,
-    },
     SessionNode {
         session_id: SessionId,
         node_id: String,
@@ -352,17 +341,6 @@ impl RuntimeInvocation {
             } => Some(CausalRef::ProcessEvent {
                 process_id: process_id.clone(),
                 sequence: *sequence,
-            }),
-            RuntimeSubject::TriggerOccurrence {
-                occurrence_id,
-                subscription_id,
-                subscription_incarnation,
-                subscription_revision,
-            } => Some(CausalRef::TriggerOccurrence {
-                occurrence_id: occurrence_id.clone(),
-                subscription_id: subscription_id.clone(),
-                subscription_incarnation: subscription_incarnation.clone(),
-                subscription_revision: *subscription_revision,
             }),
             RuntimeSubject::SessionNode {
                 session_id,

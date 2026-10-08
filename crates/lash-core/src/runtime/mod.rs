@@ -159,7 +159,6 @@ use turn_boundary::*;
 use turn_commit_draft::*;
 use turn_driver::*;
 
-pub use crate::store::QueuedWorkClass;
 use assembly::{
     LlmDebugText, LlmDebugToolCall, LlmStreamAccumulator, LlmStreamDebugState, LlmStreamEventLog,
     LlmStreamState, ReasoningPublicationState, fold_llm_stream_event,
@@ -210,7 +209,7 @@ pub use effect::{
     AttemptStreamEvent, AttemptStreamRecorder, AttemptStreamTruncation, CompactionBase,
     DecodedStreamEvent, PresentationBinding, ProcessDefinitionLocalExecution, ToolPresentation,
 };
-/// Runtime effect contracts, including local process and trigger execution capabilities.
+/// Runtime effect contracts, including local process execution capabilities.
 pub use effect::{
     AdmittedDirectSend, AdmittedScope, AssistantResponseHookEvents, AssistantResponsePlan,
     AssistantStreamHookState, AwaitEventKey, AwaitEventWaitIdentity,
@@ -226,8 +225,8 @@ pub use effect::{
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     RuntimeInvocation, RuntimeLlmCallOutcome, RuntimeReplay, RuntimeReplayAttribution,
     RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ServedOnly, ServedOnlyRange, SleepSpec,
-    ToolAttemptEffectOutcome, ToolAttemptLaunch, TriggerLocalExecution, TurnPrelude,
-    TurnPreludeRef, TurnPreludeStore, validate_replayed_effect_envelope,
+    ToolAttemptEffectOutcome, ToolAttemptLaunch, TurnPrelude, TurnPreludeRef, TurnPreludeStore,
+    validate_replayed_effect_envelope,
 };
 pub use environment::{ParkRefused, ParkedSession, RuntimeEnvironment, RuntimeEnvironmentBuilder};
 pub(crate) use error::runtime_error_from_store_commit;
@@ -262,23 +261,21 @@ pub use observation::{
 };
 pub use observation_publisher::{ObservationSource, work_with_observations};
 pub use process::ProcessChangeSubscription;
-#[cfg(any(test, feature = "testing"))]
-pub use process::reconcile_pruned_trigger_deliveries_interleaved;
 pub use process::registry_transitions;
 pub use process::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArgsMismatch, ArgsMode,
-    DeclaredProcessIdentity, DefinitionAcquisition, EngineAction, EngineEvent, EngineHostSteps,
-    EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps,
-    HandleId, HostStepRun, HostWaitKind, InvalidProcessDefinitionId, InvalidStartKey, KeyName,
-    Lifetime, LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
-    NonTerminalProcessPage, ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite,
-    ObservedProcessEventPage, ObservedProcessEventReadOutcome, ObservedWorkItem,
-    ObservedWorkItemState, PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ParentEndPlan, PreparedProcessRegistration,
-    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessChangeHub,
-    ProcessClockRebind, ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessDefinition,
-    ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionRef,
+    DeclaredProcessIdentity, DefinitionAcquisition, EngineAction, EngineEvent, EngineState,
+    EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun, EngineSteps, HandleId,
+    HostWaitKind, InvalidProcessDefinitionId, InvalidStartKey, KeyName, Lifetime, LifetimeDecision,
+    LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ObservedProcess,
+    ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
+    ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState,
+    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ParentEndPlan,
+    PreparedProcessRegistration, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind, ProcessCompletionAuthority,
+    ProcessCompletionOutcome, ProcessDefinition, ProcessDefinitionDraft,
+    ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionRef,
     ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionStore,
     ProcessDefinitionStoredError, ProcessDefinitionTarget, ProcessDefinitionValue,
     ProcessEffectNodeReport, ProcessEffectOccurrence, ProcessEffectOmissions,
@@ -288,8 +285,7 @@ pub use process::{
     ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHistoryRetention,
     ProcessEventLite, ProcessEventLog, ProcessEventPage, ProcessEventPageEvents,
     ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
-    ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventSink,
-    ProcessEventSinkRegistration, ProcessEventType, ProcessExecutionContext,
+    ProcessEventSink, ProcessEventSinkRegistration, ProcessExecutionContext,
     ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
     ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
     ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLifecycle,
@@ -299,31 +295,24 @@ pub use process::{
     ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar,
     ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
     ProcessRegistrationRefusal, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
-    ProcessRetention, ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport, ProcessSignal,
-    ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessSignature, ProcessSpawnProvenance,
-    ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartPlan,
-    ProcessStartReceipt, ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget,
-    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminal, ProcessTerminalSemantics,
-    ProcessTerminalSpec, ProcessTombstone, ProcessToolIntents, ProcessToolVisibilityFilter,
-    ProcessTransition, ProcessTransitionPlan, ProcessValueSelector, ProcessWake,
-    ProcessWakeDelivery, ProcessWakeDeliveryRequest, ProcessWakeSpec, ProcessWorkObserver,
-    ProcessWorkSnapshot, ProjectionWatermark, ResolvedProcessDefinition, RetiredProcessStatus,
+    ProcessRetention, ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport,
+    ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions,
+    ProcessStartOutcome, ProcessStartPlan, ProcessStartReceipt, ProcessStartRegistration,
+    ProcessStartRequest, ProcessStartTarget, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessTerminal, ProcessTombstone, ProcessToolIntents, ProcessToolVisibilityFilter,
+    ProcessTransition, ProcessTransitionPlan, ProcessWorkObserver, ProcessWorkSnapshot,
+    ProjectionWatermark, ResolvedProcessDefinition, RetiredProcessStatus,
     SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionId,
     SessionObserverIntentSource, SessionScope, SessionScopeId, StagedProcessStart, StartCx,
     StartCxError, StartKey, StepEffectSite, StepName, StepRequest, StoreRealization,
-    TerminalProcessStatus, UnavailableProcessService, WaitKind, WaitState, WakeId, WatchedRegistry,
-    WeakProcessEngineRegistry, admitted_signal_wait, allocate_process_event_sequence,
-    apply_process_event_projection, artifact_store_plugin_error, check_retained_start,
-    current_epoch_ms, fold_process_record, lifetime, load_process_execution_env,
-    materialize_process_event_semantics, mint_process_id, prepare_process_event_append,
+    TerminalProcessStatus, UnavailableProcessService, WaitKind, WaitState, WatchedRegistry,
+    WeakProcessEngineRegistry, allocate_process_event_sequence, apply_process_event_projection,
+    artifact_store_plugin_error, check_retained_start, current_epoch_ms, fold_process_record,
+    lifetime, load_process_execution_env, mint_process_id, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
-    process_child_session_id, process_session_turn_id, process_signal_event_type,
-    process_signal_name_from_event_type, process_signal_wait_key, process_wake_delivery,
-    process_wake_input_from_event_payload, process_wake_turn_cause, process_wake_turn_text,
-    publish_process_execution_env, reconcile_pruned_trigger_deliveries,
-    reconcile_session_process_observer_intents, require_event_replay, terminal_append_request,
-    terminal_event_type_name, tool_failure_code, validate_generic_process_event_append,
-    validate_process_signal_name, watch_process_registry,
+    process_child_session_id, process_session_turn_id, publish_process_execution_env,
+    reconcile_session_process_observer_intents, terminal_append_request, tool_failure_code,
+    validate_generic_process_event_append, watch_process_registry,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{
@@ -350,9 +339,9 @@ use state::{append_session_nodes_to_state_with_clock, open_agent_frame_in_state_
 pub use turn_boundary::{RecordedTurnAssembly, classify_output_state};
 pub use turn_control::{
     QueueWithdrawalPublisher, TurnAddress, TurnAttach, TurnCancelAffectedInput,
-    TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome,
-    TurnCancelReceipt, TurnCancelRequest, TurnCancelUndeliveredInputPolicy,
-    TurnCancellationEvidence, TurnTerminal, TurnWorkDriver,
+    TurnCancelInputOutcome, TurnCancelMode, TurnCancelOutcome, TurnCancelReceipt,
+    TurnCancelRequest, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnTerminal,
+    TurnWorkDriver,
 };
 #[cfg(feature = "testing")]
 pub use turn_input_ingress::ingress_message_id;
@@ -370,12 +359,10 @@ pub use turn_queue::SessionCommandSettlement;
 pub(crate) use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
     AdmissionBoundary, AdmittedQueuedWork, CompactContextOutcome, DeliveryPolicy,
-    OpenAgentFrameCommandOutcome, PROCESS_WAKE_MERGE_KEY, PluginOperationCommandOutcome,
-    ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkBatchingConfig, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
-    QueuedWorkKind, QueuedWorkPayload, SessionCommand, SessionCommandOutcome,
-    SessionCommandReceipt, TurnLaneAdmissionPolicy, process_wake_batch_draft,
-    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
+    OpenAgentFrameCommandOutcome, PluginOperationCommandOutcome, QueuedWorkAuthority,
+    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchingConfig, QueuedWorkCompletion,
+    QueuedWorkEnqueueOutcome, QueuedWorkPayload, SessionCommand, SessionCommandOutcome,
+    SessionCommandReceipt, TurnLaneAdmissionPolicy,
 };
 use usage::nonzero_usage;
 

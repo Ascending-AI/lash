@@ -436,8 +436,8 @@ mod tests {
     }
 
     /// Trace provenance rides a command beside its payload and is no part
-    /// of the envelope's identity (FIG-4829): the same start, signal or
-    /// accepted input under another trace context, or under
+    /// of the envelope's identity (FIG-4829): the same start or accepted
+    /// input under another trace context, or under
     /// none, journals the same bytes and hashes the same, so a retry replays
     /// its recorded effect instead of diverging from it.
     #[test]
@@ -460,20 +460,6 @@ mod tests {
                 .with_trace(trace),
                 observers: Vec::new(),
                 execution_context: Box::default(),
-            })
-        };
-        let signal = |cause: lash_trace::TraceCause| {
-            process_effect(crate::ProcessCommand::Signal {
-                signal: crate::ProcessSignal::new(
-                    crate::ProcessSignalIdentity::new(
-                        crate::ProcessId::fixture("provenance-target"),
-                        "ready",
-                        "one",
-                    )
-                    .expect("valid signal identity"),
-                    serde_json::json!(1),
-                )
-                .with_trace_cause(cause),
             })
         };
         let accept = |cause: lash_trace::TraceCause| {
@@ -499,12 +485,6 @@ mod tests {
                 start(lash_trace::TraceScopeOffer::default()),
                 start(offer(1)),
                 start(offer(2)),
-            ),
-            (
-                "signal",
-                signal(lash_trace::TraceCause::Root),
-                signal(linked(1)),
-                signal(linked(2)),
             ),
             (
                 "input",

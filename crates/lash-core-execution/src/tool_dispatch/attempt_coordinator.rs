@@ -3,7 +3,7 @@ use crate::{
     RuntimeInvocation, ToolCallOutput, ToolCallRecord, ToolFailure, ToolFailureClass,
 };
 
-use super::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome, ToolTriggerEffectOutcome};
+use super::{ToolCallLaunch, ToolDispatchContext, ToolDispatchOutcome};
 
 /// The invocation a tool call's attempts descend from: its lineage.
 ///
@@ -110,7 +110,6 @@ pub async fn coordinate_tool_invocation<'run>(
     mut local_executor: impl FnMut() -> RuntimeEffectLocalExecutor<'run>,
 ) -> CoordinatedToolInvocation {
     let max_attempts = execution_policy.max_attempts().max(1);
-    let mut triggers = Vec::new();
     let mut attempts = Vec::new();
 
     for attempt in 1..=max_attempts {
@@ -136,7 +135,6 @@ pub async fn coordinate_tool_invocation<'run>(
             // A runner bound to another call or owner is a host refusal,
             // including on replay. It cannot become a tool result.
             Err(err) if err.code == crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch => {
-                abandon_to_open_buffers(context, triggers);
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::ControllerAborted(err),
                 };
@@ -151,7 +149,6 @@ pub async fn coordinate_tool_invocation<'run>(
                         "tool_attempt_failed",
                         err.to_string(),
                         attempts,
-                        triggers,
                     ))),
                 };
             }
@@ -162,7 +159,6 @@ pub async fn coordinate_tool_invocation<'run>(
             // ADR 0042 recovery redrives the attempt, rather than committing a
             // `tool_attempt_failed` the tool never produced (FIG-3528).
             Err(err) => {
-                abandon_to_open_buffers(context, triggers);
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::ControllerAborted(err),
                 };
@@ -174,13 +170,6 @@ pub async fn coordinate_tool_invocation<'run>(
         {
             crate::panic_containment::enforce_message("tool_panicked", &failure.message);
         }
-        // The attempt's journaled trigger receipts ride the outcome to the
-        // incorporation boundary: on a live execution this moves them out of
-        // the attempt-local buffer the runner installed, and on replay the
-        // journaled outcome is the only place they exist. Either way they are
-        // consumed exactly once per attempt outcome, which is what makes a
-        // replayed attempt indistinguishable from a fresh one (ADR 0099 §13).
-        triggers.extend(outcome.triggers);
         match outcome.launch {
             crate::ToolAttemptLaunch::Done {
                 mut record,
@@ -238,7 +227,6 @@ pub async fn coordinate_tool_invocation<'run>(
                                 record,
                                 intents,
                                 attempts,
-                                triggers,
                             },
                         )
                         .await
@@ -260,7 +248,6 @@ pub async fn coordinate_tool_invocation<'run>(
                                 record,
                                 intents,
                                 attempts,
-                                triggers,
                             },
                         )
                         .await
@@ -294,11 +281,9 @@ pub async fn coordinate_tool_invocation<'run>(
                                     call.tool_name
                                 ),
                                 attempts,
-                                triggers,
                             ))),
                         };
                     }
-                    abandon_to_open_buffers(context, triggers);
                     return CoordinatedToolInvocation {
                         launch: ToolCallLaunch::ControllerAborted(err),
                     };
@@ -313,24 +298,7 @@ pub async fn coordinate_tool_invocation<'run>(
             "tool_retry_loop_failed",
             "tool retry loop exited without a terminal result",
             attempts,
-            triggers,
         ))),
-    }
-}
-
-/// When no outcome exists to carry them — a controller abort refuses the
-/// launch itself — an attempt's journaled facts land in the open context's
-/// buffers, exactly where the pre-applicator restore put them, because the
-/// commit they are evidence of already happened. The abort ends the call, so
-/// nothing downstream could incorporate a settlement for it; reaching for the
-/// buffers directly is tolerable only because there is no settlement left to
-/// own the facts.
-fn abandon_to_open_buffers(
-    context: &ToolDispatchContext<'_>,
-    triggers: Vec<ToolTriggerEffectOutcome>,
-) {
-    for trigger in triggers {
-        context.trigger_outcomes.enqueue(trigger);
     }
 }
 
@@ -343,7 +311,6 @@ struct TerminalAttemptSettlement<'settlement> {
     record: Box<ToolCallRecord>,
     intents: crate::ToolIntents,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
-    triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
 /// The local terminal facts passed from coordination to declaration realization.
@@ -359,7 +326,6 @@ struct SealedToolFinal {
     intents: crate::ToolIntents,
     intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
-    triggers: Vec<ToolTriggerEffectOutcome>,
 }
 
 async fn settle_terminal_attempt(
@@ -374,7 +340,6 @@ async fn settle_terminal_attempt(
         record,
         intents,
         attempts,
-        triggers,
     } = settlement;
     let sealed = SealedToolFinal {
         minting_emission: Some(minting_emission.clone().into_runtime_invocation()),
@@ -383,7 +348,6 @@ async fn settle_terminal_attempt(
         intents,
         intent_outcomes: Vec::new(),
         attempts,
-        triggers,
     };
     drain_sealed_final(context, sealed, child_trace_hook).await
 }
@@ -409,7 +373,6 @@ async fn drain_sealed_final(
         intents,
         intent_outcomes: mut retained_outcomes,
         attempts,
-        triggers,
     } = sealed;
     let intent_outcomes = match minting_emission {
         Some(minting_emission) => {
@@ -451,7 +414,6 @@ async fn drain_sealed_final(
         attempts,
         intents,
         intent_outcomes: retained_outcomes,
-        triggers,
     })
 }
 
@@ -600,58 +562,6 @@ pub(super) fn project_recorded_intent_outcomes(
                 ));
             }
         }
-        return;
-    }
-    // A trigger registration's slot resolves the same way: the realized
-    // receipt — which alone carries the revision and fingerprint — replaces
-    // the slot before the answer reaches a model or a cell (FIG-3116).
-    if let Some(intent_index) = lash_sansio::handle::trigger_register_slot(&value.to_json_value())
-        && let Some(registration) = outcomes.iter().find(|outcome| {
-            declares_at(
-                outcome,
-                crate::ToolIntentKind::RegisterTrigger,
-                intent_index,
-            )
-        })
-    {
-        let handle = match registration {
-            crate::ToolIntentExecutionOutcome::Executed { realized, .. } => {
-                match realized.model_value() {
-                    Ok(value) => value,
-                    Err(error) => {
-                        *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                            crate::ToolFailureClass::Internal,
-                            "tool_intent_presentation_failed",
-                            error.to_string(),
-                        ));
-                        return;
-                    }
-                }
-            }
-            crate::ToolIntentExecutionOutcome::Refused { refusal, .. }
-            | crate::ToolIntentExecutionOutcome::ProtocolRefused { refusal } => {
-                *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                    crate::ToolFailureClass::Unavailable,
-                    "trigger_register_unrealized",
-                    format!(
-                        "the declared trigger registration did not produce a subscription: it \
-                         was refused with {}",
-                        refusal.describe()
-                    ),
-                ));
-                return;
-            }
-        };
-        match serde_json::from_value(handle.clone()) {
-            Ok(decoded) => *value = decoded,
-            Err(error) => {
-                *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-                    crate::ToolFailureClass::Internal,
-                    "tool_value_decode_failed",
-                    format!("malformed realized trigger handle: {error}"),
-                ));
-            }
-        }
     }
 }
 
@@ -666,16 +576,11 @@ fn realized_start_handle(handle: &crate::ProcessHandleView) -> serde_json::Value
     })
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "a failure outcome is assembled from every channel the attempts accumulated"
-)]
 fn runtime_failure_outcome(
     call: &PreparedToolCall,
     code: impl Into<String>,
     message: impl Into<String>,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
-    triggers: Vec<ToolTriggerEffectOutcome>,
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: ToolCallRecord {
@@ -692,7 +597,6 @@ fn runtime_failure_outcome(
         attempts,
         intents: crate::ToolIntents::default(),
         intent_outcomes: Vec::new(),
-        triggers,
     }
 }
 
@@ -737,7 +641,7 @@ mod projection_tests {
         crate::ToolIntentExecutionOutcome::Refused {
             identity: None,
             intent_index: 0,
-            kind: crate::ToolIntentKind::SignalProcess,
+            kind: crate::ToolIntentKind::CancelProcess,
             refusal: reason,
         }
     }

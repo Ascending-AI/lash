@@ -14,9 +14,7 @@ use serde::{Deserialize, Serialize};
 /// from the declaring attempt's intent identity instead of being carried and
 /// then overwritten. A v2 batch or durable submission row therefore decodes to
 /// a shape this build cannot realize, so both are refused before any
-/// declaration effect rather than reinterpreted — the same treatment version 1
-/// received when version 2 rebound `EmitTrigger` occurrence idempotency to the
-/// declaration replay key.
+/// declaration effect rather than reinterpreted.
 /// **Integrator class 3: protocol and process-engine implementors.**
 /// version_surface = "coexist"
 pub const TOOL_INTENT_PROTOCOL_V3: u16 = 3;
@@ -67,13 +65,7 @@ impl ToolIntent {
     pub fn execution_env_ref(&self) -> Option<&crate::ProcessExecutionEnvRef> {
         match self {
             Self::StartProcess(start) => start.declaration.env_ref.as_ref(),
-            Self::RegisterTrigger(registration) => Some(&registration.draft.env_ref),
-            Self::PublishDefinition(_)
-            | Self::GetDefinition(_)
-            | Self::SignalProcess(_)
-            | Self::CancelProcess(_)
-            | Self::EmitProcessEvent(_)
-            | Self::EmitTrigger(_) => None,
+            Self::PublishDefinition(_) | Self::GetDefinition(_) | Self::CancelProcess(_) => None,
         }
     }
 }
@@ -85,13 +77,9 @@ impl ToolIntent {
 /// and the kind set cannot diverge.
 macro_rules! tool_intent_payload {
     (StartProcess) => { Box<StartProcessIntent> };
-    (SignalProcess) => { SignalProcessIntent };
     (CancelProcess) => { CancelProcessIntent };
-    (EmitProcessEvent) => { EmitProcessEventIntent };
-    (EmitTrigger) => { EmitTriggerIntent };
     (GetDefinition) => { GetDefinitionIntent };
     (PublishDefinition) => { Box<PublishDefinitionIntent> };
-    (RegisterTrigger) => { Box<RegisterTriggerIntent> };
 }
 
 macro_rules! define_tool_intent {
@@ -243,14 +231,10 @@ impl ToolIntentSubmissionRecord {
         identity: ToolIntentIdentity,
         intent: ToolIntent,
     ) -> Result<Self, serde_json::Error> {
-        // The hash is the intent's business identity: an occurrence an
-        // emission carries is hashed without the trace offer beside it.
+        // The hash is the intent's business identity.
         let payload_hash = crate::stable_hash::blake3_hex(
             LASH_TOOL_INTENT_PAYLOAD_DOMAIN_VERSION,
-            &match intent.without_trace_provenance() {
-                Some(business) => serde_json::to_vec(&business)?,
-                None => serde_json::to_vec(&intent)?,
-            },
+            &serde_json::to_vec(&intent)?,
         );
         Ok(Self {
             protocol_version: TOOL_INTENT_PROTOCOL_V3,
@@ -339,21 +323,6 @@ impl ToolIntentSubmissionRecord {
     }
 }
 
-impl ToolIntent {
-    /// This intent without the trace offer it carries, when it carries one:
-    /// what its payload hash covers.
-    pub fn without_trace_provenance(&self) -> Option<Self> {
-        match self {
-            Self::EmitTrigger(emit) if !emit.request.trace.is_empty() => {
-                let mut emit = emit.clone();
-                emit.request.trace = lash_trace::TraceScopeOffer::default();
-                Some(Self::EmitTrigger(emit))
-            }
-            _ => None,
-        }
-    }
-}
-
 /// Atomic result of claiming a tool-intent identity in the submission ledger.
 ///
 /// This is an **integrator class 3: protocol and process-engine implementor**
@@ -432,36 +401,6 @@ pub struct DeclaredModuleArtifact {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// Distinct from [`EmitTriggerIntent`], which fires an occurrence: this one
-/// installs the subscription. A leaf attempt cannot register synchronously for
-/// the same reason it cannot emit synchronously — a subscription that outlived
-/// a failed attempt would wake a target the attempt never committed.
-#[serde(deny_unknown_fields)]
-pub struct RegisterTriggerIntent {
-    /// The runtime whose authority owns the subscription.
-    pub owner: RuntimeOwner,
-    /// The registrant scope the declaring attempt resolved, exactly as the
-    /// retired host-operation path resolved it from the live context.
-    pub owner_scope: crate::TriggerOwnerScope,
-    /// The actor the declaring attempt resolved for the registration.
-    pub actor: crate::ProcessOriginator,
-    pub draft: crate::TriggerSubscriptionDraft,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-/// Signal declaration consumed by protocol and process-engine implementors.
-pub struct SignalProcessIntent {
-    /// The runtime whose authority owns the signal.
-    pub owner: RuntimeOwner,
-    /// Target process id.
-    pub process_id: ProcessId,
-    /// Declared signal name.
-    pub signal_name: String,
-    /// Signal payload validated by the target event schema.
-    pub payload: serde_json::Value,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 /// Cancellation declaration consumed by protocol and process-engine implementors.
 #[serde(deny_unknown_fields)]
 pub struct CancelProcessIntent {
@@ -469,57 +408,6 @@ pub struct CancelProcessIntent {
     pub owner: RuntimeOwner,
     /// Target process id.
     pub process_id: ProcessId,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-/// Event declaration consumed by protocol and process-engine implementors.
-pub struct EmitProcessEventIntent {
-    /// The runtime whose authority owns the append.
-    pub owner: RuntimeOwner,
-    /// Target process id.
-    pub process_id: ProcessId,
-    /// Registered event type.
-    pub event_type: String,
-    /// Event payload validated by the process registry.
-    pub payload: serde_json::Value,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-/// A leaf attempt cannot emit a trigger synchronously: an emission that
-/// outlives a failed attempt would advertise a cause that never committed.
-/// Declaring this intent instead moves the emission behind the attempt's own
-/// commit, where the shared realization router stamps the recorded occurrence's
-/// `idempotency_key` with this declaration's replay key as the exactly-once
-/// backstop for redrive.
-///
-/// Three consequences of carrying a whole [`crate::TriggerOccurrenceRequest`]:
-///
-/// - A submission's payload hash covers this struct's entire serde shape.
-///   Adding a field to `TriggerOccurrenceRequest` without
-///   `skip_serializing_if` changes the hash of an unchanged declaration, so a
-///   submission recorded before the change is refused as `DuplicateIdentity`
-///   after it. New fields belong behind `skip_serializing_if` unless a
-///   deliberate identity break is the point.
-/// - `request.idempotency_key` remains caller-supplied declaration material. It
-///   feeds the serialized first-writer payload hash and therefore submission
-///   identity/conflict detection. At the shared realization boundary the
-///   router replaces it with the declaration replay key as the occurrence's
-///   store-side dedupe key, so distinct declarations cannot collapse while
-///   redriving the same declaration remains exactly-once.
-/// - `owner` here is the authority the intent executor validates the
-///   declaration against; `request.session_id` is the occurrence's own routing
-///   scope, which the router carries onto the occurrence record and never
-///   checks against it.
-pub struct EmitTriggerIntent {
-    /// The runtime whose authority owns the emission. Validated: a
-    /// declaration naming another owner is refused before it reaches the
-    /// router.
-    pub owner: RuntimeOwner,
-    /// Complete durable trigger-occurrence request. At realization the router
-    /// replaces its caller-supplied `idempotency_key` with the declaration
-    /// replay key. Its own `session_id` is the occurrence's routing scope, not
-    /// an authority.
-    pub request: crate::TriggerOccurrenceRequest,
 }
 
 /// version_surface = "coexist"
@@ -767,32 +655,9 @@ mod tests {
                     ),
                 }))
             }
-            ToolIntentKind::SignalProcess => ToolIntent::SignalProcess(SignalProcessIntent {
-                owner: crate::RuntimeOwner::Session(session_id),
-                process_id: crate::process_id_for_test("process"),
-                signal_name: "go".to_string(),
-                payload: serde_json::Value::Null,
-            }),
             ToolIntentKind::CancelProcess => ToolIntent::CancelProcess(CancelProcessIntent {
                 owner: crate::RuntimeOwner::Session(session_id),
                 process_id: crate::process_id_for_test("process"),
-            }),
-            ToolIntentKind::EmitProcessEvent => {
-                ToolIntent::EmitProcessEvent(EmitProcessEventIntent {
-                    owner: crate::RuntimeOwner::Session(session_id),
-                    process_id: crate::process_id_for_test("process"),
-                    event_type: "note".to_string(),
-                    payload: serde_json::Value::Null,
-                })
-            }
-            ToolIntentKind::EmitTrigger => ToolIntent::EmitTrigger(EmitTriggerIntent {
-                owner: crate::RuntimeOwner::Session(session_id),
-                request: crate::TriggerOccurrenceRequest::new(
-                    "source",
-                    "source-key",
-                    serde_json::Value::Null,
-                    "idempotency-key",
-                ),
             }),
             ToolIntentKind::GetDefinition => ToolIntent::GetDefinition(GetDefinitionIntent {
                 owner: RuntimeOwner::Session(session_id),
@@ -808,26 +673,6 @@ mod tests {
                     )
                     .expect("draft"),
                     module: None,
-                }))
-            }
-            ToolIntentKind::RegisterTrigger => {
-                ToolIntent::RegisterTrigger(Box::new(RegisterTriggerIntent {
-                    owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
-                    actor: crate::ProcessOriginator::session(crate::SessionScope::new(
-                        session_id.clone(),
-                    )),
-                    owner: RuntimeOwner::Session(session_id),
-                    draft: crate::TriggerSubscriptionDraft::for_process(
-                        "subscription",
-                        crate::ProcessExecutionEnvRef::new("env-ref"),
-                        "source",
-                        "source-key",
-                        crate::ProcessInput::Engine {
-                            kind: "engine".to_string(),
-                            payload: serde_json::Value::Null,
-                        },
-                        crate::ProcessIdentity::new("engine"),
-                    ),
                 }))
             }
         }
@@ -905,7 +750,7 @@ mod tests {
         foreign.replay_key.push_str("foreign");
         for answer in [
             refused(Some(foreign), record.kind(), 0),
-            refused(Some(identity.clone()), ToolIntentKind::SignalProcess, 0),
+            refused(Some(identity.clone()), ToolIntentKind::GetDefinition, 0),
             refused(Some(identity.clone()), record.kind(), 1),
             refused(None, record.kind(), 0),
             crate::ToolIntentExecutionOutcome::ProtocolRefused {
@@ -922,7 +767,7 @@ mod tests {
                 status: crate::ProcessStatus::Running,
                 origin: crate::CancelOrigin::ModelRequested,
             });
-        let other_intent = sample_intent(ToolIntentKind::SignalProcess);
+        let other_intent = sample_intent(ToolIntentKind::GetDefinition);
         let mut other =
             ToolIntentSubmissionRecord::new(identity.clone(), other_intent).expect("other row");
         other.settlement = Some(ToolIntentSubmissionSettlement {

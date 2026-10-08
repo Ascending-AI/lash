@@ -64,8 +64,6 @@ impl MailInput {
 /// What a queued work batch asks the session for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MailBatchKind {
-    /// Work a turn consumes, such as a process wake.
-    Turn,
     /// A session command, applied by a command run.
     Control,
     /// A session command that runs a plugin task as an operation run of its

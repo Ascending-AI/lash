@@ -6,8 +6,7 @@ use lash_core_store::testing::guarded_surfaces::{self as laws, SurfaceProbe};
 use super::effect_summary::{
     PROCESS_EVENT_VOCABULARY_VERSION, ProcessEffectOccurrence, ProcessEffectOutcomeClass,
 };
-use super::registry_transitions::decode_process_wake_delivery;
-use crate::{FleetFormat, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, SCOPE_STORAGE_PAYLOAD_VERSION};
+use crate::{FleetFormat, SCOPE_STORAGE_PAYLOAD_VERSION};
 
 const OWNER: &str = "lash-core-execution";
 
@@ -70,58 +69,6 @@ fn read_scope(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
 
 fn restamp_scope(bytes: &[u8], version: u32) -> Vec<u8> {
     restamp(bytes, "version", version)
-}
-
-// --- PROCESS_WAKE_DELIVERY_FORMAT_VERSION: an outbox row's wake. ---
-
-fn write_wake(fleet: FleetFormat) -> Vec<u8> {
-    let process_id = crate::process_id_for_test("process-1");
-    serde_json::to_vec(&crate::ProcessWakeDelivery {
-        version: fleet.writer_version(lash_core_store::surface_format!(
-            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
-        )),
-        target_session_id: crate::SessionId::from("target"),
-        process_id: process_id.clone(),
-        sequence: 7,
-        event_type: "process.ready".to_owned(),
-        process_caused_by: None,
-        authority: crate::QueuedWorkAuthority::default(),
-        input: "wake".to_owned(),
-        created_at_ms: 123,
-        trace_cause: Default::default(),
-    })
-    .expect("encode the wake")
-}
-
-fn read_wake(bytes: &[u8], fleet: FleetFormat) -> Result<String, String> {
-    decode_process_wake_delivery(
-        std::str::from_utf8(bytes).map_err(|error| error.to_string())?,
-        fleet,
-    )
-    .map(|wake| format!("{wake:?}"))
-    .map_err(|error| error.to_string())
-}
-
-fn restamp_wake(bytes: &[u8], version: u32) -> Vec<u8> {
-    restamp(bytes, "version", version)
-}
-
-/// A wake row states its format: one that carries no `version` is not read
-/// as any format, this build's included.
-#[test]
-fn a_wake_row_without_its_version_fails_decode() {
-    let fleet = FleetFormat::current();
-    let stamped = write_wake(fleet);
-    read_wake(&stamped, fleet).expect("the stamped row decodes");
-
-    let mut row: serde_json::Value = serde_json::from_slice(&stamped).expect("the row is JSON");
-    row.as_object_mut()
-        .expect("the row is an object")
-        .remove("version")
-        .expect("the row is stamped");
-    let error = read_wake(&serde_json::to_vec(&row).expect("encode the row"), fleet)
-        .expect_err("an unstamped row must not decode");
-    assert!(error.contains("missing field `version`"), "{error}");
 }
 
 fn write_admission(fleet: FleetFormat) -> Vec<u8> {
@@ -221,13 +168,6 @@ fn probes() -> Vec<SurfaceProbe> {
             write: write_scope,
             read: read_scope,
             restamp: restamp_scope,
-        },
-        SurfaceProbe {
-            constant: "PROCESS_WAKE_DELIVERY_FORMAT_VERSION",
-            newest: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            write: write_wake,
-            read: read_wake,
-            restamp: restamp_wake,
         },
     ]
 }

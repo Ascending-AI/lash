@@ -50,7 +50,6 @@ impl RuntimeTurnDriver<'_> {
             model: session_policy.llm_profile_config().clone(),
             messages,
             events: self.turn_pipeline.active_events(),
-            turn_causes: self.turn_causes.clone(),
             protocol_run_offset: run_offset,
             turn_driver_preamble,
             turn_budget: session_policy.turn_budget,

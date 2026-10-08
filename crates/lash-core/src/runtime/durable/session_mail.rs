@@ -232,15 +232,13 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<Head>, SessionMailError>
     if !mailbox.live || mailbox.closing || mailbox.bound_run.is_some() {
         return Ok(None);
     }
-    let head_batch = mailbox.batches.iter().min_by_key(|batch| batch.enqueue_seq);
-    if let Some(batch) = head_batch
-        && batch.kind != MailBatchKind::Turn
-    {
+    // A session command applies before the session's inputs.
+    if let Some(batch) = mailbox.batches.iter().min_by_key(|batch| batch.enqueue_seq) {
         let admission = match batch.kind {
             MailBatchKind::Operation => RunAdmissionRecord::Operation {
                 batch: batch.batch.clone(),
             },
-            _ => RunAdmissionRecord::Command {
+            MailBatchKind::Control => RunAdmissionRecord::Command {
                 batch: batch.batch.clone(),
             },
         };
@@ -249,47 +247,27 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<Head>, SessionMailError>
             admission,
         })));
     }
-    let head_input = mailbox.inputs.iter().min_by_key(|input| input.enqueue_seq);
-    let turn_batch = |batch: &lash_durable::domain::MailBatch| -> Result<_, SessionMailError> {
-        Ok(AdmittedInputs {
-            run: run_of(batch.batch.as_str())?,
-            admission: RunAdmissionRecord::Turn {
-                took: AdmittedTurnRows::Batch {
-                    id: batch.batch.clone(),
-                },
-                trace: None,
-            },
-        })
+    let Some(head) = mailbox.inputs.iter().min_by_key(|input| input.enqueue_seq) else {
+        return Ok(None);
     };
-    Ok(Some(match (head_input, head_batch) {
-        (Some(input), Some(batch)) if batch.enqueue_seq < input.enqueue_seq => {
-            Head::Run(turn_batch(batch)?)
-        }
-        (Some(head), batch) => {
-            let run = head
-                .run()
-                .ok_or_else(|| SessionMailError::Undecodable(format!("run id {}", head.input)))?;
-            let stop = batch.map(|batch| batch.enqueue_seq);
-            let mut inputs = mailbox
-                .inputs
-                .iter()
-                .filter(|input| input.enqueue_seq >= head.enqueue_seq)
-                .collect::<Vec<_>>();
-            inputs.sort_by_key(|input| input.enqueue_seq);
-            let inputs = inputs
-                .into_iter()
-                .take_while(|input| {
-                    (input.input == head.input || (!is_frame_task(head) && !is_frame_task(input)))
-                        && input.run_spec_hash == head.run_spec_hash
-                        && stop.is_none_or(|stop| input.enqueue_seq < stop)
-                })
-                .cloned()
-                .collect();
-            Head::Input { run, inputs }
-        }
-        (None, Some(batch)) => Head::Run(turn_batch(batch)?),
-        (None, None) => return Ok(None),
-    }))
+    let run = head
+        .run()
+        .ok_or_else(|| SessionMailError::Undecodable(format!("run id {}", head.input)))?;
+    let mut inputs = mailbox
+        .inputs
+        .iter()
+        .filter(|input| input.enqueue_seq >= head.enqueue_seq)
+        .collect::<Vec<_>>();
+    inputs.sort_by_key(|input| input.enqueue_seq);
+    let inputs = inputs
+        .into_iter()
+        .take_while(|input| {
+            (input.input == head.input || (!is_frame_task(head) && !is_frame_task(input)))
+                && input.run_spec_hash == head.run_spec_hash
+        })
+        .cloned()
+        .collect();
+    Ok(Some(Head::Input { run, inputs }))
 }
 
 fn is_frame_task(input: &MailInput) -> bool {

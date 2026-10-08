@@ -143,21 +143,21 @@ fn declarations_refuse_typed() {
     );
     assert_eq!(
         plain.admits(OutcomeShape::Done {
-            intents: &[ToolIntentKind::EmitTrigger]
+            intents: &[ToolIntentKind::CancelProcess]
         }),
         Err(DeclarationRefusal::UndeclaredIntent {
-            kind: ToolIntentKind::EmitTrigger
+            kind: ToolIntentKind::CancelProcess
         })
     );
     let deferring = ToolDeclaration {
         may_defer: true,
-        intents: vec![ToolIntentKind::EmitTrigger],
+        intents: vec![ToolIntentKind::CancelProcess],
         isolated: false,
     };
     assert_eq!(deferring.admits(OutcomeShape::Deferred), Ok(()));
     assert_eq!(
         deferring.admits(OutcomeShape::Done {
-            intents: &[ToolIntentKind::EmitTrigger]
+            intents: &[ToolIntentKind::CancelProcess]
         }),
         Ok(())
     );

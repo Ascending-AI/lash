@@ -716,7 +716,7 @@ fn assert_parent_ended(started: Result<ProcessId, crate::PluginError>, what: &st
 
 /// A8 (FIG-5222): process A lives `Until` the session and B `Until` A. A's
 /// terminal committed before its cascade marked B, so B is live below a
-/// terminal intermediate: the close waits on B before its `triggers` step,
+/// terminal intermediate: the close waits on B before its `artifacts` step,
 /// and deletes nothing until B ends.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_live_grandchild_below_a_terminal_intermediate_blocks_the_session_close() {
@@ -780,7 +780,7 @@ async fn a_turn_child_still_in_its_grace_blocks_the_session_close() {
 }
 
 /// Close the session on `cx` while `live` lives: the close stops before its
-/// `triggers` step with the session's storage kept, and finishes once
+/// `artifacts` step with the session's storage kept, and finishes once
 /// `live` has ended. A later claim of the session's node would take `live`
 /// too once its cancel is pending, so the close runs on the caller's claim.
 async fn assert_closes_only_after(world: &World, cx: &ActorContext, live: &ProcessId) {
@@ -1311,7 +1311,6 @@ impl crate::ProcessEngine for LawEngine {
     ) -> Result<crate::ProcessDefinitionResolution, crate::ProcessDefinitionRefusal> {
         Ok(crate::ProcessDefinitionResolution::new(
             crate::ProcessSignature::Unknown,
-            Vec::new(),
         ))
     }
 }

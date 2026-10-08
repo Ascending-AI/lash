@@ -23,12 +23,11 @@ use super::events::ProcessEventAppendRequest;
 ///             "fn effect_omissions_payload_schema",
 ///         ),
 ///     ),
-///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", from_event_type),
+///     items(path = "crates/lash-core-execution/src/runtime/process/events.rs", ProcessLifecycleFact),
 ///     items(
 ///         path = "crates/lash-core-execution/src/runtime/process/validation.rs",
 ///         validate_generic_process_event_append,
 ///     ),
-///     items(path = "crates/lash-core-execution/src/triggers/command.rs", failure_code),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
 /// version_surface = "migrate"
@@ -200,8 +199,7 @@ impl ProcessEffectOccurrence {
     /// The runtime append for this occurrence, keyed by the effect's replay
     /// key.
     pub fn append_request(&self) -> ProcessEventAppendRequest {
-        ProcessEventAppendRequest::new(PROCESS_EFFECT_OUTCOME_EVENT_TYPE, vocabulary_payload(self))
-            .with_replay_key(self.replay_key.clone())
+        ProcessEventAppendRequest::effect_outcome(self.clone())
     }
 }
 
@@ -295,11 +293,7 @@ impl ProcessEffectOmissions {
     /// The runtime append for this record, keyed by `replay_key`: one key per
     /// process run, so a redrive recovers the same event.
     pub fn append_request(&self, replay_key: impl Into<String>) -> ProcessEventAppendRequest {
-        ProcessEventAppendRequest::new(
-            PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-            vocabulary_payload(self),
-        )
-        .with_replay_key(replay_key)
+        ProcessEventAppendRequest::effect_omissions(self.clone(), replay_key)
     }
 }
 
@@ -325,14 +319,6 @@ fn require_vocabulary_version(
         });
     }
     Ok(version)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the vocabulary payloads are plain structs of strings, integers and maps, which always serialize"
-)]
-fn vocabulary_payload(payload: &impl Serialize) -> serde_json::Value {
-    serde_json::to_value(payload).expect("vocabulary payloads always serialize")
 }
 
 /// The code a recorded tool failure carries. A failure the runtime, a policy
@@ -380,27 +366,26 @@ impl ProcessEffectReport {
         self.nodes.get(node_id)
     }
 
-    /// Folds one event of the process's log, as a page of
-    /// `Processes::events` or the registry returns it. Events of other kinds
+    /// Folds one fact of the process's log, as a page of
+    /// `Processes::events` or the registry returns it. Facts of other kinds
     /// are ignored. `fleet_format` is the `F` the bound store recorded: the
     /// payload's read window comes from it (FIG-3796).
     pub fn fold_event(
         &mut self,
-        event_type: &str,
-        payload: &serde_json::Value,
+        fact: &super::ProcessLifecycleFact,
         fleet_format: crate::FleetFormat,
     ) -> Result<(), ProcessEffectReportError> {
-        match event_type {
-            PROCESS_EFFECT_OUTCOME_EVENT_TYPE => {
-                let outcome = ProcessEffectOccurrence::decode(payload.clone(), fleet_format)?;
+        match fact {
+            super::ProcessLifecycleFact::EffectOutcome(_) => {
+                let outcome = ProcessEffectOccurrence::decode(fact.payload(), fleet_format)?;
                 let node = self.node_entry(&outcome.node_id);
                 let position = node
                     .occurrences
                     .partition_point(|existing| existing.occurrence < outcome.occurrence);
                 node.occurrences.insert(position, outcome);
             }
-            PROCESS_EFFECT_OMISSIONS_EVENT_TYPE => {
-                let omissions = ProcessEffectOmissions::decode(payload.clone(), fleet_format)?;
+            super::ProcessLifecycleFact::EffectOmissions(_) => {
+                let omissions = ProcessEffectOmissions::decode(fact.payload(), fleet_format)?;
                 for (node_id, counts) in omissions.nodes {
                     self.node_entry(&node_id).omitted = counts;
                 }

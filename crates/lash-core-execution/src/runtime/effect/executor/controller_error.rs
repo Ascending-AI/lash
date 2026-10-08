@@ -76,14 +76,6 @@ impl From<PluginError> for RuntimeEffectControllerError {
                 });
                 error
             }
-            PluginError::TriggerOperation(err) => {
-                let code = if err.is_terminal() {
-                    RuntimeErrorCode::Plugin
-                } else {
-                    RuntimeErrorCode::PluginSessionManager
-                };
-                Self::new(code, err.to_string())
-            }
             PluginError::StoredDataCorrupt {
                 record_kind,
                 message,
@@ -156,7 +148,6 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::Invoke(_)
             | PluginError::State(_)
             | PluginError::Declaration(_)
-            | PluginError::InvalidTriggerTarget { .. }
             | PluginError::InvalidToolDiscovery { .. }
             | PluginError::InvalidBatchMaximum { .. }
             | PluginError::ResidentToolContractUnavailable { .. }
@@ -172,13 +163,10 @@ impl From<PluginError> for RuntimeEffectControllerError {
             | PluginError::ProcessOutputAttachmentUnavailable { .. }
             | PluginError::ProcessUnknown { .. }
             | PluginError::ProcessChangeCursorPruned { .. }
-            | PluginError::TriggerSubscriptionChangeCursorPruned { .. }
             | PluginError::ProcessEventsReleased { .. }
             | PluginError::ProcessHandedOver { .. }
             | PluginError::ProcessTerminalOutcomeMismatch { .. }
             | PluginError::ReservedProcessEvent { .. }
-            | PluginError::WakeDeliveryIdentityMismatch { .. }
-            | PluginError::ProcessWakeDeliveryFormatVersionMismatch { .. }
             | PluginError::ProcessRegistryCursorBackendMismatch { .. }) => {
                 Self::new(RuntimeErrorCode::Plugin, err.to_string())
             }

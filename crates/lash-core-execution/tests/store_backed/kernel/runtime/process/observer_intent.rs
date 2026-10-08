@@ -155,7 +155,7 @@ mod tests {
             .await
             .expect("read the observer audit events")
             .into_iter()
-            .filter(|event| event.event_type == "process.observer_added")
+            .filter(|event| event.kind() == crate::ProcessEventKind::ObserverAdded)
             .count();
         assert_eq!(
             observer_events, 1,

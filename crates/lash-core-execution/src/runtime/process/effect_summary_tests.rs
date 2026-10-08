@@ -17,23 +17,27 @@ fn the_append_payload_is_the_serde_encoding_and_round_trips() {
     let outcome = ProcessEffectOccurrence::new(
         "node",
         3,
-        "triggers.disable",
+        "fixture.disable",
         ProcessEffectOutcomeClass::Failure,
         Some(lash_sansio::FailureCode::lash(
-            lash_sansio::TurnFailureCode::from_wire("trigger_conflict"),
+            lash_sansio::TurnFailureCode::from_wire("fixture_conflict"),
         )),
         "effect:node:3",
         crate::FleetFormat::current(),
     );
     let request = outcome.append_request();
-    assert_eq!(request.payload, serde_json::to_value(&outcome).unwrap());
-    assert_eq!(request.payload["code"], "lash:trigger_conflict");
+    assert_eq!(
+        request.fact.payload(),
+        serde_json::to_value(&outcome).unwrap()
+    );
+    assert_eq!(request.fact.payload()["code"], "lash:fixture_conflict");
     assert_eq!(
         request.replay.as_ref().map(|replay| replay.key.as_str()),
         Some("effect:node:3")
     );
     assert_eq!(
-        ProcessEffectOccurrence::decode(request.payload, crate::FleetFormat::current()).unwrap(),
+        ProcessEffectOccurrence::decode(request.fact.payload(), crate::FleetFormat::current())
+            .unwrap(),
         outcome
     );
 }
@@ -50,14 +54,14 @@ fn only_failed_effects_can_carry_failure_codes() {
         for code in [
             None,
             Some(lash_sansio::FailureCode::lash(
-                lash_sansio::TurnFailureCode::from_wire("trigger_conflict"),
+                lash_sansio::TurnFailureCode::from_wire("fixture_conflict"),
             )),
         ] {
             let allowed = class == ProcessEffectOutcomeClass::Failure || code.is_none();
             let outcome = ProcessEffectOccurrence::new(
                 "node",
                 1,
-                "triggers.disable",
+                "fixture.disable",
                 class,
                 code,
                 "effect:node:1",
@@ -65,11 +69,11 @@ fn only_failed_effects_can_carry_failure_codes() {
             );
             let request = outcome.append_request();
             let mut report = ProcessEffectReport::default();
-            let result = report.fold_event(&request.event_type, &request.payload, fleet);
+            let result = report.fold_event(&request.fact, fleet);
             if allowed {
                 result.expect("a valid class-and-code pair must fold");
                 assert_eq!(report.node("node").unwrap().occurrences, vec![outcome]);
-                schema.validate(&request.payload).unwrap();
+                schema.validate(&request.fact.payload()).unwrap();
             } else {
                 assert!(
                     matches!(result, Err(ProcessEffectReportError::InvalidPayload(_))),
@@ -81,11 +85,11 @@ fn only_failed_effects_can_carry_failure_codes() {
                     "an invalid event changes no report"
                 );
                 assert!(
-                    serde_json::from_value::<ProcessEffectOccurrence>(request.payload.clone())
+                    serde_json::from_value::<ProcessEffectOccurrence>(request.fact.payload())
                         .is_err(),
                     "direct deserialization must enforce the same rule"
                 );
-                assert!(schema.validate(&request.payload).is_err());
+                assert!(schema.validate(&request.fact.payload()).is_err());
             }
         }
     }
@@ -93,14 +97,14 @@ fn only_failed_effects_can_carry_failure_codes() {
 
 #[test]
 fn decode_refuses_other_versions_unknown_fields_and_uncapped_occurrences() {
-    let mut payload = occurrence("node", 1).append_request().payload;
+    let mut payload = occurrence("node", 1).append_request().fact.payload();
     payload["vocabulary_version"] = serde_json::json!(0);
     assert!(matches!(
         ProcessEffectOccurrence::decode(payload, crate::FleetFormat::current()),
         Err(ProcessEffectReportError::UnsupportedVocabularyVersion { actual: 0, .. })
     ));
 
-    let mut payload = occurrence("node", 1).append_request().payload;
+    let mut payload = occurrence("node", 1).append_request().fact.payload();
     payload["unknown"] = serde_json::json!(true);
     assert!(matches!(
         ProcessEffectOccurrence::decode(payload, crate::FleetFormat::current()),
@@ -111,7 +115,7 @@ fn decode_refuses_other_versions_unknown_fields_and_uncapped_occurrences() {
     assert!(!ProcessEffectOccurrence::is_within_cap(beyond));
     assert!(!ProcessEffectOccurrence::is_within_cap(0));
     assert!(matches!(
-        ProcessEffectOccurrence::decode(occurrence("node", beyond).append_request().payload, crate::FleetFormat::current()),
+        ProcessEffectOccurrence::decode(occurrence("node", beyond).append_request().fact.payload(), crate::FleetFormat::current()),
         Err(ProcessEffectReportError::OccurrenceOutsideCap { occurrence }) if occurrence == beyond
     ));
 }
@@ -121,7 +125,7 @@ fn omission_records_are_strict() {
     let empty = ProcessEffectOmissions::new(BTreeMap::new(), crate::FleetFormat::current());
     assert!(matches!(
         ProcessEffectOmissions::decode(
-            empty.append_request("omissions").payload,
+            empty.append_request("omissions").fact.payload(),
             crate::FleetFormat::current()
         ),
         Err(ProcessEffectReportError::EmptyOmissions)
@@ -135,7 +139,7 @@ fn omission_records_are_strict() {
     omissions.occurrence_cap += 1;
     assert!(matches!(
         ProcessEffectOmissions::decode(
-            omissions.append_request("omissions").payload,
+            omissions.append_request("omissions").fact.payload(),
             crate::FleetFormat::current()
         ),
         Err(ProcessEffectReportError::UnsupportedOccurrenceCap { .. })
@@ -157,26 +161,22 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
             crate::FleetFormat::current(),
         )
         .append_request("omissions"),
-        ProcessEventAppendRequest::new("process.custom", serde_json::json!({})),
+        ProcessEventAppendRequest::observer_added(
+            &crate::process_id_for_test("fold"),
+            &crate::SessionId::from("observer"),
+            &crate::ProcessObserverBy::host("fold"),
+        ),
     ];
     let mut forward = ProcessEffectReport::default();
     for request in &events {
         forward
-            .fold_event(
-                &request.event_type,
-                &request.payload,
-                crate::FleetFormat::current(),
-            )
+            .fold_event(&request.fact, crate::FleetFormat::current())
             .unwrap();
     }
     let mut reverse = ProcessEffectReport::default();
     for request in events.iter().rev() {
         reverse
-            .fold_event(
-                &request.event_type,
-                &request.payload,
-                crate::FleetFormat::current(),
-            )
+            .fold_event(&request.fact, crate::FleetFormat::current())
             .unwrap();
     }
     assert_eq!(forward, reverse);

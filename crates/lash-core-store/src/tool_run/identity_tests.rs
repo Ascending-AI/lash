@@ -23,10 +23,6 @@ fn start_keys_keep_every_family_and_scope_tag() {
     };
     let keys: Vec<(&str, StartKey)> = vec![
         ("tool_intent", DERIVE.for_tool_intent(&intent)),
-        (
-            "trigger_delivery",
-            DERIVE.for_trigger_delivery("occurrence-1", "subscription-1", "incarnation-1", 3),
-        ),
         ("host", StartKey::for_host("host-key")),
         (
             "keyless/turn (scope tag 1)",
@@ -60,7 +56,6 @@ fn start_keys_keep_every_family_and_scope_tag() {
         rendered,
         vec![
             "tool_intent process-start-key:v1:intent:blake3:5dbfcc38194249b9dc1464436ae9f7ca238b89aa755da7ce5dacd00d4d31edac",
-            "trigger_delivery process-start-key:v1:trigger:blake3:c475f4f7b225dcebf50189746e216c09cb6379271a04f924f2b925d400305d5d",
             "host process-start-key:v1:host:blake3:6aa69ddf2235e541820d19240250265d5da2965589cc52083fd45aadc75f2950",
             "keyless/turn (scope tag 1) process-start-key:v1:keyless:blake3:e8f889d5614d20828986e7f9abe395573f686a2e9d60db236db629bc20ebdc1b",
             "keyless/process (scope tag 2) process-start-key:v1:keyless:blake3:02ee475cfb0af992b3fc14eae8258670340738fceba594e0ee4ae9c666f9868f",

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::definition_ref::{ProcessDefinitionRef, ProcessEngineKind};
-use super::events::{ProcessAwaitOutput, ProcessEventType, default_process_event_types};
+use super::events::ProcessAwaitOutput;
 use super::op_scope::ProcessOpScope;
 
 mod lifecycle;
@@ -124,7 +124,7 @@ pub enum ProcessInput {
 /// What a start names to run: an executable input, or the immutable
 /// definition one is resolved from.
 ///
-/// A start request, a trigger target and their journal entries carry it; a
+/// A start request and its journal entries carry it; a
 /// process row carries the [`ProcessInput`] it resolved to. An input is
 /// spelled exactly as [`ProcessInput`] spells it, so a start of one reads the
 /// same on the wire as the row it registers.
@@ -411,7 +411,7 @@ pub struct ProcessStartOptions {
     pub initial_observers: Vec<SessionId>,
     /// Runtime-internal spawn provenance override. Set by process execution
     /// contexts so children started *by a process* inherit the parent's
-    /// originator and wake target instead of being stamped with the ephemeral
+    /// originator instead of being stamped with the ephemeral
     /// execution scope. `None` means the session start path stamps the
     /// creating session (the in-session meaning of "start"). This rides
     /// options — not the request — so in-session callers cannot forge
@@ -420,12 +420,11 @@ pub struct ProcessStartOptions {
 }
 
 /// Provenance a process-run context hands to its children: the chain's
-/// originator and wake target. Observer membership remains an independent,
+/// originator. Observer membership remains an independent,
 /// explicit start option.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessSpawnProvenance {
     pub originator: ProcessOriginator,
-    pub wake_session_id: Option<SessionId>,
 }
 
 impl ProcessStartOptions {
@@ -622,13 +621,9 @@ pub struct ProcessRegistration<I = ProcessInput> {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_capability: Option<SessionId>,
     pub identity: ProcessIdentity,
-    #[serde(default)]
-    pub event_types: Vec<ProcessEventType>,
     pub provenance: ProcessProvenance,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<ProcessExecutionEnvRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_session_id: Option<SessionId>,
     /// The parked call that consumes this process's terminal, when a
     /// declared start registered it (ADR 0116 §3.6). The registrar writes the
     /// hold with the row, and prune leaves a held row alone.
@@ -665,10 +660,8 @@ impl<I> Clone for ProcessRegistration<I> {
             ancestry: self.ancestry.clone(),
             session_capability: self.session_capability.clone(),
             identity: self.identity.clone(),
-            event_types: self.event_types.clone(),
             provenance: self.provenance.clone(),
             env_ref: self.env_ref.clone(),
-            wake_session_id: self.wake_session_id.clone(),
             consumer_hold: self.consumer_hold.clone(),
             engine_config: self.engine_config.clone(),
             trace: self.trace.clone(),
@@ -789,10 +782,8 @@ impl<I> ProcessRegistration<I> {
             ancestry: Ancestry::root(),
             session_capability,
             identity,
-            event_types: default_process_event_types(),
             provenance,
             env_ref: None,
-            wake_session_id: None,
             consumer_hold: None,
             engine_config: None,
             trace: lash_trace::TraceScopeOffer::default(),
@@ -838,10 +829,8 @@ impl<I> ProcessRegistration<I> {
             ancestry: self.ancestry,
             session_capability: self.session_capability,
             identity: self.identity,
-            event_types: self.event_types,
             provenance: self.provenance,
             env_ref: self.env_ref,
-            wake_session_id: self.wake_session_id,
             consumer_hold: self.consumer_hold,
             engine_config: self.engine_config,
             trace: self.trace,
@@ -889,13 +878,6 @@ impl<I> ProcessRegistration<I> {
         self
     }
 
-    /// Sets the wake session id carried by a `ProcessRegistration` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
-        self.wake_session_id = wake_session_id;
-        self
-    }
-
     /// Registers the process under a parked call's hold (ADR 0116 §3.6).
     pub fn with_consumer_hold(mut self, consumer_hold: Option<ConsumerHold>) -> Self {
         self.consumer_hold = consumer_hold;
@@ -908,8 +890,7 @@ impl<I> ProcessRegistration<I> {
         self
     }
 
-    /// Adopts an identity the engine registry admitted, together with the
-    /// signal event types the engine resolved for it.
+    /// Adopts an identity the engine registry admitted.
     ///
     /// This is the only way a registration's derived identity is replaced, and
     /// [`AdmittedProcessIdentity`](crate::AdmittedProcessIdentity) is the only
@@ -925,13 +906,7 @@ impl<I> ProcessRegistration<I> {
     /// host-declared label is restored after admission, from the declaration
     /// that carried it, by [`Self::with_host_facing_label`].
     pub fn with_admitted_identity(mut self, admitted: crate::AdmittedProcessIdentity) -> Self {
-        let (identity, signals) = admitted.into_parts();
-        self.identity = identity;
-        for signal in signals {
-            if !self.event_types.contains(&signal) {
-                self.event_types.push(signal);
-            }
-        }
+        self.identity = admitted.into_identity();
         self
     }
 
@@ -954,34 +929,14 @@ impl<I> ProcessRegistration<I> {
         }
         self
     }
-
-    /// Sets the event types carried by a `ProcessRegistration` for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
-    pub fn with_event_types(
-        mut self,
-        event_types: impl IntoIterator<Item = ProcessEventType>,
-    ) -> Self {
-        self.event_types = event_types.into_iter().collect();
-        self
-    }
-
-    /// Sets the extra event types carried by a `ProcessRegistration` for store and
-    /// durable-substrate implementors while persisting and coordinating durable process execution.
-    pub fn with_extra_event_types(
-        mut self,
-        event_types: impl IntoIterator<Item = ProcessEventType>,
-    ) -> Self {
-        self.event_types.extend(event_types);
-        self
-    }
 }
 
 /// Whether a durable write landed on this call, or coalesced onto a fact the
 /// store already held under the same durable key.
 ///
 /// Every identity-bearing store write in this runtime is idempotent under its
-/// own durable key: a re-presented start, event append, signal, cancellation
-/// request or trigger occurrence returns the recorded fact instead of writing a
+/// own durable key: a re-presented start, event append or cancellation
+/// request returns the recorded fact instead of writing a
 /// second one. The store is the only layer that knows which of the two
 /// happened, and callers that report replay to a host -- the tool-intent
 /// ingress above all -- cannot infer it from a successful `Ok` (FIG-3070).
@@ -1177,7 +1132,7 @@ pub struct ProcessIdentity {
     /// one. It is the whole reference, not a bare blob: the engine kind that
     /// owns the definition, the definition value, and the signature claimed for
     /// it when the row was created. These admission facts persist independently
-    /// of the immutable definition id, including in historical trigger receipts.
+    /// of the immutable definition id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub definition: Option<ProcessDefinitionRef>,
     /// The immutable definition a start by id admitted this row from
@@ -1474,7 +1429,6 @@ impl ProcessListMode {
 pub struct ProcessSessionDeleteReport {
     pub session_id: SessionId,
     pub removed_observer_count: usize,
-    pub cleared_subscription_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

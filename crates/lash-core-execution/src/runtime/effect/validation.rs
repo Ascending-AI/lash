@@ -376,26 +376,6 @@ mod tests {
         CanonicalRuntimeEffectEnvelope::capture(&envelope(input)).expect("canonical envelope")
     }
 
-    fn session_list_envelope() -> RuntimeEffectEnvelope {
-        RuntimeEffectEnvelope::new(
-            RuntimeEffectInvocation::new(
-                crate::EffectAddress::new(
-                    crate::ExecutionScope::turn("session-blue", "turn-blue"),
-                    "trigger:list",
-                )
-                .expect("valid trigger-list address"),
-                crate::RuntimeAttribution::for_session("session-blue"),
-                "trigger:list",
-            ),
-            RuntimeEffectCommand::Trigger {
-                command: Box::new(crate::TriggerCommand::List {
-                    owner_scope: crate::TriggerOwnerScope::session("session-blue"),
-                    filter: crate::TriggerSubscriptionFilter::for_session("session-blue"),
-                }),
-            },
-        )
-    }
-
     /// The last shape that carried the batch command (FIG-3397): a one-call
     /// `ToolBatch` envelope in its canonical form.
     const PREDECESSOR_TOOL_BATCH_ENVELOPE: &str = r#"{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"session-blue\",\"turn_id\":\"turn-blue\"},\"replay_key\":\"turn-blue:tool-batch:batch-blue\"},\"effect_id\":\"tool-batch:batch-blue\",\"attribution\":{\"session_id\":\"session-blue\"}},\"command\":{\"type\":\"tool_batch\",\"batch\":{\"batch_id\":\"batch-blue\",\"calls\":[{\"call\":{\"call_id\":\"call-blue\",\"tool_id\":\"tool:blue\",\"tool_name\":\"blue\",\"args\":{\"q\":1}},\"replay_suffix\":\"child:0:call-blue\"}]}}}","hash":"36052881d682e556eb511c93336435ca2192d8e1a1020ef6032eeca81ae1f0ab"}"#;
@@ -415,7 +395,7 @@ mod tests {
         ] {
             let recorded: CanonicalRuntimeEffectEnvelope =
                 serde_json::from_str(retired).expect("recorded envelope");
-            let reconstructed = session_list_envelope()
+            let reconstructed = envelope(json!({"q": 1}))
                 .canonical_form()
                 .expect("reconstructed envelope");
             let error = validate_replayed_effect_envelope(

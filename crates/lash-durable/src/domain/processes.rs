@@ -13,10 +13,6 @@ use lash_sansio::{CancelOrigin, ProcessId};
 
 use super::keys::ScopeKey;
 
-/// The mail kind of a signal sent to a process: its body is the signal,
-/// encoded by its owner, and it reaches `advance` as one event.
-pub const SIGNAL_MAIL: &str = "signal";
-
 /// One process actor's row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessActorRow {
@@ -63,17 +59,6 @@ pub enum ProcessWrite {
     /// [`DomainRefusal::ProcessStartRefused`](super::DomainRefusal::ProcessStartRefused)
     /// when the registrar refuses the start.
     Register(ProcessStartRows),
-    /// Send a signal, encoded by its owner, to `process`: its event is
-    /// appended exactly once under the signal's identity, and its mail and
-    /// the process's wake ride the same commit. A process that is unknown
-    /// or already terminal takes nothing: the signal reached no live
-    /// process, as one sent just before the process ended.
-    Signal {
-        /// The process.
-        process: ProcessId,
-        /// The signal.
-        signal_json: String,
-    },
     /// Commit one engine transition: the state revision moves from
     /// `expected_rev` to `expected_rev + 1` and the driver state is
     /// replaced. Refused with
@@ -96,9 +81,9 @@ pub enum ProcessWrite {
         /// The last event handed to the sinks.
         through: u64,
     },
-    /// Append one process event, encoded by its owner, exactly once: the
+    /// Append one lifecycle event, encoded by its owner, exactly once: the
     /// replay key makes a repeat of the same commit a no-op.
-    Emit {
+    AppendEvent {
         /// The process.
         process: ProcessId,
         /// The event's type.
@@ -107,10 +92,6 @@ pub enum ProcessWrite {
         payload_json: String,
         /// Its replay key.
         replay_key: String,
-        /// Whether the wake its type declares is withheld: a parked call's
-        /// announcement of its own wait wakes nobody, while the event is
-        /// journaled as any other append of its type is.
-        wake_suppressed: bool,
     },
     /// End the process with its terminal, encoded by its owner. A process
     /// already terminal keeps its first terminal. The cascade over its

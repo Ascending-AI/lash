@@ -9,11 +9,8 @@ pub use observations::RuntimeExecutionTracing;
 pub(crate) use observations::ToolObservationAttribution;
 mod referrers;
 mod tool_completion;
-pub(crate) use tool_completion::ToolCallStart;
-mod trigger_scope;
 pub(crate) use referrers::execution_claim_of;
-use trigger_scope::missing_process_execution_error;
-pub use trigger_scope::resolve_trigger_owner_scope;
+pub(crate) use tool_completion::ToolCallStart;
 
 use tokio_util::sync::CancellationToken;
 
@@ -116,7 +113,7 @@ pub struct RuntimeExecutionContext<'run> {
     pub(super) language_calls: crate::runtime::process::LanguageCallAttributions,
     /// Work-driver handle for this execution's process wiring, when the
     /// deployment provides one. Threaded through so in-run process
-    /// operations (e.g. signalling another process) that build their own
+    /// operations (e.g. cancelling another process) that build their own
     /// `RuntimeEffectLocalExecutor::processes(..)` call can hand it along
     /// instead of falling back to hub-less backoff polling.
     process_work: Option<crate::ProcessWorkWiring>,
@@ -158,7 +155,6 @@ pub(crate) struct RuntimeProcessExecution {
     pub process_id: ProcessId,
     pub originator: crate::ProcessOriginator,
     pub env_ref: Option<crate::ProcessExecutionEnvRef>,
-    pub wake_session_id: Option<SessionId>,
     pub event_context: Option<RuntimeExecutionProcessEventContext>,
 }
 
@@ -518,13 +514,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    pub fn trigger_store(&self) -> Option<Arc<dyn crate::TriggerStore>> {
-        self.dispatch
-            .trigger_router
-            .as_ref()
-            .map(crate::TriggerRouter::store)
-    }
-
     /// The fleet-format generation this context's durable writers emit —
     /// `F` as the bound store recorded it, or this build's own generation
     /// where the context holds no store (FIG-3796).
@@ -809,7 +798,7 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     /// This context serving one replayed language command (FIG-3586): every
     /// journal write the command makes — a tool attempt, a runtime value, a
-    /// trigger operation, a sleep, a group open, a process command — asks
+    /// sleep, a group open, a process command — asks
     /// `guard` first.
     pub fn with_command_journal_guard(&self, guard: Arc<crate::CommandJournalGuard>) -> Self {
         let mut dispatch = (*self.dispatch).clone();
@@ -874,7 +863,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             .as_ref()
             .map(|exec| crate::ProcessSpawnProvenance {
                 originator: exec.originator.clone(),
-                wake_session_id: exec.wake_session_id.clone(),
             })
     }
 
@@ -904,14 +892,14 @@ impl<'run> RuntimeExecutionContext<'run> {
             return Ok(registration);
         }
         let claim = execution_claim_of(self.dispatch.effect_controller.execution_scope())?;
-        let env_ref = self.captured_process_execution_env_ref(&claim).await?;
+        let env_ref = self.capture_execution_env(&claim).await?;
         Ok(registration.with_execution_env_ref(Some(env_ref)))
     }
 
-    /// Publish or acquire this execution's captured environment under `claim`
-    /// before persisting its digest in a declaration. An ended referrer refuses
-    /// acquisition; it cannot resurrect a reclaimed environment.
-    pub async fn captured_process_execution_env_ref(
+    /// Publish or acquire this execution's environment under `claim` before
+    /// persisting its digest in a start or a tool run. An ended referrer
+    /// refuses acquisition; it cannot resurrect a reclaimed environment.
+    pub(crate) async fn capture_execution_env(
         &self,
         claim: &crate::ReferrerClaim,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
@@ -995,100 +983,8 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Appends replay-scoped process events for code-executor implementors as
-    /// one atomic batch (FIG-3571), in order, and returns the stored events.
-    /// Each coordinated wake delivery the batch produced is enqueued after it
-    /// commits.
-    pub async fn append_process_events(
-        &self,
-        requests: Vec<crate::ProcessEventAppendRequest>,
-    ) -> Result<Vec<crate::ProcessEvent>, crate::PluginError> {
-        let exec = self
-            .process_execution
-            .as_ref()
-            .ok_or_else(missing_process_execution_error)?;
-        let context = exec
-            .event_context
-            .as_ref()
-            .ok_or_else(missing_process_execution_error)?;
-        let receipts = context
-            .process_work
-            .registry()
-            .append_events(
-                &exec.process_id,
-                requests,
-                &context.execution_write_authority,
-            )
-            .await?;
-        Ok(receipts.into_iter().map(|receipt| receipt.event).collect())
-    }
-
     pub fn callable_tool_manifest_by_id(&self, id: &crate::ToolId) -> Option<crate::ToolManifest> {
         crate::tool_dispatch::resolve_callable_manifest_by_id(&self.dispatch, id)
-    }
-
-    /// Appends one named, replay-scoped signal to a process for code-executor implementors.
-    pub async fn signal_process_by_id(
-        &self,
-        process_id: &ProcessId,
-        signal_name: &str,
-        signal_id: String,
-        payload: serde_json::Value,
-    ) -> Result<crate::ProcessEvent, crate::RuntimeEffectControllerError> {
-        self.process_execution
-            .as_ref()
-            .and_then(|exec| exec.event_context.as_ref())
-            .ok_or_else(missing_process_execution_error)?;
-        let identity =
-            crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?;
-        let command = crate::ProcessCommand::Signal {
-            signal: crate::ProcessSignal::new(identity, payload),
-        };
-        let effect_id = command.effect_id();
-        let invocation = crate::runtime::causal::process_effect_invocation(
-            self.dispatch.effect_controller.execution_scope(),
-            self.parent_invocation
-                .as_ref()
-                .map(|parent| parent.attribution.clone())
-                .unwrap_or_else(crate::RuntimeAttribution::none),
-            self.parent_invocation.clone(),
-            &effect_id,
-        );
-        let scoped = self.dispatch.effect_controller.clone();
-        let envelope = crate::RuntimeEffectEnvelope::new(
-            invocation,
-            crate::RuntimeEffectCommand::process(command),
-        );
-        let registry = self
-            .process_execution
-            .as_ref()
-            .and_then(|exec| exec.event_context.as_ref())
-            .map(|context| Arc::clone(context.process_work.registry()))
-            .ok_or_else(missing_process_execution_error)?;
-        let local_executor = crate::RuntimeEffectLocalExecutor::processes(
-            Arc::clone(&registry),
-            self.process_work
-                .as_ref()
-                .map(|work| Arc::clone(work.port()))
-                .ok_or_else(|| {
-                    crate::RuntimeEffectControllerError::foreign(
-                        "process_work_unavailable",
-                        crate::TurnFailureCause::Outcome,
-                        "process execution has no process-work port",
-                    )
-                })?,
-            self.dispatch.process_engines.clone(),
-            crate::runtime::HostStartAdmission::default(),
-        )
-        .with_process_attachments(Arc::clone(self.attachment_store.referrers()));
-        let outcome = scoped.process_effect(envelope, local_executor).await?;
-        match outcome.into_process()? {
-            crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
-            other => Err(crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                format!("expected signal outcome, got {other:?}"),
-            )),
-        }
     }
 
     /// The projection providers of the backend this context's actor runs
@@ -1105,104 +1001,6 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn chronological_projection(&self) -> Arc<crate::ChronologicalProjection> {
         Arc::clone(&self.chronological_projection)
-    }
-
-    pub async fn execute_trigger_effect(
-        &self,
-        effect_id: String,
-        mut command: crate::TriggerCommand,
-    ) -> Result<crate::TriggerEffectResult, crate::RuntimeEffectControllerError> {
-        self.admit_trigger_command_target(&mut command).await?;
-        let store = self.trigger_store().ok_or_else(|| {
-            crate::RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::TriggerStoreUnavailable,
-                "trigger store is unavailable in this runtime",
-            )
-        })?;
-        let store = self.revision_referrer_trigger_store(store)?;
-        #[expect(
-            clippy::expect_used,
-            reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
-        )]
-        let invocation = crate::RuntimeEffectInvocation::new(
-            crate::EffectAddress::new(
-                self.dispatch.effect_controller.execution_scope().clone(),
-                effect_id.clone(),
-            )
-            .expect("runtime context carries an admitted effect scope"),
-            self.effect_attribution(),
-            effect_id.clone(),
-        )
-        .with_caused_by(
-            self.parent_invocation
-                .as_ref()
-                .and_then(crate::RuntimeInvocation::causal_ref),
-        );
-        self.dispatch
-            .effect_controller
-            .tool_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    invocation,
-                    crate::RuntimeEffectCommand::Trigger {
-                        command: Box::new(command),
-                    },
-                ),
-                crate::RuntimeEffectLocalExecutor::triggers(store),
-            )
-            .await?
-            .into_trigger()
-    }
-
-    /// Runs the engine registry's admission on every registration-shaped
-    /// trigger command before it reaches the store (FIG-1522).
-    ///
-    /// A subscription's target is admitted exactly once, here: delivery replays
-    /// the recorded target without re-gating it, so an unregistered engine kind
-    /// that got past this point would produce starts admitted nowhere. A
-    /// registration whose target names an engine therefore requires a wired
-    /// engine registry; there is no unchecked path.
-    async fn admit_trigger_command_target(
-        &self,
-        command: &mut crate::TriggerCommand,
-    ) -> Result<(), crate::RuntimeEffectControllerError> {
-        let draft = match command {
-            crate::TriggerCommand::Register { draft, .. }
-            | crate::TriggerCommand::Update { draft, .. }
-            | crate::TriggerCommand::Revive { draft, .. } => draft,
-            _ => return Ok(()),
-        };
-        if !matches!(
-            draft.target,
-            crate::ProcessStartTarget::Input(crate::ProcessInput::Engine { .. })
-                | crate::ProcessStartTarget::Definition { .. }
-        ) {
-            return Ok(());
-        }
-        // A runtime that wired no process-engine registry has no authority to
-        // consult: there is nothing here that could say whether the kind is
-        // known, and the start itself still fails closed when the engine is
-        // missing. Refusing here instead would break every embedder that
-        // registers triggers without an engine registry, which is not the hole
-        // FIG-1522 names — that hole is a *configured* registry never being
-        // asked.
-        let Some(registry) = self
-            .dispatch
-            .trigger_router
-            .as_ref()
-            .and_then(crate::TriggerRouter::process_engines)
-        else {
-            if matches!(draft.target, crate::ProcessStartTarget::Definition { .. }) {
-                return Err(crate::RuntimeEffectControllerError::foreign(
-                    "process_definition_store_unavailable",
-                    crate::TurnFailureCause::Outcome,
-                    "trigger definition admission requires a process-engine registry",
-                ));
-            }
-            return Ok(());
-        };
-        crate::admit_trigger_registration_target(registry, draft)
-            .await
-            .map_err(crate::RuntimeEffectControllerError::from)
     }
 
     pub fn parent_invocation(&self) -> Option<&crate::RuntimeInvocation> {
@@ -1236,32 +1034,6 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub(crate) fn with_live_tool_catalog(mut self, live: Arc<crate::ToolCatalog>) -> Self {
         self.live_tool_catalog = Some(live);
         self
-    }
-
-    /// The originator a trigger command issued here acts as: the process's
-    /// recorded originator, or the session frame itself.
-    pub fn trigger_actor(&self) -> Result<crate::ProcessOriginator, crate::PluginError> {
-        match self.process_execution.as_ref() {
-            Some(exec) => Ok(exec.originator.clone()),
-            None => Ok(crate::ProcessOriginator::session(self.session_scope()?)),
-        }
-    }
-
-    pub fn trigger_owner_scope(&self) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
-        resolve_trigger_owner_scope(
-            &self.dispatch.owner.runtime_owner(),
-            self.process_execution.as_ref().map(|exec| &exec.originator),
-        )
-    }
-
-    /// Where a registration's deliveries wake: the process's recorded wake
-    /// target, else the session frame. A process with no wake target wakes
-    /// nothing.
-    pub fn trigger_registration_wake_target(&self) -> Option<crate::SessionScope> {
-        match self.process_execution.as_ref() {
-            Some(exec) => exec.wake_session_id.as_ref().map(crate::SessionScope::new),
-            None => self.session_scope().ok(),
-        }
     }
 
     pub fn turn_context(&self) -> &crate::TurnContext {

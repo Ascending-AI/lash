@@ -22,7 +22,7 @@ pub use crate::run_spec::{
     RunOptionsOwner, RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, SlotId,
     TerminationPolicy,
 };
-use crate::{CheckpointKind, PluginMessage, SessionId, TurnCause, TurnId};
+use crate::{CheckpointKind, PluginMessage, SessionId, TurnId};
 use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
@@ -1004,10 +1004,7 @@ impl AdmittedTurnInputs {
                 messages.push(message);
             }
         }
-        Ok(QueuedCheckpointTurnInput {
-            messages,
-            turn_causes: Vec::new(),
-        })
+        Ok(QueuedCheckpointTurnInput { messages })
     }
 }
 
@@ -1022,7 +1019,6 @@ pub(crate) fn source_key_display_id(source: &str) -> String {
 #[derive(Clone, Debug, Default)]
 pub struct QueuedCheckpointTurnInput {
     pub messages: Vec<crate::Message>,
-    pub turn_causes: Vec<TurnCause>,
 }
 pub(crate) fn plugin_message_from_turn_input(input: &TurnInput) -> Option<PluginMessage> {
     let parts: Vec<_> = input

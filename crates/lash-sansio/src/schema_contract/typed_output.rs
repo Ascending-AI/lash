@@ -169,8 +169,7 @@ fn validate_lash_type_schema_at_depth(
     }
 
     let Some(kind) = object.get("type").and_then(Value::as_str) else {
-        // The empty schema is emitted for `any`, process, and trigger-handle
-        // types. JSON Schema deliberately has no scalar name for that shape.
+        // The empty schema is emitted for `any` and process types. JSON Schema deliberately has no scalar name for that shape.
         if object.is_empty() {
             return Ok(());
         }

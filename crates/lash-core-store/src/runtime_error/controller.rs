@@ -127,8 +127,7 @@ impl RuntimeEffectControllerError {
     /// definition lookup, FIG-3838), a config transaction's resolution under
     /// reducers other than it was admitted with (FIG-4379), a run's scope
     /// close and a session's close,
-    /// whose store faults are the attempt's (FIG-3600), a trigger delivery's
-    /// admission, whose binding read is the attempt's (FIG-4369), a follow-on
+    /// whose store faults are the attempt's (FIG-3600), a follow-on
     /// recovery run's decision (FIG-4361), and a process command
     /// that marked its registry fault retryable (a session deletion's process
     /// cleanup, after its close) can consume derivation retry authority, as

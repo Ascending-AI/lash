@@ -270,8 +270,6 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     /// The history records after the window's.
     pub(super) events: CheckpointContentRef,
     #[serde(default)]
-    pub(super) turn_causes: Vec<TurnCause>,
-    #[serde(default)]
     pub(super) progress_event_cursor: usize,
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
@@ -591,7 +589,6 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) messages: MessageSequence,
     pub(super) prompt_messages: MessageSequence,
     pub(super) events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
-    pub(super) turn_causes: Vec<TurnCause>,
     pub(super) progress_event_cursor: usize,
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,

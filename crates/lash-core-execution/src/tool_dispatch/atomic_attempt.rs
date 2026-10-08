@@ -32,7 +32,6 @@ impl<'run> AtomicToolAttempt<'run> {
             .direct_completions
             .with_tool_attempt_parent_invocation(invocation.clone())
             .with_effect_attempt(effect_attempt);
-        dispatch.trigger_outcomes = super::ToolTriggerOutcomeBuffer::default();
         let dispatch = Arc::new(dispatch);
         let mut tool_context =
             tool_context.with_attempt_dispatch(Arc::clone(&dispatch), invocation);
@@ -82,8 +81,7 @@ impl<'run> AtomicToolAttempt<'run> {
                 crate::ToolAttemptLaunch::Done { record, intents }
             }
         };
-        let triggers = context.trigger_outcomes.drain();
-        Ok(crate::ToolAttemptEffectOutcome { launch, triggers })
+        Ok(crate::ToolAttemptEffectOutcome { launch })
     }
 }
 
@@ -165,40 +163,6 @@ impl<'grant> AttemptAuthority<'grant> {
                 .with_granted_source_id(grant.source_id.clone()),
         }
     }
-}
-
-/// A recorded attempt body cannot append process events — its
-/// [`crate::AttemptContext`] has no route to them — so a tool that must
-/// announce its durable wait declares the event on its
-/// [`crate::PendingCompletion`] instead. The announcement is staged here as a
-/// store-local effect of the park in `process`, the process the call runs
-/// inside: it commits in the transaction that records the park, so the
-/// announcement cannot exist without the park it announces. A call that runs
-/// inside no process has nowhere to announce, and fails rather than parking
-/// silently.
-///
-/// The declaration is dropped from `pending`: it has been staged, and nothing
-/// downstream may replay it out of this seam.
-pub(super) fn stage_park_announcement(
-    process: Option<&crate::ProcessId>,
-    pending: &mut crate::PendingCompletion,
-) -> Result<Option<crate::runtime::actor::round::StoreLocalEffect>, Box<crate::ToolFailure>> {
-    let Some(announcement) = pending.announcement.take() else {
-        return Ok(None);
-    };
-    let Some(process) = process else {
-        return Err(Box::new(crate::ToolFailure::runtime(
-            ToolFailureClass::Internal,
-            "pending_tool_announcement_failed",
-            "declared park announcement could not be appended: process event emission is \
-             unavailable outside a durable process",
-        )));
-    };
-    Ok(Some(
-        crate::runtime::actor::round::StoreLocalEffect::ParkAnnouncement(
-            announcement.into_rows(process.clone()),
-        ),
-    ))
 }
 
 /// The failure an outcome its admitted declaration does not admit answers
@@ -418,16 +382,6 @@ async fn hold_declared_execution_environments(
             intents
                 .intents
                 .iter()
-                .filter(|intent| match intent {
-                    crate::ToolIntent::RegisterTrigger(registration) => {
-                        super::intent_executor::validate_trigger_registration_authority(
-                            &context.intent_realization_context(),
-                            registration,
-                        )
-                        .is_none()
-                    }
-                    _ => true,
-                })
                 .filter_map(crate::ToolIntent::execution_env_ref)
                 .cloned()
                 .collect()

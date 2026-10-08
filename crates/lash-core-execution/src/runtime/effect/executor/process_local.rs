@@ -144,7 +144,6 @@ impl ProcessLocalExecution {
                         session_turn_admission: host_start.session_turn_admission.as_ref(),
                         executor: "process start on the local executor",
                         starter: &starter,
-                        trigger_route: None,
                     },
                     registration,
                     &observers,
@@ -329,35 +328,6 @@ impl ProcessLocalExecution {
                     realization,
                 ))
             }
-            ProcessCommand::Signal { signal } => {
-                let process_id = signal.identity.process_id();
-                // The append admits the signal and mails it to the process
-                // actor in one store transaction; a redelivered signal is
-                // served its admitted event and mails nothing (ADR 0132 §10).
-                let result = registry
-                    .append_event(process_id, signal.append_request())
-                    .await?;
-                let realization = result.realization;
-                Ok((
-                    ProcessEffectOutcome::Signal {
-                        event: Box::new(result.event),
-                    },
-                    realization,
-                ))
-            }
-            ProcessCommand::EmitEvent {
-                process_id,
-                request,
-            } => {
-                let result = registry.append_event(&process_id, request).await?;
-                Ok((
-                    ProcessEffectOutcome::EmitEvent {
-                        event: Box::new(result.event),
-                        wake_delivery: result.wake_delivery.map(Box::new),
-                    },
-                    result.realization,
-                ))
-            }
             ProcessCommand::PublishDefinition { .. } | ProcessCommand::GetDefinition { .. } => {
                 Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
@@ -400,38 +370,11 @@ impl ProcessLocalExecution {
                 session_turn_admission: self.host_start.session_turn_admission.as_ref(),
                 executor: "process start staged by its call",
                 starter: &starter,
-                trigger_route: None,
             },
             registration,
             &observers,
         ))
         .await
-    }
-
-    /// Stage `signal` as a store-local effect of the call that sends it:
-    /// its append is admitted against the target's row as it stands, and
-    /// nothing is appended or mailed here. The call's outcome commits the
-    /// signal's event, its mail and the target's wake.
-    ///
-    /// # Errors
-    ///
-    /// An unknown target, and the append's refusal.
-    pub async fn stage_signal(
-        &self,
-        signal: &crate::ProcessSignal,
-    ) -> Result<crate::runtime::actor::round::StoreLocalEffect, RuntimeEffectControllerError> {
-        let process_id = signal.identity.process_id();
-        let record = self
-            .registry
-            .get_process(process_id)
-            .await?
-            .ok_or_else(|| crate::PluginError::ProcessUnknown {
-                process_id: process_id.clone(),
-            })?;
-        crate::runtime::admit_process_signal_append(&record, &signal.append_request())?;
-        Ok(crate::runtime::actor::round::StoreLocalEffect::signal(
-            signal,
-        )?)
     }
 }
 

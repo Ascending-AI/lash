@@ -64,18 +64,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
             .await?)
     }
 
-    /// Stage `signal` as a store-local effect of the call that sends it.
-    async fn stage_signal(
-        &self,
-        signal: &crate::ProcessSignal,
-    ) -> Result<crate::StoreLocalEffect, crate::PluginError> {
-        Ok(self
-            .local_executor()
-            .into_process()?
-            .stage_signal(signal)
-            .await?)
-    }
-
     #[expect(
         clippy::expect_used,
         reason = "the process service requires its host's process-work wiring"
@@ -164,33 +152,6 @@ impl<'scope> ProcessCommandRunner<'scope> {
         match self.run(command).await? {
             crate::ProcessEffectOutcome::Cancel { record } => Ok(*record),
             _ => Err(wrong_process_outcome("cancel")),
-        }
-    }
-
-    async fn signal(
-        &self,
-        signal: crate::ProcessSignal,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        match self.run(crate::ProcessCommand::Signal { signal }).await? {
-            crate::ProcessEffectOutcome::Signal { event } => Ok(*event),
-            _ => Err(wrong_process_outcome("signal")),
-        }
-    }
-
-    async fn emit_event(
-        &self,
-        process_id: &ProcessId,
-        request: crate::ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        match self
-            .run(crate::ProcessCommand::EmitEvent {
-                process_id: process_id.clone(),
-                request,
-            })
-            .await?
-        {
-            crate::ProcessEffectOutcome::EmitEvent { event, .. } => Ok(*event),
-            _ => Err(wrong_process_outcome("emit_event")),
         }
     }
 
@@ -393,22 +354,18 @@ impl ProcessCapability {
             .await?;
         // Children started *by a process* inherit the chain's provenance (the
         // run context provides it); in-session starts stamp the creating
-        // session. Wake routing and observer membership are independent: only
-        // the explicit `options.initial_observers` set creates edges. The ephemeral
-        // execution scope must never appear on a record.
-        let (originator, wake_session_id) = match options.spawn_provenance.clone() {
-            Some(spawn) => (spawn.originator, spawn.wake_session_id),
-            None => (
-                crate::ProcessOriginator::session(creator_scope.clone()),
-                Some(creator_scope.session_id.clone()),
-            ),
+        // session. Only the explicit `options.initial_observers` set creates
+        // observer edges. The ephemeral execution scope must never appear on
+        // a record.
+        let originator = match options.spawn_provenance.clone() {
+            Some(spawn) => spawn.originator,
+            None => crate::ProcessOriginator::session(creator_scope.clone()),
         };
         let registration = registration
             .with_process_provenance(
                 crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
             )
-            .with_execution_env_ref(env_ref)
-            .with_wake_session_id(wake_session_id);
+            .with_execution_env_ref(env_ref);
         let registration = with_admitted_start_cx(current, registration, &scope).await?;
         let registration = self
             .admit_session_turn_start(current, registration, validation_env_spec.as_ref())
@@ -771,83 +728,6 @@ impl ProcessCapability {
                 identity.replay_key.clone(),
                 Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
             )
-            .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(in crate::runtime::session_manager) async fn emit_process_event(
-        &self,
-        current: &CurrentOwnerCapability,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-        event_type: String,
-        replay_key: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.validate_model_tool_process_handles(
-            current,
-            &crate::RuntimeOwner::Session(session_id.clone()),
-            std::slice::from_ref(process_id),
-            scope.clone(),
-        )
-        .await?;
-        let request =
-            crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(replay_key);
-        self.command_runner(current, &scope)?
-            .emit_event(process_id, request)
-            .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(in crate::runtime::session_manager) async fn signal_possessed_process(
-        &self,
-        current: &CurrentOwnerCapability,
-        _owner: &crate::RuntimeOwner,
-        process_id: &ProcessId,
-        signal_name: String,
-        signal_id: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let runner = self.command_runner(current, &scope)?;
-        // The recorded append admission refuses an unknown, pruned or ended
-        // target and records the refusal, so a replay after the target moved
-        // on reads the first run's answer (ADR 0105 §1).
-        runner
-            .signal(crate::ProcessSignal::new(
-                crate::ProcessSignalIdentity::new(process_id.clone(), signal_name, signal_id)?,
-                payload,
-            ))
-            .await
-    }
-
-    /// Stages a recorded intent's signal as a store-local effect of the
-    /// call that sends it.
-    pub(in crate::runtime::session_manager) async fn stage_recorded_signal(
-        &self,
-        current: &CurrentOwnerCapability,
-        signal: &crate::ProcessSignal,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::StoreLocalEffect, crate::PluginError> {
-        self.command_runner(current, &scope)?
-            .stage_signal(signal)
-            .await
-    }
-
-    pub(in crate::runtime::session_manager) async fn emit_event_recorded_intent(
-        &self,
-        current: &CurrentOwnerCapability,
-        process_id: &ProcessId,
-        event_type: String,
-        replay_key: String,
-        payload: serde_json::Value,
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        let request =
-            crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(replay_key);
-        self.command_runner(current, &scope)?
-            .emit_event(process_id, request)
             .await
     }
 

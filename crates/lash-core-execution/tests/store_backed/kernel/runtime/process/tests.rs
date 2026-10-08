@@ -3,10 +3,8 @@ use std::sync::Arc;
 use crate::support::prelude::*;
 
 use crate::runtime::process::{
-    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvSpec, ProcessInput,
-    ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
-    ProcessWakeSpec, ProjectionWatermark,
+    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessExecutionEnvSpec, ProcessInput,
+    ProcessObserverBy, ProcessProvenance, ProcessRegistration, ProjectionWatermark,
 };
 use crate::{Lifetime, ProcessRegistry, SessionId, StoreSet as _};
 
@@ -18,130 +16,6 @@ fn registration(_id: &str) -> ProcessRegistration {
         ProcessProvenance::host(),
         crate::Lifetime::Detached,
     )
-}
-
-/// FIG-3123. The three halves of "an announcement is not a wake", written
-/// together because each is only meaningful against the other two: the same
-/// process, the same event type, the same declared wake and the same target
-/// session — and only the delivery differs. A delivered wake is queued work
-/// at the target session, written in the append's own transaction.
-#[tokio::test]
-async fn a_suppressed_append_is_journaled_in_full_and_wakes_nobody() {
-    let stores = sqlite_memory_process_store_set().await;
-    let registry = stores.process_registry();
-    let sessions = stores.session_store_factory();
-    let process_id = crate::ProcessId::fixture("announcement-suppression");
-    let target_session_id = SessionId::from("announcing-session");
-    crate::SessionCatalogStore::admit_session(
-        sessions.as_ref(),
-        &crate::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: target_session_id.clone(),
-            relation: crate::SessionRelation::Root,
-            config: crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-                crate::MaxToolCalls::new(1024),
-            )
-            .into(),
-            head: crate::SessionCreationHead::Config,
-        },
-    )
-    .await
-    .expect("admit the target session");
-    let announcement_suppression_record = registry
-        .register_process(wake_registration(process_id.as_str(), &target_session_id))
-        .await
-        .expect("register a process whose wakes have a target session");
-    let process_id = announcement_suppression_record.id.clone();
-
-    // (a) The runtime's own announcement of a park. The session it would reach
-    // is the session parked on the announced call, so it gets no work.
-    let announced = registry
-        .append_event(
-            &process_id,
-            ProcessEventAppendRequest::new(
-                "producer.wake",
-                serde_json::json!({"wake_input": "input request opened"}),
-            )
-            .with_replay_key("announcement:park")
-            .without_wake(),
-        )
-        .await
-        .expect("append the park announcement");
-    assert!(
-        announced.wake_delivery.is_none(),
-        "a park announcement must not deliver a wake: {:?}",
-        announced.wake_delivery
-    );
-    assert!(
-        crate::QueuedWorkStore::list_queued_work(sessions.as_ref(), &target_session_id)
-            .await
-            .expect("read queued work after the announcement")
-            .is_empty(),
-        "the announcing session must observe no queued work from its own park"
-    );
-
-    // (c) ...and yet nothing reading the journal can tell: the event is the
-    // same event, semantics included.
-    let journal = registry
-        .full_event_window(&process_id, 0)
-        .await
-        .expect("read the process journal");
-    let appended = journal
-        .iter()
-        .find(|event| event.sequence == announced.event.sequence)
-        .expect("the announcement is in the journal");
-    assert_eq!(appended.event_type, "producer.wake");
-    assert_eq!(
-        appended.payload,
-        serde_json::json!({"wake_input": "input request opened"})
-    );
-    assert!(
-        appended.semantics.wake.is_some(),
-        "the event keeps the wake its type declares; only the delivery is withheld: {appended:?}"
-    );
-
-    // (b) A progress emission from that same process still says its piece.
-    let emitted = registry
-        .append_event(
-            &process_id,
-            ProcessEventAppendRequest::new(
-                "producer.wake",
-                serde_json::json!({"wake_input": "deploy complete"}),
-            )
-            .with_replay_key("announcement:emit"),
-        )
-        .await
-        .expect("append the progress emission");
-    assert!(
-        emitted.wake_delivery.is_some(),
-        "an unsuppressed append of the same event type still delivers its wake"
-    );
-    let queued = crate::QueuedWorkStore::list_queued_work(sessions.as_ref(), &target_session_id)
-        .await
-        .expect("read queued work after the emission");
-    assert_eq!(
-        queued.len(),
-        1,
-        "exactly the emission reaches the declaring session: {queued:?}"
-    );
-}
-
-fn wake_registration(id: &str, target_session_id: &SessionId) -> ProcessRegistration {
-    registration(id)
-        .with_wake_session_id(Some(target_session_id.clone()))
-        .with_extra_event_types([ProcessEventType {
-            name: "producer.wake".to_string(),
-            payload_schema: crate::JsonSchema::any(),
-            semantics: ProcessEventSemanticsSpec {
-                wake: Some(ProcessWakeSpec {
-                    when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
-                    input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                }),
-                ..ProcessEventSemanticsSpec::default()
-            },
-        }])
 }
 
 #[tokio::test]

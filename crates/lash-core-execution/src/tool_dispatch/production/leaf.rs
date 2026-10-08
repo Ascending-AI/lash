@@ -86,7 +86,7 @@ impl ProductionToolHandlers<'_> {
                 )
                 .map_err(crate::RuntimeEffectControllerError::from)?;
                 let reference = context
-                    .captured_process_execution_env_ref(&claim)
+                    .capture_execution_env(&claim)
                     .await
                     .map_err(crate::RuntimeEffectControllerError::from)?;
                 *environment = Some(reference.clone());

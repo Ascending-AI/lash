@@ -125,7 +125,6 @@ mod tests {
             session_lifecycle: host.clone(),
             session_graph: host.clone(),
             processes: host.clone(),
-            trigger_router: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: crate::ActorContext::unavailable()
                 .scoped(crate::AdmittedScope::runtime_operation(
@@ -149,7 +148,6 @@ mod tests {
                 agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             },
             observer: crate::engine::NullObservationSink::arc(),
-            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
@@ -191,14 +189,6 @@ mod tests {
                 handle.clone(),
             )
             .await;
-            let signalled = crate::signal_process_handle(
-                &context,
-                lash_core_execution::ToolCallId::fixture(&format!("signal-{shape}")),
-                handle.clone(),
-                "ready".to_string(),
-                serde_json::Value::Null,
-            )
-            .await;
             let cancelled = crate::cancel_process_handle(
                 &context,
                 lash_core_execution::ToolCallId::fixture(&format!("cancel-{shape}")),
@@ -207,11 +197,7 @@ mod tests {
             .await;
 
             let parse_refusal = awaited.output.value_for_projection();
-            for (operation, reply) in [
-                ("await", &awaited),
-                ("signal", &signalled),
-                ("cancel", &cancelled),
-            ] {
+            for (operation, reply) in [("await", &awaited), ("cancel", &cancelled)] {
                 assert!(
                     !reply.output.is_success(),
                     "{operation} operated on {shape}: {:?}",
@@ -271,18 +257,11 @@ mod tests {
                 .with_process_registry(Arc::clone(&registry)),
         );
         let hidden_process = registry
-            .register_process(
-                crate::testing::held_engine_registration(
-                    serde_json::Value::Null,
-                    crate::ProcessProvenance::host(),
-                    crate::Lifetime::Detached,
-                )
-                .with_extra_event_types([crate::ProcessEventType {
-                    name: "signal.ready".to_string(),
-                    payload_schema: crate::JsonSchema::any(),
-                    semantics: crate::ProcessEventSemanticsSpec::default(),
-                }]),
-            )
+            .register_process(crate::testing::held_engine_registration(
+                serde_json::Value::Null,
+                crate::ProcessProvenance::host(),
+                crate::Lifetime::Detached,
+            ))
             .await
             .expect("register hidden process");
         let dispatch = Arc::new(ToolDispatchContext {
@@ -295,7 +274,6 @@ mod tests {
             session_lifecycle: host.clone(),
             session_graph: host.clone(),
             processes: host.clone(),
-            trigger_router: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: crate::ActorContext::unavailable()
                 .scoped(crate::AdmittedScope::runtime_operation(
@@ -319,7 +297,6 @@ mod tests {
                 agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             },
             observer: crate::engine::NullObservationSink::arc(),
-            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
@@ -350,14 +327,6 @@ mod tests {
             handle.clone(),
         )
         .await;
-        let signalled = crate::signal_process_handle(
-            &context,
-            lash_core_execution::ToolCallId::fixture("signal-hidden-process"),
-            handle.clone(),
-            "ready".to_string(),
-            serde_json::Value::Null,
-        )
-        .await;
         let cancelled = crate::cancel_process_handle(
             &context,
             lash_core_execution::ToolCallId::fixture("cancel-hidden-process"),
@@ -366,11 +335,7 @@ mod tests {
         .await;
 
         let visibility_miss = awaited.output.value_for_projection();
-        for (operation, reply) in [
-            ("await", &awaited),
-            ("signal", &signalled),
-            ("cancel", &cancelled),
-        ] {
+        for (operation, reply) in [("await", &awaited), ("cancel", &cancelled)] {
             assert!(
                 !reply.output.is_success(),
                 "{operation} unexpectedly operated an unpossessed, unobserved handle"
@@ -405,19 +370,12 @@ mod tests {
         );
 
         let mut local_ids = BTreeMap::new();
-        for label in ["local-signal", "local-cancel", "local-await"] {
-            let mut registration = crate::testing::held_engine_registration(
+        for label in ["local-cancel", "local-await"] {
+            let registration = crate::testing::held_engine_registration(
                 serde_json::Value::Null,
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             );
-            if label == "local-signal" {
-                registration = registration.with_extra_event_types([crate::ProcessEventType {
-                    name: "signal.ready".to_string(),
-                    payload_schema: crate::JsonSchema::any(),
-                    semantics: crate::ProcessEventSemanticsSpec::default(),
-                }]);
-            }
             let record = registry
                 .register_process(registration)
                 .await
@@ -440,14 +398,6 @@ mod tests {
                 process_id,
             ))
         };
-        let local_signal = crate::signal_process_handle(
-            &context,
-            lash_core_execution::ToolCallId::fixture("signal-local"),
-            local_handle(&local_ids["local-signal"]),
-            "ready".to_string(),
-            serde_json::Value::Null,
-        )
-        .await;
         let local_cancel = crate::cancel_process_handle(
             &context,
             lash_core_execution::ToolCallId::fixture("cancel-local"),
@@ -460,11 +410,7 @@ mod tests {
             local_handle(&local_ids["local-await"]),
         )
         .await;
-        for (operation, reply) in [
-            ("await", &local_await),
-            ("signal", &local_signal),
-            ("cancel", &local_cancel),
-        ] {
+        for (operation, reply) in [("await", &local_await), ("cancel", &local_cancel)] {
             assert!(
                 reply.output.is_success(),
                 "{operation} must accept run-local possession without an observer edge: {:?}",
@@ -500,36 +446,6 @@ mod tests {
             .await
             .expect("read observed process")
             .expect("observed process remains retained");
-        let retained_bytes =
-            serde_json::to_vec(&retained).expect("serialize retained terminal process");
-        let terminal_signal = crate::signal_process_handle(
-            &context,
-            lash_core_execution::ToolCallId::fixture("signal-terminal-process"),
-            handle.clone(),
-            "ready".to_string(),
-            serde_json::Value::Null,
-        )
-        .await;
-        assert!(!terminal_signal.output.is_success());
-        assert!(
-            terminal_signal
-                .output
-                .value_for_projection()
-                .to_string()
-                .contains("already terminal"),
-            "signaling a retained terminal process must return the typed terminal error"
-        );
-        let after_rejected_signal = registry
-            .get_process(&hidden_process.id)
-            .await
-            .expect("read terminal process after rejected signal")
-            .expect("terminal process remains retained");
-        assert_eq!(
-            serde_json::to_vec(&after_rejected_signal)
-                .expect("serialize terminal process after rejected signal"),
-            retained_bytes,
-            "a rejected terminal signal must leave prune eligibility byte-stable"
-        );
 
         let prune = registry
             .prune_terminal_processes(
@@ -577,22 +493,6 @@ mod tests {
         assert!(!pruned_cancel.output.is_success());
         assert!(
             pruned_cancel
-                .output
-                .value_for_projection()
-                .to_string()
-                .contains("outcome is no longer retained")
-        );
-        let pruned_signal = crate::signal_process_handle(
-            &context,
-            lash_core_execution::ToolCallId::fixture("signal-pruned-process"),
-            handle,
-            "ready".to_string(),
-            serde_json::Value::Null,
-        )
-        .await;
-        assert!(!pruned_signal.output.is_success());
-        assert!(
-            pruned_signal
                 .output
                 .value_for_projection()
                 .to_string()
@@ -656,7 +556,6 @@ mod tests {
             session_lifecycle: host.clone(),
             session_graph: host.clone(),
             processes: host.clone(),
-            trigger_router: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             // The completion presents in place: the call's admitted
             // execution is its record, and nothing here commits.
@@ -682,7 +581,6 @@ mod tests {
                 agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             },
             observer: crate::engine::NullObservationSink::arc(),
-            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
@@ -762,7 +660,6 @@ mod tests {
                             ),
                         ),
                     }],
-                    triggers: Vec::new(),
                 },
                 "test:start-child",
                 3,

@@ -1,4 +1,3 @@
-use crate::ProcessId;
 use crate::ToolCallId;
 use crate::TurnId;
 use crate::append_vec::AppendVec;
@@ -172,15 +171,6 @@ pub enum MessageOrigin {
         plugin_id: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         transient: bool,
-    },
-    Process {
-        process_id: ProcessId,
-        event_type: String,
-        sequence: u64,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        wake_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        caused_by: Option<crate::CausalRef>,
     },
     /// The runtime's own commit of a turn's input. A host that renders its own
     /// optimistic user row correlates that row to this committed copy through

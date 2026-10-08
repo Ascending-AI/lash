@@ -143,18 +143,6 @@ pub async fn await_process_handle(
     context.await_process_handle(call_id, handle).await
 }
 
-pub async fn signal_process_handle(
-    context: &crate::RuntimeExecutionContext<'_>,
-    call_id: crate::ToolCallId,
-    handle: serde_json::Value,
-    signal_name: String,
-    payload: serde_json::Value,
-) -> crate::session::ToolInvocationReply {
-    context
-        .signal_process_handle(call_id, handle, signal_name, payload)
-        .await
-}
-
 pub async fn cancel_process_handle(
     context: &crate::RuntimeExecutionContext<'_>,
     call_id: crate::ToolCallId,
@@ -270,7 +258,6 @@ pub async fn complete_tool_output(
                 attempts: Vec::new(),
                 intents: crate::ToolIntents::default(),
                 intent_outcomes: Vec::new(),
-                triggers: Vec::new(),
             },
             "test:call",
             1,

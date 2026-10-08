@@ -151,7 +151,7 @@ use super::ActorContext;
 /// The process methods of the context.
 impl ActorContext {
     /// The process effects: `Process` (start, list, transfer, await,
-    /// attach, cancel, signal, emit) and `LoadExecutionEnv`. A start is a
+    /// attach, cancel) and `LoadExecutionEnv`. A start is a
     /// store-local effect of its call's outcome; an await is a
     /// `process_terminal` wait; a cancel is mail. Any other command is
     /// refused.

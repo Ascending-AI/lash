@@ -224,40 +224,6 @@ impl LashRuntime {
         Ok(())
     }
 
-    pub async fn list_trigger_registrations(
-        &self,
-    ) -> Result<Vec<crate::TriggerRegistration>, SessionError> {
-        let store = self.host.core.trigger_store();
-        let records = store
-            .list_subscriptions(crate::TriggerSubscriptionFilter::for_session(
-                self.state.session_id.clone(),
-            ))
-            .await
-            .map_err(|err| SessionError::Protocol(err.to_string()))?;
-        Ok(records
-            .iter()
-            .map(crate::TriggerRegistration::from)
-            .collect())
-    }
-
-    pub async fn trigger_registrations_by_source_type(
-        &self,
-        source_type: impl Into<crate::TriggerEventType>,
-    ) -> Result<Vec<crate::TriggerRegistration>, SessionError> {
-        let store = self.host.core.trigger_store();
-        let mut filter =
-            crate::TriggerSubscriptionFilter::for_session(self.state.session_id.clone());
-        filter.source_type = Some(source_type.into().to_string());
-        let records = store
-            .list_subscriptions(filter)
-            .await
-            .map_err(|err| SessionError::Protocol(err.to_string()))?;
-        Ok(records
-            .iter()
-            .map(crate::TriggerRegistration::from)
-            .collect())
-    }
-
     pub async fn query_plugin(
         &mut self,
         name: &str,

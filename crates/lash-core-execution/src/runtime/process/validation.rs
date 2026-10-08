@@ -1,79 +1,39 @@
 use crate::ProcessId;
-use lash_sansio::{CancelOrigin, CancelRequest};
-use std::collections::HashSet;
+use lash_sansio::CancelOrigin;
 
-use crate::SessionId;
 use crate::plugin::PluginError;
 
 use super::events::{
-    ProcessEvent, ProcessEventAppendRequest, ProcessEventKind, ProcessEventSemanticsSpec,
-    ProcessTerminal, ProcessTerminalSemantics, ProcessWakeDelivery, default_process_event_types,
-    is_runtime_lifecycle_event_type, runtime_lifecycle_event_type,
+    ProcessEvent, ProcessEventAppendRequest, ProcessLifecycleFact, ProcessTerminal,
 };
-use super::materialization::materialize_process_event_semantics;
 use super::model::{
-    ProcessExternalRef, ProcessLifecycleState, ProcessRecord, ProcessRegistration, ProcessStarted,
-    ProcessStatus, TerminalProcessStatus, WaitState,
+    ProcessLifecycleState, ProcessRecord, ProcessRegistration, ProcessStarted, ProcessStatus,
+    WaitState,
 };
 
+/// Refuse what only the runtime appends on the unfenced host path: the effect
+/// summary, so a host cannot pre-empt the runtime's replay key, and observer
+/// membership, which has its own registry operations.
 pub fn validate_generic_process_event_append(
     request: &ProcessEventAppendRequest,
 ) -> Result<(), PluginError> {
-    validate_process_signal_append(request)?;
-    // The effect summary is runtime-owned: only an execution-authority append
-    // may write it, so a host cannot pre-empt the runtime's replay key.
-    if matches!(
-        ProcessEventKind::from_event_type(&request.event_type),
-        ProcessEventKind::UnknownRuntime
-            | ProcessEventKind::EffectOutcome
-            | ProcessEventKind::EffectOmissions
-    ) {
+    if request.kind().is_runtime_owned() {
         return Err(PluginError::ReservedProcessEvent {
-            event_type: request.event_type.clone(),
-        });
-    }
-    if matches!(
-        request.event_type.as_str(),
-        "process.observer_added" | "process.observer_removed" | "process.subscription_retargeted"
-    ) {
-        return Err(PluginError::ReservedProcessEvent {
-            event_type: request.event_type.clone(),
+            event_type: request.kind().as_str().to_string(),
         });
     }
     Ok(())
 }
-
-fn validate_process_signal_append(request: &ProcessEventAppendRequest) -> Result<(), PluginError> {
-    let valid = match &request.signal_identity {
-        Some(identity) => {
-            request.event_type == identity.event_type()
-                && request.replay.as_ref().map(|replay| replay.key.as_str())
-                    == Some(identity.append_key().as_str())
-                && !request.wake_suppressed
-        }
-        None => !request.event_type.starts_with("signal."),
-    };
-    if !valid {
-        return Err(PluginError::ReservedProcessEvent {
-            event_type: request.event_type.clone(),
-        });
-    }
-    Ok(())
-}
-
-use super::wake::{ProcessWakeDeliveryRequest, process_wake_delivery};
 
 #[derive(Clone, Debug)]
 pub enum ProcessEventAppendPlan {
     Insert {
         event: ProcessEvent,
         projected_record: ProcessRecord,
-        wake_delivery: Option<ProcessWakeDelivery>,
     },
     Replay {
         event: ProcessEvent,
         repair_record: Option<ProcessRecord>,
-        wake_delivery: Option<ProcessWakeDelivery>,
     },
 }
 
@@ -88,9 +48,9 @@ pub enum ProcessStartPlan {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ProcessTransition {
     /// Bind the process to durable work owned by another backend.
-    SetExternalRef(ProcessExternalRef),
+    SetExternalRef(super::model::ProcessExternalRef),
     /// Record a typed process cancellation request.
-    RequestCancel(CancelRequest),
+    RequestCancel(lash_sansio::CancelRequest),
     /// Enter a durable wait state.
     EnterWait(WaitState),
     ClearWait,
@@ -107,29 +67,14 @@ pub enum ProcessTransitionPlan {
 
 const FOLD_VALIDATION_REPLAY_KEY_SUFFIX: &str = ":fold-validation";
 
-/// Allocate the next process-event sequence from the live event tail and the
-/// durable sender floor retained for the wake target.
+/// Allocate the next process-event sequence from the live event tail.
 ///
-/// Event sequences are small ordered identifiers. The sender floor survives
-/// process pruning, so a reused process id cannot issue a sequence already
-/// observed by the same target session.
-pub fn allocate_process_event_sequence(
-    last_sequence: Option<u64>,
-    sender_floor: Option<u64>,
-) -> Result<u64, PluginError> {
-    let next_event = last_sequence
+/// Event sequences are small ordered identifiers, dense per process.
+pub fn allocate_process_event_sequence(last_sequence: Option<u64>) -> Result<u64, PluginError> {
+    let sequence = last_sequence
         .unwrap_or(0)
         .checked_add(1)
         .ok_or_else(|| PluginError::Session("process event sequence exhausted".to_string()))?;
-    let next_floor = sender_floor
-        .map(|floor| {
-            floor.checked_add(1).ok_or_else(|| {
-                PluginError::Session("process wake allocation floor exhausted".to_string())
-            })
-        })
-        .transpose()?
-        .unwrap_or(1);
-    let sequence = next_event.max(next_floor);
     if sequence > i64::MAX as u64 {
         return Err(PluginError::Session(
             "process event sequence exceeds the signed 64-bit persistence domain".to_string(),
@@ -267,7 +212,7 @@ pub fn prepare_process_transition(
 fn route_transition_refusal_to_fold(
     append: &mut ProcessEventAppendRequest,
 ) -> Result<(), PluginError> {
-    let event_type = append.event_type.clone();
+    let event_type = append.kind();
     let replay = append.replay.as_mut().ok_or_else(|| {
         PluginError::Session(format!(
             "registry lifecycle transition event `{event_type}` requires a deterministic replay key"
@@ -275,6 +220,21 @@ fn route_transition_refusal_to_fold(
     })?;
     replay.key.push_str(FOLD_VALIDATION_REPLAY_KEY_SUFFIX);
     Ok(())
+}
+
+/// Whether `request`, a cancel, ends `record` as it stands: a start that
+/// failed before its process ran anything is cancelled by its own request.
+fn start_failed_cancel_ends(record: &ProcessRecord, request: &lash_sansio::CancelRequest) -> bool {
+    request.origin == CancelOrigin::StartFailed
+        && record.first_started.is_none()
+        && record.external_ref.is_none()
+}
+
+/// The outcome a start-failed cancel ends its process in.
+fn start_failed_outcome() -> ProcessTerminal {
+    let cancellation = crate::ToolCancellation::runtime("process start failed before execution")
+        .with_origin(CancelOrigin::StartFailed);
+    ProcessTerminal::from_tool_output(crate::ToolCallOutput::cancelled(cancellation))
 }
 
 /// Apply one persisted event to the process record fold.
@@ -293,25 +253,22 @@ pub fn apply_process_event_projection(
         )));
     }
 
-    let kind = ProcessEventKind::from_event_type(&event.event_type);
-    match kind {
-        ProcessEventKind::FirstStarted => {
-            let started = lifecycle_payload(event, "started")?;
-            match record.first_started.as_deref() {
-                None => record.first_started = Some(Box::new(started)),
-                Some(existing) if existing.same_execution(&started) => {}
-                Some(existing) if started.attempt == existing.attempt.saturating_add(1) => {
-                    record.first_started = Some(Box::new(started));
-                }
-                Some(_) => {
-                    return Err(PluginError::Session(format!(
-                        "process `{}` has an invalid execution-started attempt",
-                        record.id
-                    )));
-                }
+    let mut ends: Option<ProcessTerminal> = None;
+    match &event.fact {
+        ProcessLifecycleFact::Started { started } => match record.first_started.as_deref() {
+            None => record.first_started = Some(Box::new(started.clone())),
+            Some(existing) if existing.same_execution(started) => {}
+            Some(existing) if started.attempt == existing.attempt.saturating_add(1) => {
+                record.first_started = Some(Box::new(started.clone()));
             }
-        }
-        ProcessEventKind::Waiting => match &record.lifecycle {
+            Some(_) => {
+                return Err(PluginError::Session(format!(
+                    "process `{}` has an invalid execution-started attempt",
+                    record.id
+                )));
+            }
+        },
+        ProcessLifecycleFact::Waiting { wait } => match &record.lifecycle {
             ProcessLifecycleState::Terminal { .. } => {
                 return Err(PluginError::Session(format!(
                     "terminal process `{}` cannot enter a wait state",
@@ -319,12 +276,10 @@ pub fn apply_process_event_projection(
                 )));
             }
             ProcessLifecycleState::Running { .. } | ProcessLifecycleState::Waiting { .. } => {
-                record.lifecycle = ProcessLifecycleState::Waiting {
-                    wait: lifecycle_payload(event, "wait")?,
-                };
+                record.lifecycle = ProcessLifecycleState::Waiting { wait: wait.clone() };
             }
         },
-        ProcessEventKind::Resumed => match &record.lifecycle {
+        ProcessLifecycleFact::Resumed { .. } => match &record.lifecycle {
             // An ended process stays ended: no later fact takes its outcome
             // back, so a resume cannot return it to running.
             ProcessLifecycleState::Terminal { .. } => {
@@ -337,8 +292,7 @@ pub fn apply_process_event_projection(
                 record.lifecycle = ProcessLifecycleState::running();
             }
         },
-        ProcessEventKind::ExternalRefSet => {
-            let external_ref = lifecycle_payload(event, "external_ref")?;
+        ProcessLifecycleFact::ExternalRefSet { external_ref } => {
             // Compare-and-set on the segment ordinal, never last-write-wins.
             // A live host and the recovery pass may both submit the same
             // segment and mint different backend identities for it; the first
@@ -347,8 +301,8 @@ pub fn apply_process_event_projection(
             // for an earlier segment is a stale writer that must not displace
             // it.
             match record.external_ref.as_ref() {
-                None => record.external_ref = Some(external_ref),
-                Some(existing) if existing == &external_ref => {}
+                None => record.external_ref = Some(external_ref.clone()),
+                Some(existing) if existing == external_ref => {}
                 // Two backends claiming one row is a model error at every
                 // ordinal: a row has exactly one durable owner substrate, so
                 // this is checked before the ordinal comparison — a later
@@ -357,65 +311,55 @@ pub fn apply_process_event_projection(
                     return Err(process_external_ref_conflict(
                         &record.id,
                         existing,
-                        &external_ref,
+                        external_ref,
                     ));
                 }
                 Some(existing) if external_ref.supersedes(existing) => {
-                    record.external_ref = Some(external_ref);
+                    record.external_ref = Some(external_ref.clone());
                 }
                 Some(_) => {}
             }
         }
-        ProcessEventKind::CancelRequested => {
-            let request = cancel_request_payload(&event.payload)?;
-            // Replaying the stored StartFailed event must repair its own fold
-            // even though that same event made this record terminal.
-            let own_terminal_replay =
-                record.status() == ProcessStatus::Cancelled
-                    && record.last_event_sequence == event.sequence
-                    && request.origin == CancelOrigin::StartFailed
-                    && event.semantics.terminal.as_ref().is_some_and(|terminal| {
-                        terminal.status() == TerminalProcessStatus::Cancelled
-                    });
+        ProcessLifecycleFact::CancelRequested(request) => {
+            // Replaying the stored start-failed cancel must repair its own
+            // fold even though that same event made this record terminal.
+            let own_terminal_replay = record.status() == ProcessStatus::Cancelled
+                && record.last_event_sequence == event.sequence
+                && request.origin == CancelOrigin::StartFailed;
             if record.is_terminal() && !own_terminal_replay {
                 return Err(PluginError::ProcessAlreadyTerminal {
                     process_id: record.id.clone(),
                     status: record.status(),
                 });
             }
+            if !record.is_terminal() && start_failed_cancel_ends(record, request) {
+                ends = Some(start_failed_outcome());
+            }
             match record.cancel_request.as_deref() {
-                None => record.cancel_request = Some(Box::new(request)),
-                Some(existing) if existing.same_cancellation_as(&request) => {}
+                None => record.cancel_request = Some(Box::new(request.clone())),
+                Some(existing) if existing.same_cancellation_as(request) => {}
                 Some(existing) => {
                     return Err(PluginError::ProcessCancelConflict {
                         process_id: record.id.clone(),
                         existing: Box::new(existing.clone()),
-                        requested: Box::new(request),
+                        requested: Box::new(request.clone()),
                     });
                 }
             }
         }
-        ProcessEventKind::ObserverAdded
-        | ProcessEventKind::ObserverRemoved
-        | ProcessEventKind::SubscriptionRetargeted
-        | ProcessEventKind::EffectOutcome
-        | ProcessEventKind::EffectOmissions
-        | ProcessEventKind::Custom => {}
-        ProcessEventKind::UnknownRuntime => {
-            return Err(PluginError::ReservedProcessEvent {
-                event_type: event.event_type.clone(),
-            });
-        }
+        ProcessLifecycleFact::Terminal { outcome, .. } => ends = Some(outcome.clone()),
+        ProcessLifecycleFact::ObserverAdded { .. }
+        | ProcessLifecycleFact::ObserverRemoved { .. }
+        | ProcessLifecycleFact::EffectOutcome(_)
+        | ProcessLifecycleFact::EffectOmissions(_) => {}
     }
 
-    if let Some(terminal) = event.semantics.terminal.as_ref() {
+    if let Some(outcome) = ends {
         if record.is_terminal() {
             return Ok(());
         }
         // The outcome is the state: it takes the wait with it.
-        record.lifecycle = ProcessLifecycleState::Terminal {
-            outcome: terminal.outcome.clone(),
-        };
+        record.lifecycle = ProcessLifecycleState::Terminal { outcome };
     }
     record.updated_at_ms = event.occurred_at;
     record.last_event_sequence = event.sequence;
@@ -433,24 +377,6 @@ pub fn fold_process_record(
     Ok(record)
 }
 
-fn lifecycle_payload<T>(event: &ProcessEvent, field: &str) -> Result<T, PluginError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    let value = event.payload.get(field).ok_or_else(|| {
-        PluginError::Session(format!(
-            "process event `{}` is missing lifecycle payload field `{field}`",
-            event.event_type
-        ))
-    })?;
-    serde_json::from_value(value.clone()).map_err(|err| {
-        PluginError::Session(format!(
-            "process event `{}` has invalid lifecycle payload field `{field}`: {err}",
-            event.event_type
-        ))
-    })
-}
-
 fn process_external_ref_conflict(
     process_id: &ProcessId,
     existing: &super::model::ProcessExternalRef,
@@ -462,24 +388,6 @@ fn process_external_ref_conflict(
     ))
 }
 
-fn cancel_request_payload(payload: &serde_json::Value) -> Result<CancelRequest, PluginError> {
-    serde_json::from_value(payload.clone()).map_err(|error| {
-        PluginError::Session(format!("invalid process.cancel_requested payload: {error}"))
-    })
-}
-
-fn process_replay_payloads_match(
-    event_type: &str,
-    existing: &serde_json::Value,
-    requested: &serde_json::Value,
-) -> Result<bool, PluginError> {
-    if ProcessEventKind::from_event_type(event_type) == ProcessEventKind::CancelRequested {
-        return Ok(cancel_request_payload(existing)?
-            .same_cancellation_as(&cancel_request_payload(requested)?));
-    }
-    Ok(crate::identity_json::payloads_equal(existing, requested))
-}
-
 fn repair_lifecycle_projection(
     record: &ProcessRecord,
     event: &ProcessEvent,
@@ -489,396 +397,118 @@ fn repair_lifecycle_projection(
     Ok((repaired != *record).then_some(repaired))
 }
 
-/// Admit `request`, a signal's append, against `record` as it stands,
-/// writing nothing: what a store-local signal checks before its call's
-/// outcome commits it. The append in that commit applies the same rules;
-/// a target that ended meanwhile takes nothing.
+/// Plan one lifecycle append against `record` as it stands.
 ///
-/// # Errors
-///
-/// The refusal the append would answer: a malformed signal, a signal to
-/// another process, a terminal target, an undeclared signal, or a payload
-/// its declaration refuses.
-pub fn admit_process_signal_append(
-    record: &ProcessRecord,
-    request: &ProcessEventAppendRequest,
-) -> Result<(), PluginError> {
-    validate_process_signal_append(request)?;
-    if super::events::process_signal_name_from_event_type(&request.event_type).is_none()
-        || request
-            .signal_identity
-            .as_ref()
-            .is_none_or(|identity| *identity.process_id() != record.id)
-    {
-        return Err(PluginError::ReservedProcessEvent {
-            event_type: request.event_type.clone(),
-        });
-    }
-    if record.is_terminal() {
-        return Err(PluginError::ProcessAlreadyTerminal {
-            process_id: record.id.clone(),
-            status: record.status(),
-        });
-    }
-    let declared = record
-        .event_types
-        .iter()
-        .find(|declared| declared.name == request.event_type)
-        .ok_or_else(|| {
-            PluginError::Session(format!(
-                "process `{}` emitted undeclared event type `{}`",
-                record.id, request.event_type
-            ))
-        })?;
-    require_event_replay(&record.id, request, &declared.semantics)?;
-    declared
-        .payload_schema
-        .validate(&request.payload)
-        .map_err(|err| PluginError::ValueMismatch {
-            context: format!("`{}` payload", request.event_type),
-            source: Box::new(err),
-        })
-}
-
-#[allow(
-    clippy::too_many_arguments,
-    reason = "the append plan carries the journal's own positional facts; fleet format joins them as one more stamped input (FIG-3796)"
-)]
-/// `signal_events_before` is how many events of the request's type the
-/// process's log already holds, counted by the store in the append's own
-/// transaction. A store passes it for a signal append (its event type names a
-/// signal) and `None` for every other: the append selects the wait a new
-/// signal resolves from it and the process's current wait
-/// ([`select_process_signal_wait`]).
+/// `replay_lookup` is the event the store found under the request's replay
+/// key, if any: the same fact answers it (repairing the record's fold when it
+/// is the process's last event), and any other fact is a durable-identity
+/// conflict. `fleet_format` is the `F` the bound store recorded: an effect
+/// summary payload must be one this fleet writes (FIG-3796).
 pub fn prepare_process_event_append(
     record: &ProcessRecord,
     request: ProcessEventAppendRequest,
     sequence: u64,
     last_event_sequence: Option<u64>,
     replay_lookup: Option<ProcessEvent>,
-    signal_events_before: Option<u64>,
     occurred_at_ms: u64,
-    wake_session_id: Option<&SessionId>,
     fleet_format: crate::FleetFormat,
 ) -> Result<ProcessEventAppendPlan, PluginError> {
     let process_id = &record.id;
-    validate_process_signal_append(&request)?;
-    if request
-        .signal_identity
+    let replay_key = request
+        .replay
         .as_ref()
-        .is_some_and(|identity| identity.process_id() != process_id)
-    {
-        return Err(PluginError::ReservedProcessEvent {
-            event_type: request.event_type.clone(),
-        });
-    }
-    let wake_suppressed = request.wake_suppressed;
-    if ProcessEventKind::from_event_type(&request.event_type) == ProcessEventKind::UnknownRuntime {
-        return Err(PluginError::ReservedProcessEvent {
-            event_type: request.event_type.clone(),
-        });
-    }
-    match ProcessEventKind::from_event_type(&request.event_type) {
-        ProcessEventKind::EffectOutcome => {
-            let outcome = super::effect_summary::ProcessEffectOccurrence::decode(
-                request.payload.clone(),
+        .map(|replay| replay.key.clone())
+        .filter(|key| !key.is_empty())
+        .ok_or_else(|| {
+            PluginError::Session(format!(
+                "process `{process_id}` event `{}` requires a deterministic replay key",
+                request.kind()
+            ))
+        })?;
+    match &request.fact {
+        ProcessLifecycleFact::EffectOutcome(occurrence) => {
+            super::effect_summary::ProcessEffectOccurrence::decode(
+                request.fact.payload(),
                 fleet_format,
             )
             .map_err(|error| PluginError::Session(error.to_string()))?;
-            if request.replay.as_ref().map(|replay| replay.key.as_str())
-                != Some(outcome.replay_key.as_str())
-            {
+            if replay_key != occurrence.replay_key {
                 return Err(PluginError::Session(
                     "effect outcome payload replay_key must equal the append replay key"
                         .to_string(),
                 ));
             }
         }
-        ProcessEventKind::EffectOmissions => {
+        ProcessLifecycleFact::EffectOmissions(_) => {
             super::effect_summary::ProcessEffectOmissions::decode(
-                request.payload.clone(),
+                request.fact.payload(),
                 fleet_format,
             )
             .map_err(|error| PluginError::Session(error.to_string()))?;
         }
         _ => {}
     }
-    if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str())
-        && let Some(existing) = replay_lookup
-    {
-        if existing.event_type == request.event_type
-            && process_replay_payloads_match(
-                &request.event_type,
-                &existing.payload,
-                &request.payload,
-            )?
-        {
+    if let Some(existing) = replay_lookup {
+        if existing.fact.same_fact(&request.fact) {
             let repair_record = if last_event_sequence == Some(existing.sequence) {
                 repair_lifecycle_projection(record, &existing)?
             } else {
                 None
             };
-            let wake_delivery = prepare_wake_delivery(
-                process_id,
-                record,
-                existing.sequence,
-                existing.event_type.clone(),
-                existing.occurred_at,
-                existing.semantics.wake.clone(),
-                &existing.semantics.trace_cause,
-                wake_session_id,
-                wake_suppressed,
-                fleet_format,
-            )?;
             return Ok(ProcessEventAppendPlan::Replay {
                 event: existing,
                 repair_record,
-                wake_delivery,
             });
         }
         return Err(crate::durable_identity_conflict(format!(
             "process `{process_id}` event replay key `{replay_key}` conflicts with an existing event"
         )));
     }
-    if record.is_terminal()
-        && super::events::process_signal_name_from_event_type(&request.event_type).is_some()
-    {
-        return Err(PluginError::ProcessAlreadyTerminal {
-            process_id: process_id.clone(),
-            status: record.status(),
-        });
-    }
-    let runtime_owned = runtime_lifecycle_event_type(&request.event_type);
-    let declared = runtime_owned
-        .as_ref()
-        .or_else(|| {
-            record
-                .event_types
-                .iter()
-                .find(|declared| declared.name == request.event_type)
-        })
-        .ok_or_else(|| {
-            PluginError::Session(format!(
-                "process `{process_id}` emitted undeclared event type `{}`",
-                request.event_type
-            ))
-        })?;
-    require_event_replay(process_id, &request, &declared.semantics)?;
-    declared
-        .payload_schema
-        .validate(&request.payload)
-        .map_err(|err| PluginError::ValueMismatch {
-            context: format!("`{}` payload", request.event_type),
-            source: Box::new(err),
-        })?;
-    let mut semantics = materialize_process_event_semantics(
-        process_id,
-        sequence,
-        &request.payload,
-        &declared.semantics,
-    )?;
-    if ProcessEventKind::from_event_type(&request.event_type) == ProcessEventKind::CancelRequested {
-        let cancel = cancel_request_payload(&request.payload)?;
-        if cancel.origin == CancelOrigin::StartFailed
-            && record.first_started.is_none()
-            && record.external_ref.is_none()
-        {
-            let cancellation =
-                crate::ToolCancellation::runtime("process start failed before execution")
-                    .with_origin(cancel.origin);
-            semantics.terminal = Some(ProcessTerminalSemantics {
-                outcome: ProcessTerminal::from_tool_output(crate::ToolCallOutput::cancelled(
-                    cancellation,
-                )),
+    let mut fact = request.fact;
+    if let ProcessLifecycleFact::Terminal { outcome, .. } = &mut fact {
+        if record.is_terminal() {
+            return Err(PluginError::ProcessAlreadyTerminal {
+                process_id: process_id.clone(),
+                status: record.status(),
             });
         }
-    }
-    if let Some(terminal) = semantics.terminal.as_mut() {
-        terminal.outcome = terminal.outcome.clone().with_cancel_origin(
+        *outcome = outcome.clone().with_cancel_origin(
             record
                 .cancel_request
                 .as_deref()
                 .map(|request| request.origin),
         );
     }
-    if semantics.terminal.is_some() && record.is_terminal() {
-        return Err(PluginError::ProcessAlreadyTerminal {
-            process_id: process_id.clone(),
-            status: record.status(),
-        });
-    }
-    semantics.trace_cause = request.trace_cause;
-    semantics.signal_wait = super::events::process_signal_name_from_event_type(&request.event_type)
-        .map(|signal_name| {
-            select_process_signal_wait(
-                record,
-                signal_name,
-                &request.event_type,
-                signal_events_before,
-            )
-        })
-        .transpose()?;
+    let kind = fact.kind();
     let event = ProcessEvent {
         process_id: process_id.clone(),
         sequence,
-        event_type: request.event_type,
-        payload: request.payload,
         invocation: crate::runtime::causal::process_event_invocation(
             process_id,
             sequence,
-            declared.name.as_str(),
+            kind.as_str(),
             request.replay,
         ),
-        semantics: semantics.clone(),
+        fact,
+        trace_cause: request.trace_cause,
         occurred_at: occurred_at_ms,
     };
     let mut projected_record = record.clone();
     apply_process_event_projection(&mut projected_record, &event)?;
-    let wake_delivery = prepare_wake_delivery(
-        process_id,
-        record,
-        event.sequence,
-        event.event_type.clone(),
-        event.occurred_at,
-        semantics.wake.clone(),
-        &semantics.trace_cause,
-        wake_session_id,
-        wake_suppressed,
-        fleet_format,
-    )?;
     debug_assert!(
-        !is_runtime_lifecycle_event_type(&event.event_type)
-            || event
-                .invocation
-                .effect_replay_key()
-                .is_none_or(|key| { !key.ends_with(FOLD_VALIDATION_REPLAY_KEY_SUFFIX) }),
+        !replay_key.ends_with(FOLD_VALIDATION_REPLAY_KEY_SUFFIX),
         "fold-validation replay keys must be refused before a process-event insert is planned"
     );
     Ok(ProcessEventAppendPlan::Insert {
         event,
         projected_record,
-        wake_delivery,
     })
-}
-
-/// The wait a newly admitted signal resolves (FIG-4298): the ordinal of the
-/// wait `record` is parked on for this signal, or, when it is parked on none,
-/// the signal's position among the events of its type, which is the ordinal
-/// the process's next wait for the name declares.
-///
-/// The declared ordinal wins over the count: a process's wait ordinals are
-/// its own, and they need not match how many signals of the name its log
-/// holds.
-fn select_process_signal_wait(
-    record: &ProcessRecord,
-    signal_name: &str,
-    event_type: &str,
-    signal_events_before: Option<u64>,
-) -> Result<super::events::ProcessSignalWaitBinding, PluginError> {
-    if let Some(super::model::WaitState {
-        kind:
-            super::model::WaitKind::Signal {
-                name,
-                event_type: waiting_type,
-                ordinal,
-                ..
-            },
-        ..
-    }) = record.wait()
-        && name == signal_name
-        && waiting_type == event_type
-    {
-        return Ok(super::events::ProcessSignalWaitBinding { ordinal: *ordinal });
-    }
-    let before = signal_events_before.ok_or_else(|| {
-        PluginError::Session(format!(
-            "process `{}` signal `{event_type}` append was prepared without the count of its \
-             prior events the store must supply",
-            record.id
-        ))
-    })?;
-    Ok(super::events::ProcessSignalWaitBinding {
-        ordinal: before.saturating_add(1),
-    })
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "wake delivery mirrors the persisted event plus its optional materialized wake"
-)]
-fn prepare_wake_delivery(
-    process_id: &ProcessId,
-    record: &ProcessRecord,
-    sequence: u64,
-    event_type: String,
-    occurred_at: u64,
-    wake: Option<super::events::ProcessWake>,
-    event_trace_cause: &lash_trace::TraceCause,
-    wake_session_id: Option<&SessionId>,
-    wake_suppressed: bool,
-    fleet_format: crate::FleetFormat,
-) -> Result<Option<ProcessWakeDelivery>, PluginError> {
-    // A suppressed append still materializes its event and its semantics; it
-    // only withholds the delivery. The wake is the one thing a session would
-    // observe, so withholding it here — after the event and its semantics are
-    // settled — is the whole of the suppression, and an observer reading the
-    // journal cannot tell a suppressed append from an unsuppressed one.
-    if wake_suppressed {
-        return Ok(None);
-    }
-    let Some(wake) = wake else {
-        return Ok(None);
-    };
-    let Some(target_session_id) = wake_session_id else {
-        return Ok(None);
-    };
-    process_wake_delivery(ProcessWakeDeliveryRequest {
-        target_session_id: target_session_id.clone(),
-        process_id: process_id.clone(),
-        sequence,
-        event_type,
-        process_caused_by: record.provenance.caused_by.clone(),
-        authority: match &record.provenance.originator {
-            super::model::ProcessOriginator::Host { .. } => {
-                crate::QueuedWorkAuthority::new(record.originator_id())
-            }
-            super::model::ProcessOriginator::Session {
-                session_id,
-                agent_frame_id,
-            } => {
-                let authority = crate::QueuedWorkAuthority::new(session_id.clone());
-                match agent_frame_id {
-                    Some(frame_id) => authority.with_elevation(frame_id.clone()),
-                    None => authority,
-                }
-            }
-        },
-        wake,
-        // The wake's producer is whoever caused the event that woke the
-        // session; an event no one outside caused is the process's own.
-        trace_cause: if event_trace_cause.is_root() {
-            record
-                .trace
-                .as_ref()
-                .map(lash_trace::DurableTraceScope::linked_cause)
-                .unwrap_or_default()
-        } else {
-            event_trace_cause.clone()
-        },
-        occurred_at_ms: occurred_at,
-        fleet_format,
-    })
-    .map(Some)
 }
 
 pub fn prepare_process_registration(
-    mut registration: ProcessRegistration,
+    registration: ProcessRegistration,
 ) -> Result<ProcessRegistration, PluginError> {
     validate_process_registration(&registration)?;
-    ensure_core_event_types(&mut registration);
-    registration
-        .event_types
-        .retain(|event_type| !is_runtime_lifecycle_event_type(&event_type.name));
     Ok(registration)
 }
 
@@ -901,16 +531,12 @@ pub fn abandoned_consumer_refusal(start_key: Option<&crate::StartKey>, key: &str
 /// process is returned whatever the start submitted. A host's key (one it
 /// supplied, or its keyless start's derived key) fences its start: the
 /// retained process is returned only to a start that presents the same
-/// input, lifetime decision, ancestry, originator, wake target and
-/// environment. Each is what the host stated: a start carries nothing lash
+/// input, lifetime decision, ancestry, originator and environment. Each is what the host stated: a start carries nothing lash
 /// derives from a catalog or a deployment default (FIG-4594), so a retry
 /// after either changed presents the same start. A host key is global, so the retained process may be another
 /// originator's; any other start under it is a
 /// [`PluginError::StartKeyConflict`] that names the key and nothing of the
 /// process it is bound to.
-///
-/// `retained_wake_session_id` is the retained row's wake target, which the
-/// registrar stores beside the record rather than in it.
 ///
 /// # Errors
 ///
@@ -918,7 +544,6 @@ pub fn abandoned_consumer_refusal(start_key: Option<&crate::StartKey>, key: &str
 pub fn check_retained_start(
     registration: &ProcessRegistration,
     retained: &ProcessRecord,
-    retained_wake_session_id: Option<&SessionId>,
 ) -> Result<(), PluginError> {
     let Some(start_key) = registration.start_key.as_ref() else {
         return Ok(());
@@ -932,9 +557,7 @@ pub fn check_retained_start(
         && submitted.ancestry == retained.ancestry
         && submitted.session_capability == retained.session_capability
         && submitted.identity == retained.identity
-        && submitted.event_types == retained.event_types
         && submitted.provenance == retained.provenance
-        && submitted.wake_session_id.as_ref() == retained_wake_session_id
         && submitted.env_ref == retained.env_ref;
     if same {
         Ok(())
@@ -942,52 +565,6 @@ pub fn check_retained_start(
         Err(PluginError::StartKeyConflict {
             start_key: start_key.clone(),
         })
-    }
-}
-
-pub fn require_event_replay(
-    process_id: &ProcessId,
-    request: &ProcessEventAppendRequest,
-    spec: &ProcessEventSemanticsSpec,
-) -> Result<(), PluginError> {
-    let requires_key = spec.terminal.is_some()
-        || matches!(
-            request.event_type.as_str(),
-            "process.cancel_requested"
-                | "process.first_started"
-                | "process.waiting"
-                | "process.resumed"
-                | "process.external_ref_set"
-                | "process.observer_added"
-                | "process.observer_removed"
-                | "process.subscription_retargeted"
-                | super::effect_summary::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
-                | super::effect_summary::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE
-        );
-    if requires_key
-        && request
-            .replay
-            .as_ref()
-            .is_none_or(|replay| replay.key.is_empty())
-    {
-        return Err(PluginError::Session(format!(
-            "process `{process_id}` event `{}` requires a deterministic replay key",
-            request.event_type
-        )));
-    }
-    Ok(())
-}
-
-pub(super) fn ensure_core_event_types(registration: &mut ProcessRegistration) {
-    let mut existing = registration
-        .event_types
-        .iter()
-        .map(|event_type| event_type.name.clone())
-        .collect::<HashSet<_>>();
-    for event_type in default_process_event_types() {
-        if existing.insert(event_type.name.clone()) {
-            registration.event_types.push(event_type);
-        }
     }
 }
 
@@ -1007,10 +584,6 @@ pub enum ProcessRegistrationRefusal {
     SessionCapabilityUnreachable,
     ExecutionEnvMissing,
     EmptySessionTurnDefinitionKey,
-    EmptyEventTypeName,
-    DuplicateEventType,
-    ReservedRuntimeEventType,
-    TerminalEventWithoutAwaitOutput,
 }
 
 impl ProcessRegistrationRefusal {
@@ -1021,10 +594,6 @@ impl ProcessRegistrationRefusal {
         Self::SessionCapabilityUnreachable,
         Self::ExecutionEnvMissing,
         Self::EmptySessionTurnDefinitionKey,
-        Self::EmptyEventTypeName,
-        Self::DuplicateEventType,
-        Self::ReservedRuntimeEventType,
-        Self::TerminalEventWithoutAwaitOutput,
     ];
 }
 
@@ -1137,53 +706,6 @@ pub(crate) fn classify_process_registration(
                     ),
                 ));
             }
-        }
-    }
-    let mut names = HashSet::new();
-    for event_type in &registration.event_types {
-        if event_type.name.trim().is_empty() {
-            return Err(refuse(
-                ProcessRegistrationRefusal::EmptyEventTypeName,
-                format!(
-                    "process `{}` declares an empty event type",
-                    registration_name(registration)
-                ),
-            ));
-        }
-        if !names.insert(event_type.name.as_str()) {
-            return Err(refuse(
-                ProcessRegistrationRefusal::DuplicateEventType,
-                format!(
-                    "process `{}` declares duplicate event type `{}`",
-                    registration_name(registration),
-                    event_type.name
-                ),
-            ));
-        }
-        if let Some(runtime_owned) = runtime_lifecycle_event_type(&event_type.name)
-            && event_type != &runtime_owned
-        {
-            return Err(refuse(
-                ProcessRegistrationRefusal::ReservedRuntimeEventType,
-                format!(
-                    "process `{}` declares reserved runtime lifecycle event type `{}`",
-                    registration_name(registration),
-                    event_type.name
-                ),
-            ));
-        }
-        if let Some(terminal) = &event_type.semantics.terminal
-            && terminal.status != TerminalProcessStatus::Completed
-            && terminal.await_output.is_none()
-        {
-            return Err(refuse(
-                ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput,
-                format!(
-                    "terminal event `{}` for process `{}` must declare await output",
-                    event_type.name,
-                    registration_name(registration)
-                ),
-            ));
         }
     }
     Ok(())

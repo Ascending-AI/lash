@@ -101,30 +101,6 @@ pub enum ExpandedRow {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-pub struct TurnCause {
-    pub id: String,
-    pub event_type: String,
-    pub origin: MessageOrigin,
-    pub text: String,
-}
-
-impl TurnCause {
-    pub fn to_event_message(&self) -> Message {
-        Message {
-            id: self.id.clone(),
-            role: MessageRole::Event,
-            parts: Arc::new(vec![Part::text(
-                format!("{}.p0", self.id),
-                self.text.clone(),
-                None,
-            )]),
-            origin: Some(self.origin.clone()),
-            reply_marker: None,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
 pub struct CheckpointDelivery {
     /// Normal user messages admitted by durable turn-input ingress.
@@ -134,64 +110,6 @@ pub struct CheckpointDelivery {
     /// starts a turn.
     #[serde(default)]
     pub committed_user_messages: Vec<Message>,
-    pub turn_causes: Vec<TurnCause>,
-}
-
-pub fn render_turn_causes_prompt(causes: &[TurnCause]) -> Option<String> {
-    if causes.is_empty() {
-        return None;
-    }
-
-    let mut rendered = String::from("=== TURN EVENTS ===");
-    for (index, cause) in causes.iter().enumerate() {
-        rendered.push_str("\n\n");
-        rendered.push_str(&format!(
-            "--- event[{index}] · {} · {} ---\n",
-            cause.event_type, cause.id
-        ));
-        rendered.push_str("Origin: ");
-        rendered.push_str(&render_message_origin(&cause.origin));
-        rendered.push_str("\n\n");
-        rendered.push_str(cause.text.trim());
-    }
-    Some(rendered)
-}
-
-fn render_message_origin(origin: &MessageOrigin) -> String {
-    match origin {
-        MessageOrigin::Plugin {
-            plugin_id,
-            transient,
-        } => {
-            if *transient {
-                format!("plugin {plugin_id} (transient)")
-            } else {
-                format!("plugin {plugin_id}")
-            }
-        }
-        MessageOrigin::Process {
-            process_id,
-            event_type,
-            sequence,
-            wake_id,
-            ..
-        } => match wake_id {
-            Some(wake_id) => {
-                format!("process {process_id} {event_type} #{sequence} ({wake_id})")
-            }
-            None => format!("process {process_id} {event_type} #{sequence}"),
-        },
-        MessageOrigin::TurnInput { turn_id, input_id } => match input_id {
-            Some(input_id) => format!("turn input {input_id} on turn {turn_id}"),
-            None => format!("turn input on turn {turn_id}"),
-        },
-        MessageOrigin::TurnOutput { turn_id, source } => match source {
-            crate::TurnOutputSource::Runtime => format!("turn output on turn {turn_id}"),
-            crate::TurnOutputSource::Plugin { plugin_id } => {
-                format!("turn output from plugin {plugin_id} on turn {turn_id}")
-            }
-        },
-    }
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
@@ -774,7 +692,6 @@ pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub(super) messages: &'a MessageSequence,
     pub(super) prompt_messages: &'a MessageSequence,
     pub(super) events: &'a [SessionHistoryRecord<M::Event>],
-    pub(super) turn_causes: &'a [TurnCause],
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
     pub(super) observed_cancellation: Option<&'a crate::TurnCancellationEvidence>,
@@ -794,7 +711,6 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
             config: self.config,
             messages: self.prompt_messages,
             events: self.events,
-            turn_causes: self.turn_causes,
             protocol_iteration: self.protocol_iteration,
             use_tools,
             environment: self.environment,
@@ -857,17 +773,12 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
     pub fn events(&self) -> &[SessionHistoryRecord<M::Event>] {
         self.events
     }
-
-    pub fn turn_causes(&self) -> &[TurnCause] {
-        self.turn_causes
-    }
 }
 
 pub struct ProjectorContext<'a, M: TurnProtocol = UnitTurnProtocol> {
     pub config: &'a TurnMachineConfig<M>,
     pub messages: &'a MessageSequence,
     pub events: &'a [SessionHistoryRecord<M::Event>],
-    pub turn_causes: &'a [TurnCause],
     pub protocol_iteration: usize,
     pub use_tools: bool,
     /// The environment the iteration's journaled sync recorded. A projector
@@ -903,14 +814,7 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
         &self,
         ctx: ProjectorContext<'_, M>,
     ) -> Result<Arc<LlmRequest>, crate::StoredDataCorruption> {
-        let rendered_prompt = render_messages_for_projector(ctx.messages, ctx.turn_causes);
-        let mut messages = rendered_prompt.messages;
-        if let Some(turn_events) = render_turn_causes_prompt(ctx.turn_causes) {
-            messages.push(crate::llm::types::LlmMessage::text(
-                crate::llm::types::LlmRole::User,
-                Arc::from(turn_events),
-            ));
-        }
+        let messages = ctx.messages.render_prompt().messages;
 
         Ok(Arc::new(LlmRequest {
             instructions: None,
@@ -942,29 +846,6 @@ impl<M: TurnProtocol> ContextProjector<M> for ChatContextProjector {
             provider_trace: None,
         }))
     }
-}
-
-fn render_messages_for_projector(
-    messages: &MessageSequence,
-    turn_causes: &[TurnCause],
-) -> crate::RenderedPrompt {
-    if turn_causes.is_empty() {
-        return messages.render_prompt();
-    }
-
-    let active_cause_ids = turn_causes
-        .iter()
-        .map(|cause| cause.id.as_str())
-        .collect::<HashSet<_>>();
-    let filtered = messages
-        .iter()
-        .filter(|message| {
-            !(matches!(message.role, MessageRole::Event)
-                && active_cause_ids.contains(message.id.as_str()))
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    render_prompt(filtered.as_slice())
 }
 
 /// **Purity contract (ADR 0105 §6).** Every method is synchronous, takes

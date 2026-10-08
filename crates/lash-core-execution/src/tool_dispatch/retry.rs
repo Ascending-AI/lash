@@ -338,7 +338,6 @@ mod panic_tests {
             session_lifecycle: Arc::new(crate::testing::MockSessionManager::default()),
             session_graph: Arc::new(crate::testing::MockSessionManager::default()),
             processes: Arc::new(crate::UnavailableProcessService),
-            trigger_router: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             effect_controller: crate::ActorContext::unavailable()
                 .scoped(crate::AdmittedScope::runtime_operation(
@@ -362,7 +361,6 @@ mod panic_tests {
                 agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
             },
             observer: Arc::new(crate::engine::NullObservationSink),
-            trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::RuntimeAttachmentStore::unavailable()),
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),

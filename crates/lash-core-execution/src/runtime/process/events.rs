@@ -1,102 +1,24 @@
 pub use lash_core_store::process_identity::*;
 use lash_sansio::{CancelOrigin, CancelRequest};
-use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::effect_summary::{
     PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    ProcessEffectOccurrence, ProcessEffectOmissions,
 };
-use super::model::{ProcessId, ProcessObserverBy};
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessEventType {
-    pub name: String,
-    pub payload_schema: crate::JsonSchema,
-    pub semantics: ProcessEventSemanticsSpec,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct ProcessEventSemanticsSpec {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub terminal: Option<ProcessTerminalSpec>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake: Option<ProcessWakeSpec>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessTerminalSpec {
-    pub status: TerminalProcessStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub await_output: Option<ProcessValueSelector>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessWakeSpec {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub when: Option<ProcessValueSelector>,
-    pub input: ProcessValueSelector,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProcessValueSelector {
-    Payload,
-    Pointer(String),
-    Const(serde_json::Value),
-    Template {
-        template: String,
-        #[serde(default)]
-        fields: BTreeMap<String, ProcessValueSelector>,
-    },
-    Present(String),
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct ProcessEventSemantics {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub terminal: Option<ProcessTerminalSemantics>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake: Option<ProcessWake>,
-    /// The wait a signal event resolves, selected once, by the append that
-    /// admitted the signal (FIG-4298). Every signal event carries it; no
-    /// other event does.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signal_wait: Option<ProcessSignalWaitBinding>,
-    /// What caused the event, as the append that inserted it retained it:
-    /// the producer a wait this event resolves links. Written once with the
-    /// event; a replayed append reads it back whatever it carried.
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
-    pub trace_cause: lash_trace::TraceCause,
-}
-
-/// The wait one signal event resolves: the ordinal of the process's wait for
-/// the signal's name (FIG-4298).
-///
-/// The append that admits a signal selects it, in the same store transaction
-/// that inserts the event: the ordinal of the wait the process declared for
-/// this name when it is parked on one, or else the signal's own position
-/// among the events of its type, which the process's next wait for the name
-/// will declare. The binding is retained on the event, so a redelivered or
-/// retried signal is served the wait it was admitted to, never whichever
-/// wait the process has advanced to since.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProcessSignalWaitBinding {
-    pub ordinal: u64,
-}
+use super::model::{ProcessExternalRef, ProcessId, ProcessObserverBy, ProcessStarted, WaitState};
 
 /// Who wrote an [`ProcessStatus::Abandoned`] terminal (ADR 0110).
 ///
 /// The engine owns recovery, so lash itself writes an abandonment only when
 /// it refuses to resume work it cannot replay. Every other abandonment is the
-/// producer's own recorded outcome.
+/// engine's own recorded outcome.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AbandonWriter {
-    /// The process's producer recorded that its work was lost: a
-    /// producer-declared `Abandoned` terminal event.
+    /// The process's engine recorded that its work was lost.
     Producer,
     /// The resume fence refused to run a started process, before any effect,
     /// because it cannot be resumed safely (FIG-3588). `reason` says why.
@@ -216,24 +138,382 @@ impl ProcessCompletionAuthority {
     }
 }
 
-/// Terminal event type name for a terminal state.
-pub fn terminal_event_type_name(status: TerminalProcessStatus) -> &'static str {
-    match status {
-        TerminalProcessStatus::Completed => "process.completed",
-        TerminalProcessStatus::Failed => "process.failed",
-        TerminalProcessStatus::Cancelled => "process.cancelled",
-        TerminalProcessStatus::Abandoned => "process.abandoned",
+/// The kind of one process lifecycle fact: the closed vocabulary a process's
+/// event log is written in. Nothing outside lash declares a kind, so a stored
+/// event names one of these or is refused when it is read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub enum ProcessEventKind {
+    #[serde(rename = "process.first_started")]
+    FirstStarted,
+    #[serde(rename = "process.waiting")]
+    Waiting,
+    #[serde(rename = "process.resumed")]
+    Resumed,
+    #[serde(rename = "process.effect_outcome")]
+    EffectOutcome,
+    #[serde(rename = "process.effect_omissions")]
+    EffectOmissions,
+    #[serde(rename = "process.cancel_requested")]
+    CancelRequested,
+    #[serde(rename = "process.observer_added")]
+    ObserverAdded,
+    #[serde(rename = "process.observer_removed")]
+    ObserverRemoved,
+    #[serde(rename = "process.external_ref_set")]
+    ExternalRefSet,
+    #[serde(rename = "process.completed")]
+    Completed,
+    #[serde(rename = "process.failed")]
+    Failed,
+    #[serde(rename = "process.cancelled")]
+    Cancelled,
+    #[serde(rename = "process.abandoned")]
+    Abandoned,
+}
+
+impl ProcessEventKind {
+    /// Every kind, in declaration order.
+    pub const ALL: [Self; 13] = [
+        Self::FirstStarted,
+        Self::Waiting,
+        Self::Resumed,
+        Self::EffectOutcome,
+        Self::EffectOmissions,
+        Self::CancelRequested,
+        Self::ObserverAdded,
+        Self::ObserverRemoved,
+        Self::ExternalRefSet,
+        Self::Completed,
+        Self::Failed,
+        Self::Cancelled,
+        Self::Abandoned,
+    ];
+
+    /// The stored spelling: the event's type column.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::FirstStarted => "process.first_started",
+            Self::Waiting => "process.waiting",
+            Self::Resumed => "process.resumed",
+            Self::EffectOutcome => PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+            Self::EffectOmissions => PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
+            Self::CancelRequested => "process.cancel_requested",
+            Self::ObserverAdded => "process.observer_added",
+            Self::ObserverRemoved => "process.observer_removed",
+            Self::ExternalRefSet => "process.external_ref_set",
+            Self::Completed => "process.completed",
+            Self::Failed => "process.failed",
+            Self::Cancelled => "process.cancelled",
+            Self::Abandoned => "process.abandoned",
+        }
+    }
+
+    /// The kind stored as `event_type`; `None` for anything else.
+    pub fn parse(event_type: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.as_str() == event_type)
+    }
+
+    /// The kind of the terminal event that ends a process in `status`.
+    pub const fn for_terminal(status: TerminalProcessStatus) -> Self {
+        match status {
+            TerminalProcessStatus::Completed => Self::Completed,
+            TerminalProcessStatus::Failed => Self::Failed,
+            TerminalProcessStatus::Cancelled => Self::Cancelled,
+            TerminalProcessStatus::Abandoned => Self::Abandoned,
+        }
+    }
+
+    /// The status a terminal kind ends its process in; `None` for every
+    /// other kind.
+    pub const fn terminal_status(self) -> Option<TerminalProcessStatus> {
+        match self {
+            Self::Completed => Some(TerminalProcessStatus::Completed),
+            Self::Failed => Some(TerminalProcessStatus::Failed),
+            Self::Cancelled => Some(TerminalProcessStatus::Cancelled),
+            Self::Abandoned => Some(TerminalProcessStatus::Abandoned),
+            _ => None,
+        }
+    }
+
+    /// Whether only the runtime, under its execution authority, appends
+    /// this kind: the effect summary and observer membership, which a host
+    /// append must not pre-empt.
+    pub const fn is_runtime_owned(self) -> bool {
+        matches!(
+            self,
+            Self::EffectOutcome
+                | Self::EffectOmissions
+                | Self::ObserverAdded
+                | Self::ObserverRemoved
+        )
+    }
+
+    /// The JSON Schema of this kind's payload, for the kinds the runtime
+    /// publishes one for: the effect summary.
+    pub fn payload_schema(self) -> Option<crate::JsonSchema> {
+        match self {
+            Self::EffectOutcome => Some(super::effect_summary::effect_outcome_payload_schema()),
+            Self::EffectOmissions => Some(super::effect_summary::effect_omissions_payload_schema()),
+            _ => None,
+        }
     }
 }
 
-/// Build the replay-keyed terminal event append for a completion.
+impl std::fmt::Display for ProcessEventKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+/// One fact of a process's lifecycle: what a process event records. The
+/// vocabulary is closed and every fact is typed; a terminal is the typed
+/// outcome the process ended in.
 ///
-/// The single source of truth for the terminal event's type, replay key, and
-/// payload shape, shared by every completion path across all backends. New
-/// completions record their authority alongside `await_output` as durable
-/// audit evidence. `None` remains readable for terminal events persisted
-/// before completion authority was recorded. The `await_output` selector
-/// (`/await_output`) is untouched by the sibling key.
+/// It is stored as its kind's spelling ([`Self::event_type`]) and a payload
+/// ([`Self::payload`]), and read back through [`Self::decode`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProcessLifecycleFact {
+    /// An execution attempt started.
+    Started { started: ProcessStarted },
+    /// The process parked on a wait.
+    Waiting { wait: WaitState },
+    /// The wait the process was parked on ended.
+    Resumed { wait: WaitState },
+    /// One recorded effect occurrence (ADR 0100 R4).
+    EffectOutcome(ProcessEffectOccurrence),
+    /// The effect occurrences past the per-node cap, counted.
+    EffectOmissions(ProcessEffectOmissions),
+    /// The process's cancel was requested.
+    CancelRequested(CancelRequest),
+    /// A session began observing the process.
+    ObserverAdded {
+        session: crate::SessionId,
+        by: ProcessObserverBy,
+    },
+    /// A session stopped observing the process.
+    ObserverRemoved {
+        session: crate::SessionId,
+        by: ProcessObserverBy,
+    },
+    /// The process was bound to durable backend work.
+    ExternalRefSet { external_ref: ProcessExternalRef },
+    /// The process ended in `outcome`, written under `authority`.
+    Terminal {
+        outcome: ProcessTerminal,
+        authority: Option<ProcessCompletionAuthority>,
+    },
+}
+
+impl ProcessLifecycleFact {
+    /// This fact's kind.
+    pub fn kind(&self) -> ProcessEventKind {
+        match self {
+            Self::Started { .. } => ProcessEventKind::FirstStarted,
+            Self::Waiting { .. } => ProcessEventKind::Waiting,
+            Self::Resumed { .. } => ProcessEventKind::Resumed,
+            Self::EffectOutcome(_) => ProcessEventKind::EffectOutcome,
+            Self::EffectOmissions(_) => ProcessEventKind::EffectOmissions,
+            Self::CancelRequested(_) => ProcessEventKind::CancelRequested,
+            Self::ObserverAdded { .. } => ProcessEventKind::ObserverAdded,
+            Self::ObserverRemoved { .. } => ProcessEventKind::ObserverRemoved,
+            Self::ExternalRefSet { .. } => ProcessEventKind::ExternalRefSet,
+            Self::Terminal { outcome, .. } => ProcessEventKind::for_terminal(outcome.status()),
+        }
+    }
+
+    /// The stored spelling of this fact's kind.
+    pub fn event_type(&self) -> &'static str {
+        self.kind().as_str()
+    }
+
+    /// The outcome a terminal fact ends its process in.
+    pub fn terminal(&self) -> Option<&ProcessTerminal> {
+        match self {
+            Self::Terminal { outcome, .. } => Some(outcome),
+            _ => None,
+        }
+    }
+
+    /// This fact's stored payload.
+    #[expect(
+        clippy::expect_used,
+        reason = "every lifecycle payload is a crate-owned serializable struct"
+    )]
+    pub fn payload(&self) -> serde_json::Value {
+        match self {
+            Self::Started { started } => serde_json::json!({ "started": started }),
+            Self::Waiting { wait } | Self::Resumed { wait } => serde_json::json!({ "wait": wait }),
+            Self::EffectOutcome(occurrence) => {
+                serde_json::to_value(occurrence).expect("an effect occurrence serializes")
+            }
+            Self::EffectOmissions(omissions) => {
+                serde_json::to_value(omissions).expect("effect omissions serialize")
+            }
+            Self::CancelRequested(request) => {
+                serde_json::to_value(request).expect("a cancel request serializes")
+            }
+            Self::ObserverAdded { session, by } | Self::ObserverRemoved { session, by } => {
+                serde_json::json!({ "session": session, "by": by })
+            }
+            Self::ExternalRefSet { external_ref } => {
+                serde_json::json!({ "external_ref": external_ref })
+            }
+            Self::Terminal { outcome, authority } => {
+                let mut payload = serde_json::json!({ "await_output": outcome });
+                if let Some(authority) = authority {
+                    payload["completion_authority"] =
+                        serde_json::to_value(authority).expect("completion authority serializes");
+                }
+                payload
+            }
+        }
+    }
+
+    /// Read a stored fact back from its kind's spelling and its payload.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::PluginError::ReservedProcessEvent`] for a spelling that names
+    /// no lifecycle kind, and a session error for a payload its kind refuses.
+    pub fn decode(
+        event_type: &str,
+        payload: serde_json::Value,
+    ) -> Result<Self, crate::PluginError> {
+        let kind = ProcessEventKind::parse(event_type).ok_or_else(|| {
+            crate::PluginError::ReservedProcessEvent {
+                event_type: event_type.to_string(),
+            }
+        })?;
+        let invalid = |error: serde_json::Error| {
+            crate::PluginError::Session(format!(
+                "process event `{event_type}` has an invalid payload: {error}"
+            ))
+        };
+        Ok(match kind {
+            ProcessEventKind::FirstStarted => {
+                let fields: StartedPayload = serde_json::from_value(payload).map_err(invalid)?;
+                Self::Started {
+                    started: fields.started,
+                }
+            }
+            ProcessEventKind::Waiting => Self::Waiting {
+                wait: serde_json::from_value::<WaitPayload>(payload)
+                    .map_err(invalid)?
+                    .wait,
+            },
+            ProcessEventKind::Resumed => Self::Resumed {
+                wait: serde_json::from_value::<WaitPayload>(payload)
+                    .map_err(invalid)?
+                    .wait,
+            },
+            ProcessEventKind::EffectOutcome => {
+                Self::EffectOutcome(serde_json::from_value(payload).map_err(invalid)?)
+            }
+            ProcessEventKind::EffectOmissions => {
+                Self::EffectOmissions(serde_json::from_value(payload).map_err(invalid)?)
+            }
+            ProcessEventKind::CancelRequested => {
+                Self::CancelRequested(serde_json::from_value(payload).map_err(invalid)?)
+            }
+            ProcessEventKind::ObserverAdded => {
+                let ObserverPayload { session, by } =
+                    serde_json::from_value(payload).map_err(invalid)?;
+                Self::ObserverAdded { session, by }
+            }
+            ProcessEventKind::ObserverRemoved => {
+                let ObserverPayload { session, by } =
+                    serde_json::from_value(payload).map_err(invalid)?;
+                Self::ObserverRemoved { session, by }
+            }
+            ProcessEventKind::ExternalRefSet => Self::ExternalRefSet {
+                external_ref: serde_json::from_value::<ExternalRefPayload>(payload)
+                    .map_err(invalid)?
+                    .external_ref,
+            },
+            ProcessEventKind::Completed
+            | ProcessEventKind::Failed
+            | ProcessEventKind::Cancelled
+            | ProcessEventKind::Abandoned => {
+                let TerminalPayload {
+                    await_output,
+                    completion_authority,
+                } = serde_json::from_value(payload).map_err(invalid)?;
+                let declared = kind.terminal_status();
+                let outcome = ProcessTerminal::try_from(await_output).map_err(|_| {
+                    crate::PluginError::ProcessTerminalOutcomeMismatch {
+                        declared_status: declared.map_or(ProcessStatus::Completed, Into::into),
+                        outcome_status: None,
+                    }
+                })?;
+                if Some(outcome.status()) != declared {
+                    return Err(crate::PluginError::ProcessTerminalOutcomeMismatch {
+                        declared_status: declared.map_or(ProcessStatus::Completed, Into::into),
+                        outcome_status: Some(outcome.status().into()),
+                    });
+                }
+                Self::Terminal {
+                    outcome,
+                    authority: completion_authority,
+                }
+            }
+        })
+    }
+
+    /// Whether `other` is the same fact for a replay: equal, with a cancel
+    /// request compared on its cancellation rather than its clock.
+    pub fn same_fact(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::CancelRequested(left), Self::CancelRequested(right)) => {
+                left.same_cancellation_as(right)
+            }
+            _ => {
+                crate::identity_json::payloads_equal(&self.payload(), &other.payload())
+                    && self.kind() == other.kind()
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StartedPayload {
+    started: ProcessStarted,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WaitPayload {
+    wait: WaitState,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ObserverPayload {
+    session: crate::SessionId,
+    by: ProcessObserverBy,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ExternalRefPayload {
+    external_ref: ProcessExternalRef,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TerminalPayload {
+    await_output: ProcessAwaitOutput,
+    #[serde(default)]
+    completion_authority: Option<ProcessCompletionAuthority>,
+}
+
+/// The replay-keyed terminal event append for a completion.
+///
+/// The single source of truth for the terminal event's kind, replay key, and
+/// payload, shared by every completion path across all backends. A completion
+/// records its authority beside its outcome as durable audit evidence.
 pub fn terminal_append_request(
     process_id: &ProcessId,
     await_output: &ProcessAwaitOutput,
@@ -243,22 +523,14 @@ pub fn terminal_append_request(
         clippy::expect_used,
         reason = "only terminal outcomes reach this append"
     )]
-    let event_type = terminal_event_type_name(
-        await_output
-            .terminal_status()
-            .expect("only terminal outcomes may be appended"),
-    );
-    let mut payload = serde_json::json!({ "await_output": await_output });
-    #[expect(
-        clippy::expect_used,
-        reason = "a crate-owned completion authority serializes"
-    )]
-    if let Some(authority) = authority {
-        payload["completion_authority"] =
-            serde_json::to_value(authority).expect("completion authority serializes");
-    }
-    ProcessEventAppendRequest::new(event_type, payload)
-        .with_replay_key(format!("process:{process_id}:terminal:{event_type}"))
+    let outcome = ProcessTerminal::try_from(await_output.clone())
+        .expect("only terminal outcomes may be appended");
+    let event_type = ProcessEventKind::for_terminal(outcome.status()).as_str();
+    ProcessEventAppendRequest::new(ProcessLifecycleFact::Terminal {
+        outcome,
+        authority: authority.cloned(),
+    })
+    .with_replay_key(format!("process:{process_id}:terminal:{event_type}"))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -522,213 +794,79 @@ impl<'de> Deserialize<'de> for ProcessTerminal {
     }
 }
 
+/// One stored process event: a lifecycle fact at its place in the process's
+/// log.
+///
+/// It is stored as the fact's kind spelling and payload beside the rest, and
+/// a row whose fact does not decode is refused when it is read.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProcessWake {
-    pub input: String,
-}
-
-pub fn process_signal_event_type(signal_name: &str) -> Result<String, crate::PluginError> {
-    validate_process_signal_name(signal_name)?;
-    Ok(format!("signal.{signal_name}"))
-}
-
-pub fn process_signal_name_from_event_type(event_type: &str) -> Option<&str> {
-    event_type.strip_prefix("signal.")
-}
-
-/// The one spelling of a process signal's replay key.
-///
-/// Every caller that appends, awaits, or parks on a signal event derives its
-/// dedupe identity from this function (FIG-2876). The key was hand-spelled at
-/// eight sites, one of them a runbook binary outside the workspace, so a change
-/// to the format silently minted a second dedupe key and double-realized one
-/// recorded intent — not a compile error. `discriminator` is the signal's
-/// ordinal on the wait side and the recorded intent's replay key on the append
-/// side; both are the same slot of the same key.
-pub fn process_signal_wait_key(
-    process_id: &ProcessId,
-    signal_name: &str,
-    discriminator: impl std::fmt::Display,
-) -> String {
-    format!("process:{process_id}:signal.{signal_name}:{discriminator}")
-}
-
-/// One signal's identity (FIG-4299): the process it is sent to, its name and
-/// the sender's id for this one signal.
-///
-/// The identity is what makes a signal's append idempotent: its append key
-/// is derived from it, and only from it, so every retry, redelivery or replay
-/// of one signal lands on the one event its first append admitted. There is
-/// no caller-selected key beside it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(try_from = "ProcessSignalIdentityFields")]
-pub struct ProcessSignalIdentity {
-    process_id: ProcessId,
-    signal_name: String,
-    signal_id: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ProcessSignalIdentityFields {
-    process_id: ProcessId,
-    signal_name: String,
-    signal_id: String,
-}
-
-impl TryFrom<ProcessSignalIdentityFields> for ProcessSignalIdentity {
-    type Error = crate::PluginError;
-
-    fn try_from(fields: ProcessSignalIdentityFields) -> Result<Self, Self::Error> {
-        Self::new(fields.process_id, fields.signal_name, fields.signal_id)
-    }
-}
-
-impl ProcessSignalIdentity {
-    /// The identity of the signal `signal_id` named `signal_name` sent to
-    /// `process_id`.
-    ///
-    /// # Errors
-    ///
-    /// A signal name that is not a valid signal name, or an empty signal id.
-    pub fn new(
-        process_id: ProcessId,
-        signal_name: impl Into<String>,
-        signal_id: impl Into<String>,
-    ) -> Result<Self, crate::PluginError> {
-        let signal_name = signal_name.into();
-        let signal_id = signal_id.into();
-        validate_process_signal_name(&signal_name)?;
-        if signal_id.is_empty() {
-            return Err(crate::PluginError::Session(format!(
-                "process signal `{signal_name}` to `{process_id}` must carry a non-empty signal id"
-            )));
-        }
-        Ok(Self {
-            process_id,
-            signal_name,
-            signal_id,
-        })
-    }
-
-    pub fn process_id(&self) -> &ProcessId {
-        &self.process_id
-    }
-
-    pub fn signal_name(&self) -> &str {
-        &self.signal_name
-    }
-
-    pub fn signal_id(&self) -> &str {
-        &self.signal_id
-    }
-
-    /// The event type the signal appends as.
-    pub fn event_type(&self) -> String {
-        format!("signal.{}", self.signal_name)
-    }
-
-    /// The append key the signal's event is deduplicated by, derived from the
-    /// whole identity.
-    pub fn append_key(&self) -> String {
-        process_signal_wait_key(&self.process_id, &self.signal_name, &self.signal_id)
-    }
-}
-
-/// One signal as it is admitted (FIG-4299, FIG-4301): its identity and the
-/// payload it carries.
-///
-/// This is the whole request a signal command makes. Its append request is
-/// derived from it, and a recorded admission retains it, so a replay can
-/// tell the signal it admitted from a changed one under the same identity.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProcessSignal {
-    pub identity: ProcessSignalIdentity,
-    pub payload: serde_json::Value,
-    /// What caused the signal, for telemetry: its producer's context. The
-    /// append that admits the signal retains it on the event beside the
-    /// payload and wait binding; a redelivery reads the retained cause back.
-    /// It is no part of the signal: neither its identity, its append key
-    /// nor what a replay compares covers it.
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
-    pub trace_cause: lash_trace::TraceCause,
-}
-
-impl ProcessSignal {
-    pub fn new(identity: ProcessSignalIdentity, payload: serde_json::Value) -> Self {
-        Self {
-            identity,
-            payload,
-            trace_cause: lash_trace::TraceCause::Root,
-        }
-    }
-
-    /// Sets what caused the signal ([`Self::trace_cause`]).
-    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
-        self.trace_cause = trace_cause;
-        self
-    }
-
-    /// Whether `other` is this signal: the same identity and payload,
-    /// whatever context either was sent under.
-    pub fn same_signal(&self, other: &Self) -> bool {
-        self.identity == other.identity && self.payload == other.payload
-    }
-
-    /// The append this signal makes: its event type and payload under the
-    /// append key its identity derives. A signal is news to the process's
-    /// session, so its wake is never suppressed.
-    pub fn append_request(&self) -> ProcessEventAppendRequest {
-        let mut request =
-            ProcessEventAppendRequest::new(self.identity.event_type(), self.payload.clone())
-                .with_replay_key(self.identity.append_key());
-        request.signal_identity = Some(self.identity.clone());
-        request.trace_cause = self.trace_cause.clone();
-        request
-    }
-}
-
-/// The wait a stored signal event was admitted to resolve (FIG-4298).
-///
-/// # Errors
-///
-/// An event that carries no binding: every signal append retains one, so
-/// this is an event that is not a signal, or a store that did not bind it.
-pub fn admitted_signal_wait(
-    event: &ProcessEvent,
-) -> Result<ProcessSignalWaitBinding, crate::PluginError> {
-    event.semantics.signal_wait.ok_or_else(|| {
-        crate::PluginError::Session(format!(
-            "process `{}` event {} (`{}`) carries no admitted signal wait",
-            event.process_id, event.sequence, event.event_type
-        ))
-    })
-}
-
-pub fn validate_process_signal_name(signal_name: &str) -> Result<(), crate::PluginError> {
-    let valid = !signal_name.is_empty()
-        && signal_name
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-');
-    if valid {
-        Ok(())
-    } else {
-        Err(crate::PluginError::Session(format!(
-            "process signal name must be non-empty and contain only ASCII letters, digits, `_`, or `-`, got `{signal_name}`"
-        )))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(into = "ProcessEventRecord", try_from = "ProcessEventRecord")]
 pub struct ProcessEvent {
     pub process_id: ProcessId,
     pub sequence: u64,
-    pub event_type: String,
-    pub payload: serde_json::Value,
+    pub fact: ProcessLifecycleFact,
     pub invocation: crate::RuntimeInvocation,
-    pub semantics: ProcessEventSemantics,
+    /// What caused the event, as the append that inserted it retained it.
+    /// Written once with the event; a replayed append reads it back whatever
+    /// it carried.
+    pub trace_cause: lash_trace::TraceCause,
     pub occurred_at: u64,
+}
+
+impl ProcessEvent {
+    /// The event's kind.
+    pub fn kind(&self) -> ProcessEventKind {
+        self.fact.kind()
+    }
+
+    /// The outcome a terminal event ends its process in.
+    pub fn terminal(&self) -> Option<&ProcessTerminal> {
+        self.fact.terminal()
+    }
+}
+
+/// The stored form of a [`ProcessEvent`]: its fact as its kind's spelling and
+/// payload.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProcessEventRecord {
+    process_id: ProcessId,
+    sequence: u64,
+    event_type: String,
+    payload: serde_json::Value,
+    invocation: crate::RuntimeInvocation,
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    trace_cause: lash_trace::TraceCause,
+    occurred_at: u64,
+}
+
+impl From<ProcessEvent> for ProcessEventRecord {
+    fn from(event: ProcessEvent) -> Self {
+        Self {
+            process_id: event.process_id,
+            sequence: event.sequence,
+            event_type: event.fact.event_type().to_string(),
+            payload: event.fact.payload(),
+            invocation: event.invocation,
+            trace_cause: event.trace_cause,
+            occurred_at: event.occurred_at,
+        }
+    }
+}
+
+impl TryFrom<ProcessEventRecord> for ProcessEvent {
+    type Error = crate::PluginError;
+
+    fn try_from(record: ProcessEventRecord) -> Result<Self, Self::Error> {
+        Ok(Self {
+            fact: ProcessLifecycleFact::decode(&record.event_type, record.payload)?,
+            process_id: record.process_id,
+            sequence: record.sequence,
+            invocation: record.invocation,
+            trace_cause: record.trace_cause,
+            occurred_at: record.occurred_at,
+        })
+    }
 }
 
 /// Payload projection selected for a bounded process-event page.
@@ -746,7 +884,7 @@ pub enum ProcessEventQueryMode {
 #[serde(deny_unknown_fields)]
 pub struct ProcessEventLite {
     pub sequence: u64,
-    pub event_type: String,
+    pub kind: ProcessEventKind,
 }
 
 /// Projection-specific contents of one bounded event page.
@@ -885,42 +1023,72 @@ fn released_payload_digest(payload: &serde_json::Value) -> String {
     crate::stable_hash::sha256_hex(&crate::identity_json::payload_leaf(payload))
 }
 
-/// Release `event` in place for a store's prefix release: its payload is
-/// replaced by `null` and the digest returned, which the store keeps beside the
-/// row. Sequence, type, replay identity and the rest of the event stay, so
-/// sequence allocation, signal ordinals and the replay-key fence are exactly
+/// The digest a store keeps in place of `event`'s payload when it releases
+/// the event (FIG-3482). Sequence, kind, replay identity and the rest of the
+/// row stay, so sequence allocation and the replay-key fence are exactly
 /// what they were.
 ///
 /// `None` leaves the event as it is: a cancel request matches its replays on
 /// its cancellation rather than on payload bytes, and is one row per process.
-pub fn release_process_event_payload(event: &mut ProcessEvent) -> Option<String> {
-    if ProcessEventKind::from_event_type(&event.event_type) == ProcessEventKind::CancelRequested {
+pub fn release_process_event_payload(event: &ProcessEvent) -> Option<String> {
+    if event.kind() == ProcessEventKind::CancelRequested {
         return None;
     }
-    let digest = released_payload_digest(&event.payload);
-    event.payload = serde_json::Value::Null;
-    Some(digest)
+    Some(released_payload_digest(&event.fact.payload()))
 }
 
-/// Prepare a released event found under a re-presented replay key for the
-/// append's replay match: a request whose payload has the released digest
-/// gets its payload back on `existing`, so the replay answers the recorded
-/// event; any other payload is the same durable-identity conflict a retained
-/// event refuses.
-pub fn restore_released_process_event_payload(
-    existing: &mut ProcessEvent,
+/// A released event's row without its payload: what a store keeps of it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReleasedProcessEvent {
+    pub process_id: ProcessId,
+    pub sequence: u64,
+    pub event_type: String,
+    pub invocation: crate::RuntimeInvocation,
+    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    pub trace_cause: lash_trace::TraceCause,
+    pub occurred_at: u64,
+}
+
+impl ReleasedProcessEvent {
+    /// The row `event` keeps once its payload is released.
+    pub fn of(event: &ProcessEvent) -> Self {
+        Self {
+            process_id: event.process_id.clone(),
+            sequence: event.sequence,
+            event_type: event.fact.event_type().to_string(),
+            invocation: event.invocation.clone(),
+            trace_cause: event.trace_cause.clone(),
+            occurred_at: event.occurred_at,
+        }
+    }
+}
+
+/// Rebuild a released event found under a re-presented replay key for the
+/// append's replay match: a request of the same kind whose payload has the
+/// released digest gets its fact back on the row, so the replay answers the
+/// recorded event; any other request is the same durable-identity conflict a
+/// retained event refuses.
+pub fn restore_released_process_event(
+    released: ReleasedProcessEvent,
     released_digest: &str,
     requested: &ProcessEventAppendRequest,
-) -> Result<(), crate::PluginError> {
-    if existing.event_type == requested.event_type
-        && released_payload_digest(&requested.payload) == released_digest
+) -> Result<ProcessEvent, crate::PluginError> {
+    if released.event_type == requested.fact.event_type()
+        && released_payload_digest(&requested.fact.payload()) == released_digest
     {
-        existing.payload = requested.payload.clone();
-        return Ok(());
+        return Ok(ProcessEvent {
+            process_id: released.process_id,
+            sequence: released.sequence,
+            fact: requested.fact.clone(),
+            invocation: released.invocation,
+            trace_cause: released.trace_cause,
+            occurred_at: released.occurred_at,
+        });
     }
     Err(crate::durable_identity_conflict(format!(
         "process `{}` event replay key conflicts with released event {}",
-        existing.process_id, existing.sequence
+        released.process_id, released.sequence
     )))
 }
 
@@ -953,79 +1121,58 @@ pub struct ProcessEventAppendReceipt {
     /// receipt's encoding is unchanged for anything that round-trips it.
     #[serde(default, skip_serializing_if = "crate::StoreRealization::is_realized")]
     pub realization: crate::StoreRealization,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub wake_delivery: Option<ProcessWakeDelivery>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// One lifecycle fact to append, under its deterministic replay key.
+///
+/// Built only through the typed constructors: every fact a process's log
+/// holds is one lash records.
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProcessEventAppendRequest {
-    pub event_type: String,
-    pub payload: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fact: ProcessLifecycleFact,
     pub replay: Option<crate::RuntimeReplay>,
-    /// Retained by `ProcessSignal::append_request` so every store append can
-    /// validate the signal's target, event type and identity-derived key.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) signal_identity: Option<ProcessSignalIdentity>,
-    /// A wake is what a process *says to the session*, and the default is to
-    /// say it. An append sets this when the fact it records is not news to the
-    /// session: the runtime's own announcement of a call the session is already
-    /// parked on (see
-    /// [`PendingAnnouncement`](crate::PendingAnnouncement)). Waking a session
-    /// with the park notice of the very call it is waiting for re-prompts that
-    /// turn against an unsettled wait.
-    ///
-    /// Only the wake is withheld. The event is appended, journaled, projected
-    /// and visible to observers exactly as an unsuppressed append of the same
-    /// event type would be, so nothing reading the journal can tell the two
-    /// apart.
-    ///
-    /// Defaulted and omitted when false, so an append that does not set it
-    /// encodes exactly as it did before this field existed.
-    #[serde(default, skip_serializing_if = "core::ops::Not::not")]
-    pub wake_suppressed: bool,
-    /// What caused the event, for telemetry
-    /// ([`ProcessSignal::trace_cause`]): the append that inserts the event
-    /// retains it on the event's semantics and on the wake it delivers. It
-    /// takes no part in the append's replay identity or its payload match.
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
+    /// What caused the event, for telemetry: the append that inserts the
+    /// event retains it on the event. It takes no part in the append's replay
+    /// identity or its payload match.
     pub trace_cause: lash_trace::TraceCause,
 }
 
 impl ProcessEventAppendRequest {
-    /// Constructs a `ProcessEventAppendRequest` for store and durable-substrate implementors while
-    /// persisting and coordinating durable process execution.
-    pub fn new(event_type: impl Into<String>, payload: serde_json::Value) -> Self {
+    fn new(fact: ProcessLifecycleFact) -> Self {
         Self {
-            event_type: event_type.into(),
-            payload,
+            fact,
             replay: None,
-            signal_identity: None,
-            wake_suppressed: false,
             trace_cause: lash_trace::TraceCause::Root,
         }
     }
 
-    /// Withholds the wake this event type declares, leaving the append itself
-    /// unchanged.
+    /// Read a stored append back: the store's `AppendEvent` write carries
+    /// the fact's kind spelling, its payload and its replay key.
     ///
-    /// See [`wake_suppressed`](Self::wake_suppressed) for when an append is
-    /// entitled to do this.
-    /// The signal this append admits, if it is a signal's: what the store
-    /// mails to the process actor in the append's own transaction when the
-    /// append is new (ADR 0132 §10).
-    #[must_use]
-    pub fn signal(&self) -> Option<ProcessSignal> {
-        self.signal_identity.as_ref().map(|identity| ProcessSignal {
-            identity: identity.clone(),
-            payload: self.payload.clone(),
-            trace_cause: self.trace_cause.clone(),
-        })
+    /// # Errors
+    ///
+    /// A spelling or payload [`ProcessLifecycleFact::decode`] refuses, or an
+    /// empty replay key: every lifecycle append is keyed.
+    pub fn from_stored(
+        event_type: &str,
+        payload: serde_json::Value,
+        replay_key: impl Into<String>,
+    ) -> Result<Self, crate::PluginError> {
+        let replay_key = replay_key.into();
+        if replay_key.is_empty() {
+            return Err(crate::PluginError::Session(format!(
+                "process event `{event_type}` requires a deterministic replay key"
+            )));
+        }
+        Ok(
+            Self::new(ProcessLifecycleFact::decode(event_type, payload)?)
+                .with_replay_key(replay_key),
+        )
     }
 
-    pub fn without_wake(mut self) -> Self {
-        self.wake_suppressed = true;
-        self
+    /// The kind of the fact this append records.
+    pub fn kind(&self) -> ProcessEventKind {
+        self.fact.kind()
     }
 
     /// Attaches a replay key for process-store implementors so an equivalent event append is
@@ -1045,20 +1192,25 @@ impl ProcessEventAppendRequest {
         self
     }
 
+    /// Sets what caused the event ([`Self::trace_cause`]).
+    pub fn with_trace_cause(mut self, trace_cause: lash_trace::TraceCause) -> Self {
+        self.trace_cause = trace_cause;
+        self
+    }
+
     /// Build a cancellation event keyed by process, origin, and requester.
     /// Retrying with a fresh clock retains the first accepted cancellation fact.
     pub fn cancel_requested(process_id: &ProcessId, request: &CancelRequest) -> Self {
-        Self::new("process.cancel_requested", serde_json::json!(request))
+        Self::new(ProcessLifecycleFact::CancelRequested(request.clone()))
             .with_replay_key(cancellation_replay_key(process_id, request))
     }
 
     /// Builds a first-start event for process-store implementors keyed by attempt number so a retry
     /// cannot alias the preceding execution attempt.
-    pub fn first_started(process_id: &ProcessId, started: &super::model::ProcessStarted) -> Self {
-        Self::new(
-            "process.first_started",
-            serde_json::json!({ "started": started }),
-        )
+    pub fn first_started(process_id: &ProcessId, started: &ProcessStarted) -> Self {
+        Self::new(ProcessLifecycleFact::Started {
+            started: started.clone(),
+        })
         .with_replay_key(format!(
             "process:{process_id}:first-started:attempt:{}",
             started.attempt
@@ -1067,8 +1219,8 @@ impl ProcessEventAppendRequest {
 
     /// Builds a wait-entry event for process-store implementors keyed by wait identity and start
     /// time so replay cannot duplicate the transition.
-    pub fn wait_entered(process_id: &ProcessId, wait: &super::model::WaitState) -> Self {
-        Self::new("process.waiting", serde_json::json!({ "wait": wait })).with_replay_key(format!(
+    pub fn wait_entered(process_id: &ProcessId, wait: &WaitState) -> Self {
+        Self::new(ProcessLifecycleFact::Waiting { wait: wait.clone() }).with_replay_key(format!(
             "process:{process_id}:wait:{}:since:{}:entered",
             wait.key(),
             wait.since_ms
@@ -1077,8 +1229,8 @@ impl ProcessEventAppendRequest {
 
     /// Builds a wait-clear event for process-store implementors keyed to the exact wait identity
     /// and start time being resumed.
-    pub fn wait_cleared(process_id: &ProcessId, wait: &super::model::WaitState) -> Self {
-        Self::new("process.resumed", serde_json::json!({ "wait": wait })).with_replay_key(format!(
+    pub fn wait_cleared(process_id: &ProcessId, wait: &WaitState) -> Self {
+        Self::new(ProcessLifecycleFact::Resumed { wait: wait.clone() }).with_replay_key(format!(
             "process:{process_id}:wait:{}:since:{}:cleared",
             wait.key(),
             wait.since_ms
@@ -1087,14 +1239,10 @@ impl ProcessEventAppendRequest {
 
     /// Builds the single replay-stable external-reference event for process-store implementors
     /// binding durable backend work.
-    pub fn external_ref_set(
-        process_id: &ProcessId,
-        external_ref: &super::model::ProcessExternalRef,
-    ) -> Self {
-        Self::new(
-            "process.external_ref_set",
-            serde_json::json!({ "external_ref": external_ref }),
-        )
+    pub fn external_ref_set(process_id: &ProcessId, external_ref: &ProcessExternalRef) -> Self {
+        Self::new(ProcessLifecycleFact::ExternalRefSet {
+            external_ref: external_ref.clone(),
+        })
         .with_replay_key(match external_ref.segment_ordinal() {
             // Segment zero keeps the key every pre-segment writer used, so an
             // existing row's recorded append identity does not move. A later
@@ -1108,11 +1256,15 @@ impl ProcessEventAppendRequest {
 
     /// Builds an observer-add event for process-store implementors whose replay key includes
     /// process, session, and observer authority.
-    pub fn observer_added(process_id: &ProcessId, session: &str, by: &ProcessObserverBy) -> Self {
-        Self::new(
-            "process.observer_added",
-            serde_json::json!({ "session": session, "by": by }),
-        )
+    pub fn observer_added(
+        process_id: &ProcessId,
+        session: &crate::SessionId,
+        by: &ProcessObserverBy,
+    ) -> Self {
+        Self::new(ProcessLifecycleFact::ObserverAdded {
+            session: session.clone(),
+            by: by.clone(),
+        })
         .with_replay_key(format!(
             "process:{process_id}:observer:{session}:add:{}",
             by.replay_component()
@@ -1121,28 +1273,36 @@ impl ProcessEventAppendRequest {
 
     /// Builds an observer-remove event for process-store implementors whose replay key includes
     /// process, session, and observer authority.
-    pub fn observer_removed(process_id: &ProcessId, session: &str, by: &ProcessObserverBy) -> Self {
-        Self::new(
-            "process.observer_removed",
-            serde_json::json!({ "session": session, "by": by }),
-        )
+    pub fn observer_removed(
+        process_id: &ProcessId,
+        session: &crate::SessionId,
+        by: &ProcessObserverBy,
+    ) -> Self {
+        Self::new(ProcessLifecycleFact::ObserverRemoved {
+            session: session.clone(),
+            by: by.clone(),
+        })
         .with_replay_key(format!(
             "process:{process_id}:observer:{session}:remove:{}",
             by.replay_component()
         ))
     }
 
-    /// Builds a replay-stable subscription-retarget event for process-store implementors, encoding
-    /// an absent target with the reserved `none` replay component.
-    pub fn subscription_retargeted(process_id: &ProcessId, target: Option<&str>) -> Self {
-        Self::new(
-            "process.subscription_retargeted",
-            serde_json::json!({ "target": target }),
-        )
-        .with_replay_key(format!(
-            "process:{process_id}:subscription-retargeted:{}",
-            target.unwrap_or("none")
-        ))
+    /// The runtime append of one effect occurrence, keyed by the effect's
+    /// replay key.
+    pub fn effect_outcome(occurrence: ProcessEffectOccurrence) -> Self {
+        let replay_key = occurrence.replay_key.clone();
+        Self::new(ProcessLifecycleFact::EffectOutcome(occurrence)).with_replay_key(replay_key)
+    }
+
+    /// The runtime append of a run's effect omissions, keyed by
+    /// `replay_key`: one key per process run, so a redrive recovers the same
+    /// event.
+    pub fn effect_omissions(
+        omissions: ProcessEffectOmissions,
+        replay_key: impl Into<String>,
+    ) -> Self {
+        Self::new(ProcessLifecycleFact::EffectOmissions(omissions)).with_replay_key(replay_key)
     }
 }
 
@@ -1182,118 +1342,6 @@ fn cancellation_replay_key(process_id: &ProcessId, request: &CancelRequest) -> S
         PROCESS_CANCELLATION_FAMILY_VERSION,
         &cancellation_replay_preimage(process_id, request),
     )
-}
-
-/// Version 3 carries full admitted effect addresses and complete trigger causes
-/// in the invocation delivered with a process wake.
-pub use lash_core_store::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ProcessEventKind {
-    EffectOutcome,
-    EffectOmissions,
-    FirstStarted,
-    Waiting,
-    Resumed,
-    ExternalRefSet,
-    CancelRequested,
-    ObserverAdded,
-    ObserverRemoved,
-    SubscriptionRetargeted,
-    UnknownRuntime,
-    Custom,
-}
-
-impl ProcessEventKind {
-    pub(super) fn from_event_type(name: &str) -> Self {
-        match name {
-            PROCESS_EFFECT_OUTCOME_EVENT_TYPE => Self::EffectOutcome,
-            PROCESS_EFFECT_OMISSIONS_EVENT_TYPE => Self::EffectOmissions,
-            "process.first_started" => Self::FirstStarted,
-            "process.waiting" => Self::Waiting,
-            "process.resumed" => Self::Resumed,
-            "process.external_ref_set" => Self::ExternalRefSet,
-            "process.cancel_requested" => Self::CancelRequested,
-            "process.observer_added" => Self::ObserverAdded,
-            "process.observer_removed" => Self::ObserverRemoved,
-            "process.subscription_retargeted" => Self::SubscriptionRetargeted,
-            _ if name.starts_with("process.effect_") => Self::UnknownRuntime,
-            _ => Self::Custom,
-        }
-    }
-}
-
-/// The registered type of a runtime-owned process event kind, including its
-/// payload schema, or `None` for a producer-declared kind.
-pub fn runtime_lifecycle_event_type(name: &str) -> Option<ProcessEventType> {
-    match ProcessEventKind::from_event_type(name) {
-        ProcessEventKind::Custom | ProcessEventKind::UnknownRuntime => None,
-        ProcessEventKind::EffectOutcome => Some(ProcessEventType {
-            name: name.to_string(),
-            payload_schema: super::effect_summary::effect_outcome_payload_schema(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        }),
-        ProcessEventKind::EffectOmissions => Some(ProcessEventType {
-            name: name.to_string(),
-            payload_schema: super::effect_summary::effect_omissions_payload_schema(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        }),
-        ProcessEventKind::FirstStarted
-        | ProcessEventKind::Waiting
-        | ProcessEventKind::Resumed
-        | ProcessEventKind::ExternalRefSet
-        | ProcessEventKind::CancelRequested
-        | ProcessEventKind::ObserverAdded
-        | ProcessEventKind::ObserverRemoved
-        | ProcessEventKind::SubscriptionRetargeted => Some(ProcessEventType {
-            name: name.to_string(),
-            payload_schema: crate::JsonSchema::any(),
-            semantics: ProcessEventSemanticsSpec::default(),
-        }),
-    }
-}
-
-pub(super) fn is_runtime_lifecycle_event_type(name: &str) -> bool {
-    runtime_lifecycle_event_type(name).is_some()
-}
-
-pub(super) fn default_process_event_types() -> Vec<ProcessEventType> {
-    let mut event_types: Vec<_> = [
-        PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-        PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-        "process.cancel_requested",
-        "process.first_started",
-        "process.waiting",
-        "process.resumed",
-        "process.external_ref_set",
-        "process.observer_added",
-        "process.observer_removed",
-        "process.subscription_retargeted",
-    ]
-    .into_iter()
-    .filter_map(runtime_lifecycle_event_type)
-    .collect();
-    event_types.extend(
-        TerminalProcessStatus::ALL
-            .iter()
-            .copied()
-            .map(terminal_event_type),
-    );
-    event_types
-}
-
-fn terminal_event_type(status: TerminalProcessStatus) -> ProcessEventType {
-    ProcessEventType {
-        name: terminal_event_type_name(status).to_string(),
-        payload_schema: crate::JsonSchema::any(),
-        semantics: ProcessEventSemanticsSpec {
-            terminal: Some(ProcessTerminalSpec {
-                status,
-                await_output: Some(ProcessValueSelector::Pointer("/await_output".to_string())),
-            }),
-            ..ProcessEventSemanticsSpec::default()
-        },
-    }
 }
 
 #[cfg(test)]
@@ -1470,20 +1518,5 @@ mod cancellation_identity_tests {
                 "a malformed reserved tool-value tag must be rejected"
             );
         }
-    }
-}
-
-/// What a terminal event ends its process in: the outcome, whose status is
-/// derived from it and stored nowhere beside it.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ProcessTerminalSemantics {
-    pub outcome: ProcessTerminal,
-}
-
-impl ProcessTerminalSemantics {
-    /// The status the outcome ends the process in.
-    pub fn status(&self) -> TerminalProcessStatus {
-        self.outcome.status()
     }
 }

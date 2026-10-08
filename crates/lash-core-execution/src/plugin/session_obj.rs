@@ -261,7 +261,6 @@ pub(super) struct PluginSessionCapabilities {
     pub(super) tools: Arc<dyn ToolProvider>,
     pub(super) tool_registry: Arc<crate::ToolRegistry>,
     pub(super) session_extensions: PluginExtensions,
-    pub(super) triggers: crate::TriggerEventCatalog,
     pub(super) contributions: PluginContributions,
 }
 
@@ -569,10 +568,6 @@ impl PluginSession {
     /// host-static extensions in [`Self::extensions`].
     pub fn session_extensions(&self) -> &PluginExtensions {
         &self.capabilities().session_extensions
-    }
-
-    pub fn triggers(&self) -> &crate::TriggerEventCatalog {
-        &self.capabilities().triggers
     }
 
     pub fn host(&self) -> &PluginHost {

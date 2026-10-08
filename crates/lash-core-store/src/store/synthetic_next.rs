@@ -88,15 +88,6 @@ fn lift_session_head_meta(value: &mut serde_json::Value) -> Result<(), crate::St
     )
 }
 
-fn lift_process_wake_delivery(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
-    restamp(
-        value,
-        "process wake delivery",
-        "version",
-        crate::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-    )
-}
-
 /// `PROCESS_EVENT_VOCABULARY_VERSION` N+1: an effect-summary event carries
 /// its vocabulary under `vocabulary_version`.
 fn lift_process_event_vocabulary(value: &mut serde_json::Value) -> Result<(), crate::StoreError> {
@@ -187,11 +178,6 @@ pub(super) const RECORD_UPCASTERS: &[RecordUpcaster] = &[
         super::SESSION_HEAD_META_SCHEMA_VERSION - 1,
         lift_session_head_meta,
     ),
-    tree(
-        "PROCESS_WAKE_DELIVERY_FORMAT_VERSION",
-        crate::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION - 1,
-        lift_process_wake_delivery,
-    ),
     decoder(
         "CURRENT_SESSION_STATE_VERSION",
         super::CURRENT_SESSION_STATE_VERSION - 1,
@@ -247,10 +233,6 @@ pub(super) const WRITER_PINS: &[WriterPin] = &[
     pin(
         "SESSION_HEAD_META_SCHEMA_VERSION",
         super::SESSION_HEAD_META_SCHEMA_VERSION - 1,
-    ),
-    pin(
-        "PROCESS_WAKE_DELIVERY_FORMAT_VERSION",
-        crate::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION - 1,
     ),
     pin(
         "CURRENT_SESSION_STATE_VERSION",

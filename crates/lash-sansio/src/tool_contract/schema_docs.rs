@@ -66,7 +66,6 @@ pub(crate) fn compact_type(shape: &SchemaShape) -> String {
                 .join(", "),
             compact_type(&signature.output)
         ),
-        ShapeKind::Handle(payload) => format!("handle[{}]", compact_type(payload)),
     }
 }
 

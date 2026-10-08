@@ -21,7 +21,7 @@ pub use crate::runtime::turn_input_ingress::ingress_message_id;
 pub use crate::runtime::turn_loop::ResidentSessionState;
 pub use crate::runtime::turn_queue::{
     AdmissionBoundary, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkPayload,
-    SessionCommandSettlement, process_wake_batch_draft,
+    SessionCommandSettlement,
 };
 pub use crate::runtime::usage::nonzero_usage;
 pub use crate::runtime::{RecordedTurnAssembly, classify_output_state};
@@ -40,8 +40,7 @@ pub use crate::store::{
     load_session_window_state,
 };
 pub use crate::tool_dispatch::{
-    ToolCallLaunch, ToolTriggerOutcomeBuffer, execute_final_tool_intents,
-    resolve_callable_manifest_by_id,
+    ToolCallLaunch, execute_final_tool_intents, resolve_callable_manifest_by_id,
 };
 /// The kernel's single-call entries under the dispatch state a [`crate::testing::ToolCallFixture`]
 /// configures: the entries themselves take crate-private state.

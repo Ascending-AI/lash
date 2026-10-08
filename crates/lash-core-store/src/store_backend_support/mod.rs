@@ -134,13 +134,10 @@ pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
 
 /// The admission verdicts every backend takes alike; see
 /// [`crate::store::admission_plan`].
-pub use crate::store::admission_plan::{
-    deferred_wake_records, require_admitted_to_run, require_open_command,
-};
+pub use crate::store::admission_plan::{require_admitted_to_run, require_open_command};
 /// One verdict function per fencing decision; see [`crate::store::fencing`].
 pub use crate::store::fencing::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET, FencedWrite, HeadPublicationVerdict,
-    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, fenced_write_applied,
-    head_publication_verdict, require_fenced_write_applied, require_single_writer_head_publication,
-    wake_delivery_claim_verdict,
+    fenced_write_applied, head_publication_verdict, require_fenced_write_applied,
+    require_single_writer_head_publication,
 };

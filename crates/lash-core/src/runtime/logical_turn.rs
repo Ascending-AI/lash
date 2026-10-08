@@ -5,19 +5,12 @@ use crate::TurnId;
 /// The rows one turn executes, each admitted to the turn's run (FIG-3927):
 /// what the run's admission bound.
 pub(super) struct LogicalTurnAdmissions {
-    pub(super) queued: Vec<crate::AdmittedQueuedWork>,
     pub(super) turn_inputs: Vec<crate::AdmittedTurnInputs>,
 }
 
 impl LogicalTurnAdmissions {
-    pub(super) fn new(
-        queued: Vec<crate::AdmittedQueuedWork>,
-        turn_inputs: Vec<crate::AdmittedTurnInputs>,
-    ) -> Self {
-        Self {
-            queued,
-            turn_inputs,
-        }
+    pub(super) fn new(turn_inputs: Vec<crate::AdmittedTurnInputs>) -> Self {
+        Self { turn_inputs }
     }
 }
 
@@ -26,7 +19,6 @@ impl LashRuntime {
         observer: &TurnObserver,
         scoped_effect_controller: &ActorContext,
         turn_id: &TurnId,
-        admissions: &LogicalTurnAdmissions,
         tool_restore: Option<crate::ToolRestoreReport>,
     ) {
         let mut cursor =
@@ -42,17 +34,6 @@ impl LashRuntime {
                     correlation_id: None,
                     event: crate::TurnEvent::ToolRestoreReported { report },
                 },
-            );
-        }
-        for queued in &admissions.queued {
-            let work = queued.materialize_queued_checkpoint_work();
-            super::turn_loop::emit_queued_work_started(
-                observer,
-                &mut cursor,
-                turn_id,
-                crate::AdmissionBoundary::Idle,
-                queued,
-                work.turn_causes,
             );
         }
     }

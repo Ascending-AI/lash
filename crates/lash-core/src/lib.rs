@@ -31,8 +31,7 @@ pub use lash_core_execution::formats;
 pub use lash_core_execution::process_id_for_test;
 pub use lash_core_execution::process_id_from_handle_json;
 pub use lash_core_execution::runtime::actor::round::{
-    CallOwner, ParkAnnouncementRows, ParkedCall, SignalSendRows, StagedPluginState,
-    StoreLocalEffect, StoreLocalRows, parked,
+    CallOwner, ParkedCall, StagedPluginState, StoreLocalEffect, StoreLocalRows, parked,
 };
 /// Durable tool-effect format versions, re-exported for the format manifest.
 pub use lash_core_execution::waits;
@@ -124,7 +123,6 @@ pub(crate) use lash_core_execution::tool_provider;
 pub use lash_core_execution::tool_registry;
 pub(crate) use lash_core_execution::tool_result;
 pub use lash_core_execution::trace;
-pub use lash_core_execution::triggers;
 
 mod protocol_copy;
 
@@ -287,13 +285,10 @@ pub mod facade_support {
     pub use crate::runtime::ProcessEventSinkRegistration;
     pub use crate::runtime::ProcessRuntimeHost;
     pub use crate::runtime::ProcessStartPlan;
-    pub use crate::runtime::ProcessTerminalSemantics;
     pub use crate::runtime::ProcessToolVisibilityFilter;
     pub use crate::runtime::ProcessTransition;
     pub use crate::runtime::ProcessTransitionPlan;
     pub use crate::runtime::ProcessTurnCancellation;
-    pub use crate::runtime::ProcessWake;
-    pub use crate::runtime::ProcessWakeDeliveryRequest;
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
     pub use crate::runtime::QueuedDrainCandidate;
@@ -303,7 +298,6 @@ pub mod facade_support {
     pub use crate::runtime::QueuedDrainSelection;
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
-    pub use crate::runtime::QueuedWorkKind;
 
     pub use crate::runtime::RuntimeEffectReplayTrace;
     pub use crate::runtime::RuntimeEnvironment;
@@ -327,7 +321,6 @@ pub mod facade_support {
     pub use crate::runtime::TurnAddress;
     pub use crate::runtime::TurnAttach;
     pub use crate::runtime::TurnCancelAffectedInput;
-    pub use crate::runtime::TurnCancelAffectedWake;
     pub use crate::runtime::TurnCancelInputOutcome;
     pub use crate::runtime::TurnCancelMode;
     pub use crate::runtime::TurnCancelOutcome;
@@ -348,11 +341,6 @@ pub mod facade_support {
     pub use crate::runtime::current_epoch_ms;
 
     pub use crate::runtime::process_child_session_id;
-    pub use crate::runtime::process_signal_event_type;
-    pub use crate::runtime::process_signal_wait_key;
-    pub use crate::runtime::process_wake_delivery;
-    pub use crate::runtime::process_wake_source_key;
-    pub use crate::runtime::reconcile_pruned_trigger_deliveries;
     pub use crate::runtime::registry_transitions;
     pub use crate::runtime::terminal_append_request;
     pub use crate::runtime::validate_generic_process_event_append;
@@ -380,30 +368,6 @@ pub mod facade_support {
     pub use crate::tool_registry::ToolSourcePolicy;
     pub use crate::tool_registry::ToolStateEntry;
     pub use crate::tool_registry::facade_ops::ToolRegistryFacadeOps;
-    pub use crate::triggers::TriggerDeliveryEmitOutcome;
-    pub use crate::triggers::TriggerDeliveryEmitReceipt;
-    pub use crate::triggers::TriggerEmitReport;
-    pub use crate::triggers::TriggerEvent;
-    pub use crate::triggers::TriggerEventType;
-    pub use crate::triggers::TriggerRegistration;
-    pub use crate::triggers::TriggerRouter;
-    pub use crate::triggers::TriggerTarget;
-    pub use crate::triggers::default_trigger_source_key;
-    pub use crate::triggers::derived_trigger_subscription_key;
-    pub use crate::triggers::deterministic_occurrence_id;
-    pub use crate::triggers::deterministic_subscription_id;
-    pub use crate::triggers::empty_trigger_source_key;
-    pub use crate::triggers::evaluate_trigger_mutation;
-    pub use crate::triggers::evaluate_trigger_mutation_with_incarnation;
-    pub use crate::triggers::evaluate_trigger_prune;
-    pub use crate::triggers::next_trigger_revision;
-    pub use crate::triggers::next_trigger_store_revision;
-    pub use crate::triggers::sort_trigger_delivery_reservations;
-    pub use crate::triggers::trigger_command_fingerprint;
-    pub use crate::triggers::trigger_delivery_start_key;
-    pub use crate::triggers::trigger_occurrence_request_matches_record;
-    pub use crate::triggers::trigger_operation_receipt_id;
-    pub use crate::triggers::validate_trigger_occurrence_request;
     pub use lash_core_execution::Response;
     pub use lash_core_store::session_graph::facade_ops::{
         SessionGraphFacadeOps, SessionNodeProjection,
@@ -440,7 +404,6 @@ pub mod facade_support {
     pub use lash_sansio::head_tail_truncate;
     pub use lash_sansio::normalized_response_parts;
     pub use lash_sansio::reasoning_part;
-    pub use lash_sansio::render_turn_causes_prompt;
     pub use lash_sansio::resolve_schema;
     pub use lash_sansio::shared_parts;
     pub use lash_sansio::tool_result_text;
@@ -479,8 +442,7 @@ pub mod sansio {
         EffectId, ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure,
         ExecutionEnvironmentSyncFailureKind, ExpandedRow, ExpandedWrapper, LlmCallError,
         ModelToolCalls, PendingToolCall, PendingWork, ProtocolDriverHandle, ResponseToolCalls,
-        SyncedEnvironment, ToolExpansionPlan, TurnCause, TurnMachine, place_prompt,
-        render_turn_causes_prompt,
+        SyncedEnvironment, ToolExpansionPlan, TurnMachine, place_prompt,
     };
 }
 
@@ -518,8 +480,8 @@ pub use lash_sansio::{
     ToolCatalogBuildError, ToolCatalogEntry, ToolContract, ToolControl, ToolDeclaration,
     ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery, ToolFailure, ToolFailureCause,
     ToolFailureClass, ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest,
-    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause,
-    TurnId, TurnOutputSource, TurnReply, ValueMismatch,
+    ToolModule, ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnId,
+    TurnOutputSource, TurnReply, ValueMismatch,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, build_turn, messages_are_prompt_resume_safe, visible_response_parts,
@@ -529,31 +491,15 @@ pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSe
 pub use tool_registry::{
     SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy, ToolState,
 };
-pub use tool_result::{
-    CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, ToolOutcome,
-};
+pub use tool_result::{CancelHint, PendingCompletion, PendingResolver, ToolOutcome};
 pub use tool_result::{DeclaredStart, DeclaredStartRefused};
-pub use triggers::{
-    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
-    TriggerDeliveryRetentionCandidate, TriggerEffectResult, TriggerEventCatalog, TriggerHandle,
-    TriggerIngressReceipt, TriggerInputBinding, TriggerLifecycleColumnError,
-    TriggerMutationOutcome, TriggerMutationReceipt, TriggerOccurrenceFilter,
-    TriggerOccurrenceOutcome, TriggerOccurrencePlan, TriggerOccurrenceReclamationReport,
-    TriggerOccurrenceReclamationResult, TriggerOccurrenceRecord, TriggerOccurrenceRequest,
-    TriggerOperationError, TriggerOwnerScope, TriggerProviderRoute,
-    TriggerRetentionReconciliationReport, TriggerRouteRefusal, TriggerRouteRestore,
-    TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionChange,
-    TriggerSubscriptionChangeCursor, TriggerSubscriptionDraft, TriggerSubscriptionFilter,
-    TriggerSubscriptionLifecycle, TriggerSubscriptionRecord, admit_trigger_registration_target,
-    trigger_handle, trigger_handle_outcome_value,
-};
 
 pub(crate) mod facade_ops {}
 pub use lash_core_execution::{
     ArtifactCarry, ArtifactCleanup, ArtifactName, ArtifactReferrer, ArtifactReferrerError,
     ArtifactReferrerKind, ArtifactStoreId, AttachmentUploadId, FrameEnvironmentId, HostArtifactPin,
     ReferrerClaim, ReferrerGuard, ReferrerStore, ResolvedArtifactCleanup, RuntimeOwner,
-    SubscriptionRevisionId, UploadReferrerId, artifact_referrer_ended, trigger_incarnation,
+    UploadReferrerId, artifact_referrer_ended,
 };
 pub use lash_core_execution::{
     ArtifactStoreError, Backend, BackendParts, DurabilityTier, DurableBuildError, DurableConfig,
@@ -616,7 +562,6 @@ pub use plugin::{
     SessionLineage, SessionReadView, SessionRelation, SessionSnapshot, SessionStartPoint,
     SessionStateService, SessionToolAccess, SessionToolAccessError, StateCommands,
     UnstatedSessionConfig, durable_identity_conflict, is_durable_identity_conflict,
-    is_trigger_occurrence_reclaimed, trigger_occurrence_reclaimed,
 };
 pub use plugin::{OpenAgentFrameOutcome, OpenAgentFrameRequest};
 
@@ -651,9 +596,8 @@ pub use runtime::{ObservationSource, work_with_observations};
 // process engines and their integration tests —
 // they are deliberately public; the rest of the runtime module stays
 // crate-internal.
-/// Intent realization publishes the execution environment a declared trigger
-/// subscription names, under the realizing execution's journal referrer
-/// (FIG-3116, ADR 0113 §3.4).
+/// A host publishes the execution environment a start names, under the
+/// referrer that holds it (FIG-3116, ADR 0113 §3.4).
 pub use lash_core_execution::runtime::publish_process_execution_env;
 /// The artifact ports a process-engine registry acquires start and revision
 /// artifacts through (ADR 0113 §3.3), for hosts that assemble a registry
@@ -668,87 +612,81 @@ pub use runtime::{
     DefinitionAcquisition, DefinitionRef, DeliveryPolicy, DeploymentStore,
     DeploymentStoreDecorator, DrainMode, DrainModePolicy, DurableProcessWork, EffectAddress,
     EffectJournalRetirement, EffectOpener, EffectOpenerError, EffectRetirementGate, EngineAction,
-    EngineEvent, EngineHostSteps, EngineState, EngineStateFormat, EngineStepKind,
-    EngineStepRefusal, EngineStepRun, EngineSteps, ExecutableGeneration,
-    ExecutableGenerationRefusal, ExecutionScope, ForkSessionReceipt, ForkSessionRequest, HandleId,
-    HostStepRun, HostWaitKind, InputItem, InvalidProcessDefinitionId, InvalidStartKey,
-    JournalReplay, KeyName, Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft,
-    LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError,
-    LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord,
-    MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoRunOptionsOwner, NonTerminalProcessPage,
-    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, PendingTurnInput,
-    PendingTurnInputBatch, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputRead,
-    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PreparedProcessRegistration,
-    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
-    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
-    ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionId,
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionStore, ProcessDefinitionStoredError, ProcessDefinitionTarget,
-    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectNodeReport, ProcessEffectOccurrence,
-    ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcome,
-    ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, ProcessEngine,
-    ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
-    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessEventRelease, ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
-    ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLifecycle,
-    ProcessLineage, ProcessListFilter, ProcessListMode, ProcessListSelection,
+    EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal, EngineStepRun,
+    EngineSteps, ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope,
+    ForkSessionReceipt, ForkSessionRequest, HandleId, HostWaitKind, InputItem,
+    InvalidProcessDefinitionId, InvalidStartKey, JournalReplay, KeyName, Lifetime,
+    LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome,
+    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
+    LlmRequestSpec, LlmStreamRecord, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork,
+    NoRunOptionsOwner, NonTerminalProcessPage, PROCESS_EFFECT_OCCURRENCE_CAP,
+    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    PROCESS_EVENT_VOCABULARY_VERSION, ParentEndPlan, PendingTurnInput, PendingTurnInputBatch,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
+    PendingTurnInputSuffixCancelOutcome, PreparedProcessRegistration, ProcessAwaitOutput,
+    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessDefinition,
+    ProcessDefinitionDraft, ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionRef,
+    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionStore,
+    ProcessDefinitionStoredError, ProcessDefinitionTarget, ProcessDefinitionValue,
+    ProcessDriveStep, ProcessEffectNodeReport, ProcessEffectOccurrence, ProcessEffectOmissions,
+    ProcessEffectOmittedCounts, ProcessEffectOutcome, ProcessEffectOutcomeClass,
+    ProcessEffectReport, ProcessEffectReportError, ProcessEngine, ProcessEngineAdmission,
+    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEvent,
+    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHistoryRetention,
+    ProcessEventLite, ProcessEventLog, ProcessEventPage, ProcessEventPageEvents,
+    ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
+    ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput,
+    ProcessLifecycle, ProcessLineage, ProcessListFilter, ProcessListMode, ProcessListSelection,
     ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
     ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeObserver,
     ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar,
     ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt, ProcessRegistry,
     ProcessRegistryAwaiter, ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention,
-    ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport, ProcessSignal,
-    ProcessSignalIdentity, ProcessSignalWaitBinding, ProcessSignature, ProcessSpawnProvenance,
-    ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt,
-    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalSpec,
-    ProcessTerminalWait, ProcessTombstone, ProcessToolIntents, ProcessValueSelector,
-    ProcessWakeDelivery, ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring,
-    ProjectionWatermark, ProtocolSessionExtension, QueuedDrainCandidate, QueuedDrainFamily,
-    QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection, QueuedWorkAuthority,
-    QueuedWorkBatchingConfig, QueuedWorkKind, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
-    RecordedRefusal, RecordedRender, RefusedWriteRange, RenderFault, RenderRefusal, Resolution,
-    ResolveOutcome, ResolvedProcessDefinition, ResolvedRun, RetainedRevision, Retention,
-    RunAggregateWakePolicy, RunDefinition, RunDefinitionRefusal, RunDefinitions, RunOptionsOwner,
-    RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash, RuntimeAttribution,
-    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause,
-    RuntimeErrorCode, RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution,
-    RuntimeSessionState, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
-    ScopeStorageError, SegmentProgress, ServedOnly, ServedOnlyRange, SessionAdministration,
-    SessionCreationHead, SessionCursor, SessionCursorError, SessionDeleteContext,
-    SessionDeleteExecution, SessionEntry, SessionId, SessionListFilter, SessionObservationEvent,
-    SessionObservationEventPayload, SessionProcessEventKind, SessionQueueEventKind,
-    SessionRelationKind, SessionRevision, SessionScope, SessionStateVersionRefusal,
-    SessionStoreCreateRequest, SessionView, SleepSpec, SlotId, StagedProcessStart, StartCx,
-    StartCxError, StartKey, StepEffectSite, StepName, StepRequest, StoreRealization,
-    StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity, TurnActivityId,
-    TurnCancelAffectedInput, TurnCancelAffectedWake, TurnCancelInputOutcome, TurnCancelMode,
+    ProcessRunOutcome, ProcessService, ProcessSessionDeleteReport, ProcessSignature,
+    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter,
+    ProcessTerminalWait, ProcessTombstone, ProcessToolIntents, ProcessWorkSubstrate,
+    ProcessWorkWiring, ProjectionWatermark, ProtocolSessionExtension, QueuedDrainCandidate,
+    QueuedDrainFamily, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
+    QueuedWorkAuthority, QueuedWorkBatchingConfig, RecordedKeyFence, RecordedKeyRange,
+    RecordedKeys, RecordedRefusal, RecordedRender, RefusedWriteRange, RenderFault, RenderRefusal,
+    Resolution, ResolveOutcome, ResolvedProcessDefinition, ResolvedRun, RetainedRevision,
+    Retention, RunAggregateWakePolicy, RunDefinition, RunDefinitionRefusal, RunDefinitions,
+    RunOptionsOwner, RunOverrides, RunResolveError, RunShapeRefusal, RunSpec, RunSpecHash,
+    RuntimeAttribution, RuntimeCheckpointComponents, RuntimeEffectCommand,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
+    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
+    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef, ScopeStorageError,
+    SegmentProgress, ServedOnly, ServedOnlyRange, SessionAdministration, SessionCreationHead,
+    SessionCursor, SessionCursorError, SessionDeleteContext, SessionDeleteExecution, SessionEntry,
+    SessionId, SessionListFilter, SessionObservationEvent, SessionObservationEventPayload,
+    SessionProcessEventKind, SessionQueueEventKind, SessionRelationKind, SessionRevision,
+    SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest, SessionView, SleepSpec,
+    SlotId, StagedProcessStart, StartCx, StartCxError, StartKey, StepEffectSite, StepName,
+    StepRequest, StoreRealization, StoredDataCorruption, Target, ToolAttemptLaunch, TurnActivity,
+    TurnActivityId, TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy, TurnCancelWait, TurnContext, TurnEvent, TurnFailureCause,
     TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement, TurnInput,
     TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
     TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
     TurnLaneAdmissionPolicy, TurnPrelude, TurnPreludeRef, TurnPreludeStore, WaitKind, WaitState,
-    WakeId, WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
+    WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
     admit_session_state_generation, artifact_store_plugin_error, lifetime, mint_process_id,
     tool_failure_code,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
-    AdmissionBoundary, AdmittedQueuedWork, ProcessEventSemantics, QueuedCheckpointTurnInput,
-    QueuedCheckpointWork, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkCompletion,
-    QueuedWorkEnqueueOutcome, QueuedWorkPayload, RuntimeSubject, load_process_execution_env,
-    materialize_process_event_semantics, prepare_process_event_append,
+    AdmissionBoundary, AdmittedQueuedWork, QueuedCheckpointTurnInput, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkPayload,
+    RuntimeSubject, load_process_execution_env, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
-    process_event_invocation, process_wake_batch_draft, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, require_event_replay,
+    process_event_invocation,
 };
 pub use runtime::{ConsumerHold, SessionTurnOutcome};
 pub use runtime::{ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal};
@@ -761,8 +699,7 @@ pub(crate) use session::RuntimeExecutionTracing;
 pub(crate) use session::Session;
 pub use session::{
     ExecRequest, ExecutionEnvironmentSyncError, RuntimeExecutionContext, SessionError,
-    ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind, resolve_trigger_owner_scope,
-    tool_dispatch_surface,
+    ToolDispatchSurface, ToolSurfaceDrift, ToolSurfaceDriftKind, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
@@ -776,7 +713,7 @@ pub use session_model::{
 };
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
-    AdmissionRefusal, AdoptedAttachmentCondemnation, AppendRequestIdentity, AttachmentCondemnation,
+    AdoptedAttachmentCondemnation, AppendRequestIdentity, AttachmentCondemnation,
     AttachmentCondemnationAdoption, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentDeleteArming,
     AttachmentDeleteStallReason, AttachmentReferrers, AttachmentSettlementOutcome,
@@ -802,8 +739,7 @@ pub(crate) use store::{
     ensure_supported_schema_version,
 };
 pub use tool_intent::{
-    CancelProcessIntent, DeclaredModuleArtifact, EmitProcessEventIntent, EmitTriggerIntent,
-    GetDefinitionIntent, PublishDefinitionIntent, RegisterTriggerIntent, SignalProcessIntent,
+    CancelProcessIntent, DeclaredModuleArtifact, GetDefinitionIntent, PublishDefinitionIntent,
     StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
     TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, ToolAttemptOutcome, ToolIntent,
     ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,

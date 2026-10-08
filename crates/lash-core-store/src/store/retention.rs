@@ -19,11 +19,6 @@ pub struct RetentionReport {
     pub removed_receipt_count: usize,
     /// Retained session fault and deletion records acknowledged by the host.
     pub removed_session_terminal_count: usize,
-    /// Trigger mutation receipts removed before the host horizon:
-    /// ownerless (host/platform) receipts by age, and session-owned receipts
-    /// once their owner is durably deleted and no outstanding delivery names
-    /// it (FIG-4108).
-    pub removed_trigger_mutation_receipt_count: usize,
     /// Host tool-intent submission ledger rows removed before the host
     /// horizon once their owner session is durably deleted; the owner keeps a
     /// fence that refuses every later submission (FIG-1509).
@@ -41,7 +36,6 @@ impl super::MaintenanceReport for RetentionReport {
     fn reclaimed_count(&self) -> usize {
         self.removed_receipt_count
             + self.removed_session_terminal_count
-            + self.removed_trigger_mutation_receipt_count
             + self.removed_tool_intent_submission_count
             + self.removed_attachment_root_count
             + self.retired_effect_scope_count

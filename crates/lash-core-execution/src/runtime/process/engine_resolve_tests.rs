@@ -13,15 +13,6 @@ fn authoritative_signature() -> ProcessSignature {
     ProcessSignature::known(serde_json::json!({"returns": "receipt"}))
 }
 
-fn declared_signal() -> ProcessEventType {
-    ProcessEventType {
-        name: "signed.progress".to_string(),
-        payload_schema: crate::JsonSchema::admit(serde_json::json!({"type": "object"}))
-            .expect("valid declared payload schema"),
-        semantics: crate::ProcessEventSemanticsSpec::default(),
-    }
-}
-
 #[async_trait::async_trait]
 impl ProcessEngine for SignedEngine {
     async fn check_args(
@@ -71,10 +62,7 @@ impl ProcessEngine for SignedEngine {
                 message: "definition names no program".to_string(),
             });
         }
-        Ok(ProcessDefinitionResolution::new(
-            authoritative_signature(),
-            vec![declared_signal()],
-        ))
+        Ok(ProcessDefinitionResolution::new(authoritative_signature()))
     }
 
     fn state_format(&self) -> crate::EngineStateFormat {
@@ -143,11 +131,9 @@ fn registry() -> ProcessEngineRegistry {
     )
 }
 
-/// A reference that asserts nothing adopts the engine's authority, and the
-/// signals the definition declares ride the admission instead of being
-/// re-declared by the caller.
+/// A reference that asserts nothing adopts the engine's authority.
 #[tokio::test]
-async fn an_unclaimed_reference_adopts_the_artifact_signature_and_signals() {
+async fn an_unclaimed_reference_adopts_the_artifact_signature() {
     let admitted = registry()
         .admit(
             SIGNED_ENGINE_KIND,
@@ -167,7 +153,6 @@ async fn an_unclaimed_reference_adopts_the_artifact_signature_and_signals() {
         authoritative_signature(),
         "the durable row pins the engine's authority, never the claim that arrived"
     );
-    assert_eq!(admitted.signals(), [declared_signal()]);
 }
 
 /// Typed refusals, not stringly-typed ones: an engine that cannot resolve the
@@ -201,44 +186,6 @@ async fn unresolvable_and_unknown_engines_are_distinct_refusals() {
     ));
 }
 
-/// FIG-1522: trigger registration admits its engine target through the same
-/// registry boundary a start does. A subscription naming an engine kind this
-/// host never registered is refused at registration with the registry's typed
-/// `UnknownEngine` refusal — not accepted and then discovered dead at the first
-/// delivery, when the registrant is gone and the failure is invisible.
-#[tokio::test]
-async fn trigger_registration_refuses_an_unregistered_engine_kind() {
-    let reference = ProcessDefinitionRef::unclaimed(
-        "never-registered",
-        serde_json::json!({"program": "payout"}),
-    );
-    let mut draft = crate::TriggerSubscriptionDraft::for_process(
-        "sub",
-        crate::ProcessExecutionEnvRef::new("env"),
-        "app.event",
-        "key",
-        crate::ProcessInput::Engine {
-            kind: "never-registered".to_string(),
-            payload: serde_json::json!({"program": "payout"}),
-        },
-        crate::ProcessIdentity::for_definition(reference, None::<String>),
-    );
-
-    let refusal = crate::admit_trigger_registration_target(&registry(), &mut draft)
-        .await
-        .expect_err("no engine owns that kind, so the registration is refused");
-
-    let message = refusal.to_string();
-    assert!(
-        message.contains("never-registered"),
-        "the refusal names the unregistered engine kind: {message}"
-    );
-    assert!(
-        message.contains("engine"),
-        "the refusal is the registry's typed unknown-engine answer: {message}"
-    );
-}
-
 /// ADR 0013: an engine kind is registered once on a runtime host. The
 /// registry's enforcement point refuses a second registration under a kind it
 /// already holds, whichever way the engine arrived.
@@ -266,45 +213,6 @@ fn a_duplicate_engine_kind_is_refused() {
     assert!(
         registry.get(SIGNED_ENGINE_KIND).is_some(),
         "the refused registration replaces nothing"
-    );
-}
-
-/// The same boundary pins the authority on the way through: a registration
-/// naming a registered engine keeps its target and leaves registration with the
-/// artifact's signature, not the unknown claim that arrived.
-#[tokio::test]
-async fn trigger_registration_pins_the_resolved_signature_on_the_target() {
-    let mut draft = crate::TriggerSubscriptionDraft::for_process(
-        "sub",
-        crate::ProcessExecutionEnvRef::new("env"),
-        "app.event",
-        "key",
-        crate::ProcessInput::Engine {
-            kind: SIGNED_ENGINE_KIND.to_string(),
-            payload: serde_json::json!({"program": "payout"}),
-        },
-        crate::ProcessIdentity::for_definition(
-            ProcessDefinitionRef::unclaimed(
-                SIGNED_ENGINE_KIND,
-                serde_json::json!({"program": "payout"}),
-            ),
-            None::<String>,
-        ),
-    );
-
-    crate::admit_trigger_registration_target(&registry(), &mut draft)
-        .await
-        .expect("a registered engine admits the registration target");
-
-    assert_eq!(
-        draft
-            .target_identity
-            .definition
-            .as_ref()
-            .expect("the admitted target pins a definition reference")
-            .signature,
-        authoritative_signature(),
-        "registration stores the engine's authority, never the unknown claim"
     );
 }
 

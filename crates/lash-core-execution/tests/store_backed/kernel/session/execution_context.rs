@@ -72,7 +72,6 @@ mod tests {
                     parent.clone(),
                     crate::ProcessId::fixture("parent"),
                 ),
-                parent.wake_session_id.clone(),
                 None,
             );
         let prepared = crate::process_start_execution_env(&context, engine_start().into())
@@ -125,7 +124,8 @@ mod tests {
     }
 
     /// An execution that publishes a durable environment cannot publish again
-    /// after its referrer is fenced; the public helper preserves that refusal.
+    /// after its referrer is fenced; a child start's capture preserves that
+    /// refusal.
     #[tokio::test]
     async fn an_ended_execution_referrer_still_fails_the_public_env_ref_publish() {
         let backend = crate::support::sqlite_memory_store_backend().await;
@@ -136,8 +136,7 @@ mod tests {
             .into_runtime();
         let claim = context.execution_claim().expect("execution claim");
 
-        context
-            .captured_process_execution_env_ref(&claim)
+        crate::process_start_execution_env(&context, engine_start().into())
             .await
             .expect("first publish under a live owner");
 
@@ -149,8 +148,7 @@ mod tests {
             .await
             .expect("retire the durable owner");
 
-        let error = context
-            .captured_process_execution_env_ref(&claim)
+        let error = crate::process_start_execution_env(&context, engine_start().into())
             .await
             .expect_err("a fenced durable owner must not resolve to a reclaimed reference");
         assert!(

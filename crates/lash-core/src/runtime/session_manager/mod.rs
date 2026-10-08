@@ -469,26 +469,6 @@ impl RuntimeSessionServices {
         &self.current.host.core.process_engines
     }
 
-    pub(in crate::runtime) fn trigger_router(self: &Arc<Self>) -> Option<crate::TriggerRouter> {
-        self.current
-            .host
-            .work
-            .process_wiring()
-            .cloned()
-            .map(|wiring| {
-                let mut router =
-                    crate::TriggerRouter::new(self.current.host.core.trigger_store(), wiring)
-                        .with_process_artifacts(
-                            Arc::clone(&self.current.host.core.durability.process_env_store),
-                            self.current.host.core.process_engines.clone(),
-                        );
-                if let Some(restorer) = &self.current.host.core.control.trigger_route_restorer {
-                    router = router.with_route_restorer(Arc::clone(restorer));
-                }
-                router
-            })
-    }
-
     /// Host-scoped services: they own a persistence snapshot and commit graph
     /// writes against the store themselves; turn-scoped services come from
     /// [`Self::for_turn`].
@@ -595,7 +575,6 @@ mod process_visibility_tests {
         ListVisible,
         ListVisibleForAttempt,
         ValidateVisible,
-        SignalPossessed,
     }
 
     struct CountingFilter {
@@ -682,12 +661,7 @@ mod process_visibility_tests {
                         serde_json::Value::Null,
                         crate::ProcessProvenance::host(),
                         crate::Lifetime::Detached,
-                    )
-                    .with_extra_event_types([crate::ProcessEventType {
-                        name: "signal.ready".to_string(),
-                        payload_schema: crate::JsonSchema::any(),
-                        semantics: crate::ProcessEventSemanticsSpec::default(),
-                    }]),
+                    ),
                     &[SessionId::fixture(SESSION_ID.to_string())],
                 )
                 .await
@@ -715,9 +689,8 @@ mod process_visibility_tests {
         )
     }
 
-    /// One turn's execution context lends each operation its scope: `signal`
-    /// executes its command through it, and the read operations share the
-    /// same shape so the filter observation is identical.
+    /// One turn's execution context lends each operation its scope, so the
+    /// filter observation is identical across operations.
     fn operation_scope(backend: &crate::Backend) -> crate::ActorContext {
         crate::ActorContext::detached(backend.clone())
             .scoped(crate::AdmittedScope::turn(
@@ -741,7 +714,6 @@ mod process_visibility_tests {
             Operation::ListVisible,
             Operation::ListVisibleForAttempt,
             Operation::ValidateVisible,
-            Operation::SignalPossessed,
         ];
 
         for (visibility, hidden_is_visible) in cases {
@@ -795,22 +767,6 @@ mod process_visibility_tests {
                         )
                         .await;
                         assert_eq!(result.is_ok(), hidden_is_visible);
-                    }
-                    Operation::SignalPossessed => {
-                        // Callers own the visibility boundary through validate_visible;
-                        // signal_possessed must not evaluate the filter a second time.
-                        let scope = operation_scope(&backend);
-                        crate::ProcessService::signal_possessed(
-                            &service,
-                            &crate::RuntimeOwner::Session(SessionId::from(SESSION_ID)),
-                            &hidden_process_id,
-                            "ready".to_string(),
-                            uuid::Uuid::new_v4().to_string(),
-                            serde_json::Value::Null,
-                            crate::ProcessOpScope::new(scope),
-                        )
-                        .await
-                        .expect("signal an already-validated possessed process");
                     }
                 }
 

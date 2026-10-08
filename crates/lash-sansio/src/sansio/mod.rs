@@ -4,7 +4,7 @@
 //! lives behind `ProtocolDriverHandle`, which returns declarative
 //! `DriverAction`s that the machine applies.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -16,10 +16,9 @@ use crate::llm::types::{
     LlmOutputPart, LlmRequest, LlmResponse, LlmTerminalReason, LlmToolChoice, LlmToolSpec,
     ProviderReplayMeta,
 };
-use crate::session_model::message::MessageOrigin;
 use crate::session_model::{
-    Message, MessageRole, MessageSequence, Part, SessionHistoryRecord, SessionStreamEvent,
-    TokenUsage, TokenUsageOverflow, make_error_event, render_prompt,
+    Message, MessageSequence, SessionHistoryRecord, SessionStreamEvent, TokenUsage,
+    TokenUsageOverflow, make_error_event,
 };
 use crate::{CheckpointKind, ModelToolReturn, ToolCallOutput, TurnOutcome, TurnStop};
 
@@ -43,8 +42,7 @@ pub use turn_protocol::{
     ExecutionEnvironmentSyncFailure, ExecutionEnvironmentSyncFailureKind, ExpandedRow,
     ExpandedWrapper, LlmCallError, LogEvent, ModelToolCalls, PendingToolCall, PendingWork,
     ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SyncedEnvironment,
-    ToolExpansionPlan, TurnCause, TurnMachineConfig, place_prompt, render_turn_causes_prompt,
-    stored_history_refusal_actions,
+    ToolExpansionPlan, TurnMachineConfig, place_prompt, stored_history_refusal_actions,
 };
 mod checkpoint_content;
 pub use checkpoint_content::{CheckpointContentRef, TurnCheckpointContent};

@@ -81,8 +81,6 @@ pub struct ProcessListFilter {
     pub cancel_pending_before_ms: Option<u64>,
     pub identity_kind: Option<String>,
     pub identity_label: Option<String>,
-    pub caused_by_occurrence_id: Option<String>,
-    pub caused_by_subscription_id: Option<String>,
     /// Inclusive lower bound for `created_at_ms`; paired with
     /// `created_at_end_ms` this is a half-open `[start, end)` range.
     pub created_at_start_ms: Option<u64>,
@@ -111,8 +109,6 @@ impl ProcessListFilter {
                 | "cancel_pending_before_ms"
                 | "identity_kind"
                 | "identity_label"
-                | "caused_by_occurrence_id"
-                | "caused_by_subscription_id"
                 | "created_at_start_ms"
                 | "created_at_end_ms"
                 | "retired_since_ms" => {}
@@ -144,8 +140,6 @@ impl ProcessListFilter {
         let cancel_pending_before_ms = optional_u64_filter(args, "cancel_pending_before_ms")?;
         let identity_kind = optional_string_filter(args, "identity_kind")?;
         let identity_label = optional_string_filter(args, "identity_label")?;
-        let caused_by_occurrence_id = optional_string_filter(args, "caused_by_occurrence_id")?;
-        let caused_by_subscription_id = optional_string_filter(args, "caused_by_subscription_id")?;
         let created_at_start_ms = optional_u64_filter(args, "created_at_start_ms")?;
         let created_at_end_ms = optional_u64_filter(args, "created_at_end_ms")?;
         let retired_since_ms = optional_u64_filter(args, "retired_since_ms")?;
@@ -157,8 +151,6 @@ impl ProcessListFilter {
             cancel_pending_before_ms,
             identity_kind,
             identity_label,
-            caused_by_occurrence_id,
-            caused_by_subscription_id,
             created_at_start_ms,
             created_at_end_ms,
             retired_since_ms,
@@ -201,16 +193,6 @@ impl ProcessListFilter {
                 .as_ref()
                 .is_none_or(|label| record.identity.label.as_deref() == Some(label.as_str()))
             && self
-                .caused_by_occurrence_id
-                .as_ref()
-                .is_none_or(|occurrence_id| caused_by_occurrence_matches(record, occurrence_id))
-            && self
-                .caused_by_subscription_id
-                .as_ref()
-                .is_none_or(|subscription_id| {
-                    caused_by_subscription_matches(record, subscription_id)
-                })
-            && self
                 .created_at_start_ms
                 .is_none_or(|start_ms| record.created_at_ms >= start_ms)
             && self
@@ -241,21 +223,4 @@ fn optional_u64_filter(args: &serde_json::Value, key: &str) -> Result<Option<u64
                 .ok_or_else(|| format!("processes.list `{key}` filter must be an integer"))
         })
         .transpose()
-}
-
-fn caused_by_occurrence_matches(record: &ProcessRecord, occurrence_id: &str) -> bool {
-    matches!(
-        record.provenance.caused_by.as_ref(),
-        Some(crate::CausalRef::TriggerOccurrence { occurrence_id: actual, .. }) if actual == occurrence_id
-    )
-}
-
-fn caused_by_subscription_matches(record: &ProcessRecord, subscription_id: &str) -> bool {
-    matches!(
-        record.provenance.caused_by.as_ref(),
-        Some(crate::CausalRef::TriggerOccurrence {
-            subscription_id: Some(actual),
-            ..
-        }) if actual == subscription_id
-    )
 }

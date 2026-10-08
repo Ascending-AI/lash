@@ -9,8 +9,6 @@ pub mod engine_state;
 mod events;
 #[cfg(test)]
 mod guarded_surface_tests;
-pub(crate) mod identity_projection;
-mod materialization;
 pub(crate) mod model;
 #[cfg(test)]
 mod model_filter_tests;
@@ -30,7 +28,6 @@ mod testing;
 #[cfg(test)]
 mod tests;
 mod validation;
-mod wake;
 
 pub use super::actor::round::{Material, NamesMaterial, SettledOutput, SettledOutputRefusal};
 pub use awaiter::{
@@ -64,25 +61,18 @@ pub use engine::{
     ProcessEngineRegistry, ProcessInfraError, ProcessRunOutcome, WeakProcessEngineRegistry,
 };
 pub use engine_state::{
-    EngineAction, EngineEvent, EngineHostSteps, EngineState, EngineStateFormat, EngineStepKind,
-    EngineStepRefusal, EngineStepRun, EngineSteps, HostStepRun, HostWaitKind, KeyName,
-    StepEffectSite, StepName, StepRequest,
+    EngineAction, EngineEvent, EngineState, EngineStateFormat, EngineStepKind, EngineStepRefusal,
+    EngineStepRun, EngineSteps, HostWaitKind, KeyName, StepEffectSite, StepName, StepRequest,
 };
 pub use events::{
-    AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
-    ProcessCompletionAuthority, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventHistoryRetention, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
+    AbandonEvidence, AbandonWriter, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEvent,
+    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessEventHistoryRetention,
+    ProcessEventKind, ProcessEventLite, ProcessEventPage, ProcessEventPageEvents,
     ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
-    ProcessEventSemantics, ProcessEventSemanticsSpec, ProcessEventType, ProcessOutcomeNotRetained,
-    ProcessResumeRefusal, ProcessSignal, ProcessSignalIdentity, ProcessSignalWaitBinding,
-    ProcessTerminal, ProcessTerminalSemantics, ProcessTerminalSpec, ProcessValueSelector,
-    ProcessWake, ProcessWakeDelivery, ProcessWakeSpec, WakeId, admitted_signal_wait,
-    process_signal_event_type, process_signal_name_from_event_type, process_signal_wait_key,
-    release_process_event_payload, restore_released_process_event_payload,
-    runtime_lifecycle_event_type, terminal_append_request, terminal_event_type_name,
-    validate_process_signal_name,
+    ProcessLifecycleFact, ProcessOutcomeNotRetained, ProcessResumeRefusal, ProcessTerminal,
+    ReleasedProcessEvent, release_process_event_payload, restore_released_process_event,
+    terminal_append_request,
 };
-pub use materialization::materialize_process_event_semantics;
 pub use model::{
     Ancestry, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime, LifetimeDecision,
     LifetimePolicy, PreparedProcessRegistration, ProcessCancelReceipt, ProcessChange,
@@ -116,8 +106,6 @@ pub use op_scope::ProcessOpScope;
 pub(crate) use op_scope::{LanguageCallAttribution, LanguageCallAttributions};
 pub use references::ProcessLiveReferenceView;
 #[cfg(any(test, feature = "testing"))]
-pub use registry::reconcile_pruned_trigger_deliveries_interleaved;
-#[cfg(any(test, feature = "testing"))]
 pub use registry::{
     ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
 };
@@ -125,7 +113,7 @@ pub use registry::{
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NonTerminalProcessPage, ParentEndPlan, ProcessClockRebind,
     ProcessEventLog, ProcessLifecycle, ProcessObserverRegistry, ProcessPruneReport, ProcessQuery,
     ProcessRegistrar, ProcessRegistry, ProcessRegistryCursor, ProcessRetention, ProcessToolIntents,
-    ProjectionWatermark, reconcile_pruned_trigger_deliveries,
+    ProjectionWatermark,
 };
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 pub use start_staging::{
@@ -141,17 +129,12 @@ pub use steps::{
 pub use testing::*;
 pub use validation::{
     ProcessEventAppendPlan, ProcessRegistrationRefusal, ProcessStartPlan, ProcessTransition,
-    ProcessTransitionPlan, abandoned_consumer_refusal, admit_process_signal_append,
-    allocate_process_event_sequence, apply_process_event_projection, check_retained_start,
-    fold_process_record, prepare_process_event_append, prepare_process_registration,
-    prepare_process_start, prepare_process_transition, require_event_replay,
-    validate_generic_process_event_append,
+    ProcessTransitionPlan, abandoned_consumer_refusal, allocate_process_event_sequence,
+    apply_process_event_projection, check_retained_start, fold_process_record,
+    prepare_process_event_append, prepare_process_registration, prepare_process_start,
+    prepare_process_transition, validate_generic_process_event_append,
 };
 
 pub fn current_epoch_ms() -> u64 {
     <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
-pub use wake::{
-    ProcessWakeDeliveryRequest, process_wake_delivery, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text,
-};

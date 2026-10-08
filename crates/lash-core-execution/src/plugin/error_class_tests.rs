@@ -66,7 +66,6 @@ plugin_error_samples! {
     MissingRecordedProcessConfig { .. } => PluginError::MissingRecordedProcessConfig {
         engine_kind: "sampled".to_string(),
     },
-    InvalidTriggerTarget { .. } => PluginError::InvalidTriggerTarget { kind: "sampled".to_string() },
     ProcessCancelConflict { .. } => PluginError::ProcessCancelConflict {
         process_id: process(),
         existing: cancel("actor:first"),
@@ -118,11 +117,6 @@ plugin_error_samples! {
     Invoke(_) => PluginError::Invoke("sampled".to_string()),
     Session(_) => PluginError::Session("sampled".to_string()),
     State(_) => PluginError::State(crate::PluginStateError::StoreTooLarge { bytes: 2, limit: 1 }),
-    TriggerOperation(_) => PluginError::TriggerOperation(Box::new(
-        crate::TriggerOperationError::Invalid {
-            message: "sampled".to_string(),
-        },
-    )),
     Declaration(_) => PluginError::Declaration(
         crate::plugin::PluginDeclarationError::IdMismatch {
             factory: "sampled".to_string(),
@@ -189,10 +183,6 @@ plugin_error_samples! {
         requested_cursor: crate::ProcessChangeCursor::initial(),
         tombstone_compaction_horizon: crate::ProcessChangeCursor::from_store_sequence(2),
     },
-    TriggerSubscriptionChangeCursorPruned { .. } => PluginError::TriggerSubscriptionChangeCursorPruned {
-        requested_cursor: crate::TriggerSubscriptionChangeCursor::initial(),
-        tombstone_compaction_horizon: crate::TriggerSubscriptionChangeCursor::from_store_sequence(2),
-    },
     ProcessEventsReleased { .. } => PluginError::ProcessEventsReleased {
         process_id: process(),
         released_through: 3,
@@ -225,13 +215,6 @@ plugin_error_samples! {
     },
     ReservedProcessEvent { .. } => PluginError::ReservedProcessEvent {
         event_type: "sampled".to_string(),
-    },
-    WakeDeliveryIdentityMismatch { .. } => PluginError::WakeDeliveryIdentityMismatch {
-        delivery_id: "sampled".to_string(),
-        wake_id: "sampled".to_string(),
-    },
-    ProcessWakeDeliveryFormatVersionMismatch { .. } => {
-        PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected: 1, found: 2 }
     },
     ProcessRegistryCursorBackendMismatch { .. } => {
         PluginError::ProcessRegistryCursorBackendMismatch {

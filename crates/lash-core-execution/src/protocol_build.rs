@@ -4,7 +4,6 @@ use std::sync::Arc;
 pub struct ProtocolBuildInput {
     pub tool_catalog: Arc<crate::ToolCatalog>,
     pub plugin_extensions: crate::PluginExtensions,
-    pub trigger_events: crate::TriggerEventCatalog,
     /// The fleet's writer-version table, resolved from the `F` the session's
     /// store recorded (FIG-3796): preamble builders hand it to the turn
     /// machine so drivers stamp durable envelopes at the versions the fleet

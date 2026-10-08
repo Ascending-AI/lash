@@ -47,23 +47,6 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    /// Extracts the trigger outcome for effect-host implementors while executing or replaying a
-    /// runtime effect.
-    pub fn into_trigger(mut self) -> Result<TriggerLocalExecution, RuntimeEffectControllerError> {
-        // The substrate records this command its own way: no recorded body
-        // of this executor's.
-        self.issued.unrecorded();
-        match self.state {
-            RuntimeEffectLocalExecutorState::Target(LocalTarget::Trigger(execution)) => {
-                Ok(execution)
-            }
-            _ => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectLocalExecutorUnavailable,
-                "no trigger executor is available for trigger command",
-            )),
-        }
-    }
-
     /// Consumes a local executor for effect-host implementors, returning sleep options only when
     /// the effect was configured for sleep.
     pub fn into_sleep_options(mut self) -> RuntimeSleepOptions {

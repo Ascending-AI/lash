@@ -23,15 +23,6 @@ pub enum CausalRef {
         process_id: ProcessId,
         sequence: u64,
     },
-    TriggerOccurrence {
-        occurrence_id: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        subscription_id: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        subscription_incarnation: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        subscription_revision: Option<u64>,
-    },
     SessionNode {
         session_id: SessionId,
         node_id: String,

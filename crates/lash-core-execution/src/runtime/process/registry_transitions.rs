@@ -15,64 +15,6 @@
 use crate::ProcessId;
 use crate::plugin::PluginError;
 
-/// Failure text for a persisted registry payload that will not decode.
-///
-/// One vocabulary for both backends: every process-registry row body that fails
-/// `serde_json` reports this, so a corrupt payload reads the same whichever
-/// substrate stored it.
-#[cfg(test)]
-fn registry_row_decode_error(err: serde_json::Error) -> PluginError {
-    PluginError::Session(format!("failed to decode process registry row: {err}"))
-}
-
-#[cfg(test)]
-#[derive(serde::Deserialize)]
-struct ProcessWakeDeliveryFormatVersionProbe {
-    version: u32,
-}
-
-/// The reader of [`super::events::PROCESS_WAKE_DELIVERY_FORMAT_VERSION`] the guarded-surface
-/// laws execute. Its production caller was the wake outbox, which ADR 0132
-/// §12 removed: a wake now lives only in its target session's queued work.
-///
-/// `fleet_format` is the `F` the bound registry store recorded: the read
-/// admits the pair `{fleet's writer version, this build's newest}` — ADR 0106
-/// §2's `[N-1, N]` window (FIG-3796). An admitted older payload climbs to the
-/// newest through the surface's `RecordUpcaster` hooks; anything else is
-/// refused as unsupported.
-#[cfg(test)]
-pub(super) fn decode_process_wake_delivery(
-    delivery_json: &str,
-    fleet_format: crate::FleetFormat,
-) -> Result<super::events::ProcessWakeDelivery, PluginError> {
-    let probe: ProcessWakeDeliveryFormatVersionProbe =
-        serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
-    let found = probe.version;
-    let window = fleet_format.read_window(lash_core_store::surface_format!(
-        super::events::PROCESS_WAKE_DELIVERY_FORMAT_VERSION
-    ));
-    if !window.admits(found) {
-        return Err(PluginError::ProcessWakeDeliveryFormatVersionMismatch {
-            expected: window.newest(),
-            found,
-        });
-    }
-    if found == window.newest() {
-        return serde_json::from_str(delivery_json).map_err(registry_row_decode_error);
-    }
-    let mut value: serde_json::Value =
-        serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
-    lash_core_store::store::upcast_json_record(
-        "process wake delivery",
-        lash_core_store::surface_format!(super::events::PROCESS_WAKE_DELIVERY_FORMAT_VERSION),
-        found,
-        window.newest(),
-        &mut value,
-    )
-    .map_err(PluginError::from)?;
-    serde_json::from_value(value).map_err(registry_row_decode_error)
-}
-
 // ---------------------------------------------------------------------------
 // Terminal / tombstone classification
 // ---------------------------------------------------------------------------

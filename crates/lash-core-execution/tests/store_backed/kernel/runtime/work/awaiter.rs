@@ -34,18 +34,6 @@ mod tests {
         )
     }
 
-    fn plain_event_type(name: &str) -> crate::ProcessEventType {
-        crate::ProcessEventType {
-            name: name.to_string(),
-            payload_schema: crate::JsonSchema::any(),
-            semantics: crate::ProcessEventSemanticsSpec::default(),
-        }
-    }
-
-    fn registration_with_events(event_types: &[&str]) -> ProcessRegistration {
-        registration().with_extra_event_types(event_types.iter().map(|name| plain_event_type(name)))
-    }
-
     #[derive(Clone, Default)]
     struct CollectingSink {
         events: Arc<Mutex<Vec<(String, u64)>>>,
@@ -62,7 +50,7 @@ mod tests {
         async fn emit(&self, event: &ProcessEvent) {
             self.events
                 .lock_recover()
-                .push((event.event_type.clone(), event.sequence));
+                .push((event.fact.event_type().to_owned(), event.sequence));
         }
     }
 
@@ -178,7 +166,7 @@ mod tests {
             .expect("append");
 
         let event = ProcessRegistryAwaiter::new(Arc::clone(&registry), hub)
-            .await_event(&proc_record.id, "process.cancel_requested", 0)
+            .await_event(&proc_record.id, crate::ProcessEventKind::CancelRequested, 0)
             .await
             .expect("await event");
         assert_eq!(event.sequence, appended.event.sequence);
@@ -289,11 +277,12 @@ mod tests {
     async fn watched_event_wait_releases_registration_on_delivery() {
         let (registry, hub) = watched_parts(watch_process_registry(memory_registry().await));
         let record = registry
-            .register_process(registration_with_events(&["producer.ready"]))
+            .register_process(registration())
             .await
             .expect("register");
         let awaiter = ProcessRegistryAwaiter::new(registry.clone(), hub.clone());
-        let mut waiting = Box::pin(awaiter.await_event(&record.id, "producer.ready", 0));
+        let mut waiting =
+            Box::pin(awaiter.await_event(&record.id, crate::ProcessEventKind::CancelRequested, 0));
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 assert!(futures_util::poll!(&mut waiting).is_pending());
@@ -308,7 +297,14 @@ mod tests {
         let appended = registry
             .append_event(
                 &record.id,
-                ProcessEventAppendRequest::new("producer.ready", serde_json::json!({})),
+                ProcessEventAppendRequest::cancel_requested(
+                    &record.id,
+                    &crate::CancelRequest::new(
+                        crate::CancelOrigin::OperatorRequested,
+                        "actor:fixture:watched_event_wait_releases_registration_on_delivery",
+                        11,
+                    ),
+                ),
             )
             .await
             .expect("append");
@@ -325,13 +321,18 @@ mod tests {
         let _sink = watched.add_event_sink(Arc::new(sink.clone()));
         let (registry, _hub) = watched_parts(watched);
         let proc_record = registry
-            .register_process(registration_with_events(&["producer.a"]))
+            .register_process(registration())
             .await
             .expect("register");
         registry
-            .append_event(
+            .set_external_ref(
                 &proc_record.id,
-                ProcessEventAppendRequest::new("producer.a", serde_json::json!({})),
+                ProcessExternalRef {
+                    backend: "test".to_string(),
+                    id: "external".to_string(),
+                    metadata: None,
+                    segment_ordinal: None,
+                },
             )
             .await
             .expect("explicit append");
@@ -350,7 +351,7 @@ mod tests {
                 .iter()
                 .map(|(event_type, _)| event_type.as_str())
                 .collect::<Vec<_>>(),
-            vec!["producer.a", "process.completed"],
+            vec!["process.external_ref_set", "process.completed"],
             "the sink must observe terminal events appended through completion verbs"
         );
         assert!(
@@ -397,11 +398,9 @@ mod tests {
             .await
             .expect("record first start");
         let wait = WaitState {
-            kind: crate::WaitKind::Signal {
-                name: "ready".to_string(),
-                event_type: "signal.ready".to_string(),
-                key: "process:proc:signal.ready:1".to_string(),
-                ordinal: 1,
+            kind: crate::WaitKind::Call {
+                call_id: crate::ToolCallId::fixture("lifecycle-call"),
+                tool_id: crate::ToolId::from("lifecycle-tool"),
             },
             since_ms: 2,
         };

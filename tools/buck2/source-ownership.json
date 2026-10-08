@@ -100,9 +100,7 @@
       "src/tool_registry/tests.rs",
       "src/tool_registry/tests/grant_support.rs",
       "src/tool_registry/tests/restore_tests.rs",
-      "src/trace_feedback_tests.rs",
-      "src/triggers/router/tests.rs",
-      "src/triggers/tests.rs"
+      "src/trace_feedback_tests.rs"
     ],
     "unit_test_sources": [
       "src/lib.rs",

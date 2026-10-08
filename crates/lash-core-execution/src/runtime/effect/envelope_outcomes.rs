@@ -32,10 +32,7 @@ impl RuntimeEffectOutcome {
         self,
     ) -> Result<ToolAttemptEffectOutcome, RuntimeEffectControllerError> {
         match self {
-            Self::ToolAttempt { launch, triggers } => Ok(ToolAttemptEffectOutcome {
-                launch: *launch,
-                triggers,
-            }),
+            Self::ToolAttempt { launch } => Ok(ToolAttemptEffectOutcome { launch: *launch }),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::ToolAttempt,
                 other.kind(),
@@ -64,18 +61,6 @@ impl RuntimeEffectOutcome {
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::Process,
                 other.kind(),
-            )),
-        }
-    }
-
-    /// Extracts the trigger outcome for effect-host implementors while executing or replaying a
-    /// runtime effect.
-    pub fn into_trigger(self) -> Result<crate::TriggerEffectResult, RuntimeEffectControllerError> {
-        match self {
-            Self::Trigger { result } => Ok(*result),
-            other => Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectWrongOutcome,
-                format!("expected trigger outcome, got {}", other.kind().as_str()),
             )),
         }
     }
@@ -141,7 +126,6 @@ impl RuntimeEffectOutcome {
             Self::Direct { .. } => RuntimeEffectKind::Direct,
             Self::ToolAttempt { .. } => RuntimeEffectKind::ToolAttempt,
             Self::PresentToolResult { .. } => RuntimeEffectKind::PresentToolResult,
-            Self::Trigger { .. } => RuntimeEffectKind::Trigger,
             Self::Process { .. } => RuntimeEffectKind::Process,
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,

@@ -132,7 +132,7 @@ impl Family {
 /// The closed set of transcript line kinds.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Kind {
-    /// Work entered an actor (turn input, queued work, trigger delivery).
+    /// Work entered an actor (turn input, queued work).
     Ingress,
     /// The actor released its live runtime at a boundary.
     Park,

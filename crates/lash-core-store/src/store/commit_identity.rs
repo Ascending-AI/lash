@@ -42,7 +42,7 @@ pub struct OperationId {
 ///     items(
 ///         path = "crates/lash-core-store/src/store/commit_identity.rs",
 ///         path = "crates/lash-core-ids/src/stable_identity.rs", push_json_value, push_message_role,
-///         push_causal_ref, push_message_origin, push_attachment_type_metadata, push_attachment_ref,
+///         push_message_origin, push_attachment_type_metadata, push_attachment_ref,
 ///         push_attachment_source, push_part_kind, push_part, append_node_identity_bytes,
 ///         append_request_identity_bytes, new_unframed, tag, u8, u32, u64, i64, string, bytes,
 ///         optional, sequence, finish, provider_route,
@@ -317,82 +317,6 @@ fn push_message_role(
     });
 }
 
-/// An `EffectAddress` cannot be built without an admitted execution scope, and
-/// the scope is what carries the journal identity read back here.
-#[expect(clippy::expect_used, reason = "the address carries the scope")]
-fn push_causal_ref(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    caused_by: &crate::CausalRef,
-) {
-    match caused_by {
-        crate::CausalRef::Turn {
-            session_id,
-            turn_id,
-        } => {
-            identity.tag(0);
-            identity.string(session_id);
-            identity.string(turn_id);
-        }
-        crate::CausalRef::Effect { address } => {
-            identity.tag(1);
-            identity.string(
-                address
-                    .execution_scope
-                    .journal_identity()
-                    .expect("causal effect address contains a valid execution scope")
-                    .key(),
-            );
-            identity.string(&address.replay_key);
-        }
-        crate::CausalRef::ToolCall {
-            session_id,
-            call_id,
-        } => {
-            identity.tag(2);
-            identity.string(session_id);
-            identity.string(call_id.as_str());
-        }
-        crate::CausalRef::Process { process_id } => {
-            identity.tag(3);
-            identity.string(process_id);
-        }
-        crate::CausalRef::ProcessEvent {
-            process_id,
-            sequence,
-        } => {
-            identity.tag(4);
-            identity.string(process_id);
-            identity.u64(*sequence);
-        }
-        crate::CausalRef::TriggerOccurrence {
-            occurrence_id,
-            subscription_id,
-            subscription_incarnation,
-            subscription_revision,
-        } => {
-            identity.tag(5);
-            identity.string(occurrence_id);
-            identity.optional(subscription_id.as_ref(), |identity, value| {
-                identity.string(value)
-            });
-            identity.optional(subscription_incarnation.as_ref(), |identity, value| {
-                identity.string(value)
-            });
-            identity.optional(subscription_revision.as_ref(), |identity, value| {
-                identity.u64(*value)
-            });
-        }
-        crate::CausalRef::SessionNode {
-            session_id,
-            node_id,
-        } => {
-            identity.tag(6);
-            identity.string(session_id);
-            identity.string(node_id);
-        }
-    }
-}
-
 /// A host-appended origin this encoder generation has no projection for is
 /// refused rather than hashed by a guess: `MessageOrigin` is
 /// `#[non_exhaustive]`, and a new variant needs its own tag here.
@@ -409,20 +333,7 @@ fn push_message_origin(
             identity.string(plugin_id);
             identity.u8(u8::from(*transient));
         }
-        crate::MessageOrigin::Process {
-            process_id,
-            event_type,
-            sequence,
-            wake_id,
-            caused_by,
-        } => {
-            identity.tag(1);
-            identity.string(process_id);
-            identity.string(event_type);
-            identity.u64(*sequence);
-            identity.optional(wake_id.as_ref(), |identity, value| identity.string(value));
-            identity.optional(caused_by.as_ref(), push_causal_ref);
-        }
+        // Tag 1 is retired with the process-wake origin.
         crate::MessageOrigin::TurnInput { turn_id, input_id } => {
             identity.tag(2);
             identity.string(turn_id);
@@ -706,10 +617,6 @@ pub(super) fn append_request_identity_hash(
 }
 
 #[cfg(test)]
-#[path = "commit_identity_effect_tests.rs"]
-mod commit_identity_effect_tests;
-
-#[cfg(test)]
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod append_request_identity_tests {
     use super::*;
@@ -828,18 +735,9 @@ mod append_request_identity_tests {
                         "id": "message-id",
                         "role": "Assistant",
                         "origin": {
-                            "kind": "process",
-                            "process_id": "p_0192f000000070008000000000000001",
-                            "event_type": "event-type",
-                            "sequence": 18446744073709551615_u64,
-                            "wake_id": "wake-id",
-                            "caused_by": {
-                                "type": "trigger_occurrence",
-                                "occurrence_id": "occurrence-id",
-                                "subscription_id": "subscription-id",
-                                "subscription_incarnation": "incarnation-id",
-                                "subscription_revision": 18446744073709551615_u64
-                            }
+                            "kind": "plugin",
+                            "plugin_id": "plugin-id",
+                            "transient": true
                         },
                         "parts": [
                             {
@@ -943,42 +841,6 @@ mod append_request_identity_tests {
             ),
         ];
 
-        let causal_cases = [
-            crate::CausalRef::Turn {
-                session_id: SessionId::from("s"),
-                turn_id: TurnId::from("t"),
-            },
-            crate::CausalRef::ToolCall {
-                session_id: SessionId::from("s"),
-                call_id: lash_sansio::ToolCallId::fixture("c"),
-            },
-            crate::CausalRef::Process {
-                process_id: crate::process_id_for_test("p"),
-            },
-            crate::CausalRef::ProcessEvent {
-                process_id: crate::process_id_for_test("p"),
-                sequence: u64::MAX,
-            },
-            crate::CausalRef::TriggerOccurrence {
-                occurrence_id: "o".to_string(),
-                subscription_id: None,
-                subscription_incarnation: None,
-                subscription_revision: None,
-            },
-            crate::CausalRef::SessionNode {
-                session_id: SessionId::from("s"),
-                node_id: "n".to_string(),
-            },
-        ];
-
-        let causal_names = [
-            "causal_variant_0",
-            "causal_variant_2",
-            "causal_variant_3",
-            "causal_variant_4",
-            "causal_variant_5",
-            "causal_variant_6",
-        ];
         let whole_requests =
             whole_request_variant_corpus()
                 .into_iter()
@@ -1012,13 +874,6 @@ mod append_request_identity_tests {
                     hex(&append_node_identity_bytes(node).expect("encode node")),
                 )
             })
-            .chain(causal_cases.iter().enumerate().map(|(index, causal)| {
-                let mut identity = crate::stable_identity::IdentityEncoder::new_unframed(
-                    APPEND_REQUEST_IDENTITY_DOMAIN,
-                );
-                push_causal_ref(&mut identity, causal);
-                (causal_names[index], hex(&identity.finish()))
-            }))
             .chain(whole_requests)
             .chain(std::iter::once(empty_request))
             .collect::<Vec<_>>();
@@ -1027,7 +882,6 @@ mod append_request_identity_tests {
             .map(|(name, value)| format!("{name}={value}\n"))
             .collect::<String>();
         rendered.push_str(&route_identity_rows());
-        rendered.push_str(&super::commit_identity_effect_tests::effect_identity_rows());
         rendered
     }
 

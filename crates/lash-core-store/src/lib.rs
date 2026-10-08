@@ -98,8 +98,7 @@ pub(crate) use lash_sansio::{
     AttachmentId, AttachmentMaterializationNotice, AttachmentRef, AttachmentTypeMetadata, BatchId,
     BlankIdentity, CausalRef, CheckpointKind, EffectAddress, ExecutionScope, FrameKey, InputId,
     Message, MessageOrigin, MessageRole, NodeId, Part, PartKind, PluginMessage, ProcessId,
-    SessionAppendNode, SessionId, TokenUsage, TurnId, TurnOutputSource, TurnReply,
-    render_turn_causes_prompt, shared_parts,
+    SessionAppendNode, SessionId, TokenUsage, TurnId, TurnOutputSource, TurnReply, shared_parts,
 };
 
 pub(crate) type SessionHistoryRecord =
@@ -127,7 +126,7 @@ pub(crate) use execution_state::{
     HydratedExecutionState, LeafChange, PluginConfig,
 };
 pub(crate) use lash_sansio::{
-    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence, TurnCause,
+    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnCancellationEvidence,
 };
 pub(crate) use plugin_state::PluginState;
 #[cfg(any(test, feature = "testing"))]
@@ -135,9 +134,8 @@ pub use process_identity::process_id_for_test;
 pub(crate) use process_identity::{ProcessExecutionEnvSpec, ProcessStatus, RetiredProcessStatus};
 pub(crate) use protocol_turn_options::ProtocolTurnOptions;
 pub(crate) use queued_work_vocabulary::{
-    AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkKind,
-    QueuedWorkPayload, SessionCommandOutcome, TurnLaneAdmissionPolicy,
+    AdmissionBoundary, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+    QueuedWorkCompletion, QueuedWorkEnqueueOutcome, SessionCommandOutcome, TurnLaneAdmissionPolicy,
 };
 pub(crate) use runtime_error::{RuntimeError, RuntimeErrorCode};
 pub(crate) use session_identity::{
@@ -160,8 +158,6 @@ pub(crate) use chronological::ChronologicalProjection;
 pub(crate) use effect_identity::RuntimeEffectKind;
 pub(crate) use lash_sansio::ToolIntentIdentity;
 pub(crate) use message_projection::plugin_message_to_message;
-pub(crate) use process_identity::ProcessWakeDelivery;
-pub(crate) use store::queued_work::QueuedWorkClass;
 pub(crate) use turn_input_vocabulary::TurnInputCheckpointBoundary;
 pub(crate) use turn_input_vocabulary::{InputItem, TurnContext, TurnInput};
 
@@ -203,7 +199,6 @@ pub(crate) use input_normalization::NormalizedItem;
 pub use lash_sansio as sansio;
 pub(crate) use lash_sansio::llm::capability::ReasoningSelection;
 pub(crate) use lash_sansio::llm::types::LlmCallRecord;
-pub(crate) use process_identity::process_wake_turn_cause;
 pub(crate) use runtime_error::RuntimeEffectReplayMismatchReport;
 
 #[allow(unused_imports)]

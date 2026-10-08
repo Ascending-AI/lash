@@ -32,8 +32,7 @@ pub(crate) async fn issue_effect(
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::PluginCallbacks { .. } => cx.ingress_effect(envelope, local).await,
         RuntimeEffectCommand::ToolAttempt { .. }
-        | RuntimeEffectCommand::PresentToolResult { .. }
-        | RuntimeEffectCommand::Trigger { .. } => cx.tool_effect(envelope, local).await,
+        | RuntimeEffectCommand::PresentToolResult { .. } => cx.tool_effect(envelope, local).await,
         RuntimeEffectCommand::Sleep { .. } => cx.wait_effect(envelope, local).await,
         RuntimeEffectCommand::Process { .. } | RuntimeEffectCommand::LoadExecutionEnv { .. } => {
             cx.process_effect(envelope, local).await

@@ -8,7 +8,7 @@
 
 use lash_core_execution::runtime::process::{
     PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
-    PROCESS_EVENT_VOCABULARY_VERSION, runtime_lifecycle_event_type,
+    PROCESS_EVENT_VOCABULARY_VERSION, ProcessEventKind,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -46,9 +46,10 @@ fn documents() -> Result<Vec<Document>, String> {
     SHAPES
         .into_iter()
         .map(|(shape, event_type, title)| {
-            let registered = runtime_lifecycle_event_type(event_type)
-                .ok_or_else(|| format!("{event_type} is not a runtime-owned event kind"))?;
-            let mut schema = registered.payload_schema.into_value();
+            let mut schema = ProcessEventKind::parse(event_type)
+                .and_then(ProcessEventKind::payload_schema)
+                .ok_or_else(|| format!("{event_type} is not a runtime-owned event kind"))?
+                .into_value();
             let root = schema
                 .as_object_mut()
                 .ok_or_else(|| format!("{event_type} payload schema is not an object"))?;

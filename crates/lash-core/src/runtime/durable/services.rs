@@ -356,29 +356,7 @@ async fn admitted_rows(
             applications: Vec::new(),
         }]
     };
-    let taken = admission.batch_ids();
-    let queued = if taken.is_empty() {
-        Vec::new()
-    } else {
-        let batches = store
-            .list_queued_work()
-            .await
-            .map_err(store_error)?
-            .into_iter()
-            .filter(|batch| taken.contains(&batch.batch_id))
-            .collect::<Vec<_>>();
-        if batches.len() != taken.len() {
-            return Err(TurnError::Exec(format!(
-                "run {} took batches {taken:?}, not all of which are queued",
-                row.run
-            )));
-        }
-        vec![crate::AdmittedQueuedWork {
-            session_id: row.session.clone(),
-            batches,
-        }]
-    };
-    Ok(LogicalTurnAdmissions::new(queued, turn_inputs))
+    Ok(LogicalTurnAdmissions::new(turn_inputs))
 }
 
 /// The turn's observer, and the task that publishes its activity to `live`

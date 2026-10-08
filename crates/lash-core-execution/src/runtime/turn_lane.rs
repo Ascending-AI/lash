@@ -2,41 +2,6 @@
 //! item opens (ADR 0101 §4, §5). The session mail drain admits in this
 //! order.
 
-/// What the session's turn lane admits next once no session command is open
-/// (ADR 0101 §5): the host input and
-/// the queued work pending in the two admission tables take one per-session
-/// `enqueue_seq`, and the earlier of the head next-turn input and the
-/// earliest pending queued turn work goes first. There is no kind priority.
-#[derive(Clone, Copy, Debug)]
-pub enum TurnLaneHead<'a> {
-    /// The head of the accepted next-turn input.
-    Input(&'a crate::PendingTurnInputRead),
-    /// The earliest pending queued turn work, which heads a queued run.
-    Queued(&'a crate::QueuedWorkBatch),
-}
-
-/// The turn lane's next item among the session's `open` inputs and pending
-/// `queued` batches (see [`TurnLaneHead`]); `None` when both are empty. Only
-/// turn work heads the lane: session commands drain before it (ADR 0101 §4).
-#[must_use]
-pub fn turn_lane_head<'a>(
-    open: &'a [crate::PendingTurnInputRead],
-    queued: &'a [crate::QueuedWorkBatch],
-) -> Option<TurnLaneHead<'a>> {
-    let earliest_queued = queued
-        .iter()
-        .filter(|batch| batch.work_class() == crate::store::QueuedWorkClass::TurnWork)
-        .min_by_key(|batch| batch.enqueue_seq);
-    match (head_input(open), earliest_queued) {
-        (Some(head), Some(queued)) if queued.enqueue_seq < head.input.enqueue_seq => {
-            Some(TurnLaneHead::Queued(queued))
-        }
-        (Some(head), _) => Some(TurnLaneHead::Input(head)),
-        (None, Some(queued)) => Some(TurnLaneHead::Queued(queued)),
-        (None, None) => None,
-    }
-}
-
 /// The head of the session's accepted next-turn input, among its `open`
 /// inputs at idle: the oldest one. With no turn running, every open input is
 /// next-turn input, whatever turn its submitted delivery addresses (ADR 0101

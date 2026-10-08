@@ -134,8 +134,7 @@ impl ProcessRuntimeContext {
     ///
     /// # Errors
     ///
-    /// `process` is not this runtime's, its surface does not resolve, or its
-    /// wake target cannot be read.
+    /// `process` is not this runtime's, or its surface does not resolve.
     pub async fn step_tools(
         &self,
         cx: crate::ActorContext,

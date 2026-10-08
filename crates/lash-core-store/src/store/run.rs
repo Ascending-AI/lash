@@ -443,8 +443,7 @@ pub trait RunStore: Send + Sync {
     /// re-execution of the checkpoint step reads its own admission back. A
     /// first execution applies the follow-on block (except the follow-on's
     /// own checkpoint), composes the addressed active-turn inputs the
-    /// checkpoint's boundary admits and the queued work the boundary admits,
-    /// binds them to the run with `admitted_by = request.step`, and delivers
+    /// checkpoint's boundary admits, binds them to the run with `admitted_by = request.step`, and delivers
     /// their obligations.
     async fn admit_at_checkpoint(
         &self,
@@ -538,7 +537,7 @@ pub trait RunStore: Send + Sync {
 pub enum AdmittedHead {
     /// An accepted next-turn input.
     Input(InputId),
-    /// A ready queued-work batch.
+    /// The session-command batch a command or operation run applies.
     Batch(BatchId),
 }
 
@@ -551,9 +550,9 @@ pub struct UnfinishedRun {
 
 /// What a session run's admission took: the one stored form of
 /// `session_runs.admission_json`, written by the session actor's mail drain
-/// and read by every host reader (FIG-5221). A turn run takes its inputs or
-/// one turn batch, and retains the trace scope its admission proposed; a
-/// command or operation run takes the one open batch its commit applies.
+/// and read by every host reader (FIG-5221). A turn run takes its inputs, and
+/// retains the trace scope its admission proposed; a command or operation run
+/// takes the one open batch its commit applies.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "run", rename_all = "snake_case")]
 pub enum RunAdmissionRecord {
@@ -581,7 +580,7 @@ pub enum RunAdmissionRecord {
     },
 }
 
-/// The rows a turn run executes: its inputs, never none, or one turn batch.
+/// The rows a turn run executes: its inputs, never none.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "rows", rename_all = "snake_case")]
 pub enum AdmittedTurnRows {
@@ -589,11 +588,6 @@ pub enum AdmittedTurnRows {
     Inputs {
         /// The inputs.
         ids: AdmittedInputIds,
-    },
-    /// One ready queued-work batch.
-    Batch {
-        /// The batch.
-        id: BatchId,
     },
 }
 
@@ -603,6 +597,12 @@ pub enum AdmittedTurnRows {
 pub struct AdmittedInputIds(Vec<InputId>);
 
 impl AdmittedInputIds {
+    /// The one input `id`.
+    #[must_use]
+    pub fn one(id: InputId) -> Self {
+        Self(vec![id])
+    }
+
     /// `ids`, refused when empty: a turn admits at least one input.
     ///
     /// # Errors
@@ -649,7 +649,7 @@ impl From<AdmittedInputIds> for Vec<InputId> {
 pub struct EmptyInputAdmission;
 
 impl RunAdmissionRecord {
-    /// The turn-lane row that heads the run: its first input or its batch.
+    /// The row that heads the run: a turn's first input or a command's batch.
     #[must_use]
     pub fn head(&self) -> AdmittedHead {
         match self {
@@ -657,10 +657,6 @@ impl RunAdmissionRecord {
                 took: AdmittedTurnRows::Inputs { ids },
                 ..
             } => AdmittedHead::Input(ids.head().clone()),
-            Self::Turn {
-                took: AdmittedTurnRows::Batch { id },
-                ..
-            } => AdmittedHead::Batch(id.clone()),
             Self::Command { batch } | Self::Operation { batch } => {
                 AdmittedHead::Batch(batch.clone())
             }
@@ -707,15 +703,10 @@ impl RunAdmissionRecord {
         }
     }
 
-    /// The batches the run took: bound to a turn run, open for a command
-    /// or operation run.
+    /// The batch a command or operation run applies; a turn takes none.
     #[must_use]
     pub fn batch_ids(&self) -> Vec<BatchId> {
         match self {
-            Self::Turn {
-                took: AdmittedTurnRows::Batch { id },
-                ..
-            } => vec![id.clone()],
             Self::Command { batch } | Self::Operation { batch } => vec![batch.clone()],
             Self::Turn {
                 took: AdmittedTurnRows::Inputs { .. },
@@ -795,14 +786,12 @@ pub struct CheckpointAdmissionRequest {
     pub policy: crate::TurnLaneAdmissionPolicy,
 }
 
-/// What a checkpoint's admission bound to its run: both families, each in
-/// `enqueue_seq` order.
+/// What a checkpoint's admission bound to its run: its active-turn inputs,
+/// in `enqueue_seq` order.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CheckpointAdmission {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inputs: Option<crate::AdmittedTurnInputs>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub queued: Option<crate::AdmittedQueuedWork>,
 }
 
 impl CheckpointAdmission {
@@ -811,10 +800,6 @@ impl CheckpointAdmission {
         self.inputs
             .as_ref()
             .is_none_or(|inputs| inputs.inputs.is_empty())
-            && self
-                .queued
-                .as_ref()
-                .is_none_or(|queued| queued.batches.is_empty())
     }
 }
 

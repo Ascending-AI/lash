@@ -155,16 +155,16 @@ impl NoProcessWork {
         self.terminal_awaiter.await_terminal(process_id).await
     }
 
-    /// Wait for `process_id`'s first `event_type` event after
+    /// Wait for `process_id`'s first `kind` event after
     /// `after_sequence` in the registry.
     pub async fn await_event(
         &self,
         process_id: &crate::ProcessId,
-        event_type: &str,
+        kind: crate::ProcessEventKind,
         after_sequence: u64,
     ) -> Result<crate::ProcessEvent, PluginError> {
         self.terminal_awaiter
-            .await_event(process_id, event_type, after_sequence)
+            .await_event(process_id, kind, after_sequence)
             .await
     }
 }

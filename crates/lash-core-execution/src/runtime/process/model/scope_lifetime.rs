@@ -9,11 +9,11 @@
 //! - **Lifetime** is what ends it: `Until(scope)` asks for its cooperative
 //!   cancellation when `scope` closes, and `Detached` names no scope. It is a
 //!   recorded decision, taken once against the start's admitted ancestry.
-//! - **Provenance** (the originator and wake target) is observation only.
+//! - **Provenance** (the originator) is observation only.
 //!
 //! A runtime start (a model tool, `spawn_agent`, a process body) draws its
 //! lifetime from a [`StartCx`] the runtime materializes from the admitted
-//! scope; the model never picks one. A host, remote or trigger start is a
+//! scope; the model never picks one. A host or remote start is a
 //! root: it has no starter, so it is `Detached` or `Until` a session the host
 //! looked up.
 
@@ -262,7 +262,7 @@ impl ProcessLineage {
 /// admission from the admitted scope and the recorded lineage it runs under,
 /// with no live reads (FIG-3607 R2).
 ///
-/// Host, remote and trigger starts are roots and have none.
+/// Host and remote starts are roots and have none.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StartCx {
     starter: ScopeRef,

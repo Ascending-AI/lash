@@ -4,7 +4,7 @@
 //! session-command family that rides in them. The runtime's queue driver
 //! stays in `lash-core`; only the data it persists lives here.
 
-use crate::{ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause};
+use crate::SessionId;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -297,70 +297,6 @@ impl DeliveryPolicy {
         }
     }
 }
-/// Semantic kind of one queued-work row.
-///
-/// Control rows are always admitted alone even when a producer assigns a merge
-/// key accidentally.
-///
-/// This is also the durable ingress-family discriminator. [`Self::Control`]
-/// holds exactly when the row's payload is a session command, because
-/// [`QueuedWorkBatchDraft::new`] derives the kind from the payload and no
-/// setter exists to break the correspondence. Store ordering projections
-/// therefore compare `work_kind` with [`Self::Control`]'s stable value for the
-/// session-command family rather than decoding payloads.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum QueuedWorkKind {
-    Turn,
-    Control,
-}
-impl QueuedWorkKind {
-    /// Project the ingress family to its work class.
-    pub fn work_class(self) -> QueuedWorkClass {
-        match self {
-            Self::Control => QueuedWorkClass::SessionCommand,
-            Self::Turn => QueuedWorkClass::TurnWork,
-        }
-    }
-
-    /// Reports whether rows of this kind may join an adjacent compatible turn admission.
-    ///
-    /// Only [`Self::Turn`] is batchable. Control rows remain single-row admissions
-    /// even when they carry the same merge key as neighboring work.
-    pub fn is_batchable(self) -> bool {
-        matches!(self, Self::Turn)
-    }
-
-    /// Store implementations must preserve these spellings so rows remain
-    /// readable across runtime restarts and backend implementations.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Turn => "turn",
-            Self::Control => "control",
-        }
-    }
-
-    /// The accepted values are exactly `"turn"` and `"control"`; an
-    /// unrecognized value returns `None` so a store can reject incompatible
-    /// durable data instead of assigning unsafe batching semantics.
-    pub fn from_wire_str(value: &str) -> Option<Self> {
-        match value {
-            "turn" => Some(Self::Turn),
-            "control" => Some(Self::Control),
-            _ => None,
-        }
-    }
-}
 /// Producer-stamped execution authority for queued work.
 ///
 /// Both fields are opaque to Lash and belong to the row that carries them.
@@ -415,33 +351,19 @@ pub struct TurnLaneAdmissionPolicy {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueuedWorkPayload {
-    ProcessWake { wake: Box<ProcessWakeDelivery> },
     SessionCommand { command: Box<SessionCommand> },
 }
 impl QueuedWorkPayload {
-    pub fn kind(&self) -> QueuedWorkKind {
-        match self {
-            Self::ProcessWake { .. } => QueuedWorkKind::Turn,
-            Self::SessionCommand { .. } => QueuedWorkKind::Control,
-        }
-    }
-
-    pub fn process_wake(wake: ProcessWakeDelivery) -> Self {
-        Self::ProcessWake {
-            wake: Box::new(wake),
-        }
-    }
-
     pub fn session_command(command: SessionCommand) -> Self {
         Self::SessionCommand {
             command: Box::new(command),
         }
     }
 
-    pub fn work_class(&self) -> QueuedWorkClass {
+    /// The session command this payload carries.
+    pub fn command(&self) -> &SessionCommand {
         match self {
-            Self::SessionCommand { .. } => QueuedWorkClass::SessionCommand,
-            Self::ProcessWake { .. } => QueuedWorkClass::TurnWork,
+            Self::SessionCommand { command } => command,
         }
     }
 }
@@ -473,23 +395,6 @@ pub struct QueuedWorkBatch {
     #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
     pub trace_cause: lash_trace::TraceCause,
 }
-impl QueuedWorkBatch {
-    pub fn kind(&self) -> QueuedWorkKind {
-        self.payload.kind()
-    }
-
-    pub fn work_class(&self) -> QueuedWorkClass {
-        self.kind().work_class()
-    }
-
-    pub fn is_session_command_work(&self) -> bool {
-        self.work_class() == QueuedWorkClass::SessionCommand
-    }
-
-    pub fn is_turn_work(&self) -> bool {
-        self.work_class() == QueuedWorkClass::TurnWork
-    }
-}
 /// Receiver-side result of an idempotent queued-work enqueue.
 #[derive(Clone, Debug)]
 pub enum QueuedWorkEnqueueOutcome {
@@ -508,10 +413,6 @@ impl QueuedWorkEnqueueOutcome {
             Self::Inserted(batch) | Self::Existing(batch) => batch,
         }
     }
-
-    pub fn process_wake_was_absorbed(&self) -> bool {
-        matches!(self, Self::Existing(_))
-    }
 }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -519,11 +420,6 @@ pub struct QueuedWorkBatchDraft {
     pub session_id: SessionId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_key: Option<String>,
-    /// Structural producer identity for a process wake: the
-    /// `(process, sequence)` its source key spells, validated against it at
-    /// enqueue so correctness never depends on parsing that string.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_wake_source: Option<ProcessWakeSource>,
     pub delivery_policy: DeliveryPolicy,
     pub authority: QueuedWorkAuthority,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -546,7 +442,6 @@ impl QueuedWorkBatchDraft {
         Self {
             session_id: session_id.into(),
             source_key: None,
-            process_wake_source: None,
             delivery_policy,
             authority: QueuedWorkAuthority::default(),
             merge_key: None,
@@ -564,24 +459,6 @@ impl QueuedWorkBatchDraft {
     pub fn with_source_key(mut self, source_key: impl Into<String>) -> Self {
         self.source_key = Some(source_key.into());
         self
-    }
-
-    pub fn with_process_wake_source(
-        mut self,
-        process_id: impl Into<ProcessId>,
-        sequence: u64,
-    ) -> Self {
-        self.process_wake_source = Some(ProcessWakeSource {
-            process_id: process_id.into(),
-            sequence,
-        });
-        self
-    }
-
-    /// There is deliberately no setter: the kind is a function of the payload,
-    /// so a producer cannot assert [`QueuedWorkKind::Control`] over turn work.
-    pub fn kind(&self) -> QueuedWorkKind {
-        self.payload.kind()
     }
 
     pub fn with_authority(mut self, authority: QueuedWorkAuthority) -> Self {
@@ -604,19 +481,10 @@ impl QueuedWorkBatchDraft {
         self
     }
 
-    pub fn work_class(&self) -> QueuedWorkClass {
-        self.kind().work_class()
-    }
-
     /// The digest this draft is admitted and compared under (ADR 0101 §8).
     ///
     /// A session command's submission is its command with the delivery
-    /// policy, authority and merge key its producer chose. A process wake's
-    /// is the process fact it carries: target session, process, sequence,
-    /// event type, input, the originator's authority and cause. The delivery
-    /// policy and merge key a wake travels under are host configuration, so
-    /// a redelivery under changed configuration is the same submission. The
-    /// preimage is the `lash.queued-work-submission` identity family at
+    /// policy, authority and merge key its producer chose. The preimage is the `lash.queued-work-submission` identity family at
     /// [`QUEUED_WORK_SUBMISSION_FAMILY_VERSION`]; the rendered form is
     /// `queued-work-submission:v<family>:blake3:<hex>`.
     pub fn submission_digest(&self) -> Result<String, serde_json::Error> {
@@ -630,23 +498,7 @@ impl QueuedWorkBatchDraft {
     /// Stored references carried by typed queued payloads, sorted and deduplicated.
     pub fn stored_attachment_ids(&self) -> Vec<crate::AttachmentId> {
         match &self.payload {
-            QueuedWorkPayload::ProcessWake { .. } | QueuedWorkPayload::SessionCommand { .. } => {
-                Vec::new()
-            }
-        }
-    }
-
-    pub fn validate_process_wake_source(&self) -> Result<(), String> {
-        match (self.process_wake_source.as_ref(), &self.payload) {
-            (Some(source), QueuedWorkPayload::ProcessWake { wake })
-                if wake.target_session_id == self.session_id
-                    && wake.process_id == source.process_id
-                    && wake.sequence == source.sequence
-                    && source.sequence <= i64::MAX as u64
-                    && self.source_key.as_deref()
-                        == Some(process_wake_source_key(&source.process_id, source.sequence).as_str()) => Ok(()),
-            (None, QueuedWorkPayload::SessionCommand { .. }) => Ok(()),
-            _ => Err("process-wake queued work requires a matching structural source tuple, signed-64-bit sequence, target session, and source key".to_string()),
+            QueuedWorkPayload::SessionCommand { .. } => Vec::new(),
         }
     }
 }
@@ -657,9 +509,9 @@ pub const QUEUED_WORK_SUBMISSION_FAMILY_VERSION: u8 = 1;
 
 /// Permanent tag registry for the queued-work submission preimage.
 ///
-/// Payload: 1 process wake (target session, process, sequence, event type,
-/// input, authority, cause), 2 session command (one canonical JSON payload
-/// leaf). A command batch then appends tag 3 with its delivery policy
+/// Payload: 2 session command (one canonical JSON payload leaf), 4 config
+/// transaction (its id and digest); tag 1, the process wake, is retired. The
+/// batch then appends tag 3 with its delivery policy
 /// (1 `earliest_safe_boundary`, 2 `after_current_turn_commit`), authority and
 /// merge key. An optional field is tag 0 when absent and tag 1 and its value
 /// when present. Retired tags remain burned.
@@ -691,24 +543,6 @@ fn queued_work_submission_preimage(
     );
     let payload = &draft.payload;
     match payload {
-        QueuedWorkPayload::ProcessWake { wake } => {
-            identity.tag(1);
-            identity.string(wake.target_session_id.as_str());
-            identity.string(wake.process_id.as_str());
-            identity.u64(wake.sequence);
-            identity.string(&wake.event_type);
-            identity.string(&wake.input);
-            authority(&mut identity, &wake.authority);
-            match &wake.process_caused_by {
-                Some(cause) => {
-                    identity.tag(1);
-                    identity.bytes(&crate::identity_json::payload_leaf(&serde_json::to_value(
-                        cause,
-                    )?));
-                }
-                None => identity.tag(0),
-            }
-        }
         // A config transaction is the request its submitter wrote, never
         // the reducer identities ingress stamped on it: a resubmission
         // from another build asks the same thing.
@@ -727,21 +561,14 @@ fn queued_work_submission_preimage(
         },
     }
 
-    if draft.kind() == QueuedWorkKind::Control {
-        identity.tag(3);
-        identity.tag(match draft.delivery_policy {
-            DeliveryPolicy::EarliestSafeBoundary => 1,
-            DeliveryPolicy::AfterCurrentTurnCommit => 2,
-        });
-        authority(&mut identity, &draft.authority);
-        optional_string(&mut identity, draft.merge_key.as_deref());
-    }
+    identity.tag(3);
+    identity.tag(match draft.delivery_policy {
+        DeliveryPolicy::EarliestSafeBoundary => 1,
+        DeliveryPolicy::AfterCurrentTurnCommit => 2,
+    });
+    authority(&mut identity, &draft.authority);
+    optional_string(&mut identity, draft.merge_key.as_deref());
     Ok(identity.finish())
-}
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProcessWakeSource {
-    pub process_id: ProcessId,
-    pub sequence: u64,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -784,30 +611,13 @@ impl AdmittedQueuedWork {
         self.batches.is_empty()
     }
 
-    /// Materializes checkpoint input from admitted work for runtime and conformance-suite implementors.
-    pub fn materialize_queued_checkpoint_work(&self) -> QueuedCheckpointWork {
-        let mut turn_causes = Vec::new();
-        for batch in &self.batches {
-            match &batch.payload {
-                QueuedWorkPayload::ProcessWake { wake } => {
-                    turn_causes.push(crate::process_wake_turn_cause(wake));
-                }
-                QueuedWorkPayload::SessionCommand { .. } => {}
-            }
-        }
-        QueuedCheckpointWork { turn_causes }
-    }
-
     /// Extracts the sole exclusive session command for queued-work driver implementors.
     pub fn exclusive_session_command(&self) -> Option<(&QueuedWorkBatch, &SessionCommand)> {
         if self.batches.len() != 1 {
             return None;
         }
         let batch = self.batches.first()?;
-        match &batch.payload {
-            QueuedWorkPayload::SessionCommand { command } => Some((batch, command.as_ref())),
-            _ => None,
-        }
+        Some((batch, batch.payload.command()))
     }
 
     /// Extract every independently receipted command in a coalesced
@@ -816,10 +626,7 @@ impl AdmittedQueuedWork {
     pub fn session_commands(&self) -> Option<Vec<(&QueuedWorkBatch, &SessionCommand)>> {
         let mut commands = Vec::with_capacity(self.batches.len());
         for batch in &self.batches {
-            let QueuedWorkPayload::SessionCommand { command } = &batch.payload else {
-                return None;
-            };
-            commands.push((batch, command.as_ref()));
+            commands.push((batch, batch.payload.command()));
         }
         (!commands.is_empty()).then_some(commands)
     }
@@ -829,53 +636,6 @@ impl From<SessionCommand> for QueuedWorkPayload {
         Self::session_command(command)
     }
 }
-#[derive(Clone, Debug, Default)]
-pub struct QueuedCheckpointWork {
-    pub turn_causes: Vec<TurnCause>,
-}
-pub fn process_wake_source_key(process_id: &ProcessId, sequence: u64) -> String {
-    format!("process:{process_id}:event:{sequence}:wake")
-}
-
-/// Constant producer-selected merge key for process wakes.
-///
-/// The key says only that wake rows are eligible to share a turn; it is
-/// per-item data for the host's `QueuedDrainPolicy`, never a kernel admission
-/// rule. A turn-lane composition still takes only batchable turn work sharing
-/// the queue head's delivery policy (ADR 0101 §5.2); which principals,
-/// elevations or merge-key groups actually share a turn is the policy's
-/// choice.
-pub const PROCESS_WAKE_MERGE_KEY: &str = "lash.process_wake";
-
-pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {
-    process_wake_batch_draft_with_delivery_policy(wake, DeliveryPolicy::EarliestSafeBoundary)
-}
-
-/// Draft a process wake using the host-selected delivery boundary.
-///
-/// Delivery timing is independent of merge eligibility: it remains a selector
-/// compatibility gate and is never encoded into the merge key.
-pub fn process_wake_batch_draft_with_delivery_policy(
-    wake: ProcessWakeDelivery,
-    delivery_policy: DeliveryPolicy,
-) -> QueuedWorkBatchDraft {
-    let source_key = process_wake_source_key(&wake.process_id, wake.sequence);
-    let process_id = wake.process_id.clone();
-    let sequence = wake.sequence;
-    let authority = wake.authority.clone();
-    let trace_cause = wake.trace_cause.clone();
-    QueuedWorkBatchDraft::new(
-        wake.target_session_id.clone(),
-        delivery_policy,
-        QueuedWorkPayload::process_wake(wake),
-    )
-    .with_source_key(source_key)
-    .with_process_wake_source(process_id, sequence)
-    .with_authority(authority)
-    .with_merge_key(PROCESS_WAKE_MERGE_KEY)
-    .with_trace_cause(trace_cause)
-}
-
 impl crate::store::DurableRecord for QueuedWorkBatch {
     const SURFACE: crate::store::SurfaceFormat =
         crate::surface_format!(crate::store::runtime_commit::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION);

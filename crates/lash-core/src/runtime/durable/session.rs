@@ -229,13 +229,6 @@ pub trait TurnDrive: Send {
         Vec::new()
     }
 
-    /// The queued turn work, such as a process wake, the turn's checkpoints
-    /// delivered (ADR 0101 §5). Every phase commits and binds it as it does
-    /// [`delivered_inputs`](Self::delivered_inputs).
-    fn delivered_work(&self) -> Vec<crate::AdmittedQueuedWork> {
-        Vec::new()
-    }
-
     /// The decisions the turn's before-turn callbacks made when it was
     /// prepared. Every phase commits them with its checkpoint, and a resume
     /// serves them: no before-turn callback runs once a phase has committed.
@@ -861,11 +854,11 @@ pub struct ComposedCall {
 }
 
 /// What a phase row's checkpoint holds: the machine's saved turn, the
-/// steering input and queued turn work its checkpoints delivered, which the
-/// phase bound to the run, and the turn's before-turn decisions and retained
-/// trace scope, which a resume serves. It carries no plugin state: the run's
-/// changed namespaces are rows of their own (FIG-5301). Encoded by the phase
-/// runner, its owner.
+/// steering input its checkpoints delivered, which the phase bound to the
+/// run, and the turn's before-turn decisions and retained trace scope, which
+/// a resume serves. It carries no plugin state: the run's changed namespaces
+/// are rows of their own (FIG-5301). Encoded by the phase runner, its
+/// owner.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PhaseCheckpoint {
@@ -875,10 +868,6 @@ pub struct PhaseCheckpoint {
     /// application evidence ([`TurnDrive::delivered_inputs`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub delivered: Vec<crate::AdmittedTurnInputs>,
-    /// The queued turn work the turn's checkpoints delivered
-    /// ([`TurnDrive::delivered_work`]).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub delivered_work: Vec<crate::AdmittedQueuedWork>,
     /// The turn's before-turn callback decisions
     /// ([`TurnDrive::before_turn`]), which a resume serves instead of
     /// running the callbacks again.
@@ -914,9 +903,6 @@ pub struct RestoredTurn {
     /// The steering input the turn's checkpoints delivered before its last
     /// phase committed, which the resumed drive settles with its commit.
     pub delivered: Vec<crate::AdmittedTurnInputs>,
-    /// The queued turn work the turn's checkpoints delivered before its last
-    /// phase committed, which the resumed drive settles with its commit.
-    pub delivered_work: Vec<crate::AdmittedQueuedWork>,
     /// The effect the checkpoint re-delivers, if it is waiting on one.
     pub pending: Option<Effect>,
     /// The turn's row.
@@ -1155,7 +1141,6 @@ impl<'a> TurnRestore<'a> {
         let PhaseCheckpoint {
             saved,
             delivered,
-            delivered_work,
             before_turn: _,
             trace: _,
         } = serde_json::from_str(stored).map_err(|error| TurnRestoreError::Undecodable {
@@ -1186,7 +1171,6 @@ impl<'a> TurnRestore<'a> {
             machine,
             namespaces,
             delivered,
-            delivered_work,
             pending,
             row: row.clone(),
         })

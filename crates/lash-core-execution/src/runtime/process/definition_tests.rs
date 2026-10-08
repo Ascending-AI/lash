@@ -105,10 +105,7 @@ impl ProcessEngine for SignedEngine {
                 message: "definition names no program".to_string(),
             });
         }
-        Ok(ProcessDefinitionResolution::new(
-            authoritative_signature(),
-            Vec::new(),
-        ))
+        Ok(ProcessDefinitionResolution::new(authoritative_signature()))
     }
 
     fn state_format(&self) -> crate::EngineStateFormat {

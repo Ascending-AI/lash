@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::{
     AttachmentStore, Backend, Clock, DeploymentStore, ModuleArtifactStore,
-    ProcessExecutionEnvStore, ProcessRegistry, StoreBindingId, StoreSet, TriggerStore,
+    ProcessExecutionEnvStore, ProcessRegistry, StoreBindingId, StoreSet,
 };
 
 /// A decorator of one obligation kind's ledger.
@@ -33,7 +33,6 @@ pub struct LayeredBackend {
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
-    trigger_store: Arc<dyn TriggerStore>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
     module_artifacts: Arc<dyn ModuleArtifactStore>,
@@ -48,7 +47,6 @@ impl LayeredBackend {
             clock: inner.clock(),
             session_store_factory: inner.session_store_factory(),
             process_registry: inner.process_registry(),
-            trigger_store: inner.trigger_store(),
             process_env_store: inner.process_env_store(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
@@ -79,15 +77,6 @@ impl LayeredBackend {
         layer: impl FnOnce(Arc<dyn ProcessRegistry>) -> Arc<dyn ProcessRegistry>,
     ) -> Self {
         self.process_registry = layer(self.process_registry);
-        self
-    }
-
-    /// Replace the trigger store with `layer` over it.
-    pub fn map_trigger_store(
-        mut self,
-        layer: impl FnOnce(Arc<dyn TriggerStore>) -> Arc<dyn TriggerStore>,
-    ) -> Self {
-        self.trigger_store = layer(self.trigger_store);
         self
     }
 
@@ -146,7 +135,6 @@ impl LayeredBackend {
             clock: self.clock,
             session_store_factory: self.session_store_factory,
             process_registry: self.process_registry,
-            trigger_store: self.trigger_store,
             process_env_store: self.process_env_store,
             attachment_store: self.attachment_store,
             module_artifacts: self.module_artifacts,
@@ -173,7 +161,6 @@ impl LayeredStores {
             clock: inner.clock(),
             session_store_factory: inner.session_store_factory(),
             process_registry: inner.process_registry(),
-            trigger_store: inner.trigger_store(),
             process_env_store: inner.process_env_store(),
             attachment_store: inner.attachment_store(),
             module_artifacts: inner.module_artifacts(),
@@ -214,15 +201,6 @@ impl LayeredStores {
         layer: impl FnOnce(Arc<dyn ProcessRegistry>) -> Arc<dyn ProcessRegistry>,
     ) -> Self {
         self.0.process_registry = layer(self.0.process_registry);
-        self
-    }
-
-    /// Replace the trigger store with `layer` over it.
-    pub fn map_trigger_store(
-        mut self,
-        layer: impl FnOnce(Arc<dyn TriggerStore>) -> Arc<dyn TriggerStore>,
-    ) -> Self {
-        self.0.trigger_store = layer(self.0.trigger_store);
         self
     }
 
@@ -294,7 +272,6 @@ struct LayeredStoreSet {
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
-    trigger_store: Arc<dyn TriggerStore>,
     process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn AttachmentStore>,
     attachment_referrers: Arc<dyn crate::AttachmentReferrers>,
@@ -332,10 +309,6 @@ impl StoreSet for LayeredStoreSet {
 
     fn process_registry(&self) -> Arc<dyn ProcessRegistry> {
         Arc::clone(&self.process_registry)
-    }
-
-    fn trigger_store(&self) -> Arc<dyn TriggerStore> {
-        Arc::clone(&self.trigger_store)
     }
 
     fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore> {

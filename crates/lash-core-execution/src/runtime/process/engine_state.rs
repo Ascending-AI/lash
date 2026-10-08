@@ -16,9 +16,6 @@
 //! whose state this node cannot decode, ends engine-free: its claimer commits
 //! the terminal from registry state and calls nothing.
 //!
-//! **Signals** reach `advance` as [`EngineEvent::Signal`], in mailbox order
-//! per sender; concurrent senders are unordered.
-//!
 //! L6 (FIG-5175) drives this machine from the process activation.
 
 use std::time::Duration;
@@ -27,7 +24,7 @@ use lash_durable::DurableInstant;
 
 use crate::runtime::actor::round::SettledOutput;
 use crate::runtime::actor::waits::PinnedKey;
-use crate::{ProcessId, ProcessOutcome, ProcessSignal, Resolution};
+use crate::{ProcessId, ProcessOutcome, Resolution};
 
 /// The encoding of an engine's [`EngineState`]: the engine's kind and a
 /// version it bumps when the encoding changes. A node claims a process only
@@ -117,26 +114,6 @@ pub enum StepRequest {
         /// The body's input.
         input: serde_json::Value,
     },
-    /// An operation on the lash store that no catalog tool answers (a
-    /// lashlang process's trigger command), run through the
-    /// [`EngineHostSteps`] its engine's registration declares, admitted
-    /// `Once`. A registration that declares none, or not this operation, is
-    /// refused before admission ([`EngineStepRefusal`]).
-    Host {
-        /// The step's name.
-        step: StepName,
-        /// The host operation it performs.
-        operation: String,
-        /// The operation's input.
-        input: serde_json::Value,
-        /// The effect node it runs for, as for a tool step.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        site: Option<StepEffectSite>,
-        /// The language node that issued this call, bound by its admitted
-        /// execution when the host step's body starts.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        language_execution: Option<Box<lash_trace::TraceLanguageExecution>>,
-    },
 }
 
 /// The effect node of an engine's execution map that a step runs for, and
@@ -156,7 +133,7 @@ impl StepRequest {
     #[must_use]
     pub fn step(&self) -> &StepName {
         match self {
-            Self::Tool { step, .. } | Self::Engine { step, .. } | Self::Host { step, .. } => step,
+            Self::Tool { step, .. } | Self::Engine { step, .. } => step,
         }
     }
 
@@ -164,9 +141,7 @@ impl StepRequest {
     #[must_use]
     pub fn input(&self) -> &serde_json::Value {
         match self {
-            Self::Tool { input, .. } | Self::Engine { input, .. } | Self::Host { input, .. } => {
-                input
-            }
+            Self::Tool { input, .. } | Self::Engine { input, .. } => input,
         }
     }
 
@@ -174,23 +149,20 @@ impl StepRequest {
     #[must_use]
     pub fn site(&self) -> Option<&StepEffectSite> {
         match self {
-            Self::Tool { site, .. } | Self::Host { site, .. } => site.as_ref(),
+            Self::Tool { site, .. } => site.as_ref(),
             Self::Engine { .. } => None,
         }
     }
 
     /// The tool its admission records for a process of engine `engine`:
-    /// the catalog tool, or for an engine step `<engine>/<kind>` and for a
-    /// host step `<engine>/<operation>`, which only identify the record. An
-    /// engine or host step is dispatched by its variant, never by this name.
+    /// the catalog tool, or for an engine step `<engine>/<kind>`, which only
+    /// identifies the record. An engine step is dispatched by its variant,
+    /// never by this name.
     #[must_use]
     pub fn admitted_tool(&self, engine: &str) -> lash_sansio::ToolId {
         match self {
             Self::Tool { tool, .. } => tool.clone(),
             Self::Engine { kind, .. } => lash_sansio::ToolId::new(format!("{engine}/{}", kind.0)),
-            Self::Host { operation, .. } => {
-                lash_sansio::ToolId::new(format!("{engine}/{operation}"))
-            }
         }
     }
 }
@@ -257,43 +229,6 @@ pub trait EngineSteps: Send + Sync {
     ) -> SettledOutput;
 }
 
-/// What a host step's body is handed: the step's lash-minted call identity,
-/// which keys its store effect, and its operation and input.
-#[derive(Clone, Debug, PartialEq)]
-pub struct HostStepRun {
-    /// The step's call identity.
-    pub call: crate::ToolCallId,
-    /// The host operation it performs.
-    pub operation: String,
-    /// The operation's input.
-    pub input: serde_json::Value,
-}
-
-/// An engine's host steps, declared at registration
-/// ([`ProcessEngineRegistration::with_host_steps`](super::ProcessEngineRegistration::with_host_steps)):
-/// operations on the lash store its processes issue that no catalog tool
-/// answers. Each is admitted `Once` and runs once over its process's step
-/// execution context, which acts as the process's recorded originator. Its
-/// store write is its store-local effect (ADR 0132 §5): a crash before its
-/// outcome commits records `Interrupted`, never a second write.
-#[async_trait::async_trait]
-pub trait EngineHostSteps: Send + Sync {
-    /// Whether `operation` is one of this engine's host steps.
-    fn serves(&self, operation: &str) -> bool;
-
-    /// How long one run of `operation` may take: the bound its host sets.
-    /// Lash holds no step default.
-    fn execution(&self, operation: &str) -> Duration;
-
-    /// Run one host step to its answer over `context`, the process's step
-    /// execution context.
-    async fn run(
-        &self,
-        context: crate::RuntimeExecutionContext<'static>,
-        run: HostStepRun,
-    ) -> crate::ToolCallOutput;
-}
-
 /// Why an engine step was refused before admission.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum EngineStepRefusal {
@@ -316,15 +251,6 @@ pub enum EngineStepRefusal {
         engine: String,
         /// The step kind asked for.
         kind: EngineStepKind,
-    },
-    /// The engine's registration declares no host step for this
-    /// operation.
-    #[error("process engine `{engine}` declares no host step `{operation}`")]
-    UndeclaredHostStep {
-        /// The engine kind.
-        engine: String,
-        /// The host operation asked for.
-        operation: String,
     },
 }
 
@@ -363,26 +289,9 @@ pub enum EngineAction {
         until: DurableInstant,
     },
     /// Nothing to do and no deadline: the process waits until the next
-    /// mailbox event (a signal, `Cancelled`, a resolved wait or a settled
-    /// step) reaches `advance`.
+    /// mailbox event (`Cancelled`, a resolved wait or a settled step)
+    /// reaches `advance`.
     Idle,
-    /// Wait for the signal named `name`: as [`Idle`](Self::Idle), the
-    /// process waits for its next mailbox event, and its record shows it
-    /// waiting on the signal (`process.waiting`) until a transition asks for
-    /// anything else (`process.resumed`).
-    AwaitSignal {
-        /// The signal's name.
-        name: String,
-    },
-    /// Append a process event, exactly once, in the transaction that
-    /// commits this state; `advance` then receives [`EngineEvent::Emitted`]
-    /// at once.
-    Emit {
-        /// The event's type.
-        event_type: crate::ProcessEventType,
-        /// Its payload.
-        payload: serde_json::Value,
-    },
     /// End the process.
     Terminal(ProcessOutcome),
 }
@@ -402,9 +311,6 @@ pub enum EngineEvent {
         /// How its attempt ended, with its material's payload.
         outcome: SettledOutput,
     },
-    /// The event the last transition's [`EngineAction::Emit`] appended is
-    /// committed.
-    Emitted,
     /// A key the engine asked for was pinned.
     KeyPinned {
         /// The wait's name.
@@ -438,8 +344,6 @@ pub enum EngineEvent {
     },
     /// A sleep ended.
     Woke,
-    /// A signal arrived.
-    Signal(ProcessSignal),
     /// The process was cancelled; delivered once, within its grace.
     Cancelled {
         /// Who asked.

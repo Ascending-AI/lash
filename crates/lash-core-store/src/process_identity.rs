@@ -12,7 +12,7 @@ const PROCESS_ENV_PREFIX_VERSION: &str = "process-env:v6:blake3:";
 /// version_guard(items(LASH_PROCESS_ENV_DOMAIN_VERSION, process_execution_env_ref_for_bytes))
 const LASH_PROCESS_ENV_DOMAIN_VERSION: &str = "lash-process-env/v6";
 
-use crate::{ProcessId, SessionId};
+use crate::ProcessId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -102,8 +102,8 @@ impl ProcessIdMint {
 /// starting a second one, and after the process is pruned the same key starts
 /// a new process with a new id.
 ///
-/// A key lash derives from an admitted operation (a tool intent, a trigger
-/// delivery) is trusted: a retry under it returns the retained process
+/// A key lash derives from an admitted operation (a tool intent, an isolated
+/// call) is trusted: a retry under it returns the retained process
 /// whatever it submitted. A host's key (one it supplied, or its keyless
 /// start's derived key) fences its start: a retry under it returns the
 /// retained process only if it presents the same start, and is otherwise a
@@ -112,7 +112,7 @@ impl ProcessIdMint {
 ///
 /// Every key is a framed digest in one family, with each start path in its own
 /// namespace, so a host-supplied key can never collide with one lash derives
-/// for a tool intent or trigger start. The digest is over admitted
+/// for a tool intent or isolated call. The digest is over admitted
 /// operation identity only — never over submitted content, source or compiler
 /// identity, or the minted result. Only [`StartKey::for_host`] is open to a
 /// host; every other family is derived under a [`StartKeyDerivation`].
@@ -129,8 +129,8 @@ const START_KEY_PREFIX: &str = "process-start-key";
 ///
 /// version_guard(
 ///     items(
-///         START_KEY_DOMAIN, START_KEY_PREFIX, derive, for_tool_intent, for_trigger_delivery,
-///         for_host, for_keyless_host, for_isolated_call, write_scope,
+///         START_KEY_DOMAIN, START_KEY_PREFIX, derive, for_tool_intent, for_host,
+///         for_keyless_host, for_isolated_call, write_scope,
 ///     ),
 /// )
 /// version_surface = "coexist"
@@ -140,13 +140,12 @@ pub const START_KEY_FAMILY_VERSION: u8 = 1;
 /// and its own name in the rendered key, so no key derived on one path can
 /// equal one derived on another.
 ///
-/// Tag 2 is retired (ADR 0116); no namespace may reuse it.
+/// Tags 2 (ADR 0116) and 3 (the trigger delivery, FIG-5415) are retired; no
+/// namespace may reuse them, nor the name `trigger`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StartKeyNamespace {
     /// A start declared by a recorded tool intent.
     ToolIntent,
-    /// The one start of a trigger delivery.
-    TriggerDelivery,
     /// A key a host or remote caller supplied: the same bytes are one key
     /// across the store set, whoever presents them.
     Host,
@@ -157,9 +156,8 @@ enum StartKeyNamespace {
 }
 
 impl StartKeyNamespace {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 4] = [
         Self::ToolIntent,
-        Self::TriggerDelivery,
         Self::Host,
         Self::KeylessHost,
         Self::IsolatedCall,
@@ -168,7 +166,6 @@ impl StartKeyNamespace {
     fn tag(self) -> u8 {
         match self {
             Self::ToolIntent => 1,
-            Self::TriggerDelivery => 3,
             Self::Host => 4,
             Self::KeylessHost => 5,
             Self::IsolatedCall => 6,
@@ -178,7 +175,6 @@ impl StartKeyNamespace {
     fn name(self) -> &'static str {
         match self {
             Self::ToolIntent => "intent",
-            Self::TriggerDelivery => "trigger",
             Self::Host => "host",
             Self::KeylessHost => "keyless",
             Self::IsolatedCall => "isolated",
@@ -189,7 +185,7 @@ impl StartKeyNamespace {
 /// The authority to derive a key in one of lash's own start families, or to
 /// read a rendered key back from text.
 ///
-/// Only lash's own start paths hold one: the tool-intent and trigger-delivery
+/// Only lash's own start paths hold one: the tool-intent and isolated-call
 /// realizations and the host rails' keyless ordinal, in the execution crate,
 /// and host decoding of a record's key. Neither the `lash`
 /// facade nor the runtime crate's root re-exports it, so host and plugin code
@@ -210,23 +206,6 @@ impl StartKeyDerivation {
     pub fn for_tool_intent(self, identity: &crate::ToolIntentIdentity) -> StartKey {
         StartKey::derive(StartKeyNamespace::ToolIntent, |encoder| {
             encoder.string(&identity.replay_key);
-        })
-    }
-
-    /// The key of the one start a trigger delivery makes: its occurrence and
-    /// the exact subscription revision the delivery was reserved against.
-    pub fn for_trigger_delivery(
-        self,
-        occurrence_id: &str,
-        subscription_id: &str,
-        subscription_incarnation: &str,
-        subscription_revision: u64,
-    ) -> StartKey {
-        StartKey::derive(StartKeyNamespace::TriggerDelivery, |encoder| {
-            encoder.string(occurrence_id);
-            encoder.string(subscription_id);
-            encoder.string(subscription_incarnation);
-            encoder.u64(subscription_revision);
         })
     }
 
@@ -297,8 +276,8 @@ impl StartKey {
     /// The key a host or remote caller supplies for an idempotent start:
     /// arbitrary bytes in a namespace no lash-derived key shares. Lash mixes
     /// nothing into it, so the same bytes are one key across the store set,
-    /// whoever presents them (ADR 0107): the start's originator, lifetime and
-    /// wake target are content the key fences, never part of the key.
+    /// whoever presents them (ADR 0107): the start's originator and lifetime
+    /// are content the key fences, never part of the key.
     pub fn for_host(key: impl AsRef<[u8]>) -> Self {
         Self::derive(StartKeyNamespace::Host, |encoder| {
             encoder.bytes(key.as_ref());
@@ -560,8 +539,8 @@ impl ProcessStatus {
 /// The status of a process whose outcome is recorded: the terminal subset of
 /// [`ProcessStatus`].
 ///
-/// A terminal event type declares one, and a terminal outcome derives one,
-/// so neither can name a status no outcome ends a process in.
+/// A terminal outcome derives one, so none can name a status no outcome
+/// ends a process in.
 #[derive(
     Clone,
     Copy,
@@ -704,154 +683,6 @@ impl fmt::Display for RetiredProcessStatus {
     }
 }
 
-/// Version 3 carries full admitted effect addresses and complete trigger causes
-/// in the invocation delivered with a process wake. Version 4 drops the
-/// process incarnation: a minted process id names one process (ADR 0107).
-///
-#[cfg(not(feature = "synthetic-next"))]
-/// version_surface = "migrate"
-/// format_manifest = "ProcessWakeDelivery"
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 1;
-
-/// Phase A's synthetic N+1 (ADR 0115 §6) moves the surface one version on
-/// with version 4's shape; its registered lift reads what N wrote.
-#[cfg(feature = "synthetic-next")]
-/// version_surface = "migrate"
-/// format_manifest = "ProcessWakeDelivery"
-pub const PROCESS_WAKE_DELIVERY_FORMAT_VERSION: u32 = 2;
-
-/// version_guard(
-///     items(process_wake_identity_preimage),
-/// )
-/// version_surface = "coexist"
-const PROCESS_WAKE_FAMILY_VERSION: u8 = 1;
-
-/// Permanent tag registry for process-wake identities.
-///
-/// Version 1 has no sum variants: its complete grammar is target session,
-/// process id, then event sequence. Retired tags remain burned when variants
-/// are introduced in a later family version.
-fn process_wake_identity_preimage(
-    target_session_id: &SessionId,
-    process_id: &ProcessId,
-    sequence: u64,
-) -> Vec<u8> {
-    let mut identity = crate::stable_identity::IdentityEncoder::new(
-        "lash.process-wake",
-        PROCESS_WAKE_FAMILY_VERSION,
-    );
-    identity.string(target_session_id);
-    identity.string(process_id);
-    identity.u64(sequence);
-    identity.finish()
-}
-
-/// The identity of one process wake: the rendered hash of the wake's target
-/// session, process and event sequence.
-///
-/// Sealed: the only way to obtain one is [`ProcessWakeDelivery::wake_id`], so
-/// a wake id always names the wake it was computed from. It encodes as its
-/// text and has no decoder; a stored copy is compared against the wake's own.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
-#[serde(transparent)]
-pub struct WakeId(String);
-
-impl WakeId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    pub fn into_inner(self) -> String {
-        self.0
-    }
-}
-
-impl std::ops::Deref for WakeId {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        self.as_str()
-    }
-}
-
-impl AsRef<str> for WakeId {
-    fn as_ref(&self) -> &str {
-        self.as_str()
-    }
-}
-
-impl fmt::Display for WakeId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-impl From<WakeId> for String {
-    fn from(value: WakeId) -> Self {
-        value.into_inner()
-    }
-}
-
-impl PartialEq<str> for WakeId {
-    fn eq(&self, other: &str) -> bool {
-        self.as_str() == other
-    }
-}
-
-impl PartialEq<String> for WakeId {
-    fn eq(&self, other: &String) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-impl PartialEq<WakeId> for String {
-    fn eq(&self, other: &WakeId) -> bool {
-        self.as_str() == other.as_str()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct ProcessWakeDelivery {
-    pub version: u32,
-    pub target_session_id: SessionId,
-    pub process_id: ProcessId,
-    pub sequence: u64,
-    pub event_type: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_caused_by: Option<crate::CausalRef>,
-    /// Authority captured from the durable process originator at event append.
-    /// The delivery driver must forward this unchanged into queued work.
-    #[serde(default, skip_serializing_if = "process_wake_authority_is_empty")]
-    pub authority: crate::QueuedWorkAuthority,
-    pub input: String,
-    pub created_at_ms: u64,
-    /// What caused the wake, for telemetry: the producer of the event that
-    /// woke the session, or the process itself. Retained with the delivery
-    /// and carried onto the queued work it becomes; no part of the wake's
-    /// identity or submission digest.
-    #[serde(default, skip_serializing_if = "lash_trace::TraceCause::is_root")]
-    pub trace_cause: lash_trace::TraceCause,
-}
-
-impl ProcessWakeDelivery {
-    /// This wake's identity, computed from the target session, process and
-    /// event sequence it carries. A wake states its identity nowhere else.
-    pub fn wake_id(&self) -> WakeId {
-        WakeId(crate::stable_identity::rendered_hash(
-            "wake",
-            PROCESS_WAKE_FAMILY_VERSION,
-            &process_wake_identity_preimage(
-                &self.target_session_id,
-                &self.process_id,
-                self.sequence,
-            ),
-        ))
-    }
-}
-fn process_wake_authority_is_empty(authority: &crate::QueuedWorkAuthority) -> bool {
-    authority.principal.is_none() && authority.elevation.is_none()
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ProcessExecutionEnvRef(String);
@@ -883,37 +714,6 @@ pub fn process_execution_env_ref_for_bytes(bytes: &[u8]) -> ProcessExecutionEnvR
         "{PROCESS_ENV_PREFIX_VERSION}{}",
         crate::stable_hash::blake3_hex(LASH_PROCESS_ENV_DOMAIN_VERSION, bytes)
     ))
-}
-
-pub fn process_wake_turn_cause(wake: &ProcessWakeDelivery) -> crate::TurnCause {
-    crate::TurnCause {
-        id: wake.wake_id().into_inner(),
-        event_type: wake.event_type.clone(),
-        origin: crate::MessageOrigin::Process {
-            process_id: wake.process_id.clone(),
-            event_type: wake.event_type.clone(),
-            sequence: wake.sequence,
-            wake_id: Some(wake.wake_id().into_inner()),
-            caused_by: wake.process_caused_by.clone(),
-        },
-        text: process_wake_turn_text(wake),
-    }
-}
-
-/// Renders a durable process wake as model-visible chronological context.
-pub fn process_wake_turn_text(wake: &ProcessWakeDelivery) -> String {
-    // Sender-floor allocation keeps sequences small ordered identifiers, so
-    // the model-facing `#<sequence>` remains a useful event label.
-    format!(
-        "Background process wake\nProcess: {}\nEvent: {} #{}\nWake input:\n{}",
-        wake.process_id, wake.event_type, wake.sequence, wake.input
-    )
-}
-pub fn wake_payload_value_to_string(value: &serde_json::Value) -> String {
-    value
-        .as_str()
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| value.to_string())
 }
 
 /// Generates a durable lifecycle vocabulary and its complete variant list from
@@ -969,11 +769,6 @@ impl crate::store::DurableRecord for StartKey {
 impl crate::store::DurableRecord for StartKeyNamespace {
     const SURFACE: crate::store::SurfaceFormat =
         crate::surface_format!(crate::process_identity::START_KEY_FAMILY_VERSION);
-}
-
-impl crate::store::DurableRecord for ProcessWakeDelivery {
-    const SURFACE: crate::store::SurfaceFormat =
-        crate::surface_format!(crate::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION);
 }
 
 #[cfg(test)]

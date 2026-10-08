@@ -27,9 +27,6 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// The run's settlement, which its commit fills from the driver's
     /// admitted sets.
     settlement: crate::store::IngressSettlement,
-    /// How many of the driver's queued-work sets the run's own admission
-    /// took: those after them are what the turn's checkpoints delivered.
-    opening_work: usize,
     /// The turn's before-turn decisions, which every phase commits.
     before_turn: Vec<crate::plugin::RecordedTurnContribution>,
     /// The trace scope the turn's admission retained, which every phase
@@ -95,11 +92,9 @@ impl RuntimeDrive {
             attachments,
         } = turn;
         let machine = fresh_machine(&mut driver, messages, &parts.observer, invalid_input)?;
-        let opening_work = driver.pending_queued.len();
         Ok(Self::assemble(
             driver,
             machine,
-            opening_work,
             before_turn,
             attachments,
             trace_scope,
@@ -128,16 +123,12 @@ impl RuntimeDrive {
             machine,
             namespaces,
             delivered,
-            delivered_work,
             pending,
             row,
         } = restore.restore(config).await?;
-        // The steering input and queued turn work the turn's checkpoints
-        // delivered before its last phase committed are bound to its run;
+        // The steering input the turn's checkpoints delivered before its last phase committed are bound to its run;
         // the turn's commit settles them with the rows its run took.
         driver.pending_turn_inputs.extend(delivered);
-        let opening_work = driver.pending_queued.len();
-        driver.pending_queued.extend(delivered_work);
         // The namespaces the turn's run committed, the pending
         // checkpoint-callback decisions of an admitted call among them, over
         // the head the run started from, are reinstalled: preparing the turn
@@ -172,7 +163,6 @@ impl RuntimeDrive {
             drive: Box::new(Self::assemble(
                 driver,
                 machine,
-                opening_work,
                 before_turn,
                 attachments,
                 trace_scope,
@@ -186,7 +176,6 @@ impl RuntimeDrive {
     fn assemble(
         driver: Box<RuntimeTurnDriver<'static>>,
         machine: TurnMachine,
-        opening_work: usize,
         before_turn: Vec<crate::plugin::RecordedTurnContribution>,
         attachments: Option<crate::attachments::AttachmentExecutionBinding>,
         trace_scope: lash_trace::DurableTraceScope,
@@ -212,7 +201,6 @@ impl RuntimeDrive {
             machine,
             observer,
             settlement,
-            opening_work,
             before_turn,
             trace_scope,
             live,
@@ -387,14 +375,6 @@ impl TurnDrive for RuntimeDrive {
             })
             .cloned()
             .collect()
-    }
-
-    fn delivered_work(&self) -> Vec<crate::AdmittedQueuedWork> {
-        self.driver
-            .pending_queued
-            .get(self.opening_work..)
-            .unwrap_or_default()
-            .to_vec()
     }
 
     fn before_turn(&self) -> Vec<crate::plugin::RecordedTurnContribution> {
@@ -601,22 +581,16 @@ impl TurnDrive for RuntimeDrive {
                 .filter(|_| observed)
                 .map(|finished| finished.finalized(driver.turn_pipeline.state().to_snapshot())),
         };
-        // The commit settles every input and every queued work batch the
-        // turn executed, the inputs with the application evidence their
-        // delivery recorded: those its run took and those its checkpoints
-        // delivered.
+        // The commit settles every input the turn executed, with the
+        // application evidence its delivery recorded: those its run took and
+        // those its checkpoints delivered.
         let mut settlement = self.settlement.clone();
         settlement.completed_inputs = driver
             .pending_turn_inputs
             .iter()
             .map(crate::AdmittedTurnInputs::completion)
             .collect();
-        settlement.completed_batches = driver
-            .pending_queued
-            .iter()
-            .map(crate::AdmittedQueuedWork::completion)
-            .collect();
-        if !settlement.completed_inputs.is_empty() || !settlement.completed_batches.is_empty() {
+        if !settlement.completed_inputs.is_empty() {
             commit.ingress = Some(settlement);
         }
         Ok(TurnCommit {

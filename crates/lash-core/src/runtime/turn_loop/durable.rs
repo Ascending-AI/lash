@@ -61,13 +61,7 @@ impl LashRuntime {
         self.materialize_turn_session(controller).await?;
         self.resolve_turn_config(controller, run, admitted_run_spec.as_ref())
             .await?;
-        Self::emit_physical_turn_start(
-            observer,
-            controller,
-            run,
-            &admissions,
-            self.tool_restore_report.take(),
-        );
+        Self::emit_physical_turn_start(observer, controller, run, self.tool_restore_report.take());
         let (recorded_before_turn, retained_trace, export_owed) = match recorded {
             Some(recorded) => (Some(recorded.before_turn), recorded.trace, false),
             None => (None, admitted_trace, true),
@@ -114,16 +108,6 @@ impl LashRuntime {
             .plugins
             .adopt_state_segment(crate::tool_run::SegmentOrdinal(state_segment));
         let mut turn_delta = Vec::new();
-        let initial_turn_causes: Vec<_> = admissions
-            .queued
-            .iter()
-            .flat_map(|queued| queued.materialize_queued_checkpoint_work().turn_causes)
-            .collect();
-        turn_delta.extend(
-            initial_turn_causes
-                .iter()
-                .map(crate::TurnCause::to_event_message),
-        );
         let mut invalid_input = None;
         let mut input_item_count = 0;
         let mut user_messages = Vec::new();
@@ -148,9 +132,9 @@ impl LashRuntime {
                 normalized,
             ));
         }
-        // A run without host input or wake causes still opens with an empty
-        // user message. Invalid input contributes no user messages.
-        if user_messages.is_empty() && initial_turn_causes.is_empty() && invalid_input.is_none() {
+        // A run without host input still opens with an empty user message.
+        // Invalid input contributes no user messages.
+        if user_messages.is_empty() && invalid_input.is_none() {
             user_messages.push(opening_user_message(
                 format!("m_turn_{run}_input"),
                 run,
@@ -371,8 +355,6 @@ impl LashRuntime {
             after_turn_reads,
             protocol_turn_options: effective_protocol_turn_options,
             turn_context,
-            turn_causes: initial_turn_causes,
-            pending_queued: admissions.queued,
             pending_turn_inputs: admissions.turn_inputs,
             pending_checkpoint_turn_inputs: None,
             turn_phase_probe: self.turn_phase_probe.clone(),

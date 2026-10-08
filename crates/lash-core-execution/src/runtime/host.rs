@@ -13,8 +13,7 @@ use super::{DeploymentStore, ProcessWorkSubstrate, ProcessWorkWiring, Terminatio
 /// A config is built over exactly one [`Backend`](crate::Backend) (ADR 0102,
 /// D2): its effect host, attachment port, process-exec-env store and clock
 /// start as the backend's, and every other port a runtime reaches — the
-/// session-store factory, the trigger store and the process-definition
-/// registry — is read from the same backend. There is no in-memory default.
+/// session-store factory and the process-definition registry — is read from the same backend. There is no in-memory default.
 #[derive(Clone)]
 pub struct RuntimeHostConfig {
     backend: crate::Backend,
@@ -189,9 +188,6 @@ impl Default for DeltaCoalescing {
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     pub effect_host: ActorContext,
-    /// Live restoration of captured provider routes for new trigger starts,
-    /// shared by immediate delivery and recovery. Never journaled as wiring.
-    pub trigger_route_restorer: Option<Arc<dyn crate::TriggerRouteRestorer>>,
     /// The termination policy a run records on its first execution. Terminal
     /// assembly reads the run's record, never this field (FIG-4389).
     pub termination: TerminationPolicy,
@@ -297,7 +293,6 @@ impl RuntimeHostConfig {
                 execution_budgets: crate::ExecutionBudgets::default(),
                 delta_coalescing: DeltaCoalescing::default(),
                 effect_host,
-                trigger_route_restorer: None,
                 process_tool_visibility_filter: None,
                 tool_source_policy: crate::ToolSourcePolicy::default(),
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
@@ -344,11 +339,6 @@ impl RuntimeHostConfig {
     /// runtime creates, reopens or deletes goes through.
     pub fn session_store_factory(&self) -> Arc<dyn DeploymentStore> {
         self.backend.session_store_factory()
-    }
-
-    /// The backend's trigger subscriptions and occurrences.
-    pub fn trigger_store(&self) -> Arc<dyn crate::TriggerStore> {
-        self.backend.trigger_store()
     }
 
     /// Replace the runtime time source. Hosts that need deterministic replay or

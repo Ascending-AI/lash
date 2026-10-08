@@ -1,8 +1,5 @@
 //! The referrers an execution acquires artifacts under (ADR 0113 §3): its
-//! own journal, the frame its turn was admitted on, and the subscription
-//! revision a trigger command commits.
-
-use std::sync::Arc;
+//! own journal and the frame its turn was admitted on.
 
 use super::RuntimeExecutionContext;
 
@@ -67,26 +64,6 @@ impl RuntimeExecutionContext<'_> {
     pub fn frame_claim(&self) -> Result<crate::ReferrerClaim, crate::PluginError> {
         crate::ReferrerClaim::unguarded(self.frame_referrer()?)
             .map_err(|error| crate::PluginError::Session(error.to_string()))
-    }
-
-    /// `store` wrapped so a trigger command holds the revision it commits
-    /// before it commits, under this execution's journal (ADR 0113 §3.4).
-    pub(super) fn revision_referrer_trigger_store(
-        &self,
-        store: Arc<dyn crate::TriggerStore>,
-    ) -> Result<Arc<dyn crate::TriggerStore>, crate::RuntimeEffectControllerError> {
-        let creator = self
-            .dispatch
-            .effect_controller
-            .execution_scope()
-            .journal_identity()?;
-        Ok(Arc::new(
-            crate::triggers::RevisionReferrerTriggerStore::new(
-                store,
-                self.dispatch.process_engines.clone(),
-                creator,
-            ),
-        ))
     }
 }
 

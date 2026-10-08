@@ -221,7 +221,6 @@ fn windowed_llm_pending(window: &TurnWindow) -> (TurnMachine, EffectId, LlmReque
         window.then(vec![user_message("the turn's own input")]),
         Vec::new(),
         0,
-        Vec::new(),
     );
     let effects = drain_effects(&mut machine);
     let (id, request) = find_llm_call(&effects).expect("first model call");

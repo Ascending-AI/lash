@@ -32,32 +32,14 @@ fn effect_summary_request() -> crate::ProcessEventAppendRequest {
     .append_request()
 }
 
+/// The vocabulary is closed: a kind lash does not name is refused when it
+/// is read, before any append is planned.
 #[test]
 fn effect_summary_refuses_unknown_runtime_kind() {
-    let registration =
-        fixture_registration("effect-summary-unknown-kind").with_extra_event_types([
-            crate::ProcessEventType {
-                name: "process.effect_future".to_string(),
-                payload_schema: crate::JsonSchema::any(),
-                semantics: crate::ProcessEventSemanticsSpec::default(),
-            },
-        ]);
-    let record =
-        ProcessRecord::from_registration(registration, crate::process_id_for_test("record"));
-    let request =
-        crate::ProcessEventAppendRequest::new("process.effect_future", serde_json::json!({}))
-            .with_replay_key("future-effect");
-
-    let error = prepare_process_event_append(
-        &record,
-        request,
-        1,
-        None,
-        None,
-        None,
-        42,
-        None,
-        crate::FleetFormat::current(),
+    let error = crate::ProcessEventAppendRequest::from_stored(
+        "process.effect_future",
+        serde_json::json!({}),
+        "future-effect",
     )
     .expect_err("an unknown runtime-owned effect kind must be refused");
     assert!(matches!(
@@ -85,9 +67,7 @@ fn effect_summary_refuses_payload_and_append_identity_drift() {
         1,
         None,
         None,
-        None,
         42,
-        None,
         crate::FleetFormat::current(),
     )
     .expect_err("the payload may not claim a different effect");
@@ -111,7 +91,7 @@ fn the_generic_append_refuses_runtime_owned_effect_summary_kinds() {
         )
         .append_request("omissions"),
     ] {
-        let event_type = request.event_type.clone();
+        let event_type = request.kind().as_str().to_string();
         assert!(
             matches!(
                 validate_generic_process_event_append(&request),
@@ -119,25 +99,6 @@ fn the_generic_append_refuses_runtime_owned_effect_summary_kinds() {
                     if refused == event_type
             ),
             "a host append of `{event_type}` must be refused"
-        );
-    }
-}
-
-#[test]
-fn terminal_semantics_cannot_name_a_non_terminal_status() {
-    for status in crate::ProcessStatus::ALL {
-        let spec = serde_json::json!({
-            "status": status.label(),
-            "await_output": "payload",
-        });
-        let decoded = serde_json::from_value::<crate::ProcessTerminalSpec>(spec);
-        assert_eq!(
-            decoded
-                .ok()
-                .map(|spec| crate::ProcessStatus::from(spec.status)),
-            status.terminal().map(crate::ProcessStatus::from),
-            "a terminal event declares `{}` exactly when it is terminal",
-            status.label()
         );
     }
 }
@@ -229,17 +190,6 @@ fn a_process_record_decodes_one_lifecycle_state() {
     ] {
         assert!(with_lifecycle(lifecycle).is_err(), "{case} must not decode");
     }
-
-    let terminal = serde_json::json!({"outcome": outcome});
-    serde_json::from_value::<crate::ProcessTerminalSemantics>(terminal)
-        .expect("a stored terminal event carries its outcome");
-    assert!(
-        serde_json::from_value::<crate::ProcessTerminalSemantics>(
-            serde_json::json!({"status": "completed", "outcome": outcome})
-        )
-        .is_err(),
-        "a stored terminal event carries no status beside its outcome"
-    );
 }
 
 #[test]
@@ -250,51 +200,39 @@ fn a_resume_cannot_return_an_ended_process_to_running() {
     );
     let wait = WaitState {
         since_ms: 1,
-        kind: crate::WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: crate::runtime::process_signal_wait_key(&record.id, "ready", 1),
-            ordinal: 1,
+        kind: crate::WaitKind::Call {
+            call_id: crate::ToolCallId::fixture("resume-call"),
+            tool_id: crate::ToolId::from("resume-tool"),
         },
     };
     let process_id = record.id.clone();
-    let event =
-        |sequence, request: crate::ProcessEventAppendRequest, terminal| crate::ProcessEvent {
-            process_id: process_id.clone(),
+    let event = |sequence, request: crate::ProcessEventAppendRequest| crate::ProcessEvent {
+        process_id: process_id.clone(),
+        sequence,
+        fact: request.fact,
+        invocation: crate::runtime::causal::process_event_invocation(
+            &process_id,
             sequence,
-            event_type: request.event_type,
-            payload: request.payload,
-            invocation: crate::runtime::causal::process_event_invocation(
-                &process_id,
-                sequence,
-                "fixture",
-                request.replay,
-            ),
-            semantics: crate::ProcessEventSemantics {
-                terminal,
-                ..crate::ProcessEventSemantics::default()
-            },
-            occurred_at: sequence,
-        };
+            "fixture",
+            request.replay,
+        ),
+        trace_cause: request.trace_cause,
+        occurred_at: sequence,
+    };
     let outcome = crate::ProcessTerminal::from_tool_output(crate::ToolCallOutput::success(
         serde_json::json!(1),
     ));
     let waiting = event(
         1,
         crate::ProcessEventAppendRequest::wait_entered(&process_id, &wait),
-        None,
     );
     let completed = event(
         2,
         crate::terminal_append_request(&process_id, &outcome.clone().into(), None),
-        Some(crate::ProcessTerminalSemantics {
-            outcome: outcome.clone(),
-        }),
     );
     let resumed = event(
         3,
         crate::ProcessEventAppendRequest::wait_cleared(&process_id, &wait),
-        None,
     );
     super::apply_process_event_projection(&mut record, &waiting).expect("enter the wait");
     assert_eq!(record.wait(), Some(&wait));
@@ -320,16 +258,9 @@ fn a_resume_cannot_return_an_ended_process_to_running() {
 }
 
 #[test]
-fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
+fn a_persisted_record_accepts_every_runtime_lifecycle_fact() {
     let registration = prepare_process_registration(fixture_registration("pre-upgrade-record"))
         .expect("prepare pre-upgrade fixture");
-    assert!(
-        registration
-            .event_types
-            .iter()
-            .all(|event_type| !super::is_runtime_lifecycle_event_type(&event_type.name)),
-        "runtime lifecycle types must not be persisted as producer declarations"
-    );
     let encoded = serde_json::to_vec(&ProcessRecord::from_prepared_registration(
         registration,
         crate::process_id_for_test("pre-upgrade-record"),
@@ -339,11 +270,9 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
     let mut record: ProcessRecord =
         serde_json::from_slice(&encoded).expect("decode pre-upgrade row");
     let wait = WaitState {
-        kind: WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: "process:pre-upgrade-record:signal.ready:1".to_string(),
-            ordinal: 1,
+        kind: WaitKind::Call {
+            call_id: crate::ToolCallId::fixture("pre-upgrade-call"),
+            tool_id: crate::ToolId::from("pre-upgrade-tool"),
         },
         since_ms: 2,
     };
@@ -378,9 +307,7 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
             sequence,
             (sequence > 1).then_some(sequence - 1),
             None,
-            None,
             sequence + 10,
-            None,
             crate::FleetFormat::current(),
         )
         .expect("runtime-owned lifecycle append must validate");
@@ -395,163 +322,6 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
     assert!(record.first_started.is_some());
     assert!(record.wait().is_none());
     assert!(record.external_ref.is_some());
-}
-
-#[test]
-fn typed_signal_id_with_fold_validation_suffix_does_not_panic() {
-    let registration = fixture_registration("host-signal-fold-validation-key")
-        .with_extra_event_types([crate::ProcessEventType {
-            name: "signal.ready".to_string(),
-            payload_schema: crate::JsonSchema::any(),
-            semantics: crate::ProcessEventSemanticsSpec::default(),
-        }]);
-    let record =
-        ProcessRecord::from_registration(registration, crate::process_id_for_test("record"));
-    let request = crate::ProcessSignal::new(
-        crate::ProcessSignalIdentity::new(
-            record.id.clone(),
-            "ready",
-            "host-supplied:fold-validation",
-        )
-        .expect("valid signal identity"),
-        serde_json::json!({"value": "ready"}),
-    )
-    .append_request();
-
-    let plan = prepare_process_event_append(
-        &record,
-        request,
-        1,
-        None,
-        None,
-        Some(0),
-        42,
-        None,
-        crate::FleetFormat::current(),
-    )
-    .expect("typed signal id with the fold-validation suffix should append");
-    assert!(matches!(plan, ProcessEventAppendPlan::Insert { .. }));
-}
-
-/// A signal append selects the wait it resolves (FIG-4298): the declared
-/// ordinal of the wait the process is parked on for the name, else the
-/// signal's position among the events of its type. A store that supplies no
-/// count for an unparked signal is refused, never guessed for.
-#[test]
-fn a_signal_append_selects_its_declared_wait_or_its_position() {
-    let registration = fixture_registration("signal-wait-selection").with_extra_event_types([
-        crate::ProcessEventType {
-            name: "signal.ready".to_string(),
-            payload_schema: crate::JsonSchema::any(),
-            semantics: crate::ProcessEventSemanticsSpec::default(),
-        },
-    ]);
-    let mut record =
-        ProcessRecord::from_registration(registration, crate::process_id_for_test("record"));
-    let selected = |record: &ProcessRecord, before: Option<u64>| {
-        prepare_process_event_append(
-            record,
-            crate::ProcessSignal::new(
-                crate::ProcessSignalIdentity::new(
-                    record.id.clone(),
-                    "ready",
-                    "signal-wait-selection",
-                )
-                .expect("valid signal identity"),
-                serde_json::json!(1),
-            )
-            .append_request(),
-            4,
-            Some(3),
-            None,
-            before,
-            42,
-            None,
-            crate::FleetFormat::current(),
-        )
-        .map(|plan| match plan {
-            ProcessEventAppendPlan::Insert { event, .. } => event.semantics.signal_wait,
-            ProcessEventAppendPlan::Replay { .. } => panic!("a fresh signal inserts"),
-        })
-    };
-    let binding = |ordinal| Some(crate::ProcessSignalWaitBinding { ordinal });
-
-    assert_eq!(selected(&record, Some(2)).expect("unparked"), binding(3));
-    assert!(
-        selected(&record, None).is_err(),
-        "an unparked signal needs the store's count"
-    );
-
-    record.lifecycle = crate::ProcessLifecycleState::Waiting {
-        wait: WaitState {
-            since_ms: 1,
-            kind: crate::WaitKind::Signal {
-                name: "ready".to_string(),
-                event_type: "signal.ready".to_string(),
-                key: crate::runtime::process_signal_wait_key(&record.id, "ready", 7),
-                ordinal: 7,
-            },
-        },
-    };
-    assert_eq!(selected(&record, Some(2)).expect("parked"), binding(7));
-    assert_eq!(selected(&record, None).expect("parked"), binding(7));
-
-    record.lifecycle = crate::ProcessLifecycleState::Waiting {
-        wait: WaitState {
-            since_ms: 1,
-            kind: crate::WaitKind::Signal {
-                name: "other".to_string(),
-                event_type: "signal.other".to_string(),
-                key: crate::runtime::process_signal_wait_key(&record.id, "other", 7),
-                ordinal: 7,
-            },
-        },
-    };
-    assert_eq!(
-        selected(&record, Some(2)).expect("parked elsewhere"),
-        binding(3),
-        "a wait for another name does not bind this signal"
-    );
-}
-
-/// A signal is admitted only under a name its process declares and with a
-/// payload that name's schema accepts: an undeclared name and a mistyped
-/// payload are refused before anything is appended.
-#[test]
-fn a_signal_is_admitted_only_under_a_declared_name_with_a_payload_its_schema_accepts() {
-    let registration = fixture_registration("signal-validation").with_extra_event_types([
-        crate::ProcessEventType {
-            name: "signal.ready".to_string(),
-            payload_schema: crate::JsonSchema::admit(serde_json::json!({ "type": "string" }))
-                .expect("a string schema"),
-            semantics: crate::ProcessEventSemanticsSpec::default(),
-        },
-    ]);
-    let record =
-        ProcessRecord::from_registration(registration, crate::process_id_for_test("record"));
-    let signal = |name: &str, payload: serde_json::Value| {
-        crate::runtime::admit_process_signal_append(
-            &record,
-            &crate::ProcessSignal::new(
-                crate::ProcessSignalIdentity::new(record.id.clone(), name, "signal-validation")
-                    .expect("valid signal identity"),
-                payload,
-            )
-            .append_request(),
-        )
-    };
-    signal("ready", serde_json::json!("go")).expect("a declared name with its payload");
-    assert!(
-        signal("unknown", serde_json::json!("go")).is_err(),
-        "an undeclared signal name is refused"
-    );
-    assert!(
-        matches!(
-            signal("ready", serde_json::json!(7)),
-            Err(crate::PluginError::ValueMismatch { .. })
-        ),
-        "a payload its declaration's schema refuses is refused"
-    );
 }
 
 #[test]
