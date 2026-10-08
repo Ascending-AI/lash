@@ -1,6 +1,7 @@
-//! Laws of a follower whose live replay runs behind its run (FIG-5486): a
-//! gap costs it only what the replay lost, and a run it reads settled from
-//! the store answers with the activity its node was still publishing.
+//! Laws of a follower whose live replay runs behind its run: a gap costs it
+//! only what the replay lost (FIG-5486), and a run it reads ended from the
+//! store answers at once with everything the run published, because a turn's
+//! activity reaches the replay before its commit is durable (FIG-5507).
 
 use super::*;
 
@@ -103,19 +104,38 @@ async fn a_follower_past_a_restarted_stream_reads_what_the_restart_published() -
     Ok(())
 }
 
-/// A live replay store that holds a turn's model call record, and so
-/// everything its node publishes after it, until released: a shared store's
-/// publication running behind the turn's commit.
+/// A live replay store that fails its node at a chosen point of a turn's
+/// publication: it holds the turn's model call record, and so everything its
+/// node publishes after it, until released (`hold_record`), or refuses every
+/// `Committed` observation, as a node that died right after its commit
+/// publishes none (`refuse_commits`).
 #[derive(Debug)]
-struct LaggingReplay {
+struct FaultyReplay {
     inner: lash_core::facade_support::InMemoryLiveReplayStore,
+    hold_record: bool,
     /// Publications reaching the held record.
     held: AtomicUsize,
     release: tokio::sync::Semaphore,
+    refuse_commits: bool,
+    /// `Committed` publications refused.
+    refused: AtomicUsize,
+}
+
+impl FaultyReplay {
+    fn new(hold_record: bool, refuse_commits: bool) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Default::default(),
+            hold_record,
+            held: AtomicUsize::new(0),
+            release: tokio::sync::Semaphore::new(0),
+            refuse_commits,
+            refused: AtomicUsize::new(0),
+        })
+    }
 }
 
 #[async_trait::async_trait]
-impl lash_core::LiveReplayStore for LaggingReplay {
+impl lash_core::LiveReplayStore for FaultyReplay {
     async fn publish(
         &self,
         session: &lash_core::SessionId,
@@ -125,19 +145,34 @@ impl lash_core::LiveReplayStore for LaggingReplay {
         Vec<Arc<lash_core::SessionObservationEvent>>,
         lash_core::LiveReplayStoreError,
     > {
-        if events.iter().any(|event| {
-            matches!(
-                &event.payload,
-                lash_core::SessionObservationEventPayload::TurnActivity(activity)
-                    if matches!(activity.event, crate::TurnEvent::ModelCallRecorded { .. })
-            )
-        }) {
+        if self.hold_record
+            && events.iter().any(|event| {
+                matches!(
+                    &event.payload,
+                    lash_core::SessionObservationEventPayload::TurnActivity(activity)
+                        if matches!(activity.event, crate::TurnEvent::ModelCallRecorded { .. })
+                )
+            })
+        {
             self.held.fetch_add(1, Ordering::SeqCst);
             self.release
                 .acquire()
                 .await
                 .expect("the release is never closed")
                 .forget();
+        }
+        if self.refuse_commits
+            && events.iter().any(|event| {
+                matches!(
+                    &event.payload,
+                    lash_core::SessionObservationEventPayload::Committed { .. }
+                )
+            })
+        {
+            self.refused.fetch_add(1, Ordering::SeqCst);
+            return Err(lash_core::LiveReplayStoreError::Store(
+                "the committing node died before it published its commit".into(),
+            ));
         }
         self.inner.publish(session, revision, events).await
     }
@@ -188,57 +223,24 @@ impl lash_core::LiveReplayStore for LaggingReplay {
     }
 }
 
-/// A turn's commit is durable before its node has published the turn's last
-/// activity. A follower that watched the run and reads it settled from the
-/// store lets the replay reach the commit before it answers, so its report
-/// carries the run's model call, where answering at the store read dropped
-/// the record still being published, with no gap to say so.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_follower_that_reads_its_run_settled_waits_for_the_activity_still_being_published()
--> Result<()> {
-    let replay = Arc::new(LaggingReplay {
-        inner: Default::default(),
-        held: AtomicUsize::new(0),
-        release: tokio::sync::Semaphore::new(0),
-    });
-    let release = Arc::new(Notify::new());
-    let calls = Arc::new(AtomicUsize::new(0));
-    let core = LashCore::standard_builder(sqlite_memory_store_backend().await)
+/// A core over a fresh SQLite memory store set whose node publishes to
+/// `replay`.
+fn core_publishing_to(backend: lash_core::Backend, replay: Arc<FaultyReplay>) -> Result<LashCore> {
+    LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .serve_test_llm_profile(
-            scripted_provider(Arc::clone(&release), Arc::clone(&calls)),
+            scripted_provider(Arc::new(Notify::new()), Arc::new(AtomicUsize::new(0))),
             mock_llm_profile_spec(),
         )
-        .live_replay_store(replay.clone())
-        .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session(crate::SessionId::parse("send-lagging-replay").expect("nonblank host identity"))
-        .created()
-        .await
-        .open()
-        .await?;
-    let handle = session
-        .send(TurnInput::text("watch me"))
-        .id(crate::TurnId::parse("lagging-run").expect("nonblank host identity"))
-        .await?;
-    let input_id = handle.input_id().clone();
-    let mut watching = tokio::spawn(handle.outcome());
-    // A follower that attaches at the replay's head once publication is
-    // held sees none of the run, so it answers as soon as the store shows
-    // the run settled.
-    reaches(&replay.held, 1, "the model call record is held").await;
-    let settled = session.attach(input_id).outcome().await?;
-    assert_eq!(settled.status(), crate::TurnStatus::Answered);
+        .live_replay_store(replay)
+        .build(crate::testing::runtime_lease_owner())
+}
 
-    let early = tokio::time::timeout(std::time::Duration::from_millis(1500), &mut watching).await;
-    assert!(
-        early.is_err(),
-        "the follower answered while its run's model call was still unpublished: {early:?}"
-    );
-    replay.release.add_permits(1);
-    let watched = watching.await.expect("the watching follower")?;
+/// The answer of a follower that watched its run: the run's model call
+/// among its activity and in its report, and no gap.
+fn assert_whole(watched: &crate::SendOutcome) {
     assert_eq!(watched.status(), crate::TurnStatus::Answered);
     assert!(watched.gaps().is_empty(), "{:?}", watched.gaps());
     let output = watched.output().expect("an answered run has a report");
@@ -251,5 +253,71 @@ async fn a_follower_that_reads_its_run_settled_waits_for_the_activity_still_bein
         output.activities
     );
     assert_eq!(output.result.llm_calls.len(), 1);
+}
+
+/// A node that dies right after a turn's commit publishes no `Committed`
+/// for it. The run's follower learns that it ended from the store, where the
+/// terminal is, and answers the committed result at once, whole and with no
+/// gap: it waits for no observation of the commit.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_follower_answers_a_run_whose_node_died_after_its_commit_at_once() -> Result<()> {
+    let replay = FaultyReplay::new(false, true);
+    let core = core_publishing_to(sqlite_memory_store_backend().await, replay.clone())?;
+    let session = core
+        .session(
+            crate::SessionId::parse("send-unpublished-commit").expect("nonblank host identity"),
+        )
+        .created()
+        .await
+        .open()
+        .await?;
+    let handle = session
+        .send(TurnInput::text("watch me"))
+        .id(crate::TurnId::parse("unpublished-commit-run").expect("nonblank host identity"))
+        .await?;
+    let watched = tokio::time::timeout(std::time::Duration::from_secs(3), handle.outcome())
+        .await
+        .expect("the follower waited for a commit observation its run's node never published")?;
+    assert!(
+        replay.refused.load(Ordering::SeqCst) > 0,
+        "the commit's observation was refused"
+    );
+    assert_whole(&watched);
+    Ok(())
+}
+
+/// A turn's activity reaches the live replay before its commit is durable,
+/// so a reader that finds the run ended in the store finds everything the
+/// run published already there. While the replay holds the run's model call
+/// record unpublished, the run has no terminal; once it is published the
+/// run's follower answers with it and with no gap.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_runs_terminal_is_durable_only_once_its_activity_is_published() -> Result<()> {
+    let replay = FaultyReplay::new(true, false);
+    let core = core_publishing_to(sqlite_memory_store_backend().await, replay.clone())?;
+    let session = core
+        .session(crate::SessionId::parse("send-lagging-replay").expect("nonblank host identity"))
+        .created()
+        .await
+        .open()
+        .await?;
+    let handle = session
+        .send(TurnInput::text("watch me"))
+        .id(crate::TurnId::parse("lagging-run").expect("nonblank host identity"))
+        .await?;
+    let input_id = handle.input_id().clone();
+    let watching = tokio::spawn(handle.outcome());
+    reaches(&replay.held, 1, "the model call record is held").await;
+    // A follower that attaches now reads the run's end from the store alone.
+    let mut settled = tokio::spawn(session.attach(input_id).outcome());
+    let early = tokio::time::timeout(std::time::Duration::from_millis(500), &mut settled).await;
+    assert!(
+        early.is_err(),
+        "the run's terminal was durable while its model call was still unpublished"
+    );
+    replay.release.add_permits(1);
+    let settled = settled.await.expect("the attached follower")?;
+    assert_eq!(settled.status(), crate::TurnStatus::Answered);
+    assert_whole(&watching.await.expect("the watching follower")?);
     Ok(())
 }

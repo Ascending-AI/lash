@@ -348,7 +348,10 @@ pub trait TurnDrive: Send {
     /// revision of `head`, the session's head as the owner loaded it, which
     /// `turn.commit` publishes with the turn's terminal, and what the turn's
     /// after-turn callbacks decided over its outcome. The store refuses it
-    /// once the head is elsewhere.
+    /// once the head is elsewhere. A drive that publishes live activity
+    /// answers once everything the turn published reached the live stream,
+    /// so the terminal `turn.commit` writes is never durable ahead of the
+    /// activity its readers expect beside it (FIG-5507).
     ///
     /// # Errors
     ///
@@ -362,7 +365,7 @@ pub trait TurnDrive: Send {
 
     /// The turn's `turn.commit` was acknowledged: publish what the turn held
     /// back for it, its after-turn callbacks' state and its stop's terminal
-    /// among it (ADR 0122), and everything queued before it. A drive whose commit was refused, or whose
+    /// among it (ADR 0122). A drive whose commit was refused, or whose
     /// acknowledgement was lost, is dropped without it and publishes none of
     /// what it held.
     async fn committed(&mut self);

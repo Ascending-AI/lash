@@ -10,7 +10,8 @@
 //! it opened a frame. Only `Committed` settles the provisional activity the
 //! turn streamed before it.
 //!
-//! The publication follows the commit, so an owner lost between the two,
+//! A turn's own activity is published before its commit (FIG-5507); only
+//! the commit's observation follows it, so an owner lost between the two,
 //! or one whose commit's acknowledgement was lost, publishes nothing. Before
 //! each pass an owner announces the durable head it finds unpublished by its
 //! node: a `Committed` at the head with no entries over the head itself. A

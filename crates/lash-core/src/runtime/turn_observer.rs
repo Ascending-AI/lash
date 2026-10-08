@@ -28,6 +28,10 @@
 //!   and is then released in order ([`TurnObserver::release_terminal`]). A
 //!   commit that fails publishes none of it: the drive that held it is
 //!   dropped.
+//! - **Everything else publishes before its commit.** A durable turn waits
+//!   for what it queued to reach the host ([`TurnObserver::published`])
+//!   before it commits, so whoever reads the turn's terminal from the store
+//!   finds its activity already published (FIG-5507).
 //!
 //! The host end is published by
 //! [`work_with_observations`](super::work_with_observations), outside the
@@ -113,6 +117,8 @@ struct QueueState {
     closed: bool,
     publisher: Option<Waker>,
     published_waiter: Option<Waker>,
+    /// The host end is gone: nothing queued will be published.
+    abandoned: bool,
     /// A stopped turn's terminal and everything after it, held until its
     /// commit is accepted.
     held: Option<Vec<Observation>>,
@@ -279,6 +285,28 @@ impl TurnObserver {
         }
     }
 
+    /// Everything published so far has reached the host: every open frame
+    /// is queued, and the publisher has published the queue. What a stop
+    /// holds for its commit stays held. Answers at once when the host end
+    /// is gone, since nothing will drain the queue.
+    pub(in crate::runtime) async fn published(&self) {
+        std::future::poll_fn(|context| {
+            let mut state = self.queue.state.lock_recover();
+            let sealed = state.seal_frames();
+            if state.abandoned || state.drained() {
+                return Poll::Ready(());
+            }
+            state.published_waiter = Some(context.waker().clone());
+            let publisher = if sealed { state.publisher.take() } else { None };
+            drop(state);
+            if let Some(publisher) = publisher {
+                publisher.wake();
+            }
+            Poll::Pending
+        })
+        .await;
+    }
+
     /// Whether the shift is over and publications are dropped.
     pub(in crate::runtime) fn is_closed(&self) -> bool {
         self.queue.state.lock_recover().closed
@@ -342,6 +370,17 @@ impl ObservationSource for TurnObservations {
         let mut state = self.queue.state.lock_recover();
         state.seal_frames();
         state.closed = true;
+        if let Some(waiter) = state.published_waiter.take() {
+            drop(state);
+            waiter.wake();
+        }
+    }
+}
+
+impl Drop for TurnObservations {
+    fn drop(&mut self) {
+        let mut state = self.queue.state.lock_recover();
+        state.abandoned = true;
         if let Some(waiter) = state.published_waiter.take() {
             drop(state);
             waiter.wake();

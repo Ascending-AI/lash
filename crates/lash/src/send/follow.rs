@@ -11,11 +11,13 @@
 //! is gone still answers from the store, and so does one whose engine cannot
 //! answer the wait (FIG-4345).
 //!
-//! A run's commit is durable before its last activity is published: the
-//! node that made it publishes what the turn queued, then the commit's
-//! `Committed` observation. A follower that watched the run and reads it
-//! settled first lets its replay reach that committed head, within
-//! [`SETTLE_GRACE`], before it answers (FIG-5486).
+//! That a run ended is the store's fact alone: its terminal. A follower that
+//! reads it answers at once, with what the replay holds past its cursor, and
+//! waits for no observation of the commit, which a node that died after
+//! committing never publishes. The replay is whole by then: a turn's node
+//! publishes the turn's activity before it commits (FIG-5507). Only a stop's
+//! own terminal activity is published after its commit (ADR 0122), and the
+//! outcome it carries is the terminal's.
 
 use std::collections::VecDeque;
 use std::time::Duration;
@@ -45,11 +47,6 @@ const POLL_FLOOR: Duration = Duration::from_millis(25);
 const POLL_CEILING: Duration = Duration::from_secs(1);
 /// Unadopted activities a follower buffers before dropping the oldest.
 const BUFFER_CAPACITY: usize = 4096;
-/// How long a follower that watched its run lets the replay reach the
-/// run's committed head once the store shows it settled. A replay that does
-/// not (the committing node died before it published, or its publication
-/// was refused) is reported as a gap.
-const SETTLE_GRACE: Duration = Duration::from_secs(5);
 
 /// A terminal wait in flight.
 type AwaitedTerminal =
@@ -111,10 +108,6 @@ struct Adoption {
     run: Option<TurnId>,
     buffered: VecDeque<(TurnId, TurnActivity)>,
     collected: Vec<TurnActivity>,
-    /// The newest session head whose `Committed` observation this follower
-    /// read: the node that made a commit publishes it after everything the
-    /// turn queued.
-    committed: Option<SessionRevision>,
 }
 
 impl Adoption {
@@ -127,14 +120,7 @@ impl Adoption {
             subject: subject.clone(),
             buffered: VecDeque::new(),
             collected: Vec::new(),
-            committed: None,
         }
-    }
-
-    /// Whether the replay this follower read holds the commit that made
-    /// session head `head`, and so everything published before it.
-    fn reached(&self, head: SessionRevision) -> bool {
-        self.committed.is_some_and(|committed| committed >= head)
     }
 
     fn adopts(&self, turn: &TurnId) -> bool {
@@ -185,11 +171,8 @@ impl Adoption {
                 }
                 applied
             }
-            SessionObservationEventPayload::Committed { .. } => {
-                self.committed = self.committed.max(Some(event.revision()));
-                true
-            }
-            SessionObservationEventPayload::QueueChanged { .. } => true,
+            SessionObservationEventPayload::Committed { .. }
+            | SessionObservationEventPayload::QueueChanged { .. } => true,
             _ => false,
         }
     }
@@ -474,11 +457,8 @@ pub(super) async fn follow(
                         },
                     )));
                 }
-                Resolution::Settled { run, outcome, head } => {
+                Resolution::Settled { run, outcome } => {
                     adoption.adopt(run.clone(), tap).await;
-                    if let Some(head) = head {
-                        reach_head(ctx, &mut adoption, &mut observation, head, tap).await;
-                    }
                     drain(ctx, &mut adoption, &mut observation, tap).await;
                     ctx.refresh().await?;
                     let observed = observed_before || !adoption.collected.is_empty();
@@ -652,50 +632,9 @@ async fn next_event(
     }
 }
 
-/// Read the replay of a run the store shows settled until it holds the
-/// commit that made session head `head`: the committing node publishes that
-/// after the turn's last activity, so a follower that answered at the store
-/// read alone would drop whatever was still on its way. Only a follower that
-/// watched the run waits: one that saw none of it has no replay to complete
-/// and answers its gap at once. A replay that gaps, ends or stays short of
-/// the head for [`SETTLE_GRACE`] is reported as a gap.
-async fn reach_head(
-    ctx: &SendContext,
-    adoption: &mut Adoption,
-    observation: &mut Observation,
-    head: SessionRevision,
-    tap: &mut Tap<'_>,
-) {
-    if adoption.collected.is_empty() {
-        return;
-    }
-    let deadline = tokio::time::Instant::now() + SETTLE_GRACE;
-    let gaps = observation.gaps.len();
-    while !adoption.reached(head) && observation.gaps.len() == gaps {
-        if matches!(observation.replay, Replay::Ended) {
-            return;
-        }
-        match tokio::time::timeout_at(deadline, next_event(&mut observation.replay)).await {
-            Ok(Some(Ok(event))) => {
-                observation.last_cursor = event.cursor.clone();
-                let _ = adoption.observe(&event, tap).await;
-            }
-            Ok(Some(Err(_))) => observation.lost(ctx, tap).await,
-            Ok(None) => observation.replay = Replay::Ended,
-            Err(_) => {
-                let gap = replay_gap(
-                    ctx,
-                    &observation.last_cursor,
-                    LiveReplayGapReason::Unavailable,
-                );
-                observation.report(gap, tap).await;
-            }
-        }
-    }
-}
-
 /// Deliver what the live replay already holds past the last cursor read: the
-/// subject's run stopped, so its activity is published up to here.
+/// subject's run ended in the store, and its node published the run's
+/// activity before the commit that ended it.
 async fn drain(
     ctx: &SendContext,
     adoption: &mut Adoption,

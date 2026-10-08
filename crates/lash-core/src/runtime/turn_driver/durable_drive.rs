@@ -576,6 +576,12 @@ impl TurnDrive for RuntimeDrive {
         if !settlement.completed_inputs.is_empty() {
             commit.ingress = Some(settlement);
         }
+        // The turn's activity reaches the live stream before its commit is
+        // durable: a follower that reads the run ended from the store finds
+        // everything the run published already there, and waits for no
+        // observation of the commit (FIG-5507). A stop's terminal stays held
+        // for the commit (ADR 0122).
+        self.observer.published().await;
         Ok(TurnCommit {
             expected_head: commit.expected_head_revision,
             commit_json: crate::store::encode_session_commit(&commit)
@@ -584,10 +590,10 @@ impl TurnDrive for RuntimeDrive {
     }
 
     /// The after-turn callbacks' state publishes from the acknowledged
-    /// commit. What the turn held back for its commit is published with it,
-    /// and the publisher ends once everything queued reached the live
-    /// stream; then the commit itself, which settles the turn's provisional
-    /// activity; then the lifecycle observers see the finalized turn.
+    /// commit. What a stop held back for its commit is published with it,
+    /// and the publisher ends once that reached the live stream; then the
+    /// commit itself, which settles the turn's provisional activity; then
+    /// the lifecycle observers see the finalized turn.
     async fn committed(&mut self) {
         self.commit_phase.take();
         let _delivery = TurnPhaseSpan::begin(
