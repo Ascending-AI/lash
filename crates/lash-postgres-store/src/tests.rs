@@ -218,8 +218,8 @@ async fn seed_failure_evidence_session(
         .expect("allocate bad receipt sequence");
     sqlx::query(
         "INSERT INTO lash_runtime_turn_commits
-         (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms, failure_evidence, change_seq)
-         SELECT $1, 'bad-evidence-receipt', 'bad-evidence-hash', $2, committed_at_ms + 1, TRUE, $3
+         (session_id, turn_id, turn_commit_hash, result_json, committed_at_ms, failure_evidence, change_seq, head_revision)
+         SELECT $1, 'bad-evidence-receipt', 'bad-evidence-hash', $2, committed_at_ms + 1, TRUE, $3, head_revision + 1
          FROM lash_runtime_turn_commits
          WHERE session_id = $1",
     )

@@ -85,6 +85,7 @@ macro_rules! runtime_store_operations {
                 [session] fn load_ancestors(&self, session_id: &SessionId, anchor: HistoryAnchor, budget: HistoryBudget) -> Result<HistoryPage, StoreError>;
                 [session] fn contains_active_ancestor(&self, session_id: &SessionId, node_id: &crate::NodeId) -> Result<bool, StoreError>;
                 [session] fn load_failure_evidence_page(&self, session_id: &SessionId, after: Option<&FailureEvidenceCursor>, limit: NonZeroU32) -> Result<FailureEvidencePage, StoreError>;
+                [session] fn load_committed_turns(&self, session_id: &SessionId, after: Option<&CommittedTurnCursor>, limit: NonZeroU32) -> Result<CommittedTurnNodesPage, StoreError>;
             }
             TurnInputStore {
                 [carried batch] fn enqueue_pending_turn_inputs(&self, batch: crate::PendingTurnInputBatch) -> Result<Vec<crate::PendingTurnInput>, StoreError>;

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 181,
+  "cargo_target_count": 182,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -43930,7 +43930,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 242,
+  "generated_label_count": 243,
   "packages": [
     {
       "declared_features": [
@@ -44612,6 +44612,17 @@
           "kind": "test",
           "label": "//crates/lash-durable-test:child_turn_crash_proof__test",
           "tags": []
+        },
+        {
+          "build_label": "//crates/lash-durable-test:committed_turns__test",
+          "cargo": "committed_turns",
+          "check_label": "//crates/lash-durable-test:committed_turns__test[check]",
+          "clippy_label": "//crates/lash-durable-test:committed_turns__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:committed_turns__test",
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:core_node_processes__test",
@@ -48143,6 +48154,7 @@
     "postgres": [
       "//crates/lash-durable-test:after_turn_crash_laws__test",
       "//crates/lash-durable-test:cell_restore_laws__test",
+      "//crates/lash-durable-test:committed_turns__test",
       "//crates/lash-durable-test:core_node_processes__test",
       "//crates/lash-durable-test:declared_start__test",
       "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -48247,6 +48259,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test": 300,
     "//crates/lash-durable-test:cell_restore_laws__test": 300,
     "//crates/lash-durable-test:child_turn_crash_proof__test": 300,
+    "//crates/lash-durable-test:committed_turns__test": 300,
     "//crates/lash-durable-test:core_node_processes__test": 300,
     "//crates/lash-durable-test:declared_start__test": 300,
     "//crates/lash-durable-test:declared_start_crash_laws__test": 900,
@@ -48676,6 +48689,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
     "//crates/lash-durable-test:child_turn_crash_proof__test",
+    "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -48934,6 +48948,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test[check]",
     "//crates/lash-durable-test:cell_restore_laws__test[check]",
     "//crates/lash-durable-test:child_turn_crash_proof__test[check]",
+    "//crates/lash-durable-test:committed_turns__test[check]",
     "//crates/lash-durable-test:core_node_processes__test[check]",
     "//crates/lash-durable-test:declared_start__test[check]",
     "//crates/lash-durable-test:declared_start_crash_laws__test[check]",
@@ -49213,6 +49228,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:cell_restore_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:child_turn_crash_proof__test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:committed_turns__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:core_node_processes__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:declared_start__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:declared_start_crash_laws__test__clippy[clippy.txt]",
@@ -49456,6 +49472,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
     "//crates/lash-durable-test:child_turn_crash_proof__test",
+    "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -49699,6 +49716,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
     "//crates/lash-durable-test:child_turn_crash_proof__test",
+    "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -49926,6 +49944,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
     "//crates/lash-durable-test:child_turn_crash_proof__test",
+    "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -50046,6 +50065,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
     "//crates/lash-durable-test:child_turn_crash_proof__test",
+    "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -50178,6 +50198,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
     "//crates/lash-durable-test:child_turn_crash_proof__test",
+    "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -50517,6 +50538,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
     "//crates/lash-durable-test:child_turn_crash_proof__test",
+    "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
@@ -50657,6 +50679,7 @@
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:cell_restore_laws__test",
     "//crates/lash-durable-test:child_turn_crash_proof__test",
+    "//crates/lash-durable-test:committed_turns__test",
     "//crates/lash-durable-test:core_node_processes__test",
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",

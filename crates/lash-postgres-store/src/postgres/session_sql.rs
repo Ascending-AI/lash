@@ -247,6 +247,12 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `graph_nodes` statements only PostgreSQL issues.
     pub(crate) struct GraphNodePostgresStatements @ "graph_node" {
+        /// The live nodes of session `?1` among the ids in `?2`: each one's
+        /// parent, body and stored size.
+        select_live_owned_bodies = "SELECT node_id, parent_node_id, node_json, body_bytes
+             FROM graph_nodes
+             WHERE session_id = ?1 AND node_id = ANY(?2) AND tombstoned = FALSE";
+
         /// The same root classes as checkpoint reclamation. An admission
         /// conservatively protects its committed session nodes until released.
         artifact_frame_is_retained = "WITH RECURSIVE roots AS (
@@ -394,9 +400,9 @@ lash_store_sql::statements! {
         insert_staged = "INSERT INTO runtime_turn_commits (
                 session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version,
-                failure_evidence
+                failure_evidence, head_revision
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
 
         /// Record session `?1`'s terminal, with fault `?2` at `?3`, staged on
         /// the turn feed as [`Self::insert_staged`] does.

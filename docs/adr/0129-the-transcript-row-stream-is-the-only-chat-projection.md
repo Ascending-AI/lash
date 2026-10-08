@@ -50,8 +50,43 @@ serialization, integer conversion, display implementation, or cursor meaning.
 `TranscriptRowRecord` carries the display data without an ordinal. Remote
 `Committed { rows }` carries only the rows produced by that commit. It is a
 freshness event, not a complete-history response or a durable change-feed
-cursor. A missed event requires an authoritative read. The future durable sink
-and watermark work remains separate.
+cursor. A missed event requires an authoritative read: the committed-turn read
+below.
+
+## Committed-turn read (FIG-5297)
+
+A host that post-processes a conversation (memory extraction, analytics,
+indexing, sync to another store) reads the session's committed turns after a
+cursor it keeps: `DurableSession::committed_turns(after, limit)` returns
+`CommittedTurnsPage { turns, next }`, oldest first by commit. Each
+`CommittedTurn` carries the turn id, its committed rows, its commit time and
+its typed `TurnCommitOutcome`. Its rows are this ADR's fold over exactly the
+nodes the turn's commit appended, every admitted input's user row among them
+(steering and coalesced inputs included); a protocol event belongs to its turn
+even before the turn's first message. A host persists `next` only after
+applying the page.
+
+The order is the session's head revision, not the deployment's turn feed. A
+session's commits are serialized (the session-keyed lock and the head row
+lock), and each publishes the next revision, so a turn that commits late takes
+a revision above every one a reader has seen: the cursor never passes it, and
+a strict `>` never repeats one. Each turn's receipt records the revision it
+published (`runtime_turn_commits.head_revision`, unique per session), and the
+read pages its outcome-bearing receipts by it, then reads their appended nodes,
+in one snapshot. The deployment feed (`turns_changed_since`, FIG-5276) was not
+chosen: on PostgreSQL every read would first sequence the whole fleet's staged
+changes, its cursor is fleet-wide and would need a per-session index besides,
+and its receipts of deleted sessions are reclaimed under it.
+
+`CommittedTurnCursor` is opaque and serializable. It names its session and a
+revision, so it holds across process restarts, compaction (a session command
+that commits no turn) and frame switches (a revision is no frame's). A fork's
+numbering starts at its creation and its inherited history is its ancestor's
+commits, so a fork's first read serves only the fork's own turns. A cursor of
+another session is refused as `StoreError::CursorForeignSession`. A node its
+session's retention reclaimed (on an abandoned branch) is absent from its
+turn's rows; the turn is still served. There is no wait
+variant: hosts poll.
 
 A host can retain canonical records in its own storage. Agent-service's SQL
 mirror and Slack's pending/post records are such sinks. Reasoning, code, tool, and answer writes consume canonical records.

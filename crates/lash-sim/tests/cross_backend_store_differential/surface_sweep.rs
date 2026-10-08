@@ -56,6 +56,9 @@ pub(super) enum SurfaceMethod {
     /// listing, then cleared once.
     SessionFault,
     TurnsChangedSince,
+    /// [`SessionHistoryStore::load_committed_turns`](lash_core::store::SessionHistoryStore::load_committed_turns)
+    /// of the case's session from its start (FIG-5297).
+    LoadCommittedTurns,
     ListQueuedWork,
     ListPendingQueuedWork,
     PendingSessionWorkOrdering,
@@ -172,6 +175,7 @@ impl SurfaceMethod {
             Self::LoadUnknownNode => "surface:load_node_unknown",
             Self::SessionFault => "surface:session_fault",
             Self::TurnsChangedSince => "surface:turns_changed_since",
+            Self::LoadCommittedTurns => "surface:load_committed_turns",
             Self::ListQueuedWork => "surface:list_queued_work",
             Self::ListPendingQueuedWork => "surface:list_open_queued_work",
             Self::PendingSessionWorkOrdering => "surface:pending_session_work_ordering",
@@ -343,6 +347,7 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::LoadUnknownNode),
             surface(SurfaceMethod::SessionFault),
             surface(SurfaceMethod::TurnsChangedSince),
+            surface(SurfaceMethod::LoadCommittedTurns),
             surface(SurfaceMethod::ListQueuedWork),
             surface(SurfaceMethod::ListPendingQueuedWork),
             surface(SurfaceMethod::PendingSessionWorkOrdering),
@@ -684,6 +689,20 @@ impl BackendRunner {
                     .map(|change| format!("{:?}", change.kind))
                     .collect();
                 format!("changes={rows:?}")
+            }
+            SurfaceMethod::LoadCommittedTurns => {
+                let page = store
+                    .load_committed_turns(&session_id, None, std::num::NonZeroU32::MAX)
+                    .await?;
+                let turns: Vec<_> = page
+                    .turns
+                    .iter()
+                    .map(|turn| format!("{}:{:?}:{}", turn.turn_id, turn.outcome, turn.nodes.len()))
+                    .collect();
+                format!(
+                    "turns={turns:?} next_revision={}",
+                    page.next.head_revision()
+                )
             }
             SurfaceMethod::ListQueuedWork => {
                 format!("rows={}", store.list_queued_work(&session_id).await?.len())

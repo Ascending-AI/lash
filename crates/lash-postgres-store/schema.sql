@@ -249,6 +249,9 @@ CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits (
     staged_seq BIGINT NOT NULL DEFAULT nextval('lash_turn_change_staging'),
     committed_at_ms BIGINT NOT NULL,
     failure_evidence BOOLEAN NOT NULL,
+    -- The head revision the commit published: the session's commit order,
+    -- which its committed-turn read pages by (FIG-5297).
+    head_revision BIGINT NOT NULL CONSTRAINT ck_runtime_turn_commits_head_revision CHECK (head_revision > 0),
     request_identity_hash TEXT,
     requested_node_count BIGINT,
     identity_encoding_version INTEGER,
@@ -267,6 +270,10 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_turn_commits_change_seq
     ON lash_runtime_turn_commits(change_seq) WHERE outcome_code IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_runtime_turn_commits_unsequenced
     ON lash_runtime_turn_commits(staged_seq) WHERE change_seq IS NULL;
+-- A session's committed turns in commit order (FIG-5297). One commit
+-- publishes each revision, so no two receipts of a session share one.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_runtime_turn_commits_session_revision
+    ON lash_runtime_turn_commits(session_id, head_revision);
 
 -- The turn feed's clock: the last sequence a sequencing transaction assigned
 -- to committed changes. Writers never take it.

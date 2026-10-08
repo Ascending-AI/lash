@@ -130,6 +130,7 @@ pub use head_ownership::{
     HeadOwnershipFacts, SessionHeadOwner, head_write_needs_ownership, require_unowned_head,
 };
 pub use history::{
+    CommittedTurnCursor, CommittedTurnNodes, CommittedTurnNodesPage, CommittedTurnReceipt,
     FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget, HistoryCursor,
     HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore, SessionWindowRead,
     WindowSelector,

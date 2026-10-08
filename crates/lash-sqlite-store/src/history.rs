@@ -1,8 +1,9 @@
 use super::*;
 use lash_core_execution::store::{
-    AnchorUnavailable, FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget,
-    HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore,
-    SessionWindowRead, WindowSelector,
+    AnchorUnavailable, CommittedTurnCursor, CommittedTurnNodesPage, CommittedTurnReceipt,
+    FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget, HistoryCursor,
+    HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore, SessionWindowRead,
+    WindowSelector,
 };
 use lash_core_execution::store_backend_support::{
     HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode,
@@ -505,6 +506,128 @@ impl SessionHistoryStore for SqliteStore {
             .await
             .map_err(sqlite_error)?
     }
+    async fn load_committed_turns(
+        &self,
+        session_id: &SessionId,
+        after: Option<&CommittedTurnCursor>,
+        limit: NonZeroU32,
+    ) -> Result<CommittedTurnNodesPage, StoreError> {
+        if let Some(cursor) = after {
+            cursor.check_session(session_id)?;
+        }
+        let session = session_id.clone();
+        let after = after.map_or(0, CommittedTurnCursor::head_revision);
+        let fleet = self.conn.fleet();
+        let decoded = Arc::clone(&self.decoded_graph_node_bodies);
+        self.read_connection()
+            .read(move |conn| {
+                Ok(committed_turns(
+                    conn, &session, after, limit, fleet, &decoded,
+                ))
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+}
+
+/// The session's committed turns after head revision `after`, each with
+/// the nodes its commit appended that the session still holds, in one read
+/// snapshot.
+fn committed_turns(
+    conn: &Connection,
+    session: &SessionId,
+    after: u64,
+    limit: NonZeroU32,
+    fleet: lash_core_execution::FleetFormat,
+    decoded: &AtomicU64,
+) -> Result<CommittedTurnNodesPage, StoreError> {
+    live(conn, session)?;
+    let mut stmt = conn
+        .prepare_cached(
+            session_sql::session_sql()
+                .turn_commits
+                .select_committed_turns_after
+                .sql(),
+        )
+        .map_err(sqlite_error)?;
+    let receipts = stmt
+        .query_map(
+            params![
+                session.as_str(),
+                i64::try_from(after).unwrap_or(i64::MAX),
+                i64::from(limit.get())
+            ],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            },
+        )
+        .map_err(sqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_error)?;
+    let mut body_stmt = conn
+        .prepare_cached(
+            session_sql::session_sql()
+                .graph_sqlite
+                .select_live_owned_body
+                .sql(),
+        )
+        .map_err(sqlite_error)?;
+    let mut turns = Vec::with_capacity(receipts.len());
+    for (head_revision, operation, result_json, outcome_code, committed_at_ms) in receipts {
+        let receipt = CommittedTurnReceipt::from_stored(
+            session,
+            head_revision,
+            &operation,
+            &result_json,
+            outcome_code.as_deref(),
+            committed_at_ms,
+            fleet,
+        )?;
+        let mut nodes = Vec::with_capacity(receipt.appended().len());
+        for node_id in receipt.appended() {
+            let Some((parent, body, bytes)) = body_stmt
+                .query_row(params![node_id.as_str(), session.as_str()], |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                })
+                .optional()
+                .map_err(sqlite_error)?
+            else {
+                continue;
+            };
+            if body.len() as u64 != nonnegative("SessionGraph", "body_bytes", bytes)? {
+                return Err(corrupt(
+                    "SessionGraph",
+                    format!("body_bytes differs at `{node_id}`"),
+                ));
+            }
+            nodes.push(
+                lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
+                    node_id.to_string(),
+                    parent,
+                    &body,
+                    fleet,
+                )
+                .map_err(|error| corrupt("SessionGraph node", error.to_string()))?,
+            );
+            decoded.fetch_add(1, Ordering::Relaxed);
+        }
+        turns.push(receipt.into_turn(nodes));
+    }
+    let next = turns.last().map_or_else(
+        || CommittedTurnCursor::new(session.clone(), after),
+        |turn| turn.cursor.clone(),
+    );
+    Ok(CommittedTurnNodesPage { turns, next })
 }
 /// Whether a page starts at the head leaf or at a node the caller named.
 enum AnchorKind {

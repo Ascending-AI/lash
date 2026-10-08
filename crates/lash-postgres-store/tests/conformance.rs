@@ -269,8 +269,8 @@ async fn postgres_runtime_turn_receipt_rejects_half_populated_append_identity_wh
     let error = sqlx::query(
         "INSERT INTO lash_runtime_turn_commits (
             session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
-            request_identity_hash, failure_evidence, change_seq
-         ) VALUES ('half-identity', 'half-identity', 'hash', '{}', 0, 'request-hash', FALSE, 1)",
+            request_identity_hash, failure_evidence, change_seq, head_revision
+         ) VALUES ('half-identity', 'half-identity', 'hash', '{}', 0, 'request-hash', FALSE, 1, 1)",
     )
     .execute(storage.pool())
     .await

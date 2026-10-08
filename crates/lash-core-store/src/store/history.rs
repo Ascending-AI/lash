@@ -289,6 +289,158 @@ impl FailureEvidenceCursor {
     }
 }
 
+/// Session-bound position in one session's committed turns: after the turn
+/// whose commit published `head_revision` (ADR 0129, committed-turn read).
+///
+/// A session's commits are serialized and each publishes the next head
+/// revision, so the revision orders its turns by commit. A turn that commits
+/// late takes a revision above every one a reader has seen; a cursor never
+/// passes it. The position is the session's own: it holds across process
+/// restarts, compaction and frame switches, and a fork's numbering starts at
+/// its own creation.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CommittedTurnCursor {
+    session_id: SessionId,
+    head_revision: u64,
+}
+
+impl CommittedTurnCursor {
+    /// Before the session's first committed turn. A fork starts here too:
+    /// its inherited turns are its ancestor's commits, never its own.
+    pub fn start(session_id: SessionId) -> Self {
+        Self::new(session_id, 0)
+    }
+
+    /// After the turn whose commit published `head_revision`.
+    ///
+    /// Integrator class (ADR 0051): **store and durable-substrate
+    /// implementors**.
+    pub fn new(session_id: SessionId, head_revision: u64) -> Self {
+        Self {
+            session_id,
+            head_revision,
+        }
+    }
+
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    /// The head revision of the last turn read.
+    pub fn head_revision(&self) -> u64 {
+        self.head_revision
+    }
+
+    /// Refuse a cursor minted for another session.
+    pub fn check_session(&self, session_id: &SessionId) -> Result<(), StoreError> {
+        check_cursor_session(&self.session_id, session_id)
+    }
+}
+
+/// One committed turn of a session, as the store holds it: its terminal
+/// commit's receipt and the nodes that commit appended.
+#[derive(Clone, Debug)]
+pub struct CommittedTurnNodes {
+    pub turn_id: TurnId,
+    /// The position after this turn.
+    pub cursor: CommittedTurnCursor,
+    pub committed_at_ms: u64,
+    pub outcome: super::TurnCommitOutcome,
+    /// The nodes the turn's commit appended, in append order. A node the
+    /// session no longer retains (an abandoned branch its retention
+    /// reclaimed) is absent; the turn is still served.
+    pub nodes: Vec<SessionNodeRecord>,
+}
+
+/// One page of a session's committed turns, oldest first by commit.
+#[derive(Clone, Debug)]
+pub struct CommittedTurnNodesPage {
+    pub turns: Vec<CommittedTurnNodes>,
+    /// After the last turn of the page, or where the read started when the
+    /// page is empty. A page shorter than its limit has read to the head.
+    pub next: CommittedTurnCursor,
+}
+
+/// A committed turn's receipt row, decoded: the turn and the nodes its
+/// commit appended, which a backend then reads.
+///
+/// Integrator class (ADR 0051): **store and durable-substrate implementors**.
+#[derive(Clone, Debug)]
+pub struct CommittedTurnReceipt {
+    turn: CommittedTurnNodes,
+    appended: Vec<crate::NodeId>,
+}
+
+impl CommittedTurnReceipt {
+    /// Decode one row of the session's outcome-bearing receipts: its
+    /// `head_revision` column, operation key, `result_json`, outcome code and
+    /// commit time.
+    pub fn from_stored(
+        session_id: &SessionId,
+        head_revision: i64,
+        operation_key: &str,
+        result_json: &str,
+        outcome_code: Option<&str>,
+        committed_at_ms: i64,
+        fleet: super::FleetFormat,
+    ) -> Result<Self, StoreError> {
+        let corrupt = |message: &str| StoreError::StoredDataCorrupt {
+            record_kind: "CommittedTurn",
+            message: message.to_owned(),
+        };
+        let receipt = super::decode_runtime_commit_receipt_for_fleet(
+            session_id,
+            operation_key,
+            result_json,
+            fleet,
+        )?;
+        super::validate_turn_commit_outcome_code(&receipt, outcome_code)?;
+        let head_revision =
+            u64::try_from(head_revision).map_err(|_| corrupt("negative head revision"))?;
+        if receipt.head_revision != head_revision {
+            return Err(corrupt("head revision column differs from its receipt"));
+        }
+        let committed_at_ms =
+            u64::try_from(committed_at_ms).map_err(|_| corrupt("negative commit time"))?;
+        let operation: super::OperationId = serde_json::from_str(operation_key)
+            .map_err(|_| corrupt("invalid operation identity"))?;
+        let turn_id = match operation.scope {
+            crate::ExecutionScope::Turn {
+                session_id: owner,
+                turn_id,
+            } if owner == *session_id => turn_id,
+            _ => return Err(corrupt("a turn outcome outside its session's turn scope")),
+        };
+        let outcome = receipt
+            .outcome
+            .ok_or_else(|| corrupt("a committed turn has no outcome"))?;
+        Ok(Self {
+            turn: CommittedTurnNodes {
+                turn_id,
+                cursor: CommittedTurnCursor::new(session_id.clone(), head_revision),
+                committed_at_ms,
+                outcome,
+                nodes: Vec::new(),
+            },
+            appended: receipt
+                .realized_node_timestamps
+                .into_iter()
+                .map(|realized| realized.node_id)
+                .collect(),
+        })
+    }
+
+    /// The nodes the commit appended, in append order.
+    pub fn appended(&self) -> &[crate::NodeId] {
+        &self.appended
+    }
+
+    /// The turn with the appended nodes the session retains, in append order.
+    pub fn into_turn(self, nodes: Vec<SessionNodeRecord>) -> CommittedTurnNodes {
+        CommittedTurnNodes { nodes, ..self.turn }
+    }
+}
+
 fn check_cursor_session(
     cursor_session_id: &SessionId,
     session_id: &SessionId,
@@ -370,6 +522,19 @@ pub trait SessionHistoryStore: Send + Sync {
         after: Option<&FailureEvidenceCursor>,
         limit: NonZeroU32,
     ) -> Result<FailureEvidencePage, StoreError>;
+
+    /// At most `limit` of the session's committed turns after `after`, oldest
+    /// first by commit: each turn's id, commit time, outcome and the nodes its
+    /// commit appended. `None` starts before the session's first turn.
+    ///
+    /// The session's own turns only: a fork serves none of its ancestor's.
+    /// A cursor of another session is [`StoreError::CursorForeignSession`].
+    async fn load_committed_turns(
+        &self,
+        session_id: &SessionId,
+        after: Option<&CommittedTurnCursor>,
+        limit: NonZeroU32,
+    ) -> Result<CommittedTurnNodesPage, StoreError>;
 }
 
 #[cfg(test)]

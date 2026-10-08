@@ -660,8 +660,6 @@ pub mod persistence {
         CheckpointAdmissionRequest, EmptyInputAdmission, IngressRowId, IngressSettlement,
         RUN_ADMISSION_STEP, RunAdmissionRecord, UnfinishedRun,
     };
-    /// The multi-session store's catalog and bounded history segments, the
-    /// one-session view runtime code holds, and the window loaders (ADR 0112).
     pub use lash_core::store::{
         AnchorUnavailable, FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor,
         HistoryBudget, HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp,
@@ -688,6 +686,13 @@ pub mod persistence {
         CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind,
         ControlIntentState, ControlIntentStore, EnginePark, RunCommittedOutcome, RunEndOutcome,
         RunStore, RunTerminal, RunTerminalCause, RunTerminalKind, RunTerminalWrite, TurnCommitId,
+    };
+    /// The multi-session store's catalog and bounded history segments, the
+    /// one-session view runtime code holds, and the window loaders (ADR 0112).
+    /// A session's committed turns in commit order: the cursor a host keeps,
+    /// and the store-level page a backend answers (FIG-5297).
+    pub use lash_core::store::{
+        CommittedTurnCursor, CommittedTurnNodes, CommittedTurnNodesPage, CommittedTurnReceipt,
     };
     /// Test-only store hooks and the conformance-suite handle types that
     /// carry them (`testing` feature only; no production trait requires them).
@@ -1500,8 +1505,8 @@ pub use lash_core::{RetainedRevision, Retention, Target};
 /// Canonical committed chat rows and protocol-neutral display contracts.
 pub mod transcript {
     pub use lash_core::transcript::{
-        RowContent, RowId, RowOrdinal, RowProvenance, RowTool, SuppressionReason,
-        TranscriptProjection, TranscriptProjectionOptions, TranscriptProjectionOutcome,
-        TranscriptRow, TranscriptRowKind, TranscriptRowRecord,
+        CommittedTurn, CommittedTurnsPage, RowContent, RowId, RowOrdinal, RowProvenance, RowTool,
+        SuppressionReason, TranscriptProjection, TranscriptProjectionOptions,
+        TranscriptProjectionOutcome, TranscriptRow, TranscriptRowKind, TranscriptRowRecord,
     };
 }

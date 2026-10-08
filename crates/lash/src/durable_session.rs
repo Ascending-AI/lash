@@ -514,6 +514,36 @@ impl DurableSession {
             .await?)
     }
 
+    /// At most `limit` of this session's committed turns after `after`,
+    /// oldest first by commit, each with its transcript rows, commit time and
+    /// outcome (ADR 0129). `None` starts before the session's first turn; a
+    /// fork's first read serves only the fork's own turns.
+    ///
+    /// The read never skips a turn that commits late and never repeats one:
+    /// a host that persists `next` after applying a page, and reads on from
+    /// it, sees every committed turn once, across process restarts,
+    /// compaction and frame switches. A cursor of another session is refused
+    /// as [`StoreError::CursorForeignSession`](lash_core::StoreError::CursorForeignSession).
+    pub async fn committed_turns(
+        &self,
+        after: Option<&lash_core::store::CommittedTurnCursor>,
+        limit: std::num::NonZeroU32,
+    ) -> Result<crate::transcript::CommittedTurnsPage> {
+        let page = self
+            .store()
+            .await?
+            .load_committed_turns(after, limit)
+            .await?;
+        crate::transcript::CommittedTurnsPage::project(page, &self.transcript_options).map_err(
+            |error| {
+                crate::EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
+                    record_kind: error.record_kind,
+                    message: error.message,
+                })
+            },
+        )
+    }
+
     /// Report whether this session still has durable live session metadata.
     ///
     /// A cheap existence read: it does not create, hydrate, or open the

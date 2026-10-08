@@ -773,6 +773,7 @@ pub(crate) async fn apply_runtime_commit_tx(
                 requested_node_count,
                 identity_encoding_version,
                 failure_evidence: !receipt.result.failure_evidence.is_empty(),
+                head_revision: sql_head_revision,
             },
         ))
         .await

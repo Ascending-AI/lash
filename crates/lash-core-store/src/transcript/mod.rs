@@ -180,7 +180,16 @@ impl TranscriptProjection {
         records: impl IntoIterator<Item = &'a SessionNodeRecord>,
         options: &TranscriptProjectionOptions,
     ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
-        let mut current_turn = None;
+        Self::fold(records, options, None)
+    }
+
+    /// Fold `records` with `current_turn` as the turn a protocol event
+    /// belongs to until a message names one.
+    fn fold<'a>(
+        records: impl IntoIterator<Item = &'a SessionNodeRecord>,
+        options: &TranscriptProjectionOptions,
+        mut current_turn: Option<TurnId>,
+    ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
         let rows = records
             .into_iter()
             .enumerate()
@@ -296,6 +305,58 @@ impl TranscriptProjection {
     pub fn reply(&self, turn_id: &TurnId) -> Option<&TranscriptRowRecord> {
         self.visible().find(|row| {
             row.provenance.is_turn_reply && row.provenance.turn_id.as_ref() == Some(turn_id)
+        })
+    }
+}
+
+/// One committed turn of a session: its rows are the fold of exactly the
+/// nodes its commit appended, every input it admitted among them.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CommittedTurn {
+    pub turn_id: TurnId,
+    pub rows: Vec<TranscriptRowRecord>,
+    pub committed_at_ms: u64,
+    pub outcome: crate::store::TurnCommitOutcome,
+}
+
+/// One page of a session's committed turns, oldest first by commit, read
+/// after a [`CommittedTurnCursor`](crate::store::CommittedTurnCursor).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CommittedTurnsPage {
+    pub turns: Vec<CommittedTurn>,
+    /// Persist it only after applying every turn of the page; the next read
+    /// continues from it. A page shorter than its limit has read to the head.
+    pub next: crate::store::CommittedTurnCursor,
+}
+
+impl CommittedTurnsPage {
+    /// Project each turn's appended nodes. A protocol event belongs to its
+    /// turn even before the turn's first message.
+    pub fn project(
+        page: crate::store::CommittedTurnNodesPage,
+        options: &TranscriptProjectionOptions,
+    ) -> Result<Self, crate::runtime_error::StoredDataCorruption> {
+        let turns = page
+            .turns
+            .into_iter()
+            .map(|turn| {
+                let rows = TranscriptProjection::fold(
+                    turn.nodes.iter(),
+                    options,
+                    Some(turn.turn_id.clone()),
+                )?
+                .into_records();
+                Ok(CommittedTurn {
+                    turn_id: turn.turn_id,
+                    rows,
+                    committed_at_ms: turn.committed_at_ms,
+                    outcome: turn.outcome,
+                })
+            })
+            .collect::<Result<_, crate::runtime_error::StoredDataCorruption>>()?;
+        Ok(Self {
+            turns,
+            next: page.next,
         })
     }
 }

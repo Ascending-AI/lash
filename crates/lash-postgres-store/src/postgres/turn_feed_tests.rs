@@ -153,3 +153,33 @@ async fn a_polling_reader_never_skips_or_repeats_a_late_committed_change() {
     )
     .await;
 }
+
+/// The committed-turn read's cursor law (FIG-5297) with a deliberately late
+/// committer: the followed session's turn held right before its `COMMIT`
+/// while eight other sessions commit theirs and a reader polls the followed
+/// session. The reader reads each of its turns exactly once, in commit order.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn a_reader_polling_one_session_never_misses_or_repeats_a_late_committed_turn() {
+    let Some(database) = isolated().await else {
+        return;
+    };
+    let seam = BeforeTurnCommit::new();
+    let storage = crate::testing::connect(database.url())
+        .await
+        .expect("open the isolated store")
+        .with_before_turn_commit_for_testing(seam.clone());
+    let arm: lash_core_execution::testing::turn_feed_law::ArmLateCommit = Box::new(move || {
+        let pause = seam.pause_next();
+        let reached = pause.clone();
+        lash_core_execution::testing::turn_feed_law::LateCommit {
+            reached: Box::pin(async move { reached.reached().await }),
+            release: Box::new(move || pause.release()),
+        }
+    });
+    lash_core_execution::testing::committed_turns_law::a_reader_polling_one_session_never_misses_or_repeats_a_turn(
+        std::sync::Arc::new(storage.store()),
+        8,
+        Some(arm),
+    )
+    .await;
+}

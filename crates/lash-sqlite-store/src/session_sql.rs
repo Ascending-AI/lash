@@ -219,6 +219,10 @@ lash_store_sql::statements! {
         /// Fetch one selected history node's body after the page budget is fixed.
         select_body = "SELECT node_json FROM graph_nodes WHERE node_id=?1";
 
+        /// Live node `?1` of session `?2`: its parent, body and stored size.
+        select_live_owned_body = "SELECT parent_node_id, node_json, body_bytes FROM graph_nodes
+                     WHERE node_id = ?1 AND session_id = ?2 AND tombstoned = 0";
+
         exists_live = "SELECT 1 FROM graph_nodes
                      WHERE node_id = ?1 AND tombstoned = 0";
 

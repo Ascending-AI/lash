@@ -13,7 +13,7 @@ pub const TABLE: &str = "runtime_turn_commits";
 pub const INSERT_COLUMNS: &str =
     "session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version,
-                failure_evidence, change_seq";
+                failure_evidence, change_seq, head_revision";
 
 /// A settled turn's identity and result, as the failure-evidence and
 /// turn-input reads fold them.
@@ -60,9 +60,18 @@ crate::statements! {
         insert = "INSERT INTO runtime_turn_commits (
                 session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version,
-                failure_evidence, change_seq
+                failure_evidence, change_seq, head_revision
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)";
+
+        /// Session `?1`'s committed turns after head revision `?2`, oldest
+        /// first by commit, at most `?3`. A session's commits are serialized,
+        /// so a turn that commits late has a revision above every visible one.
+        select_committed_turns_after = "SELECT head_revision, turn_id, result_json, outcome_code,
+                    committed_at_ms
+             FROM runtime_turn_commits
+             WHERE session_id = ?1 AND outcome_code IS NOT NULL AND head_revision > ?2
+             ORDER BY head_revision LIMIT ?3";
 
         change_clock = "SELECT current_seq, retention_horizon FROM turn_change_clock WHERE singleton = 1";
         next_change_seq = "UPDATE turn_change_clock SET current_seq = current_seq + 1

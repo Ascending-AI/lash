@@ -715,6 +715,7 @@ pub(crate) fn apply_runtime_commit_conn(
                 identity.2,
                 !result.failure_evidence.is_empty(),
                 crate::catalog::catalog_reads::next_turn_change_sequence(tx)?,
+                sql_head_revision,
             ],
         )
         .map_err(sqlite_error)?;

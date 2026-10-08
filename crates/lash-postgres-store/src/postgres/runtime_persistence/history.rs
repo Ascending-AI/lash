@@ -1,8 +1,9 @@
 use super::*;
 use lash_core_execution::store::{
-    AnchorUnavailable, FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget,
-    HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore,
-    SessionWindowRead, WindowSelector,
+    AnchorUnavailable, CommittedTurnCursor, CommittedTurnNodesPage, CommittedTurnReceipt,
+    FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor, HistoryBudget, HistoryCursor,
+    HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore, SessionWindowRead,
+    WindowSelector,
 };
 use lash_core_execution::store_backend_support::{
     HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode,
@@ -813,6 +814,94 @@ impl SessionHistoryStore for PostgresStore {
             settlements,
             next: if more { last } else { None },
         })
+    }
+
+    /// One snapshot: the page's receipts, then the nodes their commits
+    /// appended. A session's commits are serialized, so a snapshot that holds
+    /// a revision holds every revision below it.
+    async fn load_committed_turns(
+        &self,
+        session_id: &SessionId,
+        after: Option<&CommittedTurnCursor>,
+        limit: NonZeroU32,
+    ) -> Result<CommittedTurnNodesPage, StoreError> {
+        if let Some(cursor) = after {
+            cursor.check_session(session_id)?;
+        }
+        let after = after.map_or(0, CommittedTurnCursor::head_revision);
+        let mut tx = read_tx(self).await?;
+        check_live(&mut tx, session_id).await?;
+        let statement = crate::session_sql::session_sql();
+        let rows = sqlx::query(statement.turn_commits.select_committed_turns_after.sql())
+            .bind(session_id.as_str())
+            .bind(i64::try_from(after).unwrap_or(i64::MAX))
+            .bind(i64::from(limit.get()))
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        let receipts = rows
+            .iter()
+            .map(|row| {
+                CommittedTurnReceipt::from_stored(
+                    session_id,
+                    row.get("head_revision"),
+                    row.get("turn_id"),
+                    row.get("result_json"),
+                    row.get::<Option<&str>, _>("outcome_code"),
+                    row.get("committed_at_ms"),
+                    self.fence.fleet(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let wanted = receipts
+            .iter()
+            .flat_map(|receipt| receipt.appended().iter().map(|id| id.as_str()))
+            .collect::<Vec<_>>();
+        let mut bodies = std::collections::HashMap::new();
+        for row in sqlx::query(statement.graph_postgres.select_live_owned_bodies.sql())
+            .bind(session_id.as_str())
+            .bind(&wanted)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+        {
+            let node_id: String = row.get("node_id");
+            let parent: Option<String> = row.get("parent_node_id");
+            let body: String = row.get("node_json");
+            let bytes = u64_from_sql("SessionGraph", "body_bytes", row.get("body_bytes"))?;
+            if body.len() as u64 != bytes {
+                return Err(corrupt(
+                    "SessionGraph",
+                    format!("body_bytes differs at `{node_id}`"),
+                ));
+            }
+            bodies.insert(node_id, (parent, body));
+        }
+        tx.commit().await.map_err(store_sqlx_error)?;
+        let mut turns = Vec::with_capacity(receipts.len());
+        for receipt in receipts {
+            let mut nodes = Vec::with_capacity(receipt.appended().len());
+            for node_id in receipt.appended() {
+                let Some((parent, body)) = bodies.remove(node_id.as_str()) else {
+                    continue;
+                };
+                nodes.push(
+                    lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
+                        node_id.to_string(),
+                        parent,
+                        &body,
+                        self.fence.fleet(),
+                    )
+                    .map_err(|error| corrupt("SessionGraph node", error.to_string()))?,
+                );
+            }
+            turns.push(receipt.into_turn(nodes));
+        }
+        let next = turns.last().map_or_else(
+            || CommittedTurnCursor::new(session_id.clone(), after),
+            |turn| turn.cursor.clone(),
+        );
+        Ok(CommittedTurnNodesPage { turns, next })
     }
 }
 

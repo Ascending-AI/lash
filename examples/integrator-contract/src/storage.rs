@@ -257,6 +257,14 @@ impl SessionHistoryStore for Integrator {
     ) -> Result<FailureEvidencePage, StoreError> {
         unreachable!("external signature witness")
     }
+    async fn load_committed_turns(
+        &self,
+        session_id: &SessionId,
+        after: Option<&CommittedTurnCursor>,
+        limit: NonZeroU32,
+    ) -> Result<CommittedTurnNodesPage, StoreError> {
+        unreachable!("external signature witness")
+    }
 }
 
 #[lash::async_trait]

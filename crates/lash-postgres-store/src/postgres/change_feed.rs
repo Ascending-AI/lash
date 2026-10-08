@@ -48,6 +48,8 @@ pub(crate) struct TurnReceipt {
     pub(crate) requested_node_count: Option<i64>,
     pub(crate) identity_encoding_version: Option<i32>,
     pub(crate) failure_evidence: bool,
+    /// The head revision the commit published.
+    pub(crate) head_revision: i64,
 }
 
 /// One change of the turn feed.
@@ -82,6 +84,7 @@ pub(crate) async fn stage_turn_change(
                 .bind(receipt.requested_node_count)
                 .bind(receipt.identity_encoding_version)
                 .bind(receipt.failure_evidence)
+                .bind(receipt.head_revision)
                 .execute(crate::observed_sql::executor(&mut *tx))
                 .await?;
         }

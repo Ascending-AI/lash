@@ -2333,6 +2333,7 @@ pub use test_protocol_fakes::{
 
 mod test_protocol_fakes;
 
+pub mod committed_turns_law;
 pub mod conformance_support;
 pub mod graph_integrity;
 pub mod lineage;

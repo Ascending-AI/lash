@@ -196,6 +196,9 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     requested_node_count        INTEGER,
     identity_encoding_version   INTEGER,
     failure_evidence            INTEGER NOT NULL,
+    -- The head revision the commit published: the session's commit order,
+    -- which its committed-turn read pages by (FIG-5297).
+    head_revision               INTEGER NOT NULL CONSTRAINT ck_runtime_turn_commits_head_revision CHECK (head_revision > 0),
     PRIMARY KEY (session_id, turn_id),
     CONSTRAINT ck_runtime_turn_commits_identity CHECK ((request_identity_hash IS NULL) = (identity_encoding_version IS NULL) AND (requested_node_count IS NULL OR request_identity_hash IS NOT NULL))
 );
@@ -206,6 +209,10 @@ CREATE INDEX IF NOT EXISTS idx_runtime_turn_commits_failure_evidence
 
 CREATE INDEX IF NOT EXISTS idx_runtime_turn_commits_change_seq
     ON runtime_turn_commits(change_seq) WHERE outcome_code IS NOT NULL;
+-- A session's committed turns in commit order (FIG-5297). One commit
+-- publishes each revision, so no two receipts of a session share one.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_turn_commits_session_revision
+    ON runtime_turn_commits(session_id, head_revision);
 
 -- Transactional clock: a cursor never overtakes an uncommitted terminal.
 CREATE TABLE IF NOT EXISTS turn_change_clock (
