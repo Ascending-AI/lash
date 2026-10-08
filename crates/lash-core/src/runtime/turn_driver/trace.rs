@@ -77,3 +77,29 @@ pub(in crate::runtime) fn protocol_step_trace_event(
         payload: protocol_event.payload.clone(),
     }
 }
+
+/// A live measurement span; cancellation and failed commits close it on drop.
+pub(in crate::runtime) struct TurnPhaseSpan {
+    probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
+    phase: RuntimeTurnPhase,
+}
+
+impl TurnPhaseSpan {
+    pub(in crate::runtime) fn begin(
+        probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
+        phase: RuntimeTurnPhase,
+    ) -> Self {
+        if let Some(probe) = &probe {
+            probe.begin(phase);
+        }
+        Self { probe, phase }
+    }
+}
+
+impl Drop for TurnPhaseSpan {
+    fn drop(&mut self) {
+        if let Some(probe) = &self.probe {
+            probe.end(self.phase);
+        }
+    }
+}

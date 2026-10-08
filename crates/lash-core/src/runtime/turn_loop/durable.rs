@@ -208,6 +208,10 @@ impl LashRuntime {
                 .with_base_render_cache(base_read_model.prompt_render_cache);
         // The attachment-omission history policies (ADR 0133) narrow the
         // request's view only: `messages` stays the turn's history.
+        let context_transform = crate::runtime::RuntimeNamedPhase::begin(
+            self.turn_phase_probe.clone(),
+            "context_transform",
+        );
         let mut request_messages = messages.clone();
         let trace_context = {
             let context =
@@ -235,6 +239,7 @@ impl LashRuntime {
         let prepared_context = crate::session_model::context::PreparedContext {
             messages: request_messages,
         };
+        drop(context_transform);
         let mut prelude = Box::new(crate::runtime::effect::TurnPrelude {
             configuration: crate::EffectAddress::new(
                 controller.execution_scope().clone(),

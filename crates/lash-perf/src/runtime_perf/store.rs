@@ -12,6 +12,9 @@
 //! Queue-driver wake dispatch does not pass through this decorator at all and
 //! remains owned by the existing `wait.*` phase metrics.
 
+mod durable;
+pub(crate) use durable::RuntimePerfDurableStore;
+
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::collections::{BTreeMap, HashSet};

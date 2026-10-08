@@ -95,10 +95,6 @@ pub(in crate::runtime) struct CurrentOwnerCapability {
     plugins: Arc<crate::PluginSession>,
     runtime_lease_owner: crate::LeaseOwnerIdentity,
     runtime_lease_executor_id: String,
-    #[expect(
-        dead_code,
-        reason = "L6 (FIG-5175): the engine process drive reads it; ProcessEngine::run, its only reader, is deleted (I0)"
-    )]
     turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
 }
 

@@ -159,7 +159,12 @@ impl DurableProcessWorker {
                 plugin_host: Arc::clone(&self.config.plugin_host),
                 process_work: self.process_wiring(),
                 lease_owner: self.config.lease_owner.clone(),
-                turn_phase_probe: None,
+                turn_phase_probe: process.session_capability.as_ref().and_then(|session| {
+                    self.config
+                        .runtime_host
+                        .turn_phase_probes
+                        .get_for_scope(&crate::SessionScope::new(session.clone()))
+                }),
             },
             process,
         ))

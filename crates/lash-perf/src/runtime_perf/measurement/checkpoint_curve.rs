@@ -125,7 +125,7 @@ pub(crate) const CHECKPOINT_HASH_PASSES_PER_CHANGED_BODY: u64 = 1;
 
 struct DurableCheckpointCurveFixture {
     point: CheckpointCurvePoint,
-    fixture: lash_protocol_rlm::RlmCheckpointPerfFixture,
+    fixture: CheckpointBindingFixture,
     runtime_state: RuntimeSessionState,
     store: Arc<dyn lash_core::RuntimeStore>,
 }
@@ -179,9 +179,8 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
     let seed_before_alloc = allocator_stats();
     let seed_started = Instant::now();
     let mut fixtures = Vec::with_capacity(points.len());
-    // The fixtures' cells run on the production effect controller over one
-    // memory store set; their captured state is what the curve measures.
-    let artifacts = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
+    // The fixtures' cells run on the production effect controller over
+    // independent memory store sets; their captured state is what the curve measures.
     for point in points {
         let session_id = SessionId::fixture(format!(
             "runtime-perf-{}-{run_id}-{}-{}",
@@ -193,10 +192,8 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
             .admit_session(&runtime_perf_session_create_request(&session_id))
             .await?;
         let store: Arc<dyn lash_core::RuntimeStore> = store_factory.clone();
-        let artifacts_backend = artifacts.clone();
-        let mut fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
+        let fixture = CheckpointBindingFixture::new(
             std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-            &artifacts_backend,
             point.component_count,
             point.transcript_bytes,
         )
@@ -228,7 +225,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         );
         let seed_result = store.commit_runtime_state(seed_commit).await?;
         runtime_state.apply_persisted_commit_result(seed_result);
-        fixture.acknowledge_capture();
+        fixture.acknowledge_capture().await;
         fixtures.push(DurableCheckpointCurveFixture {
             point,
             fixture,
@@ -252,20 +249,11 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
         for fixture in &mut fixtures {
             append_checkpoint_curve_graph(&mut fixture.runtime_state, fixture.point, sample);
             let prefix = fixture.point.prefix();
+            fixture.fixture.assign(sample, sample).await?;
             let work_collector = lash_core::perf_witness::Collector::install()?;
             let (snapshot, capture_phase) = Box::pin(measure_runtime_perf_async_phase(
                 "checkpoint_curve.capture",
-                async {
-                    assign_checkpoint_binding(
-                        &mut fixture.fixture,
-                        &artifacts,
-                        &fixture.runtime_state.session_id,
-                        sample,
-                        sample,
-                    )
-                    .await?;
-                    fixture.fixture.capture().await.map_err(anyhow::Error::from)
-                },
+                async { fixture.fixture.capture().await.map_err(anyhow::Error::from) },
             ))
             .await?;
             let snapshot_shape = CheckpointArtifactShape::from_snapshot(&snapshot);
@@ -310,7 +298,7 @@ pub(crate) async fn run_once_durable_checkpoint_curve(
                         .map_err(anyhow::Error::from)
                 })
                 .await?;
-            fixture.fixture.acknowledge_capture();
+            fixture.fixture.acknowledge_capture().await;
             let (loaded_state, load_phase) =
                 measure_runtime_perf_async_phase("checkpoint_curve.load", async {
                     let loaded_state = lash::persistence::load_session_window_state(

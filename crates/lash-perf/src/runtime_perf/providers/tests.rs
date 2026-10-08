@@ -235,3 +235,42 @@ fn request_input(text: &str) -> LlmMessage {
         }],
     )
 }
+
+#[test]
+fn delegated_child_task_routing_ignores_parent_spawn_history() {
+    const TASK: &str = "Submit `{ len: chunk.length }` using the seeded `chunk` variable.";
+    for scenario in [
+        RuntimePerfScenario::DurableAgentChildTurnSqlite,
+        RuntimePerfScenario::HighTrafficLoadSqlite,
+        RuntimePerfScenario::HighTrafficKneeSqlite,
+    ] {
+        let mut child = empty_request();
+        // A neutral child prompt has no delegation instructions or cache fence.
+        child.messages.push(LlmMessage::text(LlmRole::User, TASK));
+        let child_profile = benchmark_stream_profile_for_request(scenario, &child);
+        assert_eq!(
+            child_profile.full_text,
+            typescript_block("finish({ len: chunk.length });")
+        );
+
+        let mut parent = empty_request();
+        parent
+            .messages
+            .push(request_input("load-kind:child operation:0"));
+        parent.messages.push(LlmMessage::text(
+            LlmRole::Assistant,
+            format!(
+                "<typescript>const result = await agents.spawn({{ task: {TASK:?} }});</typescript>"
+            ),
+        ));
+        parent
+            .messages
+            .push(request_input("load-kind:child operation:1"));
+        let parent_profile = benchmark_stream_profile_for_request(scenario, &parent);
+        assert!(
+            parent_profile.full_text.contains("agents.spawn"),
+            "{} routed the parent's next turn as its child",
+            scenario.name()
+        );
+    }
+}

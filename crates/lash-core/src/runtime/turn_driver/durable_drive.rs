@@ -47,6 +47,8 @@ pub(in crate::runtime) struct RuntimeDrive {
     /// The turn's execution bound to the session's attachment store: the
     /// turn's puts are held by it until the drive ends (ADR 0124 §4).
     _attachments: Option<crate::attachments::AttachmentExecutionBinding>,
+    effect_phase: Option<TurnPhaseSpan>,
+    commit_phase: Option<TurnPhaseSpan>,
 }
 
 #[derive(Default)]
@@ -190,7 +192,13 @@ impl RuntimeDrive {
             commit,
             published,
         } = parts;
+        let effect_phase = Some(TurnPhaseSpan::begin(
+            driver.turn_phase_probe.clone(),
+            RuntimeTurnPhase::EffectLoop,
+        ));
         Self {
+            effect_phase,
+            commit_phase: None,
             driver,
             machine,
             observer,
@@ -421,6 +429,11 @@ impl TurnDrive for RuntimeDrive {
         done: TurnDone,
         _head: &SessionHead,
     ) -> Result<TurnCommit, TurnError> {
+        self.effect_phase.take();
+        self.commit_phase = Some(TurnPhaseSpan::begin(
+            self.driver.turn_phase_probe.clone(),
+            RuntimeTurnPhase::CommittedTurn,
+        ));
         let driver = &mut self.driver;
         driver.turn_pipeline.apply_event_delta(done.event_delta);
         driver.turn_pipeline.record_protocol_terminal_output(
@@ -497,6 +510,11 @@ impl TurnDrive for RuntimeDrive {
     /// stream; then the commit itself, which settles the turn's provisional
     /// activity; then the lifecycle observers see the finalized turn.
     async fn committed(&mut self) {
+        self.commit_phase.take();
+        let _delivery = TurnPhaseSpan::begin(
+            self.driver.turn_phase_probe.clone(),
+            RuntimeTurnPhase::PostCommitDelivery,
+        );
         let AfterCommit { state, finalized } = std::mem::take(&mut self.after_commit);
         let plugins = Arc::clone(self.driver.session.plugins());
         if let Some(state) = state

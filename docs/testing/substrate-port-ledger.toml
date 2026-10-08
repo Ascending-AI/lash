@@ -2697,7 +2697,7 @@ needs = ["turn", "round"]
 class = "mechanical"
 lane = "L9h"
 laws = [
-  "(no test functions) defines: measure_runtime_perf_phase, measure_runtime_perf_async_phase, run_once_turn_checkpoint, assign_checkpoint_binding, run_once_checkpoint_state_hot_paths, checkpoint_messages, checkpoint_message, run_once_embed, sum_phase_profiles, mean_phase_profiles",
+  "(no test functions) defines: measure_runtime_perf_phase, measure_runtime_perf_async_phase, run_once_turn_checkpoint, CheckpointBindingFixture, run_once_checkpoint_state_hot_paths, checkpoint_messages, checkpoint_message, run_once_embed, sum_phase_profiles, mean_phase_profiles",
 ]
 disposition = "port"
 status = "ported"
@@ -19932,7 +19932,7 @@ laws = [
 disposition = "replaced-by:crates/lash-perf/src/runtime_perf/measurement/contention.rs::writer_contention_smoke_reports_wait_release_latency_and_execution"
 status = "deleted"
 owed = "the writer-contention scenario reports wait, release-latency and execution samples for same-session and many-session writers"
-note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: a same-session waiter completes while the held turn runs"
+note = "FIG-5342: active; unique config write keys and queued append commands witness held-head serialization"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/measurement/contention.rs"
@@ -19947,7 +19947,7 @@ laws = [
 disposition = "replaced-by:crates/lash-perf/src/runtime_perf/measurement/contention.rs::async_settlement_smoke_drains_every_open_child_span"
 status = "deleted"
 owed = "the async-settlement scenario drains every open child span and reports spawn, settle and drain samples"
-note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: no child span opens"
+note = "FIG-5342: active; process tool contexts carry the session probe through child execution and settlement"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/measurement/queued_work.rs"
@@ -19992,7 +19992,7 @@ laws = [
 disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls"
 status = "deleted"
 owed = "durable SQLite turn scenarios report their phases and store calls"
-note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: the session's phase probe never reaches the node's run"
+note = "FIG-5342: active; served runtimes resolve the host probe registry and durable transactions use the measurement decorator"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -20022,7 +20022,7 @@ laws = [
 disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::checkpoint_state_hot_paths_capture_one_changed_component_per_turn"
 status = "deleted"
 owed = "checkpoint-state hot paths capture one changed component per turn"
-note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: the checkpoint binding is still a stub"
+note = "FIG-5342: active; a durable plugin task edits the checkpoint fixture under the served actor controller"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -20037,7 +20037,7 @@ laws = [
 disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::durable_sqlite_checkpoint_curve_reports_paired_structural_samples"
 status = "deleted"
 owed = "the durable SQLite checkpoint curve reports paired structural samples"
-note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: the checkpoint binding is still a stub"
+note = "FIG-5342: active; served plugin tasks edit isolated fixtures before capture, commit and load measurements"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -20052,7 +20052,7 @@ laws = [
 disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_smoke_reports_load_structure"
 status = "deleted"
 owed = "the high-traffic SQLite scenario reports its load structure"
-note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: a child operation stops at MaxTurns"
+note = "FIG-5342: active; direct delegated SessionTurn starts answer their seeded child task on the served node"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -20067,7 +20067,7 @@ laws = [
 disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_sqlite_knee_smoke_reports_each_step"
 status = "deleted"
 owed = "the high-traffic SQLite knee scenario reports each step"
-note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: a child operation stops at MaxTurns"
+note = "FIG-5342: active; each population uses served delegated children and durable transaction measurements"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -20082,7 +20082,7 @@ laws = [
 disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_trigger_waits_for_terminal_delivery"
 status = "deleted"
 owed = "a high-traffic trigger waits for terminal delivery"
-note = "FIG-5310: restored on the in-process durable lane; ignored on FIG-5342 because the scenario's measurement code does not yet run on the served node: the trigger operation is still a stub"
+note = "FIG-5342: active; the durable trigger API emits occurrences and the process API awaits terminal delivery"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"

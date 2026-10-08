@@ -284,6 +284,10 @@ impl LashRuntime {
             None
         };
         let resident_session = ResidentSessionContinuity::fresh();
+        let turn_phase_probe = host
+            .core
+            .turn_phase_probes
+            .get_for_scope(&crate::SessionScope::new(state.session_id.clone()));
         Ok(Self {
             session,
             host,
@@ -292,7 +296,7 @@ impl LashRuntime {
             runtime_lease_owner,
             runtime_lease_executor_id,
             process_sync_needed: Arc::new(AtomicBool::new(false)),
-            turn_phase_probe: None,
+            turn_phase_probe,
             resident_session,
             tool_restore_report,
         })

@@ -20,10 +20,17 @@ pub(super) fn benchmark_stream_profile_for_request(
             | RuntimePerfScenario::RlmObliqueStackMix
             | RuntimePerfScenario::DeepTurnComposition
     ) || scenario.is_high_traffic())
-        && request
+        && (request
             .instructions
             .as_deref()
             .is_some_and(|text| text.contains(delegation::DELEGATED_CHILD_INSTRUCTIONS))
+            || request.messages.iter().any(|message| {
+                message.role == lash_core::llm::types::LlmRole::User
+                    && message.blocks.iter().any(|block| {
+                        matches!(block, LlmContentBlock::Text { text, .. }
+                            if text.starts_with("Submit `{ len: chunk.length }` using the seeded `chunk` variable."))
+                    })
+            }))
     {
         if matches!(scenario, RuntimePerfScenario::DeepTurnComposition) {
             return text_profile(typescript_block(
@@ -406,16 +413,11 @@ finish("runtime perf benchmark ok");"#
         | RuntimePerfScenario::DurableAgentChildTurnSqlite => {
             let text = typescript_block(
                 r#"
-const spawnChild = await processes.create({ dialect: "typescript", source: `const spawnChild = async () => {
-  return await agents.spawn({
-    task: "Submit \`{ len: chunk.length }\` using the seeded \`chunk\` variable.",
-    seed: { chunk: ["alpha", "beta", "gamma"] },
-    output: { len: "int" }
-  });
-};` });
-
-const handle = await processes.start({ definition: spawnChild });
-const result = await handle;
+const result = await agents.spawn({
+  task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
+  seed: { chunk: ["alpha", "beta", "gamma"] },
+  output: { len: "int" }
+});
 finish("runtime perf benchmark ok");"#,
             );
             text_profile(text)
@@ -545,15 +547,11 @@ finish(result.value);"#,
     }
     if kind == Some(HighTrafficOperationKind::Child) {
         return text_profile(typescript_block(
-            r#"const loadChild = await processes.create({ dialect: "typescript", source: `const loadChild = async () => {
-  return await agents.spawn({
-    task: "Submit \`{ len: chunk.length }\` using the seeded \`chunk\` variable.",
-    seed: { chunk: ["alpha", "beta", "gamma"] },
-    output: { len: "int" }
-  });
-};` });
-const handle = await processes.start({ definition: loadChild });
-const result = await handle;
+            r#"const result = await agents.spawn({
+  task: "Submit `{ len: chunk.length }` using the seeded `chunk` variable.",
+  seed: { chunk: ["alpha", "beta", "gamma"] },
+  output: { len: "int" }
+});
 finish("runtime perf benchmark ok");"#,
         ));
     }

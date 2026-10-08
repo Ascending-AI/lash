@@ -149,6 +149,10 @@ impl RuntimeTurnServices {
         recorded_before_turn: Option<Vec<crate::plugin::RecordedTurnContribution>>,
     ) -> Result<(DurableTurn, DriveParts), TurnError> {
         let mut runtime = self.runtimes.open(&row.session).await?;
+        let _prepared = crate::runtime::turn_driver::TurnPhaseSpan::begin(
+            runtime.turn_phase_probe.clone(),
+            crate::runtime::RuntimeTurnPhase::PreparedTurn,
+        );
         let admissions = admitted_rows(&runtime, row).await?;
         let controller = cx.scoped(AdmittedScope::turn(row.session.clone(), row.run.clone()))?;
         let live = self.runtimes.live_replay();

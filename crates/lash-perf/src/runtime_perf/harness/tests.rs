@@ -42,7 +42,6 @@ async fn rlm_globals_keeps_fixed_session_projection_across_real_turns() {
 /// The plugin ids `scenario`'s wiring installs, in push order.
 async fn benchmark_plugin_ids(scenario: RuntimePerfScenario) -> Vec<&'static str> {
     let InProcessLane { backend, .. } = in_process_lane().await.expect("the in-process lane");
-    let backend: lash::Backend = backend.into();
     let effect_host = lash::runtime::ActorContext::detached(backend);
     let settlement_control = scenario
         .settlement_children()

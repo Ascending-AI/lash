@@ -370,6 +370,7 @@ async fn run_high_traffic_step(
 
     for (session_index, session) in sessions.into_iter().enumerate() {
         let config = config.clone();
+        let core = runtime.core();
         let queue_depth = Arc::clone(&queue_depth);
         let queue_depth_samples = Arc::clone(&queue_depth_samples);
         workers.spawn(async move {
@@ -391,6 +392,7 @@ async fn run_high_traffic_step(
                 let depth = queue_depth.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                 queue_depth_samples.lock_recover().push(depth as u64);
                 let operation = run_high_traffic_operation(
+                    &core,
                     &session,
                     ordinal,
                     config.operation_kind(ordinal),
@@ -450,6 +452,7 @@ async fn run_high_traffic_step(
 }
 
 async fn run_high_traffic_operation(
+    core: &lash::LashCore,
     session: &lash::LashSession,
     ordinal: usize,
     kind: HighTrafficOperationKind,
@@ -481,12 +484,25 @@ async fn run_high_traffic_operation(
         run_high_traffic_direct_turn(session, ordinal, kind).await?
     };
     if kind == HighTrafficOperationKind::Trigger {
-        // A trigger emission journals its process starts, so it runs in a
-        // handler of the engine's deployment; the durable engine lends one
-        // from L3 (FIG-5172).
-        anyhow::bail!(
-            "trigger high-traffic operation {ordinal} has no engine handler to emit in until L3 (FIG-5172)"
+        let request = lash_core::TriggerOccurrenceRequest::new(
+            super::super::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
+            lash_core::facade_support::empty_trigger_source_key(
+                super::super::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
+            )?,
+            serde_json::json!({ "account": "test", "title": "runtime perf benchmark ok", "text": "load" }),
+            format!("load:{}:{ordinal}", session.session_id()),
+        ).with_source(serde_json::json!({}));
+        let emitted = core.triggers().emit(request, core.effect_host()).await?;
+        anyhow::ensure!(
+            !emitted.deliveries.is_empty(),
+            "load trigger emitted no delivery"
         );
+        for delivery in emitted.deliveries {
+            let process_id = delivery
+                .process_id()
+                .ok_or_else(|| anyhow::anyhow!("load trigger refused: {:?}", delivery.outcome))?;
+            core.processes().await_output(process_id).await?;
+        }
     }
     let latency_ms = elapsed_ms(operation_started);
     let pre_phase_dispatch_ms = probe.first_phase_delay_ms(operation_started);

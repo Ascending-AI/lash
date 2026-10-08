@@ -19,6 +19,7 @@ mod streaming;
 mod tool_catalog;
 mod tools;
 mod trace;
+pub(in crate::runtime) use trace::TurnPhaseSpan;
 
 pub(in crate::runtime) use crate::runtime::turn_loop::send_queued_work_started_event;
 pub(super) use events::{emit_semantic_response_parts, send_turn_input_applications};

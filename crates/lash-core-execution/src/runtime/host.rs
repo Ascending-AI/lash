@@ -25,6 +25,9 @@ pub struct RuntimeHostConfig {
     /// The runtime's one trace handle: every engine path and every plugin
     /// emits through it.
     pub tracing: crate::trace::TraceRuntime,
+    /// Shared, unstable instrumentation resolved by served sessions and processes.
+    #[doc(hidden)]
+    pub turn_phase_probes: super::RuntimeTurnPhaseProbeSlot,
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     /// Injected time source. Durable timestamps and timeout/backoff logic read
     /// this rather than the OS clock directly, so replay is reproducible and
@@ -305,6 +308,7 @@ impl RuntimeHostConfig {
                 recovery_pass: crate::engine::RecoveryPassBudget::default(),
             },
             tracing: crate::trace::TraceRuntime::new(Arc::clone(&clock)),
+            turn_phase_probes: super::RuntimeTurnPhaseProbeSlot::default(),
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             clock,
         }

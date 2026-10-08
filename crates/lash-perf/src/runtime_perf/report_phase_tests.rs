@@ -166,7 +166,6 @@ fn ending_an_unstarted_phase_is_a_no_op() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5342: a session's phase probe never reaches the run the node executes"]
 async fn stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls() {
     for scenario in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS
         .into_iter()
@@ -185,6 +184,10 @@ async fn stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls() {
         ))
         .await
         .unwrap_or_else(|error| panic!("{} failed: {error:#}", scenario.name()));
+        eprintln!(
+            "PERF_SCENARIO {}",
+            serde_json::to_string(&result).expect("serialize measurement")
+        );
         for phase in STABLE_DURABLE_PHASES {
             assert!(
                 result.phase_profile.contains_key(phase),
@@ -453,7 +456,6 @@ fn durable_checkpoint_curve_inventory_is_backend_complete_and_opt_in() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5342: the checkpoint binding is still an engine-handler stub"]
 async fn checkpoint_state_hot_paths_capture_one_changed_component_per_turn() {
     let result = Box::pin(run_once(
         RuntimePerfScenario::CheckpointStateHotPaths,
@@ -463,6 +465,10 @@ async fn checkpoint_state_hot_paths_capture_one_changed_component_per_turn() {
     ))
     .await
     .expect("checkpoint state hot paths should run");
+    eprintln!(
+        "PERF_SCENARIO {}",
+        serde_json::to_string(&result).expect("serialize measurement")
+    );
 
     assert_eq!(result.turns.len(), 2);
     assert_eq!(result.extra_counters["execution_state_bindings"], 300);
@@ -489,7 +495,6 @@ async fn checkpoint_state_hot_paths_capture_one_changed_component_per_turn() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5342: the checkpoint binding is still an engine-handler stub"]
 async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
     let config = checkpoint_curve_config();
     let samples = 2;
@@ -501,6 +506,10 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
     ))
     .await
     .expect("durable checkpoint curve should run");
+    eprintln!(
+        "PERF_SCENARIO {}",
+        serde_json::to_string(&result).expect("serialize measurement")
+    );
 
     let points = checkpoint_curve_points(&config);
     assert_eq!(
@@ -638,7 +647,6 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5342: a high-traffic child operation stops at MaxTurns on the served node"]
 async fn high_traffic_sqlite_smoke_reports_load_structure() {
     let result = Box::pin(run_once(
         RuntimePerfScenario::HighTrafficLoadSqlite,
@@ -648,6 +656,10 @@ async fn high_traffic_sqlite_smoke_reports_load_structure() {
     ))
     .await
     .expect("high-traffic SQLite load smoke should run");
+    eprintln!(
+        "PERF_SCENARIO {}",
+        serde_json::to_string(&result).expect("serialize measurement")
+    );
 
     assert!(
         result
@@ -696,7 +708,6 @@ async fn high_traffic_sqlite_smoke_reports_load_structure() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-5342: a high-traffic child operation stops at MaxTurns on the served node"]
 async fn high_traffic_sqlite_knee_smoke_reports_each_step() {
     let result = Box::pin(run_once(
         RuntimePerfScenario::HighTrafficKneeSqlite,
@@ -706,6 +717,10 @@ async fn high_traffic_sqlite_knee_smoke_reports_each_step() {
     ))
     .await
     .expect("high-traffic SQLite knee smoke should run");
+    eprintln!(
+        "PERF_SCENARIO {}",
+        serde_json::to_string(&result).expect("serialize measurement")
+    );
 
     assert_eq!(
         result.extra_counters.get("knee.step.0.population"),
@@ -760,7 +775,6 @@ async fn high_traffic_sqlite_knee_smoke_reports_each_step() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "FIG-5342: the high-traffic trigger operation is still an engine-handler stub"]
 async fn high_traffic_trigger_waits_for_terminal_delivery() {
     let config = HighTrafficConfig::parse(1, 0, "trigger=1", "1,2", 1.25)
         .expect("valid trigger-only config");
@@ -772,6 +786,10 @@ async fn high_traffic_trigger_waits_for_terminal_delivery() {
     ))
     .await
     .expect("trigger-only high-traffic operation should observe terminal delivery");
+    eprintln!(
+        "PERF_SCENARIO {}",
+        serde_json::to_string(&result).expect("serialize measurement")
+    );
 
     assert_eq!(
         result.extra_counters.get("turn_mix.trigger.completed"),

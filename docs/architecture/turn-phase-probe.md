@@ -23,6 +23,12 @@ cannot settle work, change admission or grant a host turn-executing authority.
 
 ## Fixed phases
 
+The durable driver brackets preparation, the live effect loop, head-commit
+assembly through acknowledgement, and post-commit publication with spans that
+close on drop. Store-call measurements decorate the durable port before the
+backend is built, so the node's transactions use the same measurement sink as
+the catalog.
+
 The current typed vocabulary is `BeforeTurnHooks`, `PromptBuild`,
 `EffectLoop`, `PreparedTurn`, `CommittedTurn` and `PostCommitDelivery`. The definition is in
 `crates/lash-core-llm/src/turn_vocabulary.rs`. These are observation points in
@@ -60,8 +66,10 @@ record current production call sites, not a closed list of future names.
 
 `RuntimeTurnPhaseProbeSlot` shares a scope-keyed registry. A frame-specific
 registration overrides the session registration; an unregistered frame falls
-back to its session. Registration replaces the probe for that scope. Workers
-resolve that registration and carry the resulting `Arc` through execution.
+back to its session. Registration replaces the probe for that scope. The host config
+shares the slot with the served node. Registering a session's probe updates that slot; every runtime the node opens resolves the session's
+registration, and process tool steps resolve their recorded session capability.
+Workers carry the resulting `Arc` through execution.
 The slot is not consulted at every hook boundary.
 
 The runtime binds `PluginSession::dispatch` to that resolved probe. Its borrowed

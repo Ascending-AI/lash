@@ -111,20 +111,158 @@ pub(super) async fn run_once_turn_checkpoint(
 const CHECKPOINT_STATE_BINDINGS: usize = 300;
 const CHECKPOINT_STATE_BODY_BYTES: usize = 3 * 1024 + 512;
 
-/// Assign one binding of `fixture` in a cell of `session_id`'s turn `turn`.
-/// A cell runs in a handler of the engine's deployment, and the durable
-/// engine lends one from L3 (FIG-5172); until then the assignment is
-/// refused.
-pub(super) async fn assign_checkpoint_binding(
-    _fixture: &mut lash_protocol_rlm::RlmCheckpointPerfFixture,
-    _backend: &lash::Backend,
-    session_id: &SessionId,
-    index: usize,
-    turn: usize,
-) -> anyhow::Result<()> {
-    anyhow::bail!(
-        "checkpoint binding {index} of `{session_id}` turn {turn} has no engine handler to run in until L3 (FIG-5172)"
-    )
+/// A checkpoint fixture edited by a plugin task on the served session actor.
+/// Capture remains outside the task so the curve measures each structural step.
+pub(super) struct CheckpointBindingFixture {
+    fixture: Arc<tokio::sync::Mutex<lash_protocol_rlm::RlmCheckpointPerfFixture>>,
+    backend: lash::Backend,
+    factory: Arc<dyn lash_core::plugin::PluginFactory>,
+    session_id: SessionId,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum CheckpointAssignmentError {
+    SessionRequired,
+    Execution {
+        reason: lash_core::ExecCodeFailureReason,
+        message: String,
+    },
+}
+
+impl std::fmt::Display for CheckpointAssignmentError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SessionRequired => formatter.write_str("checkpoint task requires a session"),
+            Self::Execution { message, .. } => formatter.write_str(message),
+        }
+    }
+}
+
+struct AssignCheckpointBinding;
+impl lash_core::plugin::PluginOperation for AssignCheckpointBinding {
+    const NAME: &'static str = "checkpoint.assign";
+    const DESCRIPTION: &'static str = "Edit one benchmark checkpoint binding";
+    const SESSION_PARAM: lash_core::plugin::SessionParam =
+        lash_core::plugin::SessionParam::Required;
+    type Args = (usize, usize);
+    type Output = ();
+    type Error = CheckpointAssignmentError;
+    const ERROR_TYPE: &'static str = Self::NAME;
+    const ERROR_VERSION: lash_core::FormatVersion = lash_core::FormatVersion::ONE;
+    fn error_class(_: &CheckpointAssignmentError) -> lash_core::plugin::PluginFailureClass {
+        lash_core::plugin::PluginFailureClass::Terminal
+    }
+}
+impl lash_core::plugin::PluginTask for AssignCheckpointBinding {}
+
+impl CheckpointBindingFixture {
+    pub(super) async fn new(
+        dialect: Arc<dyn lash_protocol_rlm::Dialect>,
+        bindings: usize,
+        bytes: usize,
+    ) -> anyhow::Result<Self> {
+        let backend = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
+        let fixture = Arc::new(tokio::sync::Mutex::new(
+            lash_protocol_rlm::RlmCheckpointPerfFixture::new(dialect, &backend, bindings, bytes)
+                .await?,
+        ));
+        let task_fixture = Arc::clone(&fixture);
+        let task_backend = backend.clone();
+        let spec = lash_core::plugin::PluginSpec::new()
+            .with_plugin_task_value::<AssignCheckpointBinding, _, _>(move |ctx, (index, turn)| {
+                let fixture = Arc::clone(&task_fixture);
+                let backend = task_backend.clone();
+                async move {
+                    let session_id = ctx
+                        .session_id
+                        .ok_or(CheckpointAssignmentError::SessionRequired)?;
+                    let invocation = lash_core::runtime::causal::turn_effect_invocation(
+                        ctx.scoped_effect_controller.execution_scope(),
+                        &session_id,
+                        &lash_core::TurnId::fixture(format!("checkpoint-{turn}")),
+                        turn,
+                        0,
+                        lash_core::sansio::EffectId(0),
+                        lash_core::RuntimeEffectKind::ExecCode,
+                    );
+                    let execution = lash_core::testing::TestExecutionContextBuilder::new(
+                        lash_core::testing::TestExecutionPorts::lent(
+                            &backend,
+                            ctx.scoped_effect_controller,
+                        ),
+                    )
+                    .runtime_parent_invocation(invocation.into_runtime_invocation())
+                    .build()
+                    .into_runtime();
+                    fixture
+                        .lock()
+                        .await
+                        .assign_one(index, turn, execution)
+                        .await
+                        .map_err(|error| {
+                            let failure = error.to_exec_code_failure();
+                            CheckpointAssignmentError::Execution {
+                                reason: failure.reason,
+                                message: failure.message,
+                            }
+                        })
+                }
+            });
+        let factory: Arc<dyn lash_core::plugin::PluginFactory> =
+            Arc::new(lash_core::plugin::StaticPluginFactory::new(
+                lash_core::plugin::PluginDeclaration::initial("checkpoint_benchmark"),
+                spec,
+            ));
+        let core = super::super::harness::checkpoint_benchmark_core(
+            backend.clone(),
+            Arc::clone(&factory),
+        )?;
+        let session_id = SessionId::fixture(format!("checkpoint-worker-{}", uuid::Uuid::new_v4()));
+        let creation = lash::SessionCreation::root(lash::SessionSpec::new(
+            "mock-model",
+            lash::TurnBudget::Unbounded,
+            lash::MaxToolCalls::new(1024),
+        ));
+        core.session(session_id.clone()).create(creation).await?;
+        core.shutdown().await?;
+        Ok(Self {
+            fixture,
+            backend,
+            factory,
+            session_id,
+        })
+    }
+
+    pub(super) async fn assign(&self, index: usize, turn: usize) -> anyhow::Result<()> {
+        // The structural work collector is process-wide. Join the served
+        // node before capture so task settlement cannot enter its hash samples.
+        let core = super::super::harness::checkpoint_benchmark_core(
+            self.backend.clone(),
+            Arc::clone(&self.factory),
+        )?;
+        let session = core.session(self.session_id.clone()).open().await?;
+        let answer = session
+            .plugin_operations()
+            .run_task::<AssignCheckpointBinding>((index, turn))
+            .await;
+        let close = session.close().await;
+        let shutdown = core.shutdown().await;
+        answer?;
+        close?;
+        shutdown?;
+        Ok(())
+    }
+
+    pub(super) async fn capture(
+        &self,
+    ) -> Result<lash_core::plugin::ExecutionStateCapture, lash_core::SessionError> {
+        self.fixture.lock().await.capture().await
+    }
+
+    pub(super) async fn acknowledge_capture(&self) {
+        self.fixture.lock().await.acknowledge_capture();
+    }
 }
 
 pub(super) async fn run_once_checkpoint_state_hot_paths(
@@ -133,15 +271,12 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
     let scenario = RuntimePerfScenario::CheckpointStateHotPaths;
     let mut run = RunRecorder::start(scenario, chat_turns);
 
-    let (mut fixture, artifacts, store, mut runtime_state) = run
+    let (fixture, store, mut runtime_state) = run
         .build(async {
             // Cells run on the production effect controller over a memory
             // store set; their captured state is what is measured.
-            let artifacts = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
-            let artifacts_backend = artifacts.clone();
-            let fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
+            let fixture = CheckpointBindingFixture::new(
                 std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-                &artifacts_backend,
                 CHECKPOINT_STATE_BINDINGS,
                 CHECKPOINT_STATE_BODY_BYTES,
             )
@@ -159,7 +294,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                     &runtime_state.session_id,
                 ))
                 .await?;
-            Ok((fixture, artifacts, store, runtime_state))
+            Ok((fixture, store, runtime_state))
         })
         .await?;
 
@@ -189,7 +324,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             );
             let initial_result = store.commit_runtime_state(initial_commit).await?;
             runtime_state.apply_persisted_commit_result(initial_result);
-            fixture.acknowledge_capture();
+            fixture.acknowledge_capture().await;
             Ok((initial_component_count, initial_capture_phase))
         })
         .await?;
@@ -198,14 +333,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
     let mut last_changed_components = 0_u64;
     let mut last_hydrated_bytes = 0_u64;
     for turn_index in 0..chat_turns {
-        assign_checkpoint_binding(
-            &mut fixture,
-            &artifacts,
-            &runtime_state.session_id,
-            turn_index,
-            turn_index,
-        )
-        .await?;
+        fixture.assign(turn_index, turn_index).await?;
         run.turn(
             turn_index,
             async {
@@ -222,7 +350,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
                 fixture.capture().await.map_err(anyhow::Error::from)
             }).await?;
         phase_profile.insert(phase.0, phase.1);
-        fixture.acknowledge_capture();
+        fixture.acknowledge_capture().await;
         if snapshot.root().is_none() {
             anyhow::bail!("incremental checkpoint capture omitted its root");
         }

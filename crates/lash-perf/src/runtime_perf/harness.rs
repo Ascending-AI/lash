@@ -25,7 +25,6 @@ use super::providers::{
 };
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
 use super::store::{RuntimePerfStore, RuntimePerfStoreFactory, RuntimePerfStoreMetrics};
-use backend::PerfBackend;
 pub(crate) use backend::{durable_backend, sqlite_memory_stores};
 
 const HISTORY_EXCHANGES: usize = 18;
@@ -197,9 +196,6 @@ impl TurnEntry {
 
 pub(crate) struct BenchmarkRuntime {
     turn_entry: TurnEntry,
-    /// The lane's deployment worker probes: the deployment's worker is not
-    /// the session's runtime.
-    process_phase_probes: Option<lash::testing::RuntimeTurnPhaseProbeSlot>,
     core: BenchmarkCore,
     session: Option<lash::LashSession>,
     store: Option<Arc<RuntimePerfStore>>,
@@ -336,9 +332,6 @@ impl BenchmarkRuntime {
         probe: Arc<dyn lash::testing::RuntimeTurnPhaseProbe>,
     ) {
         let session = self.session.as_ref().expect("benchmark session");
-        if let Some(slot) = &self.process_phase_probes {
-            slot.set_for_session(session.session_id(), Arc::clone(&probe));
-        }
         session.set_turn_phase_probe(probe).await;
     }
 
@@ -832,16 +825,34 @@ fn benchmark_plugin_factories(
 /// The in-process lane: lash's durable engine over a fresh SQLite memory
 /// store set, its session catalog behind the perf store decorator.
 struct InProcessLane {
-    backend: PerfBackend,
+    backend: lash::Backend,
     stores: RuntimePerfStoreFactory,
 }
 
+fn measured_stores(
+    stores: Arc<dyn lash_core::StoreSet>,
+    catalog: Arc<dyn lash_core::DeploymentStore>,
+    metrics: Arc<RuntimePerfStoreMetrics>,
+    measure_commit_bytes: bool,
+) -> Arc<dyn lash_core::StoreSet> {
+    lash_core::testing::runtime_helpers::LayeredStores::over(stores)
+        .map_session_store_factory(|_| catalog)
+        .map_durable_store(|inner| {
+            Arc::new(super::store::RuntimePerfDurableStore {
+                inner,
+                metrics,
+                measure_commit_bytes,
+            })
+        })
+        .into_store_set()
+}
+
 async fn in_process_lane() -> anyhow::Result<InProcessLane> {
-    let engine = durable_backend(Arc::new(sqlite_memory_stores().await?))?;
-    let stores = RuntimePerfStoreFactory::decorating_without_commit_measurement(
-        engine.session_store_factory(),
-    );
-    let backend = PerfBackend::over(engine).with_catalog(Arc::new(stores.clone()));
+    let raw: Arc<dyn lash_core::StoreSet> = Arc::new(sqlite_memory_stores().await?);
+    let stores =
+        RuntimePerfStoreFactory::decorating_without_commit_measurement(raw.session_store_factory());
+    let layered = measured_stores(raw, Arc::new(stores.clone()), stores.metrics(), false);
+    let backend = durable_backend(layered)?;
     Ok(InProcessLane { backend, stores })
 }
 
@@ -860,7 +871,6 @@ pub(crate) async fn build_embed_core(
     scenario: RuntimePerfScenario,
 ) -> anyhow::Result<(BenchmarkCore, RuntimePerfStoreFactory, TurnEntry)> {
     let InProcessLane { backend, stores } = in_process_lane().await?;
-    let backend: lash::Backend = backend.into();
     let effect_host = lash::runtime::ActorContext::detached(backend.clone());
     let provider = benchmark_provider(scenario).into_handle();
     let core = match scenario.execution_mode() {
@@ -919,7 +929,7 @@ pub(crate) async fn build_runtime(
         backend: perf_backend,
         stores: store_factory,
     } = in_process_lane().await?;
-    let backend: lash::Backend = perf_backend.into();
+    let backend = perf_backend;
     let effect_host = lash::runtime::ActorContext::detached(backend.clone());
     let settlement_control = scenario
         .settlement_children()
@@ -988,7 +998,6 @@ pub(crate) async fn build_runtime(
     Ok(BenchmarkRuntime {
         store_metrics: store_factory.metrics(),
         turn_entry: TurnEntry::Durable,
-        process_phase_probes: None,
         core,
         session: Some(session),
         store: Some(store),
@@ -1150,24 +1159,26 @@ pub(crate) async fn build_runtime_with_sqlite_store(
             .await
             .map_err(|err| anyhow::anyhow!(err.to_string()))?,
     );
-    let engine = durable_backend(stores)?;
     let (store_factory, store_metrics): (
         Arc<dyn lash_core::DeploymentStore>,
         Arc<RuntimePerfStoreMetrics>,
-    ) = if !wiring.measure_commit_bytes {
-        // Store-reopen scenarios keep the backend's own catalog: they
-        // measure reopen, not decorated durable commits.
-        (
-            engine.session_store_factory(),
-            Arc::new(RuntimePerfStoreMetrics::default()),
-        )
-    } else {
-        let factory = RuntimePerfStoreFactory::decorating(engine.session_store_factory());
+    ) = if wiring.measure_commit_bytes {
+        let factory = RuntimePerfStoreFactory::decorating(stores.session_store_factory());
         let metrics = factory.metrics();
         (Arc::new(factory), metrics)
+    } else {
+        (
+            stores.session_store_factory(),
+            Arc::new(RuntimePerfStoreMetrics::default()),
+        )
     };
-    let backend = PerfBackend::over(engine);
-    let backend: lash::Backend = backend.with_catalog(Arc::clone(&store_factory)).into();
+    let layered = measured_stores(
+        stores,
+        Arc::clone(&store_factory),
+        Arc::clone(&store_metrics),
+        wiring.measure_commit_bytes,
+    );
+    let backend = durable_backend(layered)?;
     let effect_host = lash::runtime::ActorContext::detached(backend.clone());
     for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
         plugin_stack.push(factory);
@@ -1183,7 +1194,6 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     Ok(BenchmarkRuntime {
         store_metrics,
         turn_entry: TurnEntry::Durable,
-        process_phase_probes: None,
         core,
         session: Some(session),
         store: None,
@@ -1195,6 +1205,24 @@ pub(crate) async fn build_runtime_with_sqlite_store(
 }
 
 /// A benchmark core on a durable backend, with the lane's plugin stack.
+pub(crate) fn checkpoint_benchmark_core(
+    backend: lash::Backend,
+    factory: Arc<dyn PluginFactory>,
+) -> anyhow::Result<LashCore> {
+    let mut plugins = runtime_perf_plugin_stack(false, true);
+    plugins.push(factory);
+    Ok(benchmark_standard_builder(
+        backend,
+        benchmark_provider(RuntimePerfScenario::Standard).into_handle(),
+    )
+    .with_explicit_ephemeral_facets()
+    .plugins(plugins)
+    .build(lash::persistence::LeaseOwnerIdentity::opaque(
+        format!("checkpoint-worker-{}", uuid::Uuid::new_v4()),
+        uuid::Uuid::new_v4().to_string(),
+    ))?)
+}
+
 fn durable_benchmark_core(
     backend: lash::Backend,
     mode_id: ExecutionMode,

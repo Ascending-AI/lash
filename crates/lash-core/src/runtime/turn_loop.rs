@@ -162,6 +162,10 @@ impl LashRuntime {
     /// Install explicitly unstable internal instrumentation for this runtime.
     #[doc(hidden)]
     pub fn set_turn_phase_probe(&mut self, probe: Arc<dyn RuntimeTurnPhaseProbe>) {
+        self.host.core.turn_phase_probes.set_for_scope(
+            &crate::SessionScope::new(self.state.session_id.clone()),
+            Arc::clone(&probe),
+        );
         self.turn_phase_probe = Some(probe);
     }
 

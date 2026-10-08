@@ -4,17 +4,17 @@ use lash_sansio::SessionId;
 #[derive(Clone, Copy)]
 enum WriterContentionOperation {
     Configure,
-    ProcessRefresh,
+    AppendMessages,
     SecondTurn,
 }
 
 impl WriterContentionOperation {
-    const ALL: [Self; 3] = [Self::Configure, Self::ProcessRefresh, Self::SecondTurn];
+    const ALL: [Self; 3] = [Self::Configure, Self::AppendMessages, Self::SecondTurn];
 
     fn name(self) -> &'static str {
         match self {
             Self::Configure => "configure",
-            Self::ProcessRefresh => "process_refresh",
+            Self::AppendMessages => "append_messages",
             Self::SecondTurn => "second_turn",
         }
     }
@@ -44,7 +44,7 @@ async fn run_writer_operation(
             let outcome = config
                 .apply(
                     lash::config::ConfigWrite::new(
-                        format!("perf-contention:{ordinal}:{revision}"),
+                        format!("perf-contention:{ordinal}:{}", uuid::Uuid::new_v4()),
                         revision,
                     ),
                     lash::config::ConfigTransaction::of(lash::config::SetTurnBudget {
@@ -60,8 +60,15 @@ async fn run_writer_operation(
                 "writer contention config transaction was refused: {outcome:?}"
             );
         }
-        WriterContentionOperation::ProcessRefresh => {
-            session.refresh_background_graph().await?;
+        WriterContentionOperation::AppendMessages => {
+            session
+                .admin()
+                .state()
+                .append_messages(vec![lash_core::PluginMessage::text(
+                    lash_core::MessageRole::User,
+                    "writer contention append",
+                )])
+                .await?;
         }
         WriterContentionOperation::SecondTurn => {
             let turn = turn_entry
@@ -595,7 +602,6 @@ mod contention_tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore = "FIG-5342: a same-session waiter completes while the held turn runs"]
     async fn writer_contention_smoke_reports_wait_release_latency_and_execution() {
         let result = Box::pin(run_once_writer_contention(
             RuntimePerfScenario::WriterContention2Workers,
@@ -603,6 +609,10 @@ mod contention_tests {
         ))
         .await
         .expect("writer contention smoke");
+        eprintln!(
+            "PERF_SCENARIO {}",
+            serde_json::to_string(&result).expect("serialize measurement")
+        );
         for scope in ["same_session", "many_sessions"] {
             for phase in ["wait_ms", "release_latency_ms", "execution_ms"] {
                 assert!(
@@ -615,7 +625,6 @@ mod contention_tests {
     }
 
     #[tokio::test]
-    #[ignore = "FIG-5342: the settlement scenario opens no child span on the served node"]
     async fn async_settlement_smoke_drains_every_open_child_span() {
         let result = Box::pin(run_once_async_process_settlement(
             RuntimePerfScenario::AsyncProcessSettlement2Children,
@@ -623,6 +632,10 @@ mod contention_tests {
         ))
         .await
         .expect("async settlement smoke");
+        eprintln!(
+            "PERF_SCENARIO {}",
+            serde_json::to_string(&result).expect("serialize measurement")
+        );
 
         assert!(result.extra_counters["async_settlement.open_spans_before_settle"] >= 2);
         assert_eq!(
