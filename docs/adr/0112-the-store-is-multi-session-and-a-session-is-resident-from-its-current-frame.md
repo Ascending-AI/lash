@@ -314,9 +314,8 @@ A compaction's identity includes its window and token inputs, so resume
 must preserve those inputs.
 
 Evidence: `crates/lash-store-sql/src/session/graph_nodes.rs`,
-`crates/lash-store-sql/src/session/usage_delta_holes.rs`,
 `crates/lash-store-sql/src/session/turn_commits.rs`, and
-`crates/lash-core-store/src/session_graph_window.rs:12`.
+`crates/lash-core-store/src/session_graph_window.rs`.
 
 ### 12. Window load helpers
 
@@ -343,8 +342,9 @@ reopen, refresh or read-view context; `PAGED` entries name explicit page
 reads. It also rejects unbounded load and tree entry points. A new history
 reader requires a reviewed entry and matching count.
 
-Evidence: `crates/lash-core-store/src/store/history_gate_tests.rs:4` and
-`scripts/check-history-readers.sh:14`.
+Reader inventory check: `scripts/check-history-readers.sh` and its
+`scripts/history-reader-allowlist.txt` entries. The former history-gate unit
+test is retired; the check's source is not a record of execution.
 
 ### 14. Executable evidence
 
@@ -372,10 +372,11 @@ tests reject malformed bases, pointers, parent edges and stored body sizes.
 
 #### 14.4 Admitted resume
 
-`crates/lash-conformance/src/conformance/frame_open_redrive/adversarial.rs`
-and `crates/lash-core/tests/runtime/tests/turns/frame_residency.rs` exercise
-admitted frame state across resume and frame switches. The resident graph
-and compaction identity must agree with the admitted window.
+Admitted frame loading is implemented in
+`crates/lash-core/src/runtime/durable/session.rs` (`TurnRestore`). The former
+frame-open adversarial and runtime residency test registrations are retired;
+this implementation citation is not their proof. The resident graph and
+compaction identity must agree with the admitted window.
 
 #### 14.5 Paging and cursor stability
 
@@ -386,13 +387,13 @@ and ancestry confirmation within one snapshot.
 
 #### 14.6 Compaction and `continue_as` residency
 
-`crates/lash-core/tests/runtime/tests/turns/frame_residency.rs` exercises
-explicit compaction, context-pressure frames and `continue_as`, checking
-frame switches and receipt-time trimming without a history reload. The
-facade test `overflow_recovery_starts_a_frame_without_a_reload` covers
-overflow recovery. `pressure_compaction_opens_a_summary_frame_the_turn_continues_in`
-covers pressure compaction in that same facade test file,
-`crates/lash/src/tests/standard_compaction_persistence.rs:209`, `:642`.
+The former runtime residency and successful-overflow registrations are retired.
+`explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in` checks
+the summary frame and its reuse by the next turn.
+`threshold_continue_as_extends_the_pre_switch_durable_leaf` checks the
+threshold-crossing turn's ancestry. Both live in
+`crates/lash/src/tests/standard_compaction_persistence.rs`; neither is a
+replacement proof for every retired residency or overflow case.
 
 #### 14.7 Shared projection identity
 

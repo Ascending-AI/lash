@@ -1,8 +1,9 @@
 # Cutting 1.0
 
-Main owns the version-independent preparation from FIG-4802: fixture
-generators, refusal witnesses, generation-keyed replay, capture checks,
-strict-gate tooling and empty production migration catalogs. The version
+Main retains version-independent preparation from FIG-4802, including
+fixture generators, refusal witnesses, strict-gate tooling and production
+migration catalogs. Tagged capture and verification are currently unavailable
+as described below. The version
 freeze remains in force. The cut resets counters and artifacts, changes the
 release channel, activates required gates and captures the tagged corpus.
 
@@ -51,8 +52,8 @@ commit. Comparing the reset with pre-cut main intentionally refuses counters
 moving backwards.
 
 ```sh
-kiln gate lash <fork> -- bash scripts/ci/version-bump-gate.sh HEAD <reset-sha>
-kiln gate lash <fork> -- bash scripts/ci/version-bump-gate.sh HEAD
+kiln gate lash <fork> -- scripts/ci/version-bump-gate.sh HEAD <reset-sha>
+kiln gate lash <fork> -- scripts/ci/version-bump-gate.sh HEAD
 ```
 
 With no v1 tag, the second command checks the initial release baseline. After
@@ -71,18 +72,16 @@ has no GitHub workflow or release precondition.
 
 The release workflow owns the tag. The release owner certifies the exact main
 SHA before publication; preparation workers do not dispatch CI or create the
-release tag. At the tagged checkout, capture into an empty destination:
+release tag.
 
-```sh
-kiln gate lash <fork> -- just release-fixtures-capture v1.0.0 fixtures/release/v1.0.0
-kiln gate lash <fork> -- python3 scripts/verify_release_fixtures.py fixtures/release/v1.0.0
-kiln gate lash <fork> -- just release-fixtures-read-back fixtures/release/v1.0.0
-```
+Tagged capture is a release requirement that cannot currently run: the capture
+recipe and module are absent, while the retained verifier and read-back reader
+import that missing module. Do not run those entrypoints as proof or claim that
+a tagged corpus has been certified. The [release-fixture guide](../agents/release-fixtures.md)
+describes the current gap, and [ADR 0115 §6](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md#6-current-format-evidence-and-release-proof-gaps)
+separates actor-format laws from release-upgrade proof.
 
-Capture refuses a different tag, changed committed generator outputs and mixed
-generations. Use the workspace Kiln feature graph for capture and replay. The
-manifest names the exact source commit; each journal records its generation
-and ordered entries.
-
-Commit the tagged corpus. Remove rehearsal inputs from required job selection.
-The tagged corpus is immutable.
+Before the cut can capture a corpus, separate implementation work must restore
+a tagged writer, verification and read-back. The resulting manifest must name
+the exact source commit. Commit only that tagged corpus, remove rehearsal
+inputs from required job selection, and keep tagged bytes immutable afterward.

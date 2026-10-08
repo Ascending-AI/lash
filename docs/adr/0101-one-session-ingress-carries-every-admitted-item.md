@@ -200,17 +200,15 @@ transaction, so its phase rows are retired like a turn run's; an operation
 run ends the same way once its task settled. A resumed operation run past its
 settling commit runs nothing and adopts the published head.
 
-Evidence: `crates/lash-core/src/runtime/shift/admission.rs:213`,
-`crates/lash-core/src/runtime/session_api.rs:1375`,
-`crates/lash-core/src/runtime/compact_context.rs:1`,
-`crates/lash-core/src/runtime/host_commands.rs:1`,
-`crates/lash-core/src/runtime/host_commands/task_cancel.rs:1`,
-`crates/lash-core/src/runtime/shift/run.rs` (`execute_commands_run`,
-`execute_operation_run`),
-`crates/lash-core-execution/src/runtime/effect/executor/control/task.rs`
-(`own_effect_controller_task`),
-`crates/lash/src/admin/host_commands.rs:1`, and
-`crates/lash-core-store/src/store/mod.rs:1354`.
+Evidence: `crates/lash-core/src/runtime/session_api.rs`,
+`crates/lash-core/src/runtime/compact_context.rs`,
+`crates/lash-core/src/runtime/host_commands.rs`,
+`crates/lash-core/src/runtime/host_commands/task_cancel.rs`,
+`crates/lash-core/src/runtime/durable/session.rs` (`SessionActivation`),
+`crates/lash-core/src/runtime/host_commands.rs`
+(`apply_plugin_operation_command`),
+`crates/lash/src/admin/host_commands.rs`, and
+`crates/lash-core-store/src/store/mod.rs`.
 
 ### 5. Ordering and composition
 
@@ -219,10 +217,9 @@ producer priority. Commands are a separate lane and do not establish a turn-lane
 stop. Clock values can bound age; they cannot decide order. Lash implements no
 authentication or security policy.
 
-Evidence: `crates/lash-core-store/src/store/admission_plan.rs:285`,
-`crates/lash-core/src/runtime/shift/admission.rs:289`,
-`crates/lash-core-execution/src/runtime/park.rs::turn_lane_head`, and
-`crates/lash-core-store/src/store/queued_work.rs:244`.
+Evidence: `crates/lash-core-store/src/store/admission_plan.rs`,
+`crates/lash-core/src/runtime/durable/session.rs`, and
+`crates/lash-core-store/src/store/queued_work.rs`.
 
 #### 5.1 Turn addressing is immutable intent
 
@@ -266,11 +263,11 @@ input carries neither. The default policy takes one row at a time, so each
 next-turn input is its own run and a cancel of one never reaches another.
 
 Evidence: `crates/lash-core-store/src/store/queued_work.rs`
-(`select_turn_work_indices`),
+(`select_leading_session_command`),
 `crates/lash-core-store/src/store/admission_plan.rs`
 (`plan_next_turn_input_admission`),
 `crates/lash-core-store/src/queued_drain_policy.rs`, and
-`crates/lash-conformance/src/conformance/queued_input_runs.rs`.
+`crates/lash-core/src/runtime/durable/session.rs` (`admit_turn`).
 
 One run answers every input it admits, at idle or at its checkpoints. Each
 input retains its own application evidence even when inputs share a run's
@@ -362,8 +359,8 @@ Work retained across a physical-turn follow-on carries its admitted rows and
 application evidence. Rendering and settlement consume the delivered set,
 rather than settling a whole container from only its first rendered item.
 
-Evidence: `crates/lash-core/src/runtime/logical_turn.rs:66`, and
-`crates/lash-core/src/runtime/turn_loop/commit.rs`.
+Evidence: `crates/lash-core/src/runtime/logical_turn.rs`, and
+`crates/lash-core/src/runtime/durable/head_commit.rs`.
 
 ### 12. Commands are idempotent by compare-and-set
 
@@ -406,13 +403,13 @@ and config compare-and-set.
 
 Store tiers are SQLite file, SQLite memory, and PostgreSQL. Laws run the
 production runtime over a fault-injecting store with labelled commits, a
-virtual clock and `SimNodes` (ADR 0132 §14). Upgrade proofs use
-synthetic-next. Evidence lives in
-`crates/lash-conformance/src/conformance/session_ingress.rs`,
-`crates/lash-conformance/src/conformance/shift_admission.rs`,
-`crates/lash-durable-test/tests/frame_switch_crash_proof.rs`,
-`crates/lash-conformance/src/conformance/cancelled_turn_withheld_input.rs`,
-and `crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs`.
+virtual clock and `SimNodes` (ADR 0132 §14). Current store laws live in
+`crates/lash-conformance/src/conformance/session_ingress.rs` and
+`crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs`.
+`crates/lash-durable-test/tests/frame_switch_crash_proof.rs` covers the
+switch/follow-on crash boundary. The former shift-admission and withheld-input
+registrations are retired; this list does not claim their full runtime matrix
+or a two-build upgrade proof.
 
 ### A1. The ingress is the only way a turn starts
 
@@ -444,8 +441,8 @@ Explicit control supports redrive, cancel, and fork. A park is neither a
 program failure nor a fabricated answer. Retry policy is recorded data under
 [ADR 0110](0110-the-engine-owns-process-recovery.md) and ADR 0132 §7.
 
-Evidence: `crates/lash-core/src/runtime/shift/admission.rs:112`, and
-`crates/lash-core-execution/src/runtime/park.rs`.
+Implementation: `crates/lash-core/src/runtime/durable/session.rs`
+(`SessionParkReason`) and `crates/lash/src/send.rs` (parked outcomes).
 
 ### A5. Session commands, and the session model as durable config
 
@@ -463,10 +460,11 @@ The capability refs a `RunSpec` names are recorded with the shape too, and
 reach the host's deferred tool resolver, with the session and the run, on
 every resolution the run asks for.
 
-Evidence: `crates/lash-core-store/src/session_policy.rs:125`,
+Evidence: `crates/lash-core-store/src/session_policy.rs`,
 `crates/lash-core-store/src/run_spec.rs`,
-`crates/lash-conformance/src/conformance/run_spec_shift.rs`, and
-`crates/lash-conformance/src/conformance/run_spec_tool_access.rs`.
+`crates/lash-conformance/src/conformance/runtime_persistence/run_specs.rs`.
+This is store-level run-spec evidence; the retired runtime registrations are
+not current proof of tool resolution across redrive.
 
 ### A6. Everything on a sent input is durable data
 

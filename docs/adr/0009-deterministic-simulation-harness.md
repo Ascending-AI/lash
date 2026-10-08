@@ -22,4 +22,4 @@ A custom deterministic executor is rejected because it adds a scheduling contrac
 
 Passing runs can use search mode without per-seed artifact packages. Failures produce trace, minimization and history evidence. Confidence selectors choose bounded search budgets under ADR 0008; a seed alone is insufficient to reconstruct a failed interleaving.
 
-[Engine composition](../../crates/lash-sim/src/backend.rs), [virtual clock](../../crates/lash-sim/src/clock.rs), [provider transport](../../crates/lash-sim/src/provider/transport.rs) and [backend fault vocabulary](../../crates/lash-sim/src/backend_fault.rs) implement these boundaries.
+[Engine composition](../../crates/lash-sim/src/backend.rs), [virtual clock](../../crates/lash-durable-test/src/clock.rs), [provider transport](../../crates/lash-sim/src/provider/transport.rs) and [backend fault vocabulary](../../crates/lash-sim/src/backend_fault.rs) implement these boundaries.

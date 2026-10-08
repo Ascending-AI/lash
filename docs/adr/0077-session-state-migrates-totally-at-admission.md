@@ -59,17 +59,21 @@ Durable format conversion belongs to the fleet finalize contract in
 registered lifts and migration guarantees of
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). Admission
 does not invent a converter for unsupported state or reset its contents.
-The production session marker is generation 3; the synthetic-next tier uses
-generation 4 to prove adjacent-format support. Neither admits snapshot-era
-session generations by guessing defaults.
+`CURRENT_SESSION_STATE_VERSION` is 1 in the ordinary build and 2 with
+`synthetic-next`, as declared in
+`crates/lash-core-store/src/store/state_version.rs`. The marker's admitted
+window, rather than historical cutover numbers, decides what a build reads.
+The pre-1.0 freeze changes shapes in place; equal numbers do not establish
+compatibility between development builds.
 
 ### Executable state remains pinned
 
 The marker does not translate a parked VM instruction pointer, heap or
 compiled artifact into another executable contract. A VM snapshot bound to an
 executable identity whose bytecode contract changed finishes on a node that
-reads it or is migrated, under ADR 0106 §1. Wire negotiation and
-physical-store admission also retain their own contracts.
+reads it or is refused under ADR 0106 §1. VM worker IPC admission and
+physical-store admission retain their own contracts. Host transport DTOs are
+host-owned under ADR 0136; the engine supplies typed local reads.
 
 ## Enforcement gates
 
@@ -97,7 +101,7 @@ validation, while fleet conversion owns supported format transitions.
 
 - `crates/lash-core-store/src/store/state_version.rs` defines marker admission, the fleet window, and the `SessionAdmissionWindow` descriptor.
 - `crates/lash/src/formats.rs` folds the session admission window into the build's format set.
-- `crates/lash-core/src/runtime/shift/admission.rs` gates run admission.
+- `crates/lash-core/src/runtime/durable/session.rs` gates run admission.
 - `crates/lash-sqlite-store/src/persistence/session_commit.rs` validates the fence.
 - `crates/lash-postgres-store/src/postgres/runtime_persistence/session_commit.rs` implements the same transaction.
 - `crates/lash-conformance/src/conformance/session_store_factory/state_version.rs` pins refusal ordering.

@@ -154,8 +154,8 @@ tick budget. They are not a throughput guarantee under an unbounded incoming
 queue. Simulation varies scheduling to exercise loss, retry and stalled
 delivery.
 
-Evidence: `crates/lash-core/src/runtime/shift/interval.rs` and
-`crates/lash-core/src/runtime/shift/lanes.rs`.
+Evidence: `crates/lash-core/src/runtime/obligations/interval.rs` and
+`crates/lash-core/src/runtime/obligations/relay.rs`.
 
 ## 2. Rationale
 
@@ -252,10 +252,10 @@ A stalled delete keeps its session closing until re-arm or deletion settles
 the work. Cleanup stalls use the same operator listing and re-arm as the other
 kind.
 
-Evidence: `crates/lash-core/src/runtime/session_close.rs`,
+Evidence: `crates/lash-core/src/runtime/durable/session_close.rs`,
 `crates/lash-core/src/runtime/session_delete.rs`,
 `crates/lash/src/core/session_deletion.rs` and
-`crates/lash-core-execution/src/runtime/process/scope_close.rs`.
+`crates/lash-core/src/runtime/durable/turn_scope.rs`.
 
 ## 5. Due time belongs to delivery
 
@@ -288,9 +288,11 @@ Obligation laws live in store conformance and backend tests. The store matrix
 is SQLite file, SQLite memory and PostgreSQL. Laws run the production runtime
 over a fault-injecting store with labelled commits, a virtual clock and
 `SimNodes` (ADR 0132 §14). Upgrade proofs use the synthetic-next tier. The
-session-delete finalizer is covered by
-`crates/lash/src/tests/core_session_builder/session_delete_finalizer.rs` and
-`crates/lash-sim/tests/session_delete_bounds.rs`.
+session-close implementation is
+`crates/lash-core/src/runtime/durable/session_close.rs`, and physical deletion
+is delivered by `crates/lash-core/src/runtime/session_delete.rs`. The former
+finalizer and simulated delete-bound registrations are retired; these source
+citations do not establish their latency or fault-matrix proof.
 
 ## 9. Corruption after a published answer is the session's fault
 
@@ -323,8 +325,8 @@ store. Accepted inputs stay accepted.
 operator repaired the data, and wakes the session actor.
 
 Evidence: `crates/lash-core-store/src/store/session_fault.rs`,
-`crates/lash-core/src/runtime/shift/scope_close.rs`,
-`crates/lash-core/src/runtime/shift/admission.rs`,
+`crates/lash-core/src/runtime/durable/turn_scope.rs`,
+`crates/lash-core/src/runtime/durable/session.rs`,
 `crates/lash/src/send/resolve.rs` and
 `crates/lash/src/tests/store_faults.rs`.
 

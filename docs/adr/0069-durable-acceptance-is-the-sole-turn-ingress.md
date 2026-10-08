@@ -183,22 +183,23 @@ execution's identity or recording another input.
 
 ## Executable evidence
 
-- [Send acceptance](../../crates/lash/src/send.rs#L351),
-  [host id](../../crates/lash/src/send.rs#L254) and
-  [durable-session send](../../crates/lash/src/durable_session.rs#L212)
+- [Send acceptance](../../crates/lash/src/send.rs),
+  [host id](../../crates/lash/src/send.rs) and
+  [durable-session send](../../crates/lash/src/durable_session.rs)
   implement facade ingress.
-- [Digest and id verdict](../../crates/lash-core-store/src/store_backend_support/turn_input_batch.rs#L35)
+- [Digest and id verdict](../../crates/lash-core-store/src/store_backend_support/turn_input_batch.rs)
   implements existing/new admission and typed conflicts.
-- [Child-session acceptance](../../crates/lash-core/src/runtime/turn_loop/accept.rs#L169)
+- [Child-session acceptance](../../crates/lash-core/src/runtime/session_manager/session_init.rs)
   provisions its admission.
-- [Recorded run admission](../../crates/lash-core/src/runtime/shift/run.rs#L1)
-  and [store composition](../../crates/lash-core/src/runtime/shift/run.rs#L713)
-  preserve the exact admitted set and base across recovery.
-- [Settlement and release SQL](../../crates/lash-store-sql/src/turn_ingress/pending_inputs.rs#L212)
+- [Recorded run admission and restore](../../crates/lash-core/src/runtime/durable/session.rs)
+  preserve the admitted set across recovery; [store composition](../../crates/lash-core-store/src/store/admission_plan.rs)
+  selects that set before it is recorded.
+- [Settlement and release SQL](../../crates/lash-store-sql/src/turn_ingress/pending_inputs.rs)
   binds settlement to the run and releases bindings at terminality.
-- [Acceptance laws](../../crates/lash-conformance/src/conformance/direct_turn_acceptance.rs#L1)
-  and the [turn crash matrix](../../crates/lash-conformance/src/conformance/turn_crash_matrix/after_commit_redrive.rs#L1)
-  cover admission, resume and commit acknowledgement.
+- [Ingress integrity laws](../../crates/lash-conformance/src/conformance/runtime_persistence/ingress_integrity.rs)
+  cover retained submission identity and settlement at the store boundary.
+  The former direct-acceptance and turn-crash registrations are retired;
+  their presence in earlier revisions is not current runtime proof.
 - Store laws run on SQLite file, SQLite memory and PostgreSQL. Laws run the
   production runtime over a fault-injecting store with labelled commits, a
   virtual clock and `SimNodes` (ADR 0132 §14). Upgrade proofs use the

@@ -155,7 +155,7 @@ Neither tool signals processes or clears caches. For example, in an owned fork:
 ```sh
 python3 tools/buck2/benchmarks/measure.py --repo "$PWD" \
   --result /tmp/lash-build-metrics.json --log /tmp/lash-build.log -- \
-  bash scripts/hermetic-build.sh build //crates/lash-store-sql:lash-store-sql --jobs 2
+  scripts/hermetic-build.sh build //crates/lash-store-sql:lash-store-sql --jobs 2
 ```
 
 The first matched workspace-analysis observations used the owning Kiln CLI,
@@ -310,7 +310,7 @@ Tracked runnable commands no longer try to execute Buck2 test wrappers through
 `kiln run`; source-writing generators use their supported Cargo recipes.
 
 Focused fake-CLI contracts, duration parsing, release-fixture caller tests,
-Just parsing, shell syntax and pre-commit checks passed for these repairs. They
+Just parsing, script syntax and pre-commit checks passed for these repairs. They
 did not invoke Buck2, Cargo compilation or NativeLink. The combined candidate
 now includes graph commit `e79c1a22bc46953134b4154776747e1547b648bb` and
 caller commit `fa173b178e3d57e3b5976af250b66b11acd6e64a`. The subsequent

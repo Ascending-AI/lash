@@ -215,7 +215,7 @@ installed without them.
 - `crates/lash-core-execution/src/plugin/recorded_callbacks.rs` records before-turn and deferred result-check callbacks.
 - `crates/lash-core/src/runtime/turn_driver/after_turn.rs` runs a finished turn's after-turn callbacks; their decisions and staged state commit in its `turn.commit` (FIG-5283).
 - `crates/lash-core-execution/src/plugin/transition.rs` defines complete transitions and checkpoint native views.
-- `crates/lash-core/src/runtime/shift/plugin_transition.rs` prepares and publishes the session transition.
+- `crates/lash-core/src/runtime/plugin_transition.rs` prepares and publishes the session transition.
 - `crates/lash-core/src/runtime/process_runtime.rs` adopts a process's recorded transition.
 - `crates/lash-core-execution/src/plugin/runtime_impl.rs` reconstructs read-only capabilities.
 - `crates/lash-core-store/src/session_state.rs` captures the checkpoint components.

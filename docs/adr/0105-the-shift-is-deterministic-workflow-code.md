@@ -150,10 +150,9 @@ owner. A run commit can still meet a moved head when another writer of the
 same epoch advanced it. That commit ends its run with `StoreCommitSuperseded`
 and never wedges; the resume that reloads the head is a new run.
 
-Evidence: `crates/lash-core/src/runtime/shift/admission.rs`,
-`crates/lash-core-store/src/store/head_ownership.rs`,
-`crates/lash-core/src/runtime/shift/run.rs`,
-`crates/lash-core/src/runtime/shift.rs`.
+Evidence: `crates/lash-core/src/runtime/durable/session.rs`,
+`crates/lash-core-store/src/store/head_ownership.rs`, and
+`crates/lash-core/src/runtime/durable/head_commit.rs`.
 
 ### 3. Cancel races and losing work
 
@@ -254,9 +253,8 @@ operations still need stable idempotency identities; a store fence cannot
 retract a request already sent.
 
 Evidence: `crates/lash-core/src/runtime/turn_boundary.rs`,
-`crates/lash-core/src/runtime/turn_loop/commit.rs`,
-`crates/lash-core/src/runtime/shift/park.rs`,
-`crates/lash-core/src/runtime/shift.rs`,
+`crates/lash-core/src/runtime/durable/head_commit.rs`,
+`crates/lash-core/src/runtime/durable/session.rs`,
 `crates/lash-core-store/src/store/runtime_commit.rs`.
 
 ### 10. Commands and executors

@@ -139,7 +139,9 @@ local disk. A host that needs hard isolation (an OS kill and reap, adoption of
 a live worker across host loss) builds it into its own `ProcessEngine`,
 together with whatever durable ownership that requires.
 
-Evidence: `crates/lash/src/tests/isolated_tool_route.rs`.
+Implementation: `crates/lash-core-execution/src/runtime/actor/process/driver.rs`
+and `crates/lash-core-execution/src/tool_dispatch/production/round.rs`.
+The former isolated-route test registration is retired.
 
 ## Consequences
 

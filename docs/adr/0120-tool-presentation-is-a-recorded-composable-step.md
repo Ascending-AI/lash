@@ -62,7 +62,7 @@ committed state; a recorded-state or material refusal is never fallback model
 text. Optional-step fallback remains the plugin-composition policy, not a
 repair for a resume failure.
 
-Sources: `crates/lash-core-execution/src/tool_dispatch/run_coordinator/drain.rs`,
+Sources: `crates/lash-core-execution/src/runtime/actor/round/lifecycle.rs`,
 `crates/lash-core-execution/src/tool_dispatch/production/settlement.rs`
 and `crates/lash-core-execution/src/runtime/effect/tool_presentation.rs`.
 

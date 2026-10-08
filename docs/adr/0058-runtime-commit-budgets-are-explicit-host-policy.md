@@ -132,11 +132,11 @@ changes without changing what the commit means.
 
 ## Code evidence
 
-- [Required policy and row measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L24).
-- [Logical-byte measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L290).
-- [Created-head measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L246).
-- [Measured creation](../../crates/lash-core-store/src/store/catalog.rs#L91).
-- [A stranded command stops its shift](../../crates/lash-core-execution/src/engine/shift.rs#L224).
-- [Verified realization](../../crates/lash-core-store/src/store/realization.rs#L8).
-- [Host attachment configuration](../../crates/lash/src/core.rs#L841).
-- [Physical-operation timing](../../crates/lash-perf/src/runtime_perf/store.rs#L1).
+- [Required policy and row measurement](../../crates/lash-core-store/src/store/commit_budget.rs).
+- [Logical-byte measurement](../../crates/lash-core-store/src/store/commit_budget.rs).
+- [Created-head measurement](../../crates/lash-core-store/src/store/commit_budget.rs).
+- [Measured creation](../../crates/lash-core-store/src/store/catalog.rs).
+- [A stranded command stops its shift](../../crates/lash-core/src/runtime/host_commands.rs).
+- [Verified realization](../../crates/lash-core-store/src/store/realization.rs).
+- [Host attachment configuration](../../crates/lash/src/core.rs).
+- [Physical-operation timing](../../crates/lash-perf/src/runtime_perf/store.rs).

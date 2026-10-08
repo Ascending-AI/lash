@@ -180,7 +180,7 @@ choose Require. This policy checks tool restoration, not every condition
 needed to run a turn.
 
 Sources: `crates/lash-core/src/runtime/tool_restore.rs` and
-`crates/lash-core/src/runtime/shift/plugin_transition.rs`.
+`crates/lash-core/src/runtime/plugin_transition.rs`.
 
 ### Host tool administration is durable
 
@@ -251,7 +251,7 @@ that executes the session's runs (FIG-4202). An open that cannot reconcile
 its tools and run turns is never the runtime that runs the session's turns.
 
 Sources: `crates/lash/src/session.rs` (`open_resolved`) and
-`crates/lash/src/core/session_shifts.rs` (`shift_runtime`).
+`crates/lash-core/src/runtime/durable/services.rs` (`RuntimeTurnServices`).
 
 ## Consequences
 

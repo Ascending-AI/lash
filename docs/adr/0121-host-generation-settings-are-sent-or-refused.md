@@ -129,8 +129,7 @@ never that the provider complied. The receipt includes `reasoning`,
 `OmittedUnsupported` applies only to the `cache` row. That row reports
 prompt-cache breakpoints placed by the protocol, not a host setting.
 
-**Recorded policy shapes are strict.** `ReasoningCapability` and its
-remote mirror deny unknown fields, so a persisted `default_effort`, `aliases`
+**Recorded policy shapes are strict.** `ReasoningCapability` denies unknown fields, so a persisted `default_effort`, `aliases`
 or encoded `disable` fails to load rather than being ignored. An `OpenAiCompat`
 naming `reasoning_format` is refused the same way. The receipt decoder
 refuses an `omitted_sampling_pinned` outcome.

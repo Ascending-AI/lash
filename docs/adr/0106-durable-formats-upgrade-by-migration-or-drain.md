@@ -16,8 +16,9 @@ cannot decode does. SQLite storage belongs to one host and upgrades by closing
 the serving build before the next one opens the database. Compatibility needs
 distinct rules for shared values, immutable history, identities and in-flight
 state.
-The current code supplies those mechanisms and proves upgrades through the
-synthetic-next tier; the freeze supplies no compatibility between arbitrary
+The current code declares compatibility ranges and synthetic-next surfaces;
+these declarations alone are not a two-build upgrade proof (ADR 0115 §6).
+The freeze supplies no compatibility between arbitrary
 pre-1.0 builds.
 
 ## Decision
@@ -120,7 +121,7 @@ manifests. Engine-state formats are declared by their process engines.
 | Derived workflow graph and type facets | Their declared read ranges and projection policy. |
 | Content addresses and idempotency families | Preserve stored identity preimages; admit the declared family rather than re-derive an old identity with a new family. |
 | Turn checkpoints, VM snapshots, Run records, wait rows, outcome materials and engine state | The actor's format set, the claim filter and drain by release (§1); 1.0 decode-and-resume fixtures. |
-| Release fixtures | Capture by release tag; synthetic-next supplies the current upgrade proof. |
+| Release fixtures | Tagged capture is a release requirement; the capture workflow is currently unavailable (ADR 0115 §6). |
 
 Session-state admission validates the session actor's epoch in the store
 transaction, reads the independent version marker, and returns the session id,
@@ -132,7 +133,8 @@ reader still enforces its own surface window, as specified by
 Some surfaces have an exact range until a compatibility change supplies its
 predecessor conversion. A registry policy does not grant blanket additive
 compatibility. The freeze changes normal shapes in place; synthetic-next
-widens the selected ranges and registries for executable upgrade evidence.
+widens the selected ranges and registries for successor-format testing;
+that does not establish an executed rolling-upgrade or rollback choreography.
 
 Evidence: `scripts/discover_version_surfaces.py`,
 `scripts/check_format_registry.py`,
@@ -190,8 +192,8 @@ Shared `PostgresStorage` clones use the same pool; independently opened pools
 add to the process total. A rollback choreography can retain three builds,
 so its declaration budgets three. `lashctl preflight` accepts all five budget
 terms and checks the live server's capacity and reserved connections before
-the roll. The [rolling runbook](../../runbooks/rolling-upgrade/runbook.md#postgresql-connection-budget)
-states the operator declaration.
+the roll (`crates/lash-postgres-store/src/connection_budget.rs`). The former
+rolling-upgrade runbook is retired; preflight alone is not rolling proof.
 
 Evidence: `crates/lash-postgres-store/src/postgres/migrate.rs`,
 `crates/lash-sqlite-store/src/migration.rs`,
@@ -211,13 +213,13 @@ pending cancel ends it engine-free; the fleet-format law requires that a newer
 set is not written while an older node is live. The 1.0 decode-and-resume
 fixtures commit encoded state in every format of the build's sets, and a
 check requires a fixture for every format id. Format-registry checks validate
-policy declarations; release fixture capture writes `fixtures/release/<tag>/`.
+policy declarations. Tagged-release capture is unavailable; see the
+[release-fixture evidence gap](../agents/release-fixtures.md).
 
 Evidence: `crates/lash-durable/src/laws/formats.rs`,
 `crates/lash-durable-test/tests/drain_by_release.rs`,
 `crates/lash-durable-test/tests/format_fixtures.rs`,
 `crates/lash-core-execution/src/runtime/actor/process_laws.rs`,
-`scripts/capture_release_fixtures.py`,
 `scripts/check_format_registry.py`.
 
 ### 7. What stays fail-closed
@@ -236,9 +238,10 @@ Evidence: `crates/lash-core-store/src/compat.rs`,
 
 ### 8. The release boundary
 
-The current tree carries compatibility descriptors, writer pins, migration
-runners and fixture capture. Synthetic-next supplies a
-successor format and schema for proving them. The normal build remains under
+The current tree carries compatibility descriptors, writer pins and migration
+runners. Synthetic-next supplies successor format and schema declarations.
+Tagged fixture capture is unavailable, and the retained read-back recipe
+cannot import its verifier's missing capture definitions. The normal build remains under
 the version freeze. The 1.0 cut owns the release baseline, strict version and
 upgrade gates, the baseline migration catalog, fixture capture at `v1.0.0`,
 and the fixture read-back target. ADR 0115 specifies that cut; the presence of
@@ -246,8 +249,8 @@ its mechanisms here does not make a pre-1.0 build a compatibility release.
 
 Evidence: `crates/lash-core-store/src/store/fleet_format.rs`,
 `crates/lash-sqlite-store/src/migration.rs`,
-`crates/lash-postgres-store/src/postgres/migrate.rs`,
-`scripts/capture_release_fixtures.py`.
+`crates/lash-postgres-store/src/postgres/migrate.rs`, and
+[release fixtures](../agents/release-fixtures.md).
 
 ## Rejected alternatives
 
@@ -262,5 +265,6 @@ A supported upgrade needs its declared read/write window and conversion or
 drain path. The rollback boundary is the fleet-epoch flip, which requires that
 no node of the older build is live. Operators run schema migration, then
 drain by release. Immutable history retains its bytes and identities. The current
-upgrade evidence comes from synthetic-next; the version freeze does not
+format tests cover only their registered assertions; synthetic-next source
+alone is not upgrade evidence. The version freeze does not
 promise migration or rollback between arbitrary development builds.

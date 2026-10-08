@@ -9,7 +9,7 @@ classic Scripts in one realm (`vm.createContext` plus `vm.Script`), so top-level
 `var`/function declarations on its global object, as ECMA-262 specifies. The
 lash side runs every session through the production RLM executor, live and
 restarting through the durable snapshot between every pair of cells
-(`crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle.rs`); the
+(`crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/mod.rs`); the
 dialect's own view (`tests/corpus_laws/sessions.rs`) holds the corpus
 discipline, and every cell also feeds the round-trip law and the artifact
 invariants.

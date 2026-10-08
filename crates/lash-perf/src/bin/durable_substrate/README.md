@@ -20,8 +20,10 @@ What is production and what is the bench's:
   to record each write transaction's label, latency and payload bytes; it
   forwards every call unchanged.
 
-There is no facade turn yet (L3's facade wiring), so `send()` and the host's
-tool registry, projections and event feed are not in these numbers.
+This benchmark drives the durable substrate directly, bypassing facade
+`LashSession::send()` and observation. Its measurements exclude the host's
+tool registry, projections and event feed; facade wiring exists in
+[`lash/src/session.rs`](../../../../lash/src/session.rs).
 
 ## Cases
 

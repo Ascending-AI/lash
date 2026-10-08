@@ -51,8 +51,8 @@ The per-scope/per-child request identity and settle marker are idempotent.
 Settlement does not await child termination.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/registry.rs`,
-`crates/lash-core-execution/src/runtime/process/parent_end.rs`,
-`crates/lash-core-execution/src/runtime/process/scope_close.rs`,
+`crates/lash-sqlite-store/src/process_registry/parent_end.rs`,
+`crates/lash-core/src/runtime/durable/turn_scope.rs`,
 `crates/lash-sqlite-store/src/process_registry/registration.rs`, and
 `crates/lash-postgres-store/src/postgres/process_registry.rs`.
 
@@ -103,8 +103,8 @@ scope closure, then completes retirement. Recovery resumes the first step
 whose commit is missing. The Run ownership contract belongs to
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md).
 
-Evidence: `crates/lash-core-execution/src/runtime/process/scope_close.rs` and
-`crates/lash-core-execution/src/runtime/process/parent_end.rs`.
+Evidence: `crates/lash-core/src/runtime/durable/turn_scope.rs` and
+`crates/lash-sqlite-store/src/process_registry/parent_end.rs`.
 
 ## Alternatives considered
 

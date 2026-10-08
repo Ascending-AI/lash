@@ -357,7 +357,7 @@ Two shapes worth knowing, both visible in the attachment family:
 ```
 kiln test //crates/lash-sqlite-store:all
 kiln test //crates/lash-postgres-store:lash-postgres-store__unit_test
-bash scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-store
+scripts/ci/with-service.sh pg -- scripts/ci/store-tests.sh pg-store
 ```
 
 The two unit-test targets include `rendered_statement_sets_tests.rs`, which

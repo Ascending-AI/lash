@@ -71,7 +71,11 @@ let backend = DurableBackendBuilder::new(stores)
     .process_engine(Arc::new(CiEngine))
     .projection_provider(Arc::new(TicketProvider::new(client)))
     .build()?;
+// Each policy value below is chosen by the host.
 let core = lash::LashCore::builder(backend)
+    .commit_budget(commit_budget)
+    .queued_work_batching(queued_work_batching)
+    .tool_source_policy(tool_source_policy)
     .execution_budgets(budgets)
     .delta_coalescing(lash::DeltaCoalescing::recommended())
     .data_retention(lash::DataRetention {
@@ -81,6 +85,25 @@ let core = lash::LashCore::builder(backend)
     // providers, plugins, models, tracing ...
     .build(lash::persistence::LeaseOwnerIdentity::opaque(node_name, boot_id))?;
 ```
+
+### Required choices before serving
+
+The core requires all six policy inputs below. A named preset is a host's
+explicit choice of values, not an implicit policy or a measured deployment
+recommendation. The same applies to session, model, RLM and store choices.
+
+| Boundary | Required host choices | Current owner |
+| --- | --- | --- |
+| Core | `commit_budget`, `queued_work_batching`, `tool_source_policy`, `execution_budgets`, `delta_coalescing`, `data_retention` on `LashCoreBuilder` | [Builder](../../crates/lash/src/core.rs) and [required-policy validation](../../crates/lash/src/core/runtime_host_config.rs). |
+| Session creation | `SessionSpec::model`, `turn_budget`, `max_tool_calls`, `no_progress_budget`; supply tool authority through `SessionCreation::root(tool_access, spec)` or `child_of(tool_access, parent, spec)` | [Session spec](../../crates/lash-core-execution/src/session_model/mod.rs) and [creation](../../crates/lash/src/session.rs). A child records supplied config; only a fork clones. |
+| Recorded model | Wire model, nonzero context window and `CacheRetention` in `LlmProfileMetadata`; choose capability and request defaults for the route | [Model metadata](../../crates/lash-sansio/src/llm_profile.rs). |
+| RLM, when installed | `RlmProtocolPluginConfig::builder()` requires `instruction_limit`, `memory_limit` and `channel` before `build()` | [Typed builder](../../crates/lash-protocol-rlm/src/plugin/config.rs). |
+| SQLite | Supply `SqliteSynchronous` to `SqliteStoreSet::open` | [Store open](../../crates/lash-sqlite-store/src/lib.rs) and [§3](#3-sqlite-is-one-file). |
+| Tool or process body | Each tool's execution bound, a deferring tool's park bound, each engine step's execution bound and each engine wait's bound | [§6](#6-execution-budgets). These are independent of shared model/control budgets. |
+
+Use [§12](#12-host-prompt-policy) for prompt-plan creation and changes. The
+retention decisions below are part of this checklist, including the model's
+required cache-retention choice.
 
 ### Retention the host states
 
@@ -674,8 +697,9 @@ A webhook that receives callbacks retries until it gets an answer and treats
 
 ## 6. Execution budgets
 
-`lash::ExecutionBudgets` is the one source of every execution bound. It is the
-host's spend decision and has no default: state it with
+`lash::ExecutionBudgets` supplies the shared model and control-phase bounds.
+Tool bodies and parks, and process step bodies and waits, carry their own
+host declarations below. The shared budget is the host's spend decision and has no default: state it with
 `LashCoreBuilder::execution_budgets`, or `build` refuses with
 `EmbedError::MissingExecutionBudgets`. A direct client takes it too:
 `DirectLlmClient::new(provider, model, budgets)`. A host with no numbers of its
@@ -923,8 +947,10 @@ provider-side caches such as Google uploads. `ProviderToken` has no
 
 **When lash asks.** Before every model-call attempt, with
 `TokenRequestReason::Current`. Answer from the host's own cache; it must be
-cheap and safe to call concurrently. When the answer expires within 30 s,
-lash asks once more with `Expiring`. When the provider answers 401 before any
+cheap and safe to call concurrently. When the answer expires within the
+provider's selected `TokenPolicy::expiry_skew`, lash asks once more with
+`Expiring`. `TokenPolicy::standard()` selects 30 s; the host may choose another
+skew. When the provider answers 401 before any
 output, lash asks once with `Rejected` and `stale` set to the token it sent,
 then resends the admitted body once. A 401 after output started is surfaced,
 never retried, and 403 is never retried.
@@ -973,3 +999,141 @@ included in `serialize_config`, without the credential.
 Both schemes ask the same host-owned token source before each attempt and on rejection.
 Credential header values carry sensitivity through transport and recording, including
 custom OpenAI-compatible auth headers and Codex's bound account ID.
+
+## 11. Local values and host transport
+
+[ADR 0136](../adr/0136-hosts-own-their-wire-contracts.md) owns the transport
+boundary. Lash returns local typed Rust values; the host defines its DTOs,
+authentication, transport and client compatibility policy. Serialization on a
+core type does not promise a stable engine wire contract. For an example,
+[the workbench observation envelope](../../examples/agent-workbench/src/main_sections/routes/observation_envelope.rs)
+projects the local feed into host-owned NDJSON. The VM worker IPC contract is a
+separate execution boundary, described in
+[ADR 0123](../adr/0123-model-code-runs-in-resettable-worker-processes.md).
+
+### Typed history paging
+
+`DurableSession::history(anchor, budget)` is a typed store read that opens no
+runtime. Start with `lash::persistence::HistoryAnchor::Head` or `Node`, and
+supply both nonzero `HistoryBudget::max_nodes` and `max_bytes`; there is no
+unbounded history request. The `HistoryPage` carries decoded records in
+descending generation, its pinned leaf, a stop reason and `next`. Continue with
+`HistoryAnchor::Cursor(next)` while `next` is present.
+
+A paging run follows one ancestry across frames and fork boundaries. Its
+cursor is session-bound and pins the leaf and lineage; a later append does not
+move that run's starting point. Fork ceilings constrain inherited ancestry,
+and each `HistoryNode::owner_session_id` identifies the stored row's owner.
+Product projection and cursor delivery to clients belong to the host.
+
+[Facade history rustdoc](../../crates/lash/src/durable_session.rs),
+[typed pages and cursors](../../crates/lash-core-store/src/store/history.rs) and
+[ADR 0112 §6](../adr/0112-the-store-is-multi-session-and-a-session-is-resident-from-its-current-frame.md#6-load_ancestors)
+define this contract.
+
+## 12. Host prompt policy
+
+The host supplies `lash::prompt::PromptPlan` at creation with
+`SessionCreation::with_prompt_plan`. Core records the plan separately from
+plugin namespaces. Installed plugins register keyed sections and wrappers;
+the plan selects their ordering and placement for each call's purpose.
+Change the recorded plan through `lash::config::SetPromptPlan` in a
+`ConfigTransaction`, applied by the session command lane. A run keeps its
+admitted config snapshot; the transaction changes subsequent admissions.
+
+Composition occurs for each new model-call admission. Core records the
+resolved plan, section text, wrapper outputs, request template and response
+contract with that call. A resend loads that record without rerunning a
+renderer or wrapper; the next new call composes again. Initial-instruction
+placement sets the request's instruction field. Current-context placement
+extends an existing context prefix or adds a trailing user message, following
+the protocol's placement implementation.
+
+`SessionPromptAdmin::plan`, `catalog` and `preview` inspect policy and resolution;
+`preview` renders nothing and admits no call. `snapshot(run, call)` reads a
+retained call's exact text. See [facade prompt rustdoc](../../crates/lash/src/lib.rs),
+[creation](../../crates/lash/src/session.rs),
+[core plan command](../../crates/lash-core-execution/src/plugin/config/core.rs),
+[prompt administration](../../crates/lash/src/admin/prompt.rs),
+[composition and recording](../../crates/lash-core-execution/src/plugin/prompt/composer.rs)
+and [placement](../../crates/lash-sansio/src/sansio/turn_protocol.rs).
+[ADR 0133](../adr/0133-prompt-sections-are-keyed-trusted-and-placed-by-the-host.md)
+defines keyed section and wrapper ownership.
+
+## 13. Attachment delivery and provider sends
+
+### Refs become live values per attempt
+
+Session input holds `AttachmentRef` values: content identity, media type, byte
+length and optional typed metadata. A provider lowers the composed request to
+`RecordedRequestTemplate`; each `AttachmentSlot` records a ref, acceptance and
+a pinned codec. The call's admission retains those refs and literals, without
+recording a delivered URL, provider file id or inline body.
+
+For each attempt, the host store supplies `Delivery` values through
+`SlotDeliveries`. It checks acceptance and the requested
+`DeliveryContext::valid_through_ms` horizon. Missing content, a refused form or
+an insufficient horizon produces a typed delivery failure before send.
+The provider checks the delivered form against the slot's acceptance and
+encodes it through the recorded codec into a transient `LiveRequestBody`.
+Deliveries and the filled body live only for the attempt; a resend obtains
+fresh delivery values for the recorded slots.
+
+[ADR 0135](../adr/0135-attachments-are-durable-refs-delivered-by-the-host-store.md),
+[host-store delivery](../../crates/lash-core-store/src/attachments/delivery.rs),
+[slot fill](../../crates/lash-core-llm/src/provider/slot_delivery.rs) and
+[facade provider types](../../crates/lash/src/lib.rs) define these seams.
+
+### Implementing the provider boundary
+
+`Provider::send(&mut self, body: &LiveRequestBody, context: ResponseContext)`
+takes the body admitted for the call and the facts needed to interpret its
+response. `ResponseContext::scope` identifies the call and attempt;
+`ResponseContract` pins the model, requested output and offered tools' input
+schemas. Recorded context has no senders. Each live attempt adds its stream
+and trace senders through `ResponseContext::with_senders`.
+
+The body is the call's statement of what it asks. An implementer that needs
+request content decodes that body; an in-process provider using canonical
+lowering may use `LiveRequestBody::canonical_request`. Reconstructing another
+request beside it would let a resend disagree with the admitted call.
+See [provider trait](../../crates/lash-core-llm/src/provider/traits.rs),
+[response context](../../crates/lash-sansio/src/llm/response_context.rs) and
+`lash::provider` in [facade rustdoc](../../crates/lash/src/lib.rs).
+
+## 14. Stream termination policy
+
+An omitted route/model policy selects
+`lash::provider::StreamTermination::EofTolerated`: a clean EOF can complete retained
+output without a dialect terminal event. EOF tolerance does not make an empty
+or malformed response valid. A host requiring terminal evidence explicitly
+selects `RequireTerminalEvidence`; the model's
+`LlmProfileCapability::stream_termination` overrides the route choice.
+OpenAI-compatible routes configure it through `OpenAiCompat`, and Anthropic
+and Google expose it on their provider configuration. The OpenRouter preset
+explicitly remains strict.
+
+Under strict policy, missing dialect evidence is a typed stream failure with
+partial output retained for accounting, not a completed protocol response.
+Cancellation and abort-usage drain retain their own rules. See
+[ADR 0036](../adr/0036-stream-termination-is-explicit-dialect-policy.md),
+[policy](../../crates/lash-sansio/src/llm/capability.rs) and
+[OpenAI route resolution](../../crates/lash-provider-openai/src/config.rs).
+
+## 15. Hosting cutover map
+
+Use this index when replacing a pre-cutover integration. Each row points to
+the current boundary and its owning contract.
+
+| Contract | Hosting entrypoint | Authority |
+| --- | --- | --- |
+| Host events, routing and scheduling | [§9](#9-events-routing-and-scheduling) | [ADR 0137](../adr/0137-the-host-owns-events-routing-and-scheduling.md). |
+| Host DTOs and transport | [§11](#11-local-values-and-host-transport) | [ADR 0136](../adr/0136-hosts-own-their-wire-contracts.md). |
+| Typed bounded history | [History paging](#typed-history-paging) | [Facade history](../../crates/lash/src/durable_session.rs). |
+| Attachment refs and store delivery | [§13](#13-attachment-delivery-and-provider-sends) | [ADR 0135](../adr/0135-attachments-are-durable-refs-delivered-by-the-host-store.md). |
+| Host token source | [§10](#10-provider-credentials) | [Credential seam](../../crates/lash-core-llm/src/provider/credential.rs). |
+| Host prompt plan | [§12](#12-host-prompt-policy) | [Core config command](../../crates/lash-core-execution/src/plugin/config/core.rs). |
+| Selected EOF policy | [§14](#14-stream-termination-policy) | [ADR 0036](../adr/0036-stream-termination-is-explicit-dialect-policy.md). |
+| Shared execution budgets and declared body/park bounds | [§6](#6-execution-budgets) | [Execution budgets](../../crates/lash-sansio/src/execution_budgets.rs). |
+| Required choices and explicit presets | [Required choices](#required-choices-before-serving) | [Core validation](../../crates/lash/src/core/runtime_host_config.rs). |
+| Admitted body and response context | [Provider sends](#implementing-the-provider-boundary) | [Provider trait](../../crates/lash-core-llm/src/provider/traits.rs). |

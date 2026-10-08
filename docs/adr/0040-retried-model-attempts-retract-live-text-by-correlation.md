@@ -45,8 +45,11 @@ bodies, and the runtime resets provisional output, usage and evidence. RLM
 stores per-iteration assistant content as protocol history paired with its
 trajectory, while the final product transcript is committed once.
 
-The remote mirror carries `model_attempt_reset` and its correlation-id lists.
-Remote negotiation follows the protocol's supported version contract.
+The local observation feed carries typed `ModelAttemptReset` values and their
+correlation-id lists. A host projects them into its own transport DTOs and owns
+that transport's compatibility policy
+([ADR 0136](0136-hosts-own-their-wire-contracts.md)); the workbench projection is
+`examples/agent-workbench/src/main_sections/routes/observation_envelope.rs`.
 
 ## Consequences
 

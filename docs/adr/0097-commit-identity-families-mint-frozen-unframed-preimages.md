@@ -50,8 +50,8 @@ The commit intent has distinct completed input and completed queue-batch lists.
 It includes persisted config, including `config_revision`. These are typed
 payload facts, not additional identity families.
 
-Evidence: `crates/lash-core-store/src/store/commit_identity.rs:28`, `:1218`,
-`:1233`, `:1246`, and `crates/lash-core-store/src/store/identity_projection.rs`.
+Evidence: `crates/lash-core-store/src/store/commit_identity.rs`, which owns
+request, admission and commit identity projections.
 
 ## Alternatives considered
 

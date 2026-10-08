@@ -278,32 +278,32 @@ virtual clock and `SimNodes` (ADR 0132 §14). L07/L08/L12/L16/L17/L19/L22 in the
 
 #### 7.1 Barrier laws
 
-`crates/lash-conformance/src/conformance/tool_batch_parallelism.rs` owns
-body-start barriers, reverse-dependency checks and the forced-serial negative
-control, for batch wrappers with native siblings, native calls, RLM
-`Promise.all` and `Promise.allSettled`, and process aggregates.
-`crates/lash-protocol-rlm/tests/tool_batch_parallelism.rs` registers them. A
-started observer event alone does not prove overlap.
-`crates/lash/src/tests/aggregate_oracle.rs` proves independent receipts,
+`crates/lash-durable-test/tests/tool_batches.rs` registers
+`tool_group_members_start_before_any_finishes` and
+`tool_group_reverse_dependency` on the served-node path. Rendezvous proves
+body overlap for native calls, batch wrappers beside native calls, and RLM
+`Promise.all` and `Promise.allSettled`. The same calls without a rendezvous
+must produce the same answers; a serial implementation cannot satisfy the
+gated body's dependency. A started observer event alone does not prove overlap.
+`crates/lash/src/tests/aggregate_oracle.rs` covers independent receipts,
 retries, protected drain, losing-call progress and recorded timer/aggregate
-selection.
+selection. The former batch-parallelism registrations are retired.
 
 #### 7.2 Batch sugar laws
 
 Expansion and fold unit tests live beside their pure functions in
-`crates/lash-protocol-standard/src/batch.rs`. Shared laws in
-`crates/lash-conformance/src/conformance/batch_sugar.rs` cover admission,
-identity, resume, redrive, cancellation, all-refused rounds and transcript
-folding. The standard plugin tests the configuration ceiling.
+`crates/lash-protocol-standard/src/batch.rs`. Served-node laws in
+`crates/lash-durable-test/tests/tool_batches.rs` include
+`batch_admission_and_identity_contract`, `standard_rounds_and_batches_use_the_run`
+and `batch_folds_to_one_transcript_call`. They cover admission, identity,
+run-backed settlement and folding. Crash and cancellation claims require their
+own registrations; the former shared batch-sugar suite is retired.
 
 #### 7.3 Declared-start and spawn laws
 
-`crates/lash-conformance/src/conformance/declared_start.rs` covers launch
-crashes, discarded retries, refusal, early terminal, cancellation, scope close,
-retention, decoded identity refusal, child metadata and overlapping spawns.
 `crates/lash-durable-test/tests/declared_start.rs` and
-`declared_start_crash_laws.rs` run them through a host's send() on the core's
-served node with the delegation example's tool, including stable launch and
+`crates/lash-durable-test/tests/declared_start_crash_laws.rs` run declared-start
+and spawn laws through a host's `send()` on the core's served node with the delegation example's tool, including stable launch and
 cancel and immutable completion and authority.
 
 #### 7.4 Compile-fail fixtures

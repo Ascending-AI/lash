@@ -52,7 +52,7 @@ it does not quantify a whole-graph hit-rate improvement.
 
 The full launcher reset suite and process-identity suite passed concurrently
 inside Bubblewrap. Separate probes verified private locks, hidden host `/tmp`
-sentinels and an inaccessible host Docker socket. These are isolated shell
+sentinels and an inaccessible host Docker socket. These are isolated script
 fixtures; they do not run against live services.
 
 ## Bounded test split

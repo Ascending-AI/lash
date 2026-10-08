@@ -132,9 +132,9 @@ introduced write restrictions needed for coexistence.
 
 ## Code evidence
 
-- [Published artifacts and open gate](../../crates/lash-postgres-store/src/postgres/schema.rs#L3).
-- [Migration API](../../crates/lash-postgres-store/src/lib.rs#L866).
-- [Comparison and expanded admission](../../crates/lash-postgres-store/src/postgres/schema_shape.rs#L83).
-- [Catalog introspection](../../crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs#L1).
-- [Lock and snapshot discipline](../../crates/lash-postgres-store/src/postgres/schema.rs#L249).
-- [Schema and artifact laws](../../crates/lash-postgres-store/src/postgres/schema_tests.rs).
+- [Published artifacts and open gate](../../crates/lash-postgres-store/src/postgres/schema.rs).
+- [Migration API](../../crates/lash-postgres-store/src/lib.rs).
+- [Comparison and expanded admission](../../crates/lash-postgres-store/src/postgres/schema_shape.rs).
+- [Catalog introspection](../../crates/lash-postgres-store/src/postgres/schema_shape/introspect.rs).
+- [Lock and snapshot discipline](../../crates/lash-postgres-store/src/postgres/schema.rs).
+- [Expanded-catalog admission laws](../../crates/lash-postgres-store/src/postgres/schema_compat_tests.rs).

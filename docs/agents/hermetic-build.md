@@ -739,16 +739,19 @@ generation refuses a dependency that enables `testing`; compiling the resolved
 libraries catches production calls to testing-only APIs. Run the named target
 for a focused proof after changing those boundaries.
 
-Cargo build parity has a named landing gate:
+Cargo build parity is implemented in `scripts/ci/cargo-parity.sh`, which is
+tracked without executable mode. This tree therefore advertises only the
+executable production facade witness below; it does not establish Cargo parity:
 
 ```sh
-kiln gate lash <fork> -- bash scripts/ci/cargo-parity.sh
+# Cargo parity's script is not directly executable in this tree.
+# The production facade witness has an executable entrypoint:
+kiln gate lash <fork> -- scripts/ci/facade-production.sh
 ```
 
-It first checks the same two facade production library graphs and refuses a
-`testing` feature in their normal/build dependency trees. This witness can run
-alone with `kiln gate lash <fork> -- bash scripts/ci/facade-production.sh`.
-It runs real Cargo through the admission shim, with Buck routing disabled,
+The production witness checks the same two facade library graphs and refuses a
+`testing` feature in their normal/build dependency trees.
+The parity script additionally runs real Cargo through the admission shim, with Buck routing disabled,
 using `check --workspace --all-targets --locked --offline` and the isolated
 development graphs of lashlang and integrator-contract. Cargo manifests remain the single
 source for the generated Buck graph. Resolver 2 isolates development features
@@ -770,8 +773,8 @@ the container on success, failure or interruption:
 
 ```sh
 scripts/ci/with-service.sh
-scripts/ci/with-service.sh pg -- bash scripts/ci/store-tests.sh pg-store
-scripts/ci/with-service.sh all -- bash scripts/ci/store-tests.sh s3-store
+scripts/ci/with-service.sh pg -- scripts/ci/store-tests.sh pg-store
+scripts/ci/with-service.sh all -- scripts/ci/store-tests.sh s3-store
 ```
 
 Trusted store jobs compile through the pool and execute locally against the
@@ -784,8 +787,7 @@ Untrusted jobs keep their Cargo commands and receive no pool credentials.
 Local runs list service-shaped contracts they did not exercise, with recipes.
 
 PostgreSQL 17 and 18 are supported; 18 is primary and the one development and
-CI major. 17 runs only in the release gate (`with-service.sh pg17 -- bash
-scripts/ci/store-tests.sh pg-release`). Use `kiln gate lash <fork> -- <cmd>` for other live gates, with
+CI major. 17 runs only in the release gate (`with-service.sh pg17 -- scripts/ci/store-tests.sh pg-release`). Use `kiln gate lash <fork> -- <cmd>` for other live gates, with
 identities and ports derived from `KILN_GATE_ID`.
 
 The ordinary partition retains ignored-test selection and exclusions. The five

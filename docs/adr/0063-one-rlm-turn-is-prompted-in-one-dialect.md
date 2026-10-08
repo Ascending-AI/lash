@@ -64,14 +64,14 @@ rule to their own contributions.
 
 ## Executable evidence
 
-- [Dialect and session contracts](../../crates/lash-protocol-rlm/src/dialect.rs#L33),
-  [vocabulary](../../crates/lash-protocol-rlm/src/dialect.rs#L308) and the
+- [Dialect and session contracts](../../crates/lash-protocol-rlm/src/dialect.rs),
+  [vocabulary](../../crates/lash-protocol-rlm/src/dialect.rs) and the
   extension-session tests in that file cover vocabulary and delimiter selection.
-- [Prompt inventory filtering](../../crates/lash-protocol-rlm/src/protocol/prompt.rs#L21)
+- [Prompt inventory filtering](../../crates/lash-protocol-rlm/src/protocol/prompt.rs)
   hides the internal namespace.
-- [Prompt walker](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs#L65)
+- [Prompt walker](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs)
   checks source wording with explicit IR and VM exceptions.
-- [Cell trace](../../crates/lash-protocol-rlm/src/protocol/driver.rs#L480),
-  [process trace](../../crates/lash-lashlang-runtime/src/process/execution_trace.rs#L469)
-  and [IR identity](../../crates/lashlang/src/artifact_identity.rs#L6)
+- [Cell trace](../../crates/lash-protocol-rlm/src/protocol/driver.rs),
+  [process trace](../../crates/lash-lashlang-runtime/src/process/trace_map.rs)
+  and [IR identity](../../crates/lashlang/src/artifact_identity.rs)
   keep source labels separate from machine identities.

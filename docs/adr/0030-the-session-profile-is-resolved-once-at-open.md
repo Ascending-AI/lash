@@ -146,5 +146,5 @@ policy.
 - [Creation and open](../../crates/lash/src/session.rs), including recorded-state loading and recorded-model binding.
 - [Creation head contract](../../crates/lash-core-store/src/session_identity.rs).
 - [Session policy and immutable frames](../../crates/lash-core-store/src/session_state.rs).
-- [Durable configuration application and the per-run snapshot](../../crates/lash-core/src/runtime/shift/turn_config.rs).
+- [Durable configuration application and the per-run snapshot](../../crates/lash-core/src/runtime/turn_config.rs).
 - [Recorded configuration and its typed commands](../../crates/lash-core-store/src/session_policy.rs).

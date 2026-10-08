@@ -98,11 +98,13 @@ Hosts supply presentation guidance through prompt sections.
 
 ## Executable evidence
 
-- [Recorded facts](../../crates/lash-rlm-types/src/lib.rs#L960) define the recorded
+- [Recorded facts](../../crates/lash-rlm-types/src/lib.rs) define the recorded
   termination.
 - [The RLM owner](../../crates/lash-protocol-rlm/src/plugin/config_owner.rs)
   creates, validates and registers `SetRlmRender`.
-- [Facade creation](../../crates/lash/src/session.rs#L257) records the config head;
-  [opening](../../crates/lash/src/session.rs#L167) reads an existing session.
-- [Session-fact laws](../../crates/lash/src/tests/core_session_builder/rlm_session_facts.rs#L1)
-  cover creation, reopen, the typed read and the render command.
+- [Facade creation](../../crates/lash/src/session.rs) records the config head;
+  [opening](../../crates/lash/src/session.rs) reads an existing session.
+- [Recorded-config laws](../../crates/lash/src/tests/core_session_builder/recorded_plugin_config.rs)
+  cover owner-reduced commands, revision checks and recorded config at reopen.
+  The former RLM session-fact test registration is retired; these laws do not
+  establish a separate render-command proof.

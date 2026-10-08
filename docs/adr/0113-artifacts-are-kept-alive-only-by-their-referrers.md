@@ -198,9 +198,9 @@ outside an end hook's transaction
    `Delivered` and deletes the obligation row. Fences remain permanent.
 
 The resolution and delivery are in
-`crates/lash-core/src/runtime/artifact_cleanup.rs:238-325,505-559,606-645`;
+`crates/lash-core/src/runtime/artifact_cleanup.rs-559,606-645`;
 settlement is in
-`crates/lash-store-sql/src/artifact/cleanup_obligations.rs:125-149`.
+`crates/lash-store-sql/src/artifact/cleanup_obligations.rs`.
 `NotYet` defers at the relay's maximum backoff with attempts reset.
 Every execution kind uses this deferral: awaited and command runs,
 processes, and session operations. Settlement permits cleanup when the next due
@@ -210,8 +210,8 @@ artifacts for the full deferral avoids a separate settlement fast path.
 A missing carry stalls as refused, an undecodable row stalls as undecodable,
 and store faults retry the delivery. A retry repeats every store
 idempotently; partial success is never acknowledged
-(`crates/lash-core-execution/src/runtime/shift/relay.rs:184-205`,
-`crates/lash-core/src/runtime/artifact_cleanup.rs:571-593`).
+(`crates/lash-core/src/runtime/obligations/relay.rs`,
+`crates/lash-core/src/runtime/artifact_cleanup.rs`).
 
 Execution settlement is decided by durable facts alone. `Settled` promises
 that the execution cannot resume, record or read again:
@@ -585,8 +585,10 @@ same derivation
 
 #### 7.4 Execution state at frame open
 
-Frame opens clear live execution state
-(`crates/lash-conformance/src/conformance/frame_open_redrive.rs:1412`).
+Frame opens clear live execution state through
+`crates/lash-core/src/runtime/turn_boundary/execution_state.rs`.
+The former frame-open redrive registration is retired; this is an
+implementation citation, not its runtime proof.
 
 #### 7.5 Publication racing frame end
 
@@ -622,30 +624,20 @@ Prune and a late start rescue respect fences
 #### 7.11 Execution gates
 
 An unsettled execution keeps its gate's artifacts
-(`crates/lash-core/src/runtime/artifact_cleanup_tests.rs:618`). For awaited
+(`crates/lash-core/src/runtime/artifact_cleanup_tests.rs`). For awaited
 and command runs, processes, and session operations, a deferred cleanup
 retains its artifacts while the execution is unsettled and releases after
 settlement once the deferral expires, on SQLite memory/file and PostgreSQL.
-A carry turn held open across a recovery pass after a crash reclaims its
-predecessor frame after the cleanup clock passes the guarded deferral,
-while claim recovery keeps the matrix's lapsed-claim bound
-(`crates/lash-sim/src/crash_matrix/cases/definition_carry.rs`).
+The former definition-carry crash-matrix case is retired. Its cleanup-clock
+and lapsed-claim bounds are not established by the unit citations above.
 
 #### 7.12 Definition closure
 
 A carried definition id holds its closure, an uncarried definition ends,
 and a host pin survives an uncarried switch
-(`crates/lash/tests/artifact_referrers_evidence.rs:619,709,769`). A create,
-a carry and a start by id each survive a deployment crash at every
-boundary: before and after the create attempt commits, after publication
-and before the frame commits, before admission, after registration, and
-after the recorded start. Each boundary is proven over SQLite and over
-PostgreSQL. A start cut before its registration committed admits at most one
-process, and one that admitted none leaves nothing held once the host's pin
-is gone. Every such world's store cells, schema and recorded rows carry no
-catalog field beside a definition
-(`crates/lash-sim/src/crash_matrix/cases/definition.rs`,
-`crates/lash-sim/src/crash_matrix/catalog_audit.rs`).
+(`crates/lash/tests/artifact_referrers_evidence.rs`). The former definition
+crash-matrix case is retired. That unit evidence does not establish every
+create, carry and start crash boundary on both stores.
 
 #### 7.13 Forks
 

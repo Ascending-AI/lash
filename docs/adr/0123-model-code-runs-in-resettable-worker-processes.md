@@ -421,21 +421,21 @@ Parent adapters retain opaque VM bytes and worker-verified structural metadata.
 
 ## Implementation
 
-- `crates/lashlang/src/runtime/instance.rs:36` owns the instance;
+- `crates/lashlang/src/runtime/instance.rs` owns the instance;
   `:65` resets by replacement and `:106` owns semantic state decoding.
 - `crates/lash-protocol-rlm/src/executor/state/worker_envelope.rs` separates
   guest bytes from parent authority.
-- `crates/lash-vm-protocol/src/state.rs:86` defines opaque state;
-  `crates/lash-vm-protocol/src/codec.rs:3` defines framing and decode charges.
-- `crates/lash-vm-broker/src/broker.rs:22` defines worker-loss recovery;
+- `crates/lash-vm-protocol/src/state.rs` defines opaque state;
+  `crates/lash-vm-protocol/src/codec.rs` defines framing and decode charges.
+- `crates/lash-vm-broker/src/broker.rs` defines worker-loss recovery;
   `:391` releases a slot for a nested effect without committing the park.
 - `crates/lash-protocol-rlm/src/executor/mod.rs` and
   `crates/lash-lashlang-runtime/src/process.rs` broker worker execution.
 - `crates/lash-vm-worker/src/service.rs` owns source compilation and artifact
   inspection; `scripts/check-vm-parent-paths.py` checks the production inventory.
 - `crates/lash-typescript/tests/corpus_laws/vm_instance.rs` pins reset and
-  step/resume equivalence; `crates/lash-conformance/src/macros/vm_broker.rs:12`
-  registers the broker laws; `crates/lash-vm-worker/tests/pool_laws.rs`
+  step/resume equivalence; the former conformance broker registration is
+  retired. `crates/lash-vm-worker/tests/pool_laws.rs`
   exercises the physical pool.
 
 ### Durable worker accounting

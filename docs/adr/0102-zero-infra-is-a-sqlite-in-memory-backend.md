@@ -44,11 +44,11 @@ attachment-byte store at construction. Module artifacts belong to the store
 set that reopens the session. The kernel's contracts name no concrete SQL
 store.
 
-Evidence: `crates/lash-core-execution/src/backend.rs:89`,
-`crates/lash-core-execution/src/runtime/host.rs:185`,
-`crates/lash/src/plugin_binding.rs:1`,
-`crates/lash-sqlite-store/src/backend.rs:95`,
-`crates/lash-postgres-store/src/postgres/backend.rs:44`.
+Evidence: `crates/lash-core-execution/src/backend.rs`,
+`crates/lash-core-execution/src/runtime/host.rs`,
+`crates/lash/src/session.rs`,
+`crates/lash-sqlite-store/src/backend.rs`,
+`crates/lash-postgres-store/src/postgres/backend.rs`.
 
 ### D3. SQLite memory is named SQL storage
 

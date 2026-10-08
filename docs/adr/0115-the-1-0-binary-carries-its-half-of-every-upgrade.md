@@ -2,15 +2,16 @@
 
 ## Status
 
-Accepted. The compatibility machinery supports a one-release rolling upgrade
-and rollback window. The pre-1.0 version freeze holds until the release cut;
-synthetic-next provides executable successor coverage without changing the
-default build's versions.
+Accepted. The release design requires a one-release rolling upgrade and
+rollback window. The pre-1.0 version freeze holds until the release cut;
+synthetic-next declares successor formats without changing the ordinary
+build's versions. The removed two-build harness and tagged-capture workflow
+leave release proof gaps (§6); the design below is not a certification.
 
 ## Context
 
 A rolling upgrade has two builds reading the same durable state and serving
-calls to one another. The older build needs compatibility stamps, writer
+actors over one store. The older build needs compatibility stamps, writer
 fences, supported ranges and typed refusals before the newer build arrives.
 Finalizing a release ends rollback and permits new writes and contraction.
 A version stamp alone cannot protect an already-open writer or an actor that a
@@ -34,7 +35,7 @@ Before finalize, N+1 writes only what N reads. This includes semantics as well
 as shape: retention, delivery, identity and ownership cannot require behavior
 that N cannot preserve. A new build stamping an old number on incompatible
 content violates the contract. Writer pins, admission and the synthetic
-successor laws enforce the versioned parts of this rule
+successor declarations express the versioned parts of this rule
 (`crates/lash-core-store/src/store/fleet_format.rs`,
 `crates/lash-core-store/src/store/synthetic_next.rs`).
 
@@ -142,7 +143,7 @@ the epoch rather than individually selecting every format
 
 A writer's epoch is its store's recorded one. Only a writer holding no store
 uses the build's own epoch (`crates/lash-core/src/runtime/session_manager/mod.rs`,
-`crates/lash-core/src/runtime/session_manager/process_runners/runner.rs`).
+`crates/lash-core-execution/src/runtime/actor/process.rs`).
 A payload validator admits the version each epoch in the writable range
 assigns (`crates/lash-core-execution/src/runtime/process/effect_summary.rs`).
 
@@ -154,8 +155,9 @@ its first data statement reads the fleet row. Finalize takes the same lock
 exclusive before it moves the row. A writer already holding the shared lock
 finishes before finalize; a later writer reads the moved epoch and refuses
 before mutation if it cannot write it
-(`crates/lash-postgres-store/src/postgres/guarded_tx.rs`,
-`crates/lash-postgres-store/src/postgres/finalize.rs`). The lock is
+(`crates/lash-postgres-store/src/postgres/guarded_tx.rs`). The finalize
+entrypoint is currently absent; the exclusive flip is a release obligation,
+not an executable operator command in this tree. The lock is
 transaction-scoped and writes nothing, so the fleet row takes no tuple lock
 from the fleet's writers (FIG-5275).
 
@@ -209,13 +211,11 @@ on the next open
 `crates/lash-sqlite-store/src/backend.rs`,
 `crates/lash-sqlite-store/src/compat.rs`).
 
-**SQLite finalize.** `SqliteStoreSet::finalize` checks that no live node
-lacks the newer formats, under exclusive store ownership, and moves the epoch
-in one transaction of the one database. There is no partial finalize to
-recover. SQLite has no finalize hold because no fleet-wide automatic finalize
-reaches a SQLite store
-(`crates/lash-sqlite-store/src/backend.rs`,
-`crates/lash-sqlite-store/src/finalize.rs`).
+**SQLite finalize.** The release design requires an exclusive transaction
+that verifies live-node format support and moves the epoch atomically. The
+store currently exposes no finalize entrypoint. The existing writer fence is
+in `crates/lash-sqlite-store/src/compat.rs`; it does not prove a working
+finalize or rollback workflow.
 
 #### 2.5 Per-plugin writer ranges
 
@@ -247,16 +247,16 @@ never contracts after finalize: a `[1,2]` range stays `[1,2]` rather than
 contracting to `[2,2]` once the older format's writers drain, an accepted
 simplification of the design's post-drain contraction (FIG-4858). An
 admission already recorded under an older format may still write it; every
-new admission selects the maximum common version (§2.6). A finalize that
-would change a range while `F` already is the build's epoch refuses
-`PluginRangesNeedEpochMove` and changes nothing.
+new admission selects the maximum common version (§2.6). A finalize must not change ranges without moving the fleet epoch. This is a
+release-operation requirement; there is no current finalize refusal variant
+or command establishing it.
 
-`lashctl finalize --plugin-registrations <json-file>` passes the successor's
-writer registrations into this same guarded flip. The file is the serialized
-`PluginHost::composition()?.writer_registrations()` of the successor, an array
-of `{plugin, native, writable}` declarations. The operator reads and validates
-it before opening storage. Omit the file for a deployment with no plugin format
-changes. Retained plugins absent from the successor keep their recorded ranges.
+A release finalize must carry the successor's writer registrations into the
+guarded flip. `PluginHost::composition()?.writer_registrations()` supplies an
+array of `{plugin, native, writable}` declarations. The current operator has
+no finalize command; this is the required input to a future release operation,
+not a runnable CLI recipe. Retained plugins absent from the successor must
+keep their recorded ranges.
 
 #### 2.6 Admissions record the plugin composition and writers
 
@@ -401,41 +401,31 @@ be ignored where its decoder permits it; effect, ownership and identity
 records use their typed admission rules. The compatibility window forbids
 emitting semantics N cannot carry before finalize.
 
-### 6. The synthetic N+1 gates
+### 6. Current format evidence and release proof gaps
 
-The upgrade harness builds the default and synthetic-next variants from one
-tree. Synthetic-next moves every guarded surface, the component and fleet
-ranges, cursor and format set, with old-format writer
-pins and decoder coverage. Derived projections use regeneration instead of
-lifts (`crates/lash-core-store/src/store/synthetic_next.rs`).
+`crates/lash-core-store/src/store/synthetic_next.rs` declares successor
+writer pins and lifts. Component, session-state and fleet ranges have
+synthetic-next branches in `crates/lash-core-store/src/compat.rs`,
+`crates/lash-core-store/src/store/state_version.rs` and
+`crates/lash-core-store/src/store/fleet_format.rs`. These declarations are
+inputs to compatibility checks, not execution evidence for two-build rollback.
 
-`crates/lash-upgrade-harness/tests/phase_a/main.rs` registers expanded-store
-rollback, skipped-release refusal, writer/finalize races, host compatibility,
-drain by release and rollback, retention and delivery rollback, history after finalize, workflow-graph range checks, and
-the two-binary plugin writer-range rollback over SQLite file and PostgreSQL
-overlap stores. Plugin rollback and retained-history unit laws also cover
-SQLite memory and file stores, preserving recorded config and model routes.
-`operator_json_contract` lives in `crates/lashctl/tests/`.
+Current actor-format laws live in
+`crates/lash-durable/src/laws/formats.rs`,
+`crates/lash-durable-test/tests/drain_by_release.rs` and
+`crates/lash-durable-test/tests/format_fixtures.rs`. Their registrations define
+which stores and assertions they exercise. Decode/resume fixtures for the
+build's format sets and a drain law do not certify expanded-store rollback,
+writer/finalize races, plugin writer-range rollback, history after finalize,
+or a rolling cluster under load.
 
-The store matrix is SQLite file, SQLite memory and PostgreSQL. Laws run the
-production runtime over a fault-injecting store with labelled commits, a
-virtual clock and `SimNodes` (ADR 0132 §14). Upgrade proofs use the
-synthetic-next tier. The plugin rollback laws send admitted turns through the
-production runtime. Other Phase A and rolling runs use the two node builds
-against live PostgreSQL plus SQLite reopen cases; the
-operator JSON proof needs one binary. `just phase-a` and `just e2e-rolling`
-run the service proofs (`justfile:434`, `runbooks/rolling-upgrade/runbook.md:43`).
-Each law's registration supplies its supported store and host combination.
-
-`just e2e-rolling-cluster` runs the choreography under load on the Helm load
-topology: PostgreSQL and kind, with N's and N+1's nodes side by side while
-the load driver's sessions keep sending. It half-rolls, rolls back before
-finalize, rolls, finalizes, and fences: the live N worker's write, a fresh N process and
-N's operator are refused. The load verifier's witness classes judge no lost or
-duplicated effects, stale writers fenced after finalize, the rollback
-restoring N, and every session settling turns through each step
-(`scripts/loadtest_upgrade.py`). It runs on
-demand and sets no performance baseline.
+The former upgrade harness, Phase A and rolling recipes, rolling runbook and
+load-upgrade driver are absent. No executable proof of those choreographies is
+claimed here. The current `justfile` retains `release-fixtures-read-back`, but
+its reader and verifier import missing capture definitions. Tagged capture,
+verification and read-back therefore remain unavailable; see
+[release fixtures](../agents/release-fixtures.md). Restoring that proof is
+separate implementation work required before the release can claim it.
 
 ### 7. Release-cut guardrails
 
@@ -449,20 +439,21 @@ Synthetic-only changes do not advance those default versions.
 
 ### 8. Upgrade operations
 
-The operator sequence is expand, roll, drain by release, finalize, then
-finish backfills and contract. `lashctl` provides migrate, drain,
-drain-status, end-drain, finalize, finalize-hold, preflight and version. Its exit codes are 0 done, 1 failure, 2 usage,
-3 refused precondition, 4 incompatible store and 5 pending
-(`crates/lashctl/src/main.rs`).
+The release design's sequence is expand, roll, drain by release, finalize,
+then finish backfills and contract. The current `lashctl` supplies `migrate`,
+`preflight`, `stalled list`, `stalled rearm`, `deployment-status` and `version`.
+Its exit codes are 0 done, 1 failure, 2 usage, 3 refused precondition and
+4 incompatible store (`crates/lashctl/src/main.rs`). Node draining is exposed
+through `LashCore::drain` (`crates/lash/src/core/node.rs`), not operator drain
+or finalize commands.
 
-Finalize verifies that no live node lacks the newer formats, admits the epoch
-under lock and moves it to `F_self`. PostgreSQL stores the operator hold on
-the same fleet row. Automatic mode refuses a hold; `--override-hold` requests
-manual mode. Rerunning a completed flip reports `already_finalized`
-(`crates/lash-core-store/src/store/fleet_finalize.rs`,
-`crates/lash-postgres-store/src/postgres/finalize.rs`).
-SQLite finalizes its one database in one transaction and has no fleet-wide
-automatic hold (`crates/lash-sqlite-store/src/backend.rs`).
+Finalize and a finalize hold are release obligations without a current
+operator implementation. A finalize must verify that no live node lacks the
+newer formats, admit the epoch under lock and move it to the build's epoch.
+The current writer-range declarations in
+`crates/lash-core-store/src/store/fleet_format.rs` do not establish that flip.
+Do not advertise a rollback window as tested until the missing operation and
+its two-build proof exist.
 
 Backfills require their declared finalized epoch. A batch advances its cursor
 and rewritten rows in one guarded commit. Contract requires its epoch and

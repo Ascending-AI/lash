@@ -106,7 +106,7 @@ its admission. Resuming the same plan yields the same ids. A fresh response has 
 its provider ids match another response's.
 
 Sources: `crates/lash-sansio/src/sansio/turn_protocol.rs`,
-`crates/lash-core-execution/src/session/tool_execution/group.rs`, and
+`crates/lash-core-execution/src/runtime/actor/round/records.rs`, and
 `crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs`.
 
 ### 5. The tool-facing API
@@ -232,8 +232,8 @@ Source: `crates/lash-sansio/src/tool_call_id.rs`.
 refuses retained-request drift (L12).
 The store matrix is SQLite file, SQLite memory and PostgreSQL.  Laws run the production runtime over a fault-injecting store with labelled commits, a virtual clock and `SimNodes` ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §14). Upgrade proofs use the synthetic-next tier.
 
-Sources: `crates/lash-conformance/src/macros/tool_call_identity.rs`,
-`crates/lash-conformance/src/conformance/batch_sugar.rs`,
+Sources: `crates/lash-durable-test/tests/tool_call_identity.rs`,
+`crates/lash-durable-test/tests/tool_batches.rs`,
 `crates/lash-core-store/src/tool_run/admission.rs`, and
 `crates/lash-sim/src/invariants/tool_call_identity.rs`.
 

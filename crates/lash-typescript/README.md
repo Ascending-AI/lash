@@ -706,10 +706,22 @@ with an explicit-string repair for other values. RegExp objects are durable
 mutable heap values: pattern, flags, and `lastIndex` persist across suspension,
 while the compiled matcher is a rebuildable cache and is never serialized.
 Node-shaped exec/match results use an unforgeable durable `RegExpMatch` heap
-kind. This is a fail-closed wire cutover: bytecode format 9, snapshot format 6,
-VM continuation format 7, RLM snapshot envelope 12, and Lashlang segment
-handover 3. Deployments must drain or recreate parked processes created by
-older formats. The accepted surface is `source`, `flags`, `global`,
+kind. The current owning constants are `BYTECODE_FORMAT_VERSION` (30) in
+[`lashlang`](../lashlang/src/lib.rs), `LASHLANG_SNAPSHOT_VERSION` (1) in
+[`runtime/state.rs`](../lashlang/src/runtime/state.rs),
+`VM_CONTINUATION_FORMAT_VERSION` (1) in
+[`runtime/vm/continuation.rs`](../lashlang/src/runtime/vm/continuation.rs),
+`RLM_SNAPSHOT_VERSION` (1) in
+[`executor/snapshot.rs`](../lash-protocol-rlm/src/executor/snapshot.rs), and
+`LASHLANG_SEGMENT_STATE_VERSION` (1) in
+[`engine/state.rs`](../lash-lashlang-runtime/src/engine/state.rs). The snapshot,
+continuation and RLM envelope constants become 2 with `synthetic-next`.
+The pre-1.0 freeze changes shapes in place; these numbers do not promise
+compatibility across development builds. Admission checks the node's decoded
+format set and the executable contract; unreadable parked state must finish
+on a node that reads it or be ended and recreated
+([ADR 0106](../../docs/adr/0106-durable-formats-upgrade-by-migration-or-drain.md)).
+The accepted surface is `source`, `flags`, `global`,
 `ignoreCase`, `multiline`, `sticky`, `unicode`, and writable `lastIndex`;
 `exec`, `test`, `toString`, and `valueOf`; plus string `match`, `search`,
 `matchAll`, `replace`, `replaceAll`, and `split`. Exec match values have Node's

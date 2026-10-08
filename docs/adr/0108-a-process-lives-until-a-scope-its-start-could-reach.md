@@ -101,9 +101,9 @@ scope. The cascade writes cancel requests to the children's mailboxes in
 bounded batches and advances a durable cursor, so it survives a crash and no
 transaction walks a large tree (ADR 0132 §11).
 
-Evidence: `crates/lash-sqlite-store/src/session_runs.rs:169`,
-`crates/lash-core-execution/src/runtime/process/scope_close.rs:139`, and
-`crates/lash-sqlite-store/src/process_registry/parent_end.rs:55`.
+Evidence: `crates/lash-sqlite-store/src/session_runs.rs`,
+`crates/lash-core/src/runtime/durable/turn_scope.rs`, and
+`crates/lash-sqlite-store/src/process_registry/parent_end.rs`.
 
 ### 5a. The `CloseSession` intent is the deletion tombstone
 
@@ -119,9 +119,9 @@ Session deletion and evidence reclamation preserve this tombstone. The
 session's other control intents can be removed. A retried deletion completes
 the recorded close rather than inventing a second intent.
 
-Evidence: `crates/lash-sqlite-store/src/session_runs.rs:945`,
-`crates/lash-sqlite-store/src/session_delete_ledger.rs:40`, and
-`crates/lash-store-sql/src/session_runs/control_intents.rs:75`.
+Evidence: `crates/lash-sqlite-store/src/session_runs.rs`,
+`crates/lash-sqlite-store/src/catalog.rs`, and
+`crates/lash-store-sql/src/session_runs/control_intents.rs`.
 
 ### 6. A closed scope starts nothing
 

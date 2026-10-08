@@ -101,6 +101,6 @@ the oracle.
 
 - [Script](../../crates/lash-core-store/src/testing/script.rs) and [Gate](../../crates/lash-core-store/src/testing/gate.rs), over the [store](../../crates/lash-core-store/src/store/runtime_store_decorator.rs) and [deployment](../../crates/lash-core-execution/src/runtime/deployment_store_decorator.rs) operation lists.
 - [Simulator backend faults](../../crates/lash-sim/src/backend_fault.rs) as script arms, and the in-store points of [SQLite](../../crates/lash-sqlite-store/src/testing.rs) and [PostgreSQL](../../crates/lash-postgres-store/src/postgres/testing.rs).
-- [Effect window invariant](../../crates/lash-sim/src/invariants/effect_window.rs) and [virtual clock](../../crates/lash-sim/src/clock.rs).
+- [Effect window invariant](../../crates/lash-sim/src/invariants/effect_window.rs) and [virtual clock](../../crates/lash-durable-test/src/clock.rs).
 - [Store gate matrix](../../scripts/ci/store-tests.sh).
-- [Mutation gate stages](../../scripts/ci/confidence-stage.sh) and [synthetic upgrade features](../../crates/lash-upgrade-harness/Cargo.toml).
+- [Mutation gate stages](../../scripts/ci/confidence-stage.sh) and [synthetic format declarations](../../crates/lash-core-store/src/store/synthetic_next.rs).
