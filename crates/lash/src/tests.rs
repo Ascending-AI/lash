@@ -467,6 +467,7 @@ mod standard_compaction_persistence;
 mod standard_protocol_turns;
 mod stream_evidence;
 mod store_faults;
+mod tool_check_control;
 mod tool_intent_ingress;
 mod tool_restore_report;
 mod turn_checkpoints;
