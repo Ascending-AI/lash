@@ -1959,3 +1959,215 @@ async fn lashlang_signal_wait_resolves_with_the_hosts_signal(tier: Tier) {
 }
 
 on_every_tier!(lashlang_signal_wait_resolves_with_the_hosts_signal);
+
+// --- isolated tools ---------------------------------------------------------
+
+/// The engine an isolated call binds: it ends with the payload it started
+/// on.
+const ISOLATED_ENGINE: &str = "core-node-isolated-engine";
+const ISOLATED_TOOL: &str = "iso_run";
+
+fn isolated_engine_advance(
+    _state: &mut serde_json::Value,
+    event: lash_core::EngineEvent,
+) -> lash_core::EngineAction {
+    match event {
+        lash_core::EngineEvent::Started { payload } => {
+            answer(serde_json::json!({ "isolated": payload }))
+        }
+        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
+        _ => lash_core::EngineAction::Idle,
+    }
+}
+
+/// A native tool declared isolated, which its provider binds to
+/// [`ISOLATED_ENGINE`] when `bound`; its ordinary body counts its runs.
+struct IsolatedTools {
+    bound: bool,
+    executions: AtomicUsize,
+}
+
+fn isolated_definition() -> lash_core::ToolDefinition {
+    use lash_core::ToolDefinitionBindingExt as _;
+    lash_core::ToolDefinition::raw(
+        "tool:iso_run",
+        ISOLATED_TOOL,
+        "Runs in an isolated process.",
+        serde_json::json!({
+            "type": "object",
+            "properties": { "label": { "type": "string" } },
+            "required": ["label"],
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "object" }),
+    )
+    .expect("the isolated tool's schemas")
+    .with_tool_binding(lash_core::ToolBinding::new(["iso"], "run"))
+    .with_declaration(lash_core::ToolDeclaration {
+        isolated: true,
+        ..lash_core::ToolDeclaration::default()
+    })
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for IsolatedTools {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![isolated_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == ISOLATED_TOOL).then(|| Arc::new(isolated_definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.executions.fetch_add(1, Ordering::SeqCst);
+        lash_core::ToolOutcome::ok(serde_json::json!({ "ordinary": true })).into()
+    }
+
+    fn isolated_process(
+        &self,
+        call: lash_core::IsolatedProcessRequest<'_>,
+    ) -> Option<lash_core::IsolatedProcessBinding> {
+        self.bound.then(|| lash_core::IsolatedProcessBinding {
+            engine: ISOLATED_ENGINE.to_owned(),
+            payload: call.args.clone(),
+        })
+    }
+}
+
+/// An RLM turn whose cell calls the isolated tool: the deployment, its
+/// tools, the turn's output and every request its model saw.
+async fn isolated_turn(
+    tier: Tier,
+    bound: bool,
+) -> (
+    Deployment,
+    Arc<IsolatedTools>,
+    lash::TurnOutput,
+    Vec<String>,
+) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let model = {
+        let seen = Arc::clone(&seen);
+        scripted(move |request, transcript| {
+            let mut seen = seen.lock().unwrap();
+            seen.push(transcript.to_owned());
+            let source = if seen.len() == 1 {
+                "const started = await iso.run({label: \"isolated-law\"});\nfinish(started);"
+            } else {
+                "finish(\"asked again\");"
+            };
+            text(request, &format!("<typescript>\n{source}\n</typescript>"))
+        })
+    };
+    let tools = Arc::new(IsolatedTools {
+        bound,
+        executions: AtomicUsize::new(0),
+    });
+    let deployment = deploy_with(
+        tier,
+        vec![Arc::new(ScriptEngine {
+            kind: ISOLATED_ENGINE,
+            advance: isolated_engine_advance,
+        })],
+        {
+            let tools = Arc::clone(&tools);
+            move |backend| {
+                rlm_core(backend)
+                    .serve_test_llm_profile(model, metadata())
+                    .tools(tools)
+            }
+        },
+    )
+    .await;
+    let output = settle(&deployment.core, "isolated-call", "call the isolated tool").await;
+    let seen = seen.lock().unwrap().clone();
+    (deployment, tools, output, seen)
+}
+
+/// The processes of the isolated engine the registry holds.
+async fn isolated_processes(backend: &lash::Backend) -> Vec<lash_core::ProcessRecord> {
+    backend
+        .process_registry()
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        })
+        .await
+        .expect("the registry lists its processes")
+        .into_iter()
+        .filter(|record| {
+            matches!(
+                record.input.as_ref(),
+                lash_core::ProcessInput::Engine { kind, .. } if kind == ISOLATED_ENGINE
+            )
+        })
+        .collect()
+}
+
+/// L08/D04: an RLM cell's call of a tool declared isolated, which its
+/// provider binds to a registered engine, starts exactly one lash process
+/// under an isolated start key, before any body runs: no ordinary body
+/// runs, the engine runs the process, and the call answers its descriptor.
+async fn an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor(tier: Tier) {
+    let (deployment, tools, output, _) = isolated_turn(tier, true).await;
+    assert!(output.is_success(), "{output:?}");
+    let descriptor: lash_core::tool_dispatch::IsolatedProcessDescriptor = serde_json::from_value(
+        output
+            .final_value()
+            .cloned()
+            .unwrap_or_else(|| panic!("the cell finishes with the call's answer: {output:?}")),
+    )
+    .unwrap_or_else(|error| panic!("the call answers its descriptor ({error}): {output:?}"));
+    assert!(
+        descriptor
+            .start_key
+            .as_str()
+            .starts_with("process-start-key:v1:isolated:"),
+        "{:?}",
+        descriptor.start_key
+    );
+    let processes = isolated_processes(&deployment.backend).await;
+    assert_eq!(processes.len(), 1, "one lash process: {processes:#?}");
+    assert_eq!(processes[0].id, descriptor.process_id);
+    assert_eq!(processes[0].start_key.as_ref(), Some(&descriptor.start_key));
+    assert_eq!(
+        tools.executions.load(Ordering::SeqCst),
+        0,
+        "no ordinary body"
+    );
+    assert_eq!(
+        success(&ended(&deployment.core, &descriptor.process_id).await),
+        serde_json::json!({ "isolated": { "label": "isolated-law" } }),
+        "the engine ran the one process on the call's arguments"
+    );
+}
+
+/// L08/D04: an isolated tool its provider binds to no engine is refused at
+/// admission: the cell's call answers the typed refusal, and no body,
+/// process or engine run starts.
+async fn an_unbound_isolated_tool_is_refused_typed_before_any_body(tier: Tier) {
+    let (deployment, tools, output, seen) = isolated_turn(tier, false).await;
+    assert!(output.is_success(), "{output:?}");
+    assert_eq!(seen.len(), 2, "the model saw the refused cell: {seen:#?}");
+    assert!(
+        seen[1].contains(
+            "was refused at admission: the tool is declared isolated and no process \
+             implementation is bound to it"
+        ),
+        "the cell's call answered the unsupported-isolation refusal: {}",
+        seen[1]
+    );
+    assert_eq!(
+        tools.executions.load(Ordering::SeqCst),
+        0,
+        "no ordinary body"
+    );
+    assert!(
+        isolated_processes(&deployment.backend).await.is_empty(),
+        "no process"
+    );
+}
+
+on_every_tier!(an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor);
+on_every_tier!(an_unbound_isolated_tool_is_refused_typed_before_any_body);

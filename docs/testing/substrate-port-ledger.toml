@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1645 rows over 873 files, 4018 laws.
-# By class: mechanical 184, semantic 125, delete 871, replace 465.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 89, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 364, ported 105, deleted 1176.
+# 1648 rows over 873 files, 4021 laws.
+# By class: mechanical 184, semantic 128, delete 871, replace 465.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 87, L9c 352, L9d 89, L9e 134, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 363, ported 105, deleted 1180.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -9369,9 +9369,51 @@ laws = [
   "l08_an_unbound_isolated_tool_refuses_typed_before_any_body",
   "l08_isolated_cancellation_forbids_launch_before_admission_or_cancels_the_same_process_after",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs"
+status = "deleted"
+note = "the file went with Restate (FIG-5190, 5ad9641f9e); each law has a row of its own"
+
+[[row]]
+path = "crates/lash/src/tests/isolated_tool_route.rs"
+test = "l08_an_isolated_rlm_tool_starts_one_process_before_any_body_and_returns_its_descriptor"
+area = "isolated-tools"
+needs = ["turn", "round", "process", "cell"]
+class = "semantic"
+lane = "L9e"
+laws = [
+  "l08_an_isolated_rlm_tool_starts_one_process_before_any_body_and_returns_its_descriptor",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor"
+status = "deleted"
+note = "FIG-5309 re-wrote the law through a host's send() of an RLM turn on the core's node, its engine a registered advance engine"
+
+[[row]]
+path = "crates/lash/src/tests/isolated_tool_route.rs"
+test = "l08_an_unbound_isolated_tool_refuses_typed_before_any_body"
+area = "isolated-tools"
+needs = ["turn", "round", "process", "cell"]
+class = "semantic"
+lane = "L9e"
+laws = [
+  "l08_an_unbound_isolated_tool_refuses_typed_before_any_body",
+]
+disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::an_unbound_isolated_tool_is_refused_typed_before_any_body"
+status = "deleted"
+note = "FIG-5309 re-wrote the law through a host's send() of an RLM turn: the cell's call answers the UnsupportedIsolation admission refusal, and nothing starts"
+
+[[row]]
+path = "crates/lash/src/tests/isolated_tool_route.rs"
+test = "l08_isolated_cancellation_forbids_launch_before_admission_or_cancels_the_same_process_after"
+area = "isolated-tools"
+needs = ["turn", "round", "process", "cell"]
+class = "semantic"
+lane = "L9e"
+laws = [
+  "l08_isolated_cancellation_forbids_launch_before_admission_or_cancels_the_same_process_after",
+]
+disposition = "covered-by:crates/lash-durable-test/tests/declared_start.rs::declared_start_cancel_at_each_point"
+status = "deleted"
+note = "an isolated call's start is a declared start obligation bound to the call (call_run::bind_start, its cancel hold the call's cancel policy), so a cancel before its admission forbids the launch and one after it cancels the same process; the crash-cut legs went with the Restate double (FIG-5190)"
 
 [[row]]
 path = "crates/lash/src/tests/long_tool_body.rs"
