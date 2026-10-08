@@ -2,8 +2,7 @@
 // in causal order. Each law drives the production timeline module through the
 // sources a page feeds it (a send, the product lane, live observations, a
 // turn's committed rows, an authoritative snapshot) and reads the DOM it
-// produces. The same laws run in Node over a small tree DOM
-// (timeline_projection.mjs) and in Chromium over the real DOM
+// produces. The same laws run in Chromium over the real DOM
 // (timeline_browser.py).
 //
 // `env` supplies: `assert`, `timeline(clock)` → { timeline, list, footer },

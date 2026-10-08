@@ -1,10 +1,10 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1593 rows over 864 files, 3947 laws.
-# By class: mechanical 163, semantic 111, delete 865, replace 454.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 104, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 7, P5 2.
-# By status: todo 404, ported 90, deleted 1099.
+# 1595 rows over 866 files, 3963 laws.
+# By class: mechanical 164, semantic 111, delete 866, replace 454.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 73, L9c 342, L9d 79, L9e 131, L9f 125, L9g 98, L9h 106, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 7, P5 2.
+# By status: todo 404, ported 91, deleted 1100.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
@@ -10044,8 +10044,6 @@ laws = [
   "retired_session_cancel_and_tool_refresh_return_the_typed_conflict",
   "retired_session_http_refusals_record_structured_admission_evidence",
   "every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal",
-  "canonical_rows_survive_every_registered_production_renderer",
-  "workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors",
   "attachment_urls_percent_encode_the_id_path_segment",
   "session_event_registry_isolates_channels_and_recreates_after_removal",
   "settled_product_reconciliation_keeps_the_cursor_monotonic",
@@ -10058,6 +10056,50 @@ laws = [
 ]
 disposition = "port"
 status = "todo"
+
+[[row]]
+path = "examples/agent-workbench/src/main_sections/tests/projection_suites.rs"
+test = "*"
+area = "workbench"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9h"
+laws = [
+  "canonical_rows_survive_every_registered_production_renderer",
+  "workbench_browser_recovery_projection_preserves_rows_and_scopes_session_cursors",
+]
+disposition = "port"
+status = "ported"
+note = "FIG-5299 re-wrote the two projection-gate laws the Restate driver held on a SQLite memory durable backend: canonical rows commit through the session's own admin append and feed tests/transcript_projection.mjs over durable().transcript(); the browser suite's trigger identities and typed Stop terminal are pure facade values, fed to tests/browser_projection.mjs"
+
+[[row]]
+path = "examples/agent-workbench/tests/timeline_projection.mjs"
+test = "*"
+area = "workbench"
+needs = ["turn"]
+class = "delete"
+lane = "L9h"
+laws = [
+  "provider failure settles to the same durable row for sender and observer, and usage reaches the page",
+  "client request errors and a durable failure remain distinct rows",
+  "a model attempt reset retracts only the superseded partial text, and the retry shows its status",
+  "a retry status belongs to its own turn",
+  "a tool call is one row nested in its code block, live and after the commit",
+  "durable tool summaries render success, failure, and explicit omission honestly",
+  "committed rows render canonical reasoning and code disclosure, each carrying its row id",
+  "a snapshot overtaken by a live event cannot erase its row",
+  "busy follows the turn, and a read begun before its done cannot re-arm it",
+  "turn A's done does not retire turn B's live prose",
+  "a failed turn's provisional rows retire on its done",
+  "pending input receipts wait in the footer until their turn takes them",
+  "input a run already admitted is its run's user row, never a queued receipt",
+  "one trigger occurrence is one row, and the turn it started folds into it",
+  "message attachments render as linked images and degrade visibly on load failure",
+  "a committed RLM printed-image message numbers multiple image alt labels",
+]
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5299 deleted the suite: its only driver was the Restate gate FIG-5190 removed, and its LASH_WORKBENCH_TURN_EVENTS, LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT and LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE fixtures came only from that gate's deleted app-state fixture. The FIG-5086 laws it also ran live on in tests/timeline_laws.mjs for the dormant Chromium runner tests/timeline_browser.py."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/reference_transport.rs"
