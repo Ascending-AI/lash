@@ -1,5 +1,5 @@
 //! S2's claim, fence, heartbeat/reap and wake measurements (FIG-5167),
-//! repeated against the real `DurableStore` and `Signals` of the
+//! repeated against the real `DurableStore` and `NodeWakes` of the
 //! PostgreSQL store instead of the spike's sketch tables.
 //!
 //! Each simulated node is a registered boot with its own pool. Claimed
@@ -14,8 +14,8 @@ use anyhow::{Context as _, Result, ensure};
 use futures_util::future::try_join_all;
 use lash_core_execution::StoreSet;
 use lash_durable::{
-    ActorKey, CommitLabel, DurableStore, FormatSet, MailTx, NodeId, NodeLease, NodeSpec, Release,
-    Signal, Signals, WakeBatch,
+    ActorKey, CommitLabel, DurableStore, FormatSet, MailTx, NodeId, NodeLease, NodeSpec,
+    NodeWakeEvent, NodeWakes, Release, WakeBatch,
 };
 use lash_postgres_store::{
     PostgresEndpoints, PostgresHostConfig, PostgresStorage, PostgresStoreSet,
@@ -29,7 +29,7 @@ const TTL_MILLIS: i64 = 15_000;
 
 struct BenchNode {
     store: Arc<dyn DurableStore>,
-    signals: Option<Arc<dyn Signals>>,
+    node_wakes: Option<Arc<dyn NodeWakes>>,
     lease: NodeLease,
     storage: PostgresStorage,
 }
@@ -60,7 +60,7 @@ async fn nodes(url: &str, count: usize, tag: &str, formats: &FormatSet) -> Resul
             .map_err(|error| anyhow::anyhow!("register: {error}"))?;
         nodes.push(BenchNode {
             store,
-            signals: set.durable_signals(),
+            node_wakes: set.node_wakes(),
             lease,
             storage,
         });
@@ -327,8 +327,11 @@ async fn wake(report: &Report, url: &str, count: usize, events: usize) -> Result
     let mut feeds = Vec::new();
     let mut owned = Vec::new();
     for node in &nodes {
-        let signals = node.signals.as_ref().context("PostgreSQL has signals")?;
-        let feed = signals
+        let node_wakes = node
+            .node_wakes
+            .as_ref()
+            .context("PostgreSQL has node wakes")?;
+        let feed = node_wakes
             .listen(&node.lease)
             .await
             .map_err(|error| anyhow::anyhow!("listen: {error}"))?;
@@ -341,10 +344,10 @@ async fn wake(report: &Report, url: &str, count: usize, events: usize) -> Result
         feeds.push(feed);
         owned.push(claimed.into_iter().next().context("one claim")?.actor);
     }
-    let signals = producer
-        .signals
+    let node_wakes = producer
+        .node_wakes
         .as_ref()
-        .context("PostgreSQL has signals")?;
+        .context("PostgreSQL has node wakes")?;
     let mut end_to_end = Vec::new();
     let mut commits = Vec::new();
     let mut deliveries = Vec::new();
@@ -371,7 +374,7 @@ async fn wake(report: &Report, url: &str, count: usize, events: usize) -> Result
         }
         ensure!(!owned_batch.is_empty(), "the mail commit woke no owner");
         let publishing = Instant::now();
-        signals
+        node_wakes
             .publish(&WakeBatch {
                 ready: BTreeSet::new(),
                 owned: owned_batch,
@@ -383,7 +386,7 @@ async fn wake(report: &Report, url: &str, count: usize, events: usize) -> Result
                 .await
                 .context("no delivery within 10 s")?
             {
-                Signal::Owned(actors) if actors.contains(actor) => break,
+                NodeWakeEvent::Owned(actors) if actors.contains(actor) => break,
                 _ => {}
             }
         }

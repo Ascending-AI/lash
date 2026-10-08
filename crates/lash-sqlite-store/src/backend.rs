@@ -322,7 +322,7 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         Arc::new(SqliteStoreSet::durable_store(self))
     }
 
-    fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>> {
+    fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
         None
     }
 

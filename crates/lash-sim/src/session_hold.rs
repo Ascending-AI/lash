@@ -147,8 +147,8 @@ impl lash_core_execution::StoreSet for HoldingStoreSet {
         })
     }
 
-    fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>> {
-        lash_core_execution::StoreSet::durable_signals(self.inner.as_ref())
+    fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
+        lash_core_execution::StoreSet::node_wakes(self.inner.as_ref())
     }
 
     fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {

@@ -11,9 +11,9 @@
 //!   than `max_active` in all.
 //! - **Mail** reaches a hot owner by the wake hint of a mailbox commit made
 //!   on this node ([`Backend::commit_mail`]), published to the owner's node
-//!   when the store set has signals and the notifier is `AfterCommit`, or by
+//!   when the store set has node wakes and the notifier is `AfterCommit`, or by
 //!   the owner's own read at every claim poll: the poll is the correctness
-//!   backstop, the hint only cuts latency. With signals the node also holds
+//!   backstop, the hint only cuts latency. With node wakes the node also holds
 //!   a liveness lock, so a crashed node is reaped as soon as its session
 //!   ends.
 //! - **Idle eviction and release** belong to each activation: a session
@@ -90,9 +90,9 @@ pub async fn serve(
     .with_hints(backend.hints().clone())
     .with_drain(serve.drain);
     if settings.notifier == Notifier::AfterCommit
-        && let Some(signals) = backend.stores().durable_signals()
+        && let Some(node_wakes) = backend.stores().node_wakes()
     {
-        runner = runner.with_signals(signals);
+        runner = runner.with_node_wakes(node_wakes);
     }
     runner.run(stop).await
 }

@@ -332,8 +332,8 @@ impl lash::StoreSet for DeleteStores {
     fn durable_store(&self) -> Arc<dyn DurableStore> {
         self.durable.clone()
     }
-    fn durable_signals(&self) -> Option<Arc<dyn lash::durable::Signals>> {
-        self.inner.durable_signals()
+    fn node_wakes(&self) -> Option<Arc<dyn lash::durable::NodeWakes>> {
+        self.inner.node_wakes()
     }
     fn binding_identity(&self) -> &lash::StoreBindingId {
         self.inner.binding_identity()

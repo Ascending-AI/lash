@@ -40,7 +40,7 @@
 //! transaction fenced by the epoch it was claimed under, so a claim runs it
 //! again and no actor is left owned with no activation.
 //!
-//! With [`Signals`] (PostgreSQL), the runner also listens: it opens its
+//! With [`NodeWakes`] (PostgreSQL), the runner also listens: it opens its
 //! listener before its first claim, so no hint sent after that scan is
 //! missed; it rescans after the listener resubscribes; it publishes what
 //! its node's commits woke, coalesced, after those commits; and it watches
@@ -56,11 +56,11 @@ use crate::durable_config::DurableConfig;
 use crate::error::{DurableError, StoreFailure, StoreFailureKind};
 use crate::formats::FormatSet;
 use crate::ids::{ActorKey, CommitLabel, Epoch, NodeId};
+use crate::node_wakes::{NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
 use crate::port::{
     ActorCommit, ActorState, ClaimCause, Claimed, DurableStore, HeartbeatOutcome, MailCommit,
     NodeLease, NodeSpec, Owner, Woken,
 };
-use crate::signals::{Signal, SignalFeed, Signals, WakeBatch};
 use crate::tx::{ActorTx, Release};
 use lash_core_ids::clock::Clock;
 use std::collections::{HashMap, HashSet};
@@ -467,7 +467,7 @@ struct HintsInner {
 /// its commit woke, after the commit. An actor this boot runs is hinted in
 /// process and nothing is published; a readied unowned actor rings one
 /// claim loop: this node's while it has a free slot, or else, with
-/// [`Signals`], the one live peer its key hashes to; an actor another node
+/// [`NodeWakes`], the one live peer its key hashes to; an actor another node
 /// owns is published to that node alone. Publishes coalesce until the
 /// publisher's next flush.
 #[derive(Clone, Default)]
@@ -637,27 +637,27 @@ pub struct Runner {
     config: RunnerConfig,
     activation: Arc<dyn Activation>,
     hints: Hints,
-    signals: Option<Arc<dyn Signals>>,
+    node_wakes: Option<Arc<dyn NodeWakes>>,
     drain: Drain,
     liveness: Liveness,
 }
 
 /// Publish the node's coalesced wakes, one flush at a time: whatever is
 /// woken while a publish is in flight rides the next one.
-async fn publish(hints: Hints, signals: Arc<dyn Signals>) {
+async fn publish(hints: Hints, node_wakes: Arc<dyn NodeWakes>) {
     loop {
         hints.inner.flush.notified().await;
         let batch = hints.take_pending();
         if !batch.is_empty() {
             // A hint that fails to send costs latency only: the polls find
             // the work.
-            let _ = signals.publish(&batch).await;
+            let _ = node_wakes.publish(&batch).await;
         }
     }
 }
 
-/// The feed's next signal, or never without one.
-async fn next_signal(feed: &mut Option<Box<dyn SignalFeed>>) -> Signal {
+/// The feed's next wake event, or never without one.
+async fn next_node_wake(feed: &mut Option<Box<dyn NodeWakeFeed>>) -> NodeWakeEvent {
     match feed {
         Some(feed) => feed.next().await,
         None => std::future::pending().await,
@@ -679,7 +679,7 @@ impl Runner {
             config,
             activation,
             hints: Hints::default(),
-            signals: None,
+            node_wakes: None,
             drain: Drain::default(),
             liveness,
         }
@@ -699,16 +699,16 @@ impl Runner {
         hints
             .inner
             .publishing
-            .store(self.signals.is_some(), Ordering::Release);
+            .store(self.node_wakes.is_some(), Ordering::Release);
         self.hints = hints;
         self
     }
 
-    /// Listen, publish and watch liveness through `signals`.
+    /// Listen, publish and watch liveness through `node_wakes`.
     #[must_use]
-    pub fn with_signals(mut self, signals: Arc<dyn Signals>) -> Self {
+    pub fn with_node_wakes(mut self, node_wakes: Arc<dyn NodeWakes>) -> Self {
         self.hints.inner.publishing.store(true, Ordering::Release);
-        self.signals = Some(signals);
+        self.node_wakes = Some(node_wakes);
         self
     }
 
@@ -762,8 +762,8 @@ impl Runner {
             ended_tx,
         ));
         // The listener is in place before the first claim scans.
-        let mut feed = match &self.signals {
-            Some(signals) => match self.within(started_by, signals.listen(&lease)).await {
+        let mut feed = match &self.node_wakes {
+            Some(node_wakes) => match self.within(started_by, node_wakes.listen(&lease)).await {
                 Some(Ok(feed)) => Some(feed),
                 failed => {
                     renewal.abort_all();
@@ -778,8 +778,8 @@ impl Runner {
             None => None,
         };
         let mut publisher: JoinSet<()> = JoinSet::new();
-        if let Some(signals) = &self.signals {
-            publisher.spawn(publish(self.hints.clone(), Arc::clone(signals)));
+        if let Some(node_wakes) = &self.node_wakes {
+            publisher.spawn(publish(self.hints.clone(), Arc::clone(node_wakes)));
         }
         let mut active: JoinSet<Exit> = JoinSet::new();
         // The actor and epoch each running activation was claimed with, and
@@ -865,19 +865,19 @@ impl Runner {
                     continue;
                 }
                 () = self.drain.wait(), if !self.drain.started() => continue,
-                signal = next_signal(&mut feed) => match signal {
-                    Signal::Ready => {
+                event = next_node_wake(&mut feed) => match event {
+                    NodeWakeEvent::Ready => {
                         next_claim = self.clock.now();
                         claim_delay = settings.claim_backoff;
                     }
-                    Signal::Owned(actors) => {
+                    NodeWakeEvent::Owned(actors) => {
                         for actor in &actors {
                             if !self.hints.hint_running(actor) {
                                 next_claim = self.clock.now();
                             }
                         }
                     }
-                    Signal::Resubscribed => {
+                    NodeWakeEvent::Resubscribed => {
                         seen_held.clear();
                         self.hints.hint_all_running();
                         next_claim = self.clock.now();
@@ -902,12 +902,12 @@ impl Runner {
                     Err(stopped) => break stopped,
                 }
             }
-            if let (Some(signals), Some(session)) =
-                (&self.signals, feed.as_ref().map(|feed| feed.session()))
+            if let (Some(node_wakes), Some(session)) =
+                (&self.node_wakes, feed.as_ref().map(|feed| feed.session()))
                 && now >= next_watch
             {
                 next_watch = now + settings.claim_poll;
-                let probed = match self.bounded(&mut stop, &ended, signals.liveness()).await {
+                let probed = match self.bounded(&mut stop, &ended, node_wakes.liveness()).await {
                     Ok(probed) => probed,
                     Err(stopped) => break stopped,
                 };
@@ -921,7 +921,7 @@ impl Runner {
                     _ => Vec::new(),
                 };
                 for boot in released {
-                    let reap = signals.reap_released(&lease, &boot);
+                    let reap = node_wakes.reap_released(&lease, &boot);
                     match self.bounded(&mut stop, &ended, reap).await {
                         Ok(Ok(reaped)) if !reaped.is_empty() => next_claim = now,
                         Ok(Err(DurableError::NodeLeaseLost { .. })) => {
@@ -1169,7 +1169,7 @@ fn not_started(what: &str, settings: LeaseSettings) -> DurableError {
 
 /// The other nodes whose listeners hold their boots' locks in `boots`,
 /// sorted and once each.
-fn live_peers(lease: &NodeLease, boots: &[crate::signals::BootLiveness]) -> Vec<NodeId> {
+fn live_peers(lease: &NodeLease, boots: &[crate::node_wakes::BootLiveness]) -> Vec<NodeId> {
     let mut peers: Vec<NodeId> = boots
         .iter()
         .filter(|liveness| liveness.held && liveness.boot.node != lease.owner.node)
@@ -1204,7 +1204,7 @@ fn rendezvous(actor: &ActorKey, peer: &NodeId) -> u64 {
 /// starting up or never listens, so its lease alone decides it.
 fn released_boots(
     lease: &NodeLease,
-    boots: Vec<crate::signals::BootLiveness>,
+    boots: Vec<crate::node_wakes::BootLiveness>,
     session: u64,
     seen_held: &mut HashMap<Owner, u64>,
 ) -> Vec<Owner> {

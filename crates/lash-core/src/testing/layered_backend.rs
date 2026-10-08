@@ -311,8 +311,8 @@ impl StoreSet for LayeredStoreSet {
         }
     }
 
-    fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>> {
-        self.inner.durable_signals()
+    fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>> {
+        self.inner.node_wakes()
     }
 
     fn binding_identity(&self) -> &StoreBindingId {

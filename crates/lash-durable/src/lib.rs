@@ -41,10 +41,10 @@ mod labels;
 pub use labels::CommitCapacity;
 #[cfg(feature = "testing")]
 pub mod laws;
+mod node_wakes;
 mod port;
 mod probe;
 pub mod runner;
-mod signals;
 mod tx;
 
 pub use config::{LeaseConfig, LeaseConfigError, LeaseSettings};
@@ -60,10 +60,10 @@ pub use ids::{
     ActorKey, ActorKeyError, ActorKind, BootId, CommitLabel, DurableInstant, Epoch, MailKind,
     MailSeq, NodeId, StateRevision,
 };
+pub use node_wakes::{BootLiveness, NodeWakeEvent, NodeWakeFeed, NodeWakes, WakeBatch};
 pub use port::{
     ActorCommit, ActorSnapshot, ActorState, ClaimCause, ClaimPurpose, Claimed, DurableStore,
     HeartbeatOutcome, MailCommit, NodeLease, NodeSpec, Owner, Reaped, Woken,
 };
 pub use probe::{DurableProbe, NoProbe};
-pub use signals::{BootLiveness, Signal, SignalFeed, Signals, WakeBatch};
 pub use tx::{ActorTx, Mail, MailTx, MailWrite, OpenedActor, Release};

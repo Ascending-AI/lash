@@ -286,7 +286,7 @@ impl Backend {
 
     /// Commit the mailbox transaction `tx` under `label`, then hand every
     /// actor it woke to this node's runner: an actor the node runs is hinted
-    /// in process, and with signals an actor another node owns, or a readied
+    /// in process, and with node wakes an actor another node owns, or a readied
     /// unowned one, is published after the commit. A hint is only a hint:
     /// an actor whose hint is lost sees the commit at its next poll.
     ///
@@ -487,11 +487,11 @@ pub trait StoreSet: Send + Sync {
     /// mail and the domain rows of ADR 0132.
     fn durable_store(&self) -> Arc<dyn DurableStore>;
 
-    /// The cross-node signals over this store set's database: wake hints
-    /// after commit and node liveness locks (L8, FIG-5178). `None` for a
-    /// store with one node per database (SQLite), whose wakes stay in
-    /// process; its runner relies on in-process hints and the polls.
-    fn durable_signals(&self) -> Option<Arc<dyn lash_durable::Signals>>;
+    /// The node wakes over this store set's database: wake hints after
+    /// commit and node liveness locks (L8, FIG-5178). `None` for a store
+    /// with one node per database (SQLite), whose wakes stay in process;
+    /// its runner relies on in-process hints and the polls.
+    fn node_wakes(&self) -> Option<Arc<dyn lash_durable::NodeWakes>>;
 
     /// The identity of this store set's storage.
     fn binding_identity(&self) -> &StoreBindingId;

@@ -219,7 +219,7 @@ and the time to the next block.
 sample of 20 was confirmed released), the bench measures a 30 s quiet window.
 
 **Store.** S2's shapes run on the PostgreSQL store's own `DurableStore` and
-`Signals`, not on the spike's tables. Each simulated node is a registered boot
+`NodeWakes`, not on the spike's tables. Each simulated node is a registered boot
 with its own pool. A claimed actor is released as `waiting`, already due, so
 the claimable set keeps its size. Fence is `begin` plus an empty commit on the
 node's own actor. Wake is a mail commit to an actor another node owns, then

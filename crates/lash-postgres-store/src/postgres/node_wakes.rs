@@ -1,4 +1,4 @@
-//! [`PostgresSignals`]: the durability engine's cross-node signals over
+//! [`PostgresNodeWakes`]: the durability engine's node wakes over
 //! PostgreSQL (L8, FIG-5178).
 //!
 //! - **Wakes.** A batch is sent with one `pg_notify` statement on the shared
@@ -11,9 +11,9 @@
 //!   owner's channel with the actor's key in the payload.
 //! - **Listener.** Each node has one listener on a connection of its own. It
 //!   subscribes to its node's channel, then takes its boot's liveness lock, a
-//!   session advisory lock, before [`Signals::listen`] returns. When its
+//!   session advisory lock, before [`NodeWakes::listen`] returns. When its
 //!   session is lost it reconnects, subscribes and locks again, and only then
-//!   reports [`Signal::Resubscribed`], so the runner rescans after it. Its
+//!   reports [`NodeWakeEvent::Resubscribed`], so the runner rescans after it. Its
 //!   reconnects back off under the host's `signals.reconnect` policy, and a
 //!   store opens at most `roles.served_nodes` listeners at once.
 //! - **Liveness.** A boot's lock is free exactly when no session of it
@@ -32,8 +32,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use lash_durable::{
-    ActorKey, BootLiveness, CommitCapacity, DurableError, NodeId, NodeLease, Owner, Reaped, Signal,
-    SignalFeed, Signals, WakeBatch,
+    ActorKey, BootLiveness, CommitCapacity, DurableError, NodeId, NodeLease, NodeWakeEvent,
+    NodeWakeFeed, NodeWakes, Owner, Reaped, WakeBatch,
 };
 use sqlx::PgPool;
 use sqlx::postgres::{PgListener, PgNotification, PgPoolOptions};
@@ -95,26 +95,26 @@ fn notifications(batch: &WakeBatch) -> (Vec<String>, Vec<String>) {
     (channels, payloads)
 }
 
-/// What one notification signals, if anything.
-fn signal_of(notification: &PgNotification) -> Option<Signal> {
+/// The wake event one notification carries, if anything.
+fn node_wake_of(notification: &PgNotification) -> Option<NodeWakeEvent> {
     if notification.payload().is_empty() {
-        return Some(Signal::Ready);
+        return Some(NodeWakeEvent::Ready);
     }
     let actors: Vec<ActorKey> = notification
         .payload()
         .split('\n')
         .filter_map(|key| ActorKey::parse(key).ok())
         .collect();
-    (!actors.is_empty()).then_some(Signal::Owned(actors))
+    (!actors.is_empty()).then_some(NodeWakeEvent::Owned(actors))
 }
 
-/// The cross-node [`Signals`] over one PostgreSQL catalog.
+/// The node wakes of one PostgreSQL catalog.
 #[derive(Clone, Debug)]
-pub struct PostgresSignals {
+pub struct PostgresNodeWakes {
     store: PostgresDurableStore,
 }
 
-impl PostgresSignals {
+impl PostgresNodeWakes {
     pub(crate) fn new(store: PostgresDurableStore) -> Self {
         Self { store }
     }
@@ -153,26 +153,26 @@ impl Session {
     }
 }
 
-/// Forward `listener`'s signals until `shutdown`, then end the session.
+/// Forward `listener`'s wake events until `shutdown`, then end the session.
 async fn serve(
     listener: PgListener,
     session: Session,
-    signals: mpsc::UnboundedSender<Signal>,
+    wakes: mpsc::UnboundedSender<NodeWakeEvent>,
     lost: Arc<AtomicU64>,
     shutdown: oneshot::Receiver<()>,
 ) {
-    forward(listener, &session, &signals, &lost, shutdown).await;
+    forward(listener, &session, &wakes, &lost, shutdown).await;
     // The listener's connection is back in the pool: closing the pool ends
     // the session, which releases the lock.
     session.pool.close().await;
 }
 
-/// Forward `listener`'s signals until `shutdown`, reopening a lost session.
-/// Returns having dropped every listener it held.
+/// Forward `listener`'s wake events until `shutdown`, reopening a lost
+/// session. Returns having dropped every listener it held.
 async fn forward(
     mut listener: PgListener,
     session: &Session,
-    signals: &mpsc::UnboundedSender<Signal>,
+    wakes: &mpsc::UnboundedSender<NodeWakeEvent>,
     lost: &AtomicU64,
     mut shutdown: oneshot::Receiver<()>,
 ) {
@@ -183,8 +183,8 @@ async fn forward(
             received = listener.try_recv() => received,
         };
         if let Ok(Some(notification)) = received {
-            if let Some(signal) = signal_of(&notification)
-                && signals.send(signal).is_err()
+            if let Some(event) = node_wake_of(&notification)
+                && wakes.send(event).is_err()
             {
                 break 'serve;
             }
@@ -214,7 +214,7 @@ async fn forward(
                 }
             }
         };
-        if signals.send(Signal::Resubscribed).is_err() {
+        if wakes.send(NodeWakeEvent::Resubscribed).is_err() {
             break 'serve;
         }
     }
@@ -222,16 +222,16 @@ async fn forward(
 
 /// A node's listener, as its runner holds it.
 struct PostgresFeed {
-    signals: mpsc::UnboundedReceiver<Signal>,
+    wakes: mpsc::UnboundedReceiver<NodeWakeEvent>,
     lost: Arc<AtomicU64>,
     shutdown: Option<oneshot::Sender<()>>,
 }
 
 #[async_trait::async_trait]
-impl SignalFeed for PostgresFeed {
-    async fn next(&mut self) -> Signal {
-        match self.signals.recv().await {
-            Some(signal) => signal,
+impl NodeWakeFeed for PostgresFeed {
+    async fn next(&mut self) -> NodeWakeEvent {
+        match self.wakes.recv().await {
+            Some(event) => event,
             None => std::future::pending().await,
         }
     }
@@ -250,7 +250,7 @@ impl Drop for PostgresFeed {
 }
 
 #[async_trait::async_trait]
-impl Signals for PostgresSignals {
+impl NodeWakes for PostgresNodeWakes {
     async fn publish(&self, batch: &WakeBatch) -> Result<(), DurableError> {
         let (channels, payloads) = notifications(batch);
         if channels.is_empty() {
@@ -269,7 +269,7 @@ impl Signals for PostgresSignals {
             .await
     }
 
-    async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn SignalFeed>, DurableError> {
+    async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
         let pools = &self.store.pools;
         let open_within = pools.listener_policy.acquire_timeout;
         // A listener that just stopped frees its slot when its session task
@@ -303,12 +303,12 @@ impl Signals for PostgresSignals {
                 return Err(sqlx_failure(error));
             }
         };
-        let (send, signals) = mpsc::unbounded_channel();
+        let (send, wakes) = mpsc::unbounded_channel();
         let (shutdown, stop) = oneshot::channel();
         let lost = Arc::new(AtomicU64::new(0));
         tokio::spawn(serve(listener, session, send, Arc::clone(&lost), stop));
         Ok(Box::new(PostgresFeed {
-            signals,
+            wakes,
             lost,
             shutdown: Some(shutdown),
         }))
@@ -328,5 +328,5 @@ impl Signals for PostgresSignals {
 }
 
 #[cfg(test)]
-#[path = "durable_signals_tests.rs"]
+#[path = "node_wakes_tests.rs"]
 mod tests;

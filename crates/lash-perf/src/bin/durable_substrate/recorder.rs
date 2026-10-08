@@ -22,7 +22,7 @@ use lash_durable::domain::{
 use lash_durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, Claimed, CommitLabel, DurableError,
     DurableInstant, DurableReads, DurableStore, Epoch, FormatSet, HeartbeatOutcome, MailCommit,
-    MailTx, NodeLease, NodeSpec, Reaped, Signals,
+    MailTx, NodeLease, NodeSpec, NodeWakes, Reaped,
 };
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{ProcessId, SessionId, TurnId};
@@ -433,8 +433,8 @@ impl StoreSet for RecordingStores {
         Arc::clone(&self.store) as _
     }
 
-    fn durable_signals(&self) -> Option<Arc<dyn Signals>> {
-        self.inner.durable_signals()
+    fn node_wakes(&self) -> Option<Arc<dyn NodeWakes>> {
+        self.inner.node_wakes()
     }
 
     fn binding_identity(&self) -> &StoreBindingId {

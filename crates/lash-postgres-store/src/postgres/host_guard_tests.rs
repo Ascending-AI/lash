@@ -9,7 +9,7 @@
 
 use std::time::{Duration, Instant};
 
-use lash_durable::{CommitLabel, NodeSpec, Signals as _};
+use lash_durable::{CommitLabel, NodeSpec, NodeWakes as _};
 use sqlx::Connection as _;
 
 use super::*;
@@ -175,7 +175,7 @@ async fn every_role_names_itself_in_pg_stat_activity() {
         .await
         .expect("register on the renewal connection");
     let _feed = storage
-        .durable_signals()
+        .node_wakes()
         .listen(&lease)
         .await
         .expect("listen on the listener session");

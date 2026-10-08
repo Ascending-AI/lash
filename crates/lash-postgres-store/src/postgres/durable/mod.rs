@@ -27,8 +27,8 @@
 //! on the work pool behind `max_store_operations` admission, so a burst of
 //! ordinary commits cannot starve a heartbeat into a self-stop.
 //!
-//! Cross-node signals ([`PostgresSignals`]) live beside this module: wake
-//! hints published with `pg_notify` after commit, never inside a writing
+//! Node wakes ([`PostgresNodeWakes`]) live beside this module: wake hints
+//! published with `pg_notify` after commit, never inside a writing
 //! transaction, and each node's liveness lock, a session advisory lock its
 //! listener holds.
 
@@ -75,10 +75,10 @@ mod snapshots;
 mod turns;
 mod waits;
 
-#[path = "../durable_signals.rs"]
-mod signals;
+#[path = "../node_wakes.rs"]
+mod node_wakes;
 
-pub use signals::PostgresSignals;
+pub use node_wakes::PostgresNodeWakes;
 
 /// The owner commit a domain write is applied in: after its fence.
 pub(crate) struct Committing<'a> {

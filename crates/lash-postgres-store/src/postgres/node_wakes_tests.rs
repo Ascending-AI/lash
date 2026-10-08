@@ -1,4 +1,4 @@
-//! Laws of the durability engine's cross-node signals over PostgreSQL (L8,
+//! Laws of the durability engine's node wakes over PostgreSQL (L8,
 //! FIG-5178), on real connections and the database clock.
 
 // FIG-2971: this file is test code; ambient env access is sanctioned here
@@ -71,8 +71,8 @@ fn mail(actor: &ActorKey) -> MailTx {
 }
 
 /// Whether `boot`'s liveness lock is held, as a probe sees it now.
-async fn held(signals: &PostgresSignals, boot: &Owner) -> Option<bool> {
-    signals
+async fn held(node_wakes: &PostgresNodeWakes, boot: &Owner) -> Option<bool> {
+    node_wakes
         .liveness()
         .await
         .expect("probe liveness")
@@ -122,23 +122,28 @@ impl Activation for Hold {
     }
 }
 
-/// A runner over `storage` with signals, holding what it claims.
+/// A runner over `storage` with node wakes, holding what it claims.
 struct Node {
     hints: lash_durable::runner::Hints,
     arrived: mpsc::UnboundedReceiver<Instant>,
     task: tokio::task::JoinHandle<Result<Stopped, DurableError>>,
 }
 
-fn start(storage: &PostgresStorage, name: &str, lease: LeaseSettings, signals: bool) -> Node {
-    let signals = signals.then(|| Arc::new(storage.durable_signals()) as Arc<dyn Signals>);
+fn start(storage: &PostgresStorage, name: &str, lease: LeaseSettings, node_wakes: bool) -> Node {
+    let node_wakes = node_wakes.then(|| Arc::new(storage.node_wakes()) as Arc<dyn NodeWakes>);
     let settings = DurableSettings {
         lease,
         ..DurableSettings::default()
     };
-    run(Arc::new(storage.durable_store()), signals, name, settings)
+    run(
+        Arc::new(storage.durable_store()),
+        node_wakes,
+        name,
+        settings,
+    )
 }
 
-/// A runner with signals over `storage` under `settings`, whose every claim
+/// A runner with node wakes over `storage` under `settings`, whose every claim
 /// `claims` counts.
 fn start_counted(
     storage: &PostgresStorage,
@@ -151,13 +156,13 @@ fn start_counted(
         node: name.to_owned(),
         claims: claims.clone(),
     };
-    let signals: Arc<dyn Signals> = Arc::new(storage.durable_signals());
-    run(Arc::new(store), Some(signals), name, settings)
+    let node_wakes: Arc<dyn NodeWakes> = Arc::new(storage.node_wakes());
+    run(Arc::new(store), Some(node_wakes), name, settings)
 }
 
 fn run(
     store: Arc<dyn DurableStore>,
-    signals: Option<Arc<dyn Signals>>,
+    node_wakes: Option<Arc<dyn NodeWakes>>,
     name: &str,
     settings: DurableSettings,
 ) -> Node {
@@ -169,8 +174,8 @@ fn run(
         RunnerConfig::new(NodeId::new(name), vec![formats()], &config),
         Arc::new(Hold { arrived: send }),
     );
-    if let Some(signals) = signals {
-        runner = runner.with_signals(signals);
+    if let Some(node_wakes) = node_wakes {
+        runner = runner.with_node_wakes(node_wakes);
     }
     let hints = runner.hints();
     let task = tokio::spawn(runner.run(std::future::pending()));
@@ -420,27 +425,27 @@ async fn a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie() {
     };
     let storage = storage(&database).await;
     let store = storage.durable_store();
-    let signals = storage.durable_signals();
+    let node_wakes = storage.node_wakes();
     let held_actor = actor("held");
     create(&store, &held_actor).await;
     let dead = node(&store, "dead").await;
     let watcher = node(&store, "watcher").await;
     let claimed = store.claim(&dead, 1).await.expect("claim");
     assert_eq!(claimed.len(), 1);
-    let feed = signals.listen(&dead).await.expect("listen");
-    assert_eq!(held(&signals, &dead.owner).await, Some(true));
-    assert_eq!(held(&signals, &watcher.owner).await, Some(false));
+    let feed = node_wakes.listen(&dead).await.expect("listen");
+    assert_eq!(held(&node_wakes, &dead.owner).await, Some(true));
+    assert_eq!(held(&node_wakes, &watcher.owner).await, Some(false));
     assert!(
-        signals
+        node_wakes
             .reap_released(&watcher, &dead.owner)
             .await
             .expect("reap")
             .is_empty(),
         "a reaper that holds no lock of its own reaped"
     );
-    let _watching = signals.listen(&watcher).await.expect("listen");
+    let _watching = node_wakes.listen(&watcher).await.expect("listen");
     assert!(
-        signals
+        node_wakes
             .reap_released(&watcher, &dead.owner)
             .await
             .expect("reap")
@@ -455,10 +460,10 @@ async fn a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie() {
 
     drop(feed);
     eventually(Duration::from_secs(5), "the lock is released", || async {
-        held(&signals, &dead.owner).await == Some(false)
+        held(&node_wakes, &dead.owner).await == Some(false)
     })
     .await;
-    let reaped = signals
+    let reaped = node_wakes
         .reap_released(&watcher, &dead.owner)
         .await
         .expect("reap");
@@ -494,9 +499,9 @@ async fn a_lost_listener_session_resubscribes_holding_its_lock() {
     };
     let storage = storage(&database).await;
     let store = storage.durable_store();
-    let signals = storage.durable_signals();
+    let node_wakes = storage.node_wakes();
     let lease = node(&store, "blip").await;
-    let mut feed = signals.listen(&lease).await.expect("listen");
+    let mut feed = node_wakes.listen(&lease).await.expect("listen");
     let ended: Vec<bool> = sqlx::query_scalar(
         "SELECT pg_terminate_backend(pid) FROM pg_locks
          WHERE locktype = 'advisory' AND granted
@@ -507,23 +512,23 @@ async fn a_lost_listener_session_resubscribes_holding_its_lock() {
     .await
     .expect("end the listener's session");
     assert_eq!(ended, vec![true], "one session held the boot's lock");
-    let signal = tokio::time::timeout(Duration::from_secs(5), feed.next())
+    let event = tokio::time::timeout(Duration::from_secs(5), feed.next())
         .await
         .expect("the listener reports its new session");
-    assert_eq!(signal, Signal::Resubscribed);
+    assert_eq!(event, NodeWakeEvent::Resubscribed);
     assert_eq!(feed.session(), 1);
-    assert_eq!(held(&signals, &lease.owner).await, Some(true));
-    signals
+    assert_eq!(held(&node_wakes, &lease.owner).await, Some(true));
+    node_wakes
         .publish(&WakeBatch {
             ready: std::collections::BTreeSet::from([lease.owner.node.clone()]),
             ..WakeBatch::default()
         })
         .await
         .expect("publish");
-    let signal = tokio::time::timeout(Duration::from_secs(5), feed.next())
+    let event = tokio::time::timeout(Duration::from_secs(5), feed.next())
         .await
         .expect("a hint reaches the new session");
-    assert_eq!(signal, Signal::Ready);
+    assert_eq!(event, NodeWakeEvent::Ready);
 }
 
 /// O1: mail written on node B to an actor hot on node A reaches A through
@@ -537,7 +542,7 @@ async fn mail_from_another_node_reaches_a_hot_owner_through_its_hint() {
     };
     let storage = storage(&database).await;
     let store = storage.durable_store();
-    let signals = storage.durable_signals();
+    let node_wakes = storage.node_wakes();
     let hot = actor("hot");
     create(&store, &hot).await;
     let slow_poll = LeaseSettings {
@@ -551,7 +556,7 @@ async fn mail_from_another_node_reaches_a_hot_owner_through_its_hint() {
     .await;
     let writer = start(&storage, "b", slow_poll, true);
     eventually(Duration::from_secs(5), "node b listens", || async {
-        signals
+        node_wakes
             .liveness()
             .await
             .expect("probe")
@@ -580,7 +585,7 @@ async fn mail_from_another_node_reaches_a_hot_owner_through_its_hint() {
     writer.task.abort();
 }
 
-/// O1: mail whose hint is lost (a writer with no signals, standing in for a
+/// O1: mail whose hint is lost (a writer with no node wakes, standing in for a
 /// dropped NOTIFY) still reaches a hot owner within its mail poll.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll() {
@@ -633,7 +638,7 @@ async fn a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses() {
     };
     let storage = storage(&database).await;
     let store = storage.durable_store();
-    let signals = storage.durable_signals();
+    let node_wakes = storage.node_wakes();
     let hot = actor("hot");
     create(&store, &hot).await;
     let dying = start(&storage, "dying", LeaseSettings::default(), true);
@@ -645,7 +650,7 @@ async fn a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses() {
     .await;
     let survivor = start(&storage, "survivor", LeaseSettings::default(), true);
     eventually(Duration::from_secs(5), "both nodes listen", || async {
-        let live = signals.liveness().await.expect("probe");
+        let live = node_wakes.liveness().await.expect("probe");
         live.len() == 2 && live.iter().all(|liveness| liveness.held)
     })
     .await;
@@ -698,9 +703,9 @@ async fn create_woken(store: &dyn DurableStore, actor: &ActorKey) -> lash_durabl
 }
 
 /// Wait until `node` holds its liveness lock.
-async fn listening(signals: &PostgresSignals, node: &str) {
+async fn listening(node_wakes: &PostgresNodeWakes, node: &str) {
     eventually(Duration::from_secs(5), "the node listens", || async {
-        signals
+        node_wakes
             .liveness()
             .await
             .expect("probe")
@@ -730,7 +735,7 @@ async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node() {
         .await
         .expect("open the isolated store");
     let store = storage.durable_store();
-    let signals = storage.durable_signals();
+    let node_wakes = storage.node_wakes();
     let claims = Claims::default();
     let mut nodes = Vec::new();
     for index in 1..NODES {
@@ -741,7 +746,7 @@ async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node() {
             holding(quiet(), 256),
             &claims,
         ));
-        listening(&signals, &name).await;
+        listening(&node_wakes, &name).await;
     }
     eventually(Duration::from_secs(5), "each peer claimed once", || async {
         claims.len() == NODES - 1
@@ -796,10 +801,10 @@ async fn a_hint_to_a_dead_node_is_backed_by_the_claim_poll() {
     };
     let storage = storage(&database).await;
     let store = storage.durable_store();
-    let signals = storage.durable_signals();
+    let node_wakes = storage.node_wakes();
     let claims = Claims::default();
     let doomed = start_counted(&storage, "doomed", holding(quiet(), 256), &claims);
-    listening(&signals, "doomed").await;
+    listening(&node_wakes, "doomed").await;
     eventually(
         Duration::from_secs(5),
         "the doomed node claimed",
@@ -820,14 +825,14 @@ async fn a_hint_to_a_dead_node_is_backed_by_the_claim_poll() {
         ..LeaseSettings::default()
     };
     let survivor = start_counted(&storage, "survivor", holding(polling, 256), &claims);
-    listening(&signals, "survivor").await;
+    listening(&node_wakes, "survivor").await;
     doomed.task.abort();
     assert!(doomed.task.await.is_err(), "the doomed node was stopped");
     eventually(
         Duration::from_secs(5),
         "the doomed node's lock is free",
         || async {
-            signals
+            node_wakes
                 .liveness()
                 .await
                 .expect("probe")

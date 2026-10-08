@@ -125,7 +125,7 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("durable store")
     }
 
-    fn durable_signals(&self) -> Option<Arc<dyn lash_core::durable_port::Signals>> {
+    fn node_wakes(&self) -> Option<Arc<dyn lash_core::durable_port::NodeWakes>> {
         None
     }
 

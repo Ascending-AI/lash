@@ -51,8 +51,8 @@ impl lash::StoreSet for ReceiverHoldStores {
         self.inner.durable_store()
     }
 
-    fn durable_signals(&self) -> Option<Arc<dyn lash::durable::Signals>> {
-        self.inner.durable_signals()
+    fn node_wakes(&self) -> Option<Arc<dyn lash::durable::NodeWakes>> {
+        self.inner.node_wakes()
     }
     fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
         Arc::clone(&self.registry)

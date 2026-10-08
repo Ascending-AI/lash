@@ -788,10 +788,10 @@ impl PostgresStorage {
         )
     }
 
-    /// The durability engine's cross-node signals over this catalog: wake
-    /// hints after commit and node liveness locks.
-    pub fn durable_signals(&self) -> PostgresSignals {
-        PostgresSignals::new(self.durable_store())
+    /// The durability engine's node wakes over this catalog: wake hints
+    /// after commit and node liveness locks.
+    pub fn node_wakes(&self) -> PostgresNodeWakes {
+        PostgresNodeWakes::new(self.durable_store())
     }
 
     /// The store→engine delivery obligation ledger of `kind` over this
@@ -928,7 +928,7 @@ mod turn_ingress;
 
 pub use backend::PostgresStoreSet;
 pub mod host;
-pub use durable::{PostgresDurableStore, PostgresSignals};
+pub use durable::{PostgresDurableStore, PostgresNodeWakes};
 use guarded_tx::begin_guarded;
 pub use host::{
     ConnectionRole, ConnectionTopology, PostgresConnectionFactory, PostgresEndpoints,
