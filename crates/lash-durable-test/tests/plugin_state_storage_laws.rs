@@ -159,6 +159,9 @@ struct World {
     notes: AtomicUsize,
     /// How many times [`INCR`] ran.
     reductions: AtomicUsize,
+    /// Store reads taken between the revert law's model calls.
+    overlay_store: Mutex<Option<Arc<dyn DurableStore>>>,
+    overlay_bodies: Mutex<Vec<Option<Arc<[u8]>>>>,
 }
 
 fn tool_definition(name: &str) -> lash_core::ToolDefinition {
@@ -276,6 +279,18 @@ impl lash_core::ToolProvider for StoragePlugin {
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let label = call.args["label"].as_str().unwrap_or_default().to_owned();
+        if self.id == MEMORY && label == "inspect-overlay" {
+            let store = self.world.overlay_store.lock_recover().clone().unwrap();
+            let session = SessionId::try_from("revert-overlay-session".to_owned()).unwrap();
+            let run = store.turn(&session).await.unwrap().unwrap().run;
+            let rows = store.turn_namespaces(&session, &run).await.unwrap();
+            let row = rows.into_iter().find(|row| row.plugin == MEMORY).unwrap();
+            self.world.overlay_bodies.lock_recover().push(row.body);
+            return lash_core::ToolAttemptOutcome::Done {
+                result: lash_core::ToolOutcomeDone::ok(serde_json::json!({ "inspected": true })),
+                intents: lash_core::ToolIntents::default(),
+            };
+        }
         let commands = if self.id == MEMORY {
             lash::plugins::StateCommands::new().set("value", remembered(&label).into())
         } else {
@@ -353,7 +368,7 @@ fn measure(writes: &[DomainWrite]) -> Written {
         match write {
             DomainWrite::Turn(TurnWrite::Namespaces { namespaces, .. }) => {
                 for namespace in namespaces {
-                    let bytes = namespace.body.as_ref().map_or(0, |body| body.len());
+                    let bytes = namespace.values.body().map_or(0, <[u8]>::len);
                     written.value_bytes += bytes;
                     if namespace.plugin == MEMORY {
                         written.memory_rows += 1;
@@ -941,8 +956,62 @@ async fn a_heads_frontier_keeps_only_the_receipts_of_the_run_that_wrote_it(tier:
     world.shutdown().await;
 }
 
+/// Returning to the run's base values clears the changed values body,
+/// even though publication metadata still differs from the base head.
+async fn a_run_reverting_to_base_clears_its_overlay_body(tier: Tier) {
+    let state = Arc::new(World::default());
+    let Some(world) = served::World::new(tier, |backend| {
+        *state.overlay_store.lock_recover() = Some(Arc::clone(backend.durable()));
+        with_plugins(lash::LashCore::standard_builder(backend.clone()), &state)
+    })
+    .await
+    else {
+        return;
+    };
+    let remember = |id: &str, label: &str| {
+        served::response(vec![served::call(
+            id,
+            REMEMBER,
+            serde_json::json!({ "label": label }),
+        )])
+    };
+    world.script("overlay-seed", vec![remember("seed", "base")]);
+    world.script(
+        "overlay-revert",
+        vec![
+            remember("change", "changed"),
+            remember("inspect-changed", "inspect-overlay"),
+            remember("revert", "base"),
+            remember("inspect-base", "inspect-overlay"),
+        ],
+    );
+    let session = world
+        .session("revert-overlay-session", served::spec(64))
+        .await;
+    served::assert_answered("seed", &world.send(&session, "overlay-seed").await);
+    served::assert_answered("revert", &world.send(&session, "overlay-revert").await);
+    let bodies = state.overlay_bodies.lock_recover().clone();
+    assert_eq!(bodies.len(), 2, "both committed overlays were inspected");
+    assert!(bodies[0].is_some(), "changed values have a run body");
+    assert!(
+        bodies[1].is_none(),
+        "base values must clear the earlier run body"
+    );
+    assert_eq!(
+        committed(&world.backend, session.session_id(), MEMORY)
+            .await
+            .unwrap(),
+        Some(BTreeMap::from([(
+            "value".to_owned(),
+            remembered("base").into()
+        )]))
+    );
+    world.shutdown().await;
+}
+
 tiered_laws!(
     current_thread:
+    a_run_reverting_to_base_clears_its_overlay_body,
     an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_cut,
     a_cells_pruned_calls_keep_their_changes_and_never_rewrite_an_unchanged_namespace,
     a_fork_copies_and_resets_namespaces_as_declared_at_its_revision,

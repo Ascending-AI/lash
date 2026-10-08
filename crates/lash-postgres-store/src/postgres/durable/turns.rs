@@ -13,8 +13,8 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_undelivered_wire,
 };
 use lash_durable::domain::{
-    DomainRefusal, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace,
-    TurnRow, TurnWrite, UnfinishedPhase,
+    DomainRefusal, RunValuesWrite, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest,
+    TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -141,7 +141,8 @@ pub(super) async fn apply(
                     .bind(run.as_str())
                     .bind(namespace.plugin.as_str())
                     .bind(entry)
-                    .bind(namespace.body.as_deref())
+                    .bind(namespace.values.body())
+                    .bind(matches!(namespace.values, RunValuesWrite::Held))
                     .execute(crate::observed_sql::executor(&mut *tx))
                     .await
                     .map_err(sqlx_failure)?;

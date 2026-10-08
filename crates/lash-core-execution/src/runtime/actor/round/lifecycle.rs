@@ -171,13 +171,13 @@ pub trait MemberBodies: Send + Sync {
     /// record yet (FIG-5301): a commit that prunes members' records writes
     /// them, so a pruned outcome is never the only copy of a value or of its
     /// dedup receipt. Empty for bodies that reduce no session plugin state.
-    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespace> {
+    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
         Vec::new()
     }
 
     /// Record that a commit wrote `written`, what
     /// [`run_changes`](Self::run_changes) named.
-    fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespace]) {}
+    fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespaceWrite]) {}
 
     /// Release what `execution`'s park launched, once its park ended:
     /// `cancelled` when the call ends cancelled. Runs before the call's

@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use super::{LABEL, LawBroken, LawResult, create, ensure, node, session};
-use crate::domain::{DomainRefusal, TurnNamespace, TurnWrite};
+use crate::domain::{DomainRefusal, RunValuesWrite, TurnNamespaceWrite, TurnWrite};
 use crate::{DomainWrite, DurableError, DurableStore};
 use lash_core_store::plugin_state::{NamespaceBody, NamespaceEntry, PluginNamespaceState};
 use lash_core_store::store::{
@@ -24,16 +24,14 @@ fn namespace(generation: u64, value: &str) -> (NamespaceEntry, Arc<[u8]>) {
     (entry, body.bytes)
 }
 
-/// An unfinished run's namespace rows hold what its commits wrote: a row
-/// written without a body keeps the body it holds, and one with a body
-/// replaces it. The run's terminal drops them with its phase row, so a
-/// cancelled run's changes are gone and its head untouched; and a run that
-/// ended records no row.
+/// A run's typed namespace writes have one body per current value: Body
+/// replaces it, Held keeps it for metadata changes, and Base clears it.
+/// A terminal drops the overlay and refuses subsequent namespace writes.
 ///
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_runs_namespace_rows_hold_its_bodies_and_end_with_it(
+pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_it(
     store: &dyn DurableStore,
 ) -> LawResult {
     let id = SessionId::try_from("namespace-session".to_owned())
@@ -50,13 +48,13 @@ pub async fn a_runs_namespace_rows_hold_its_bodies_and_end_with_it(
         tx.write(DomainWrite::Turn(write));
         store.commit(tx, LABEL).await
     };
-    let write = |entry: &NamespaceEntry, body: Option<&Arc<[u8]>>| TurnWrite::Namespaces {
+    let write = |entry: &NamespaceEntry, values: RunValuesWrite| TurnWrite::Namespaces {
         session: id.clone(),
         run: run.clone(),
-        namespaces: vec![TurnNamespace {
+        namespaces: vec![TurnNamespaceWrite {
             plugin: "memory".to_owned(),
             entry: entry.clone(),
-            body: body.cloned(),
+            values,
         }],
     };
     let rows = || async move {
@@ -81,7 +79,7 @@ pub async fn a_runs_namespace_rows_hold_its_bodies_and_end_with_it(
     })
     .await?;
     let (first, first_body) = namespace(1, "first");
-    commit(write(&first, Some(&first_body))).await?;
+    commit(write(&first, RunValuesWrite::Body(first_body.clone()))).await?;
     let read = rows().await?;
     ensure!(
         read == [("memory".to_owned(), first.clone(), Some(first_body.clone()))],
@@ -93,7 +91,7 @@ pub async fn a_runs_namespace_rows_hold_its_bodies_and_end_with_it(
         generation: 2,
         ..first.clone()
     };
-    commit(write(&refused, None)).await?;
+    commit(write(&refused, RunValuesWrite::Held)).await?;
     let read = rows().await?;
     ensure!(
         read == [(
@@ -101,15 +99,42 @@ pub async fn a_runs_namespace_rows_hold_its_bodies_and_end_with_it(
             refused.clone(),
             Some(first_body.clone())
         )],
-        "a bodiless row read back {read:?}"
+        "a held body read back {read:?}"
     );
 
     let (second, second_body) = namespace(3, "second");
-    commit(write(&second, Some(&second_body))).await?;
+    commit(write(&second, RunValuesWrite::Body(second_body.clone()))).await?;
     let read = rows().await?;
     ensure!(
         read == [("memory".to_owned(), second.clone(), Some(second_body))],
         "a replaced body read back {read:?}"
+    );
+
+    let base = NamespaceEntry {
+        generation: 4,
+        ..first.clone()
+    };
+    commit(write(&base, RunValuesWrite::Base)).await?;
+    let read = rows().await?;
+    ensure!(
+        read == [("memory".to_owned(), base.clone(), None)],
+        "returning to base kept an earlier body: {read:?}"
+    );
+    let base_metadata = NamespaceEntry {
+        generation: 5,
+        ..base
+    };
+    commit(write(&base_metadata, RunValuesWrite::Base)).await?;
+    let read = rows().await?;
+    ensure!(
+        read == [("memory".to_owned(), base_metadata, None)],
+        "base metadata must keep the body absent: {read:?}"
+    );
+    commit(write(&first, RunValuesWrite::Body(first_body.clone()))).await?;
+    let read = rows().await?;
+    ensure!(
+        read == [("memory".to_owned(), first.clone(), Some(first_body.clone()))],
+        "leaving base must install the current body: {read:?}"
     );
 
     commit(TurnWrite::Terminal {
@@ -126,7 +151,7 @@ pub async fn a_runs_namespace_rows_hold_its_bodies_and_end_with_it(
         read.is_empty(),
         "the cancelled run's rows outlived it: {read:?}"
     );
-    match commit(write(&first, Some(&first_body))).await {
+    match commit(write(&first, RunValuesWrite::Body(first_body.clone()))).await {
         Err(DurableError::Domain(DomainRefusal::TurnNotOpen { .. })) => {}
         other => {
             return Err(LawBroken(format!(

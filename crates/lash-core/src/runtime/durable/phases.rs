@@ -82,7 +82,7 @@ pub(super) fn write_run_changes(
     tx: &mut lash_durable::ActorTx,
     session: &SessionId,
     run: &TurnId,
-) -> Vec<lash_durable::domain::TurnNamespace> {
+) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
     let changes = drive.run_changes();
     if !changes.is_empty() {
         tx.write(DomainWrite::Turn(TurnWrite::Namespaces {

@@ -385,11 +385,11 @@ impl TurnDrive for RuntimeDrive {
         Some(self.trace_scope.clone())
     }
 
-    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespace> {
+    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
         self.driver.session.plugins().run_changes()
     }
 
-    fn run_changes_committed(&self, written: &[lash_durable::domain::TurnNamespace]) {
+    fn run_changes_committed(&self, written: &[lash_durable::domain::TurnNamespaceWrite]) {
         self.driver.session.plugins().run_changes_committed(written);
     }
 

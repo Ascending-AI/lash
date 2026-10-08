@@ -205,8 +205,8 @@ pub enum TurnWrite {
     /// Record namespaces the unfinished turn's run changed (FIG-5301): each
     /// replaces the run's row for its plugin. The run's changes are the
     /// session head's namespaces overlaid with these rows until the turn
-    /// ends; a body is written only once per value, and a row without one
-    /// keeps the body it holds. Refused with
+    /// ends; the typed values write replaces, retains or clears the body.
+    /// Refused with
     /// [`DomainRefusal::TurnNotOpen`](super::DomainRefusal::TurnNotOpen) when
     /// it is not the session's unfinished turn.
     Namespaces {
@@ -215,7 +215,7 @@ pub enum TurnWrite {
         /// The run.
         run: TurnId,
         /// The namespaces, by plugin.
-        namespaces: Vec<TurnNamespace>,
+        namespaces: Vec<TurnNamespaceWrite>,
     },
     /// End the turn and drop its phase row and its run's namespace rows,
     /// whether its commit promoted them or a cancel discards them. Refused with
@@ -240,10 +240,42 @@ pub struct TurnNamespace {
     pub plugin: String,
     /// Its entry: its values by content address and its metadata.
     pub entry: lash_core_store::plugin_state::NamespaceEntry,
-    /// Its values body, when the run's rows do not hold it yet. Read back,
-    /// the body the row holds, which may be an earlier value's: a reader
-    /// trusts it only when it hashes to the entry's address.
+    /// Its values body, absent exactly when the values are the run's base.
+    /// A present body must match the entry's content address.
     pub body: Option<std::sync::Arc<[u8]>>,
+}
+
+/// Where the values of a run namespace write are held.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RunValuesWrite {
+    /// Use the run's base values and clear any earlier body.
+    Base,
+    /// Retain the row's current values body for a metadata-only write.
+    Held,
+    /// Replace the row's values with this body.
+    Body(std::sync::Arc<[u8]>),
+}
+
+impl RunValuesWrite {
+    /// The body to bind for a replacement; base and held bind SQL NULL.
+    #[must_use]
+    pub fn body(&self) -> Option<&[u8]> {
+        match self {
+            Self::Body(body) => Some(body),
+            Self::Base | Self::Held => None,
+        }
+    }
+}
+
+/// A plugin namespace write for an unfinished run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnNamespaceWrite {
+    /// The plugin that owns the namespace.
+    pub plugin: String,
+    /// Its entry: its values by content address and its metadata.
+    pub entry: lash_core_store::plugin_state::NamespaceEntry,
+    /// Whether to use the base, retain the row's body, or replace it.
+    pub values: RunValuesWrite,
 }
 
 /// A session's head commit from its own actor (V0, then L3; FIG-5230): the

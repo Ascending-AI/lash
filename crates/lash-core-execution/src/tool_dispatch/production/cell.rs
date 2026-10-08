@@ -506,11 +506,11 @@ impl MemberBodies for CellMembers {
             .publish_committed_state(state)
     }
 
-    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespace> {
+    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
         self.tools.context.dispatch().plugins.run_changes()
     }
 
-    fn run_changes_committed(&self, written: &[lash_durable::domain::TurnNamespace]) {
+    fn run_changes_committed(&self, written: &[lash_durable::domain::TurnNamespaceWrite]) {
         self.tools
             .context
             .dispatch()

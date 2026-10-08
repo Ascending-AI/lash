@@ -15,7 +15,7 @@
 //! from its record, which the namespace's frontier applies once.
 use super::*;
 use lash_core_store::plugin_state::{NamespaceBody, NamespaceEntry};
-use lash_durable::domain::TurnNamespace;
+use lash_durable::domain::{RunValuesWrite, TurnNamespace, TurnNamespaceWrite};
 
 /// What a run's durable rows record, beside the state it started from.
 #[derive(Debug)]
@@ -100,7 +100,7 @@ impl crate::PluginSession {
     /// record yet, each with its values body when no row or base holds those
     /// values: what the run's next commit writes. An unchanged namespace
     /// costs nothing, however large. Empty outside a durable run.
-    pub fn run_changes(&self) -> Vec<TurnNamespace> {
+    pub fn run_changes(&self) -> Vec<TurnNamespaceWrite> {
         let mut guard = self.state.lock_recover();
         let registry = &mut *guard;
         let Some(run) = registry.run.as_mut() else {
@@ -114,15 +114,21 @@ impl crate::PluginSession {
                 _ => {}
             }
             let body = NamespaceBody::encode(&namespace.values);
-            let durable = run
+            let values = if run.base_values(plugin) == Some(&body.values) {
+                RunValuesWrite::Base
+            } else if run
                 .rows
                 .get(plugin)
                 .is_some_and(|row| row.values == body.values)
-                || run.base_values(plugin) == Some(&body.values);
-            changes.push(TurnNamespace {
+            {
+                RunValuesWrite::Held
+            } else {
+                RunValuesWrite::Body(body.bytes)
+            };
+            changes.push(TurnNamespaceWrite {
                 plugin: plugin.clone(),
                 entry: namespace.entry(body.values),
-                body: (!durable).then_some(body.bytes),
+                values,
             });
         }
         changes
@@ -130,7 +136,7 @@ impl crate::PluginSession {
 
     /// Record that a commit wrote `written`, rows [`Self::run_changes`]
     /// named: the run's rows record them from now on.
-    pub fn run_changes_committed(&self, written: &[TurnNamespace]) {
+    pub fn run_changes_committed(&self, written: &[TurnNamespaceWrite]) {
         let mut registry = self.state.lock_recover();
         if let Some(run) = registry.run.as_mut() {
             for namespace in written {
@@ -160,10 +166,8 @@ impl crate::PluginSession {
         let mut state = run.base.clone();
         for row in &rows {
             let values = match &row.body {
-                Some(bytes) if crate::BlobRef::for_content(bytes) == row.entry.values => {
-                    NamespaceBody::decode(&row.plugin, &row.entry.values, bytes)?
-                }
-                _ if run.base_values(&row.plugin) == Some(&row.entry.values) => run
+                Some(bytes) => NamespaceBody::decode(&row.plugin, &row.entry.values, bytes)?,
+                None if run.base_values(&row.plugin) == Some(&row.entry.values) => run
                     .base
                     .plugins
                     .get(&row.plugin)

@@ -13,8 +13,8 @@ use lash_core_execution::store_backend_support::turn_cancel::{
     turn_cancel_undelivered_wire,
 };
 use lash_durable::domain::{
-    DomainRefusal, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest, TurnEnd, TurnNamespace,
-    TurnRow, TurnWrite, UnfinishedPhase,
+    DomainRefusal, RunValuesWrite, SessionCommitWrite, TurnCancelAnswer, TurnCancelRequest,
+    TurnEnd, TurnNamespace, TurnRow, TurnWrite, UnfinishedPhase,
 };
 use lash_durable::{ActorKey, DurableError, DurableInstant, Epoch, Woken};
 use lash_sansio::{SessionId, TurnId};
@@ -54,8 +54,8 @@ CREATE TABLE IF NOT EXISTS turn_phases (
 );
 
 -- The plugin namespaces an unfinished turn's run changed (FIG-5301): the
--- entry (values address and metadata, JSON) and the values body the run last
--- wrote, dropped with the phase row when the turn ends.
+-- entry (values address and metadata, JSON) and its matching values body,
+-- NULL exactly for base values, dropped with the phase row when the turn ends.
 CREATE TABLE IF NOT EXISTS turn_namespaces (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,
@@ -191,7 +191,8 @@ pub(super) fn apply(tx: &Connection, commit: &Committing<'_>, write: &TurnWrite)
                         run.as_str(),
                         namespace.plugin,
                         entry,
-                        namespace.body.as_deref(),
+                        namespace.values.body(),
+                        matches!(namespace.values, RunValuesWrite::Held),
                     ],
                 )?;
             }

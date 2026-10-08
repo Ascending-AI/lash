@@ -1086,8 +1086,8 @@ CREATE TABLE IF NOT EXISTS lash_turn_phases (
 );
 
 -- The plugin namespaces an unfinished turn's run changed (FIG-5301): the
--- entry (values address and metadata, JSON) and the values body the run last
--- wrote, dropped with the phase row when the turn ends.
+-- entry (values address and metadata, JSON) and its matching values body,
+-- NULL exactly for base values, dropped with the phase row when the turn ends.
 CREATE TABLE IF NOT EXISTS lash_turn_namespaces (
     session_id TEXT NOT NULL,
     run TEXT NOT NULL,

@@ -245,13 +245,13 @@ pub trait TurnDrive: Send {
     /// reinstalls the run's rows over the head before the machine restores.
     /// An unchanged namespace is never written. Empty for a drive that holds
     /// no plugins.
-    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespace> {
+    fn run_changes(&self) -> Vec<lash_durable::domain::TurnNamespaceWrite> {
         Vec::new()
     }
 
     /// Record that a phase committed `written`, what
     /// [`run_changes`](Self::run_changes) named.
-    fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespace]) {}
+    fn run_changes_committed(&self, _written: &[lash_durable::domain::TurnNamespaceWrite]) {}
 
     /// Where the session's live replay stands now, encoded for a model
     /// pin: a fresh call pins it before its first attempt streams, and a
