@@ -457,6 +457,7 @@ mod provider_attempts;
 mod replay_origin;
 mod plugin_stack;
 mod presentation_fallback;
+mod process_start_input;
 mod protocol_effects;
 mod recorded_execution_controls;
 mod recorded_protocol_prompt;
