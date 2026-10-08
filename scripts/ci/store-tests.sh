@@ -189,10 +189,14 @@ declare -A uniform_store_suites=(
   # filter derives them -- scripts/check_postgres_gate_coverage.py fails on a
   # PostgreSQL-gated law whose name or binary escapes it, and on a law that
   # also needs a second service unless a skip here names it.
-  [pg-facade-laws]="//crates/lash:lash__unit_test,//crates/lash:integration__test|postgres|lash-runtime|--lib --bins --test integration --features rlm,sqlite,testing,typescript|cargo-test|ignored-only,nocapture"
-  [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads|lash-perf||nextest|include-ignored"
-  [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|include-ignored"
+  [pg-facade-laws]="//crates/lash:lash__unit_test,//crates/lash:integration__test,//crates/lash:artifact_referrers_evidence__test|postgres|lash-runtime|--lib --bins --test integration --test artifact_referrers_evidence --features rlm,sqlite,testing,typescript|cargo-test|ignored-only,nocapture"
+  [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads,affected_postgres_scenarios_leave_base_database_clean,selected_postgres_scenario_requires_a_database_url|lash-perf||nextest|include-ignored"
+  [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault,backend_contention_report_runs_postgres_and_records_artifact,writer_fence_storm_expires_while_virtual_time_is_stopped,postgres_isolation_requires_a_database_url,a_postgres_failure_package_replays_on_postgres|lash-sim|--lib|nextest-ci|include-ignored"
   [pg-cross-backend]="//crates/lash-sim:cross_backend_store_differential__test||lash-sim|--test cross_backend_store_differential|nextest-ci|include-ignored,single-threaded,nocapture"
+  [pg-standard-retention]="//crates/lash-protocol-standard:lash-protocol-standard__unit_test|postgres|lash-internal-protocol-standard|--lib|cargo-test|ignored-only"
+  [pg-operator-laws]="//crates/lashctl:operator_json_contract__test||lashctl|--test operator_json_contract|cargo-test|ignored-only"
+  [pg-chaos-laws]="//crates/lash-sim:chaos_soak__test|chaos_soak_on_postgres|lash-sim|--test chaos_soak|cargo-test|ignored-only"
+  [pg-schema-laws]="//crates/lash-postgres-store:schema_constraints__test||lash-internal-postgres-store|--test schema_constraints|cargo-test|ignored-only"
   [s3-attachment-differential]="//crates/lash-sim:cross_backend_store_differential__test|attachment_blob_store_differential_agrees|lash-sim|--test cross_backend_store_differential|cargo-test|include-ignored,nocapture"
 )
 

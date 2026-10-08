@@ -9,6 +9,8 @@ rules do not fire on the shapes the crate legitimately uses.
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import os
 import sys
 import tempfile
 import unittest
@@ -50,7 +52,7 @@ SKIPS = "skip=postgres_live_s3"
 
 
 def postgres_laws(count: int) -> str:
-    """Enough PostgreSQL-only laws to clear the scanner's sanity floor."""
+    """Ordinary PostgreSQL laws for the source-only selection fixtures."""
     return "\n".join(
         '#[test]\n#[ignore = "requires PostgreSQL"]\nfn postgres_law_%d() {}' % index
         for index in range(count)
@@ -59,14 +61,14 @@ def postgres_laws(count: int) -> str:
 
 class Fixture(unittest.TestCase):
     def setUp(self) -> None:
-        self._temp = tempfile.TemporaryDirectory()
+        self._temp = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR"))
         self.addCleanup(self._temp.cleanup)
         self.root = Path(self._temp.name)
         self.write_recipe(labels=FACADE_LABELS, flags="nocapture," + SKIPS)
         self.write_workflow(WORKFLOW)
         (self.root / "crates/lash/src").mkdir(parents=True, exist_ok=True)
         (self.root / "crates/lash/tests").mkdir(parents=True, exist_ok=True)
-        self.write_source("src/lib.rs", postgres_laws(checker.MIN_GATE_SITES))
+        self.write_source("src/lib.rs", postgres_laws(20))
 
     def write_recipe(self, labels: str, flags: str) -> None:
         path = self.root / "scripts/ci/store-tests.sh"
@@ -192,13 +194,124 @@ class SelectionDefects(Fixture):
             any("cannot resolve" in v.detail for v in violations), violations
         )
 
-    def test_a_bare_scanner_floor_fails(self) -> None:
+    def test_empty_postgres_discovery_fails(self) -> None:
         (self.root / "crates/lash/src/lib.rs").write_text("", encoding="utf-8")
         violations = self.violations()
         self.assertTrue(
-            any("PostgreSQL-gated ignored sites" in v.detail for v in violations),
+            any("no PostgreSQL laws discovered" in v.detail for v in violations),
             violations,
         )
+
+
+class TargetCoverage(Fixture):
+    def target(self, tags=(), source=None):
+        package = self.root / "crates/durable"
+        package.mkdir(parents=True, exist_ok=True)
+        (package / "proof.rs").write_text(source or '''#[tokio::test]
+async fn opens_once_on_postgres() {
+    let _ = std::env::var("LASH_POSTGRES_DATABASE_URL");
+}
+''')
+        (package / "BUCK").write_text(
+            'lash_rust_integration_test(name="proof__test", crate_root="proof.rs")'
+        )
+        inventory = self.root / "tools/buck2/target-inventory.json"
+        inventory.parent.mkdir(parents=True, exist_ok=True)
+        inventory.write_text(json.dumps({"packages": [{"manifest": "crates/durable/Cargo.toml",
+            "targets": [{"kind": "test", "label": "//crates/durable:proof__test", "tags": list(tags)}]}]}))
+
+    def test_postgres_leg_without_any_runner_is_rejected(self):
+        self.target()
+        self.assertTrue(any("//crates/durable:proof__test" in v.detail for v in self.violations()))
+
+    def test_hermetic_runner_covers_a_nonignored_postgres_leg(self):
+        self.target(tags=["hermetic-postgres"])
+        self.assert_clean()
+
+    def test_hermetic_server_alone_does_not_select_an_ignored_law(self):
+        self.target(tags=["hermetic-postgres"], source='''#[test]
+#[ignore = "requires PostgreSQL"]
+fn opens_on_postgres() {}
+''')
+        self.assertTrue(any("opens_on_postgres" in v.detail for v in self.violations()))
+
+    def test_main_gate_selects_an_ignored_postgres_law(self):
+        self.target(source='''#[test]
+#[ignore = "requires PostgreSQL"]
+fn opens_on_postgres() {}
+''')
+        self.write_recipe("//crates/durable:proof__test", "nocapture")
+        self.assert_clean()
+
+    def test_named_gate_with_wrong_filter_does_not_cover_a_law(self):
+        self.target(source='''#[test]
+#[ignore = "requires PostgreSQL"]
+fn requires_a_database() {}
+''')
+        self.write_recipe("//crates/durable:proof__test", "nocapture")
+        self.assertTrue(any("requires_a_database" in v.detail for v in self.violations()))
+
+    def test_missing_discovered_root_fails_closed(self):
+        self.target(tags=["hermetic-postgres"])
+        (self.root / "crates/durable/proof.rs").unlink()
+        self.assertTrue(any("missing Rust test source" in v.detail for v in self.violations()))
+
+    def test_url_read_in_a_unit_law_requires_a_runner(self):
+        self.target(source='''#[test]
+fn the_store_opens() { let _ = std::env::var("LASH_POSTGRES_DATABASE_URL"); }
+''')
+        path = self.root / "tools/buck2/target-inventory.json"
+        inventory = json.loads(path.read_text())
+        inventory["packages"][0]["targets"][0]["kind"] = "unit-test"
+        path.write_text(json.dumps(inventory))
+        self.assertTrue(any("the_store_opens" in v.detail for v in self.violations()))
+
+    def test_mixed_macro_brackets_do_not_hide_the_following_pg_law(self):
+        self.target(source='''macro_rules! helper {
+    () => { let values = [Some(1)]; };
+}
+#[test]
+fn opens_on_postgres() { let _ = std::env::var("LASH_POSTGRES_DATABASE_URL"); }
+''')
+        self.assertTrue(any("opens_on_postgres" in v.detail for v in self.violations()))
+
+    def test_tier_macro_in_a_path_module_requires_a_runner(self):
+        self.target(source='''#[path = "shared.rs"]
+mod laws;
+''')
+        (self.root / "crates/durable/shared.rs").write_text('tiered_laws!(the_turn_settles);')
+        self.assertTrue(any("postgres::the_turn_settles" in v.detail for v in self.violations()))
+
+    def test_unused_tier_macro_and_commented_law_are_not_pg_legs(self):
+        self.target(source='''// async fn opens_on_postgres() {}
+macro_rules! tiered_laws { () => { tiered_laws!(@postgres); }; }
+#[test]
+fn sqlite_only() {}
+''')
+        targets = list(checker.postgres_targets(self.root))
+        self.assertEqual(targets, [])
+
+    def test_release_matrix_supplies_postgres_and_selects_its_leg(self):
+        self.target()
+        self.write_workflow('''jobs:
+  release:
+    strategy:
+      matrix:
+        include:
+          - service: pg
+          - service: pg17
+    steps:
+      - run: |
+          bash scripts/ci/with-service.sh "${SERVICE}" -- \\
+            bash scripts/ci/store-tests.sh pg-release
+''')
+        recipe = self.root / checker.STORE_TESTS
+        recipe.write_text(recipe.read_text() + '''
+release_legs() {
+  echo "proof|shared|opens_once_on_postgres|//crates/durable:proof__test|-p durable"
+}
+''')
+        self.assert_clean()
 
 
 if __name__ == "__main__":

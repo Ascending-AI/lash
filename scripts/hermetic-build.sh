@@ -17,4 +17,7 @@ case "${1:-}" in
   fmt) shift; exec cargo fmt --all "$@" ;;
   miri) shift; exec bash "$repo/scripts/append-vec-miri.sh" "$@" ;;
 esac
+if [[ "${1:-}" == check ]]; then
+  python3 "$repo/scripts/check_postgres_gate_coverage.py"
+fi
 exec python3 "$repo/tools/buck2/driver.py" "${mode[@]}" "$@"

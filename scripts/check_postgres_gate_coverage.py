@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Every PostgreSQL-gated law in //crates/lash is selected by a Postgres suite.
+"""Every PostgreSQL law target has a runner that supplies its database.
 
 The facade's PostgreSQL laws are ``#[ignore]``d tests: a bare ``cargo test``
 runs zero of them, and for years that meant they ran only by hand (FIG-4743).
@@ -8,7 +8,13 @@ derived by name rather than listed by hand: a law whose only requirement is a
 live PostgreSQL carries ``postgres`` in its libtest path, and the suites select
 it with a ``postgres`` filter plus the ignored-test opt-in.
 
-This check is the other half of that contract. It scans ``crates/lash`` for
+This check resolves every generated Rust test root and follows its modules,
+including shared #[path] helpers. URL reads, PostgreSQL law names and the PG
+tier macro require hermetic-postgres or a named main/certification gate.
+An ignored law additionally needs an ignored-covering selection: merely
+starting a hermetic server does not execute an ignored test.
+
+It scans the workspace for
 every ignored marker whose reason names PostgreSQL -- on a ``fn``, on a
 law-table entry (``#[ignore] name: ...``), inside a ``macro_rules!`` arm that
 generates an ignored test, or as a macro argument (``laws!(postgres, ...,
@@ -34,12 +40,15 @@ Only the standard library plus PyYAML is used, matching the sibling checks.
 from __future__ import annotations
 
 import argparse
+import ast
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import re
 import sys
 
 import yaml
+from fixture_regenerators import TOKEN, without_comments
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +58,7 @@ STORE_TESTS = Path("scripts/ci/store-tests.sh")
 POSTGRES = re.compile(r"postgres", re.IGNORECASE)
 # A reason naming one of these means a `pg` container alone does not satisfy
 # the law, so the Postgres suite must not select it.
-SECOND_SERVICE = re.compile(r"managed|\bs3\b|minio", re.IGNORECASE)
+SECOND_SERVICE = re.compile(r"managed|\bs3\b|minio|LASH_RELEASE_FIXTURES_DIR", re.IGNORECASE)
 
 # `#[ignore]` and `#[ignore = "reason"]`.
 ATTR_IGNORE = re.compile(r'#\[\s*ignore\b(?:\s*=\s*"([^"]*)")?\s*\]')
@@ -69,12 +78,13 @@ MACRO_DEF = re.compile(r"\bmacro_rules!\s+(\w+)")
 # A PostgreSQL-gated ignored law stays runnable only while its libtest path
 # keeps `postgres`: that is what the suites' name filter selects.
 FILTER_COVERED = re.compile(r"postgres")
-
-# The count floor keeps a broken scanner honest: if the regexes stop finding
-# the gate markers, the check must say so rather than report that everything
-# is selected.
-MIN_GATE_SITES = 20
-
+PG_READ = re.compile(
+    r'(?:var(?:_os)?\s*\(\s*"LASH_POSTGRES_DATABASE_URL"|required_database_url\s*\(|postgres_from_env\s*\()'
+)
+TEST_FUNCTION = re.compile(
+    r'#\[(?:tokio::)?test(?:\([^\]]*\))?\]\s*(?:#\[[^\]]*\]\s*)*'
+    r'(?:async\s+)?fn\s+(\w+)[^{]*\{'
+)
 
 @dataclass(frozen=True)
 class Violation:
@@ -91,6 +101,8 @@ class Suite:
     labels: frozenset[str]
     filters: tuple[str, ...]  # empty means the whole binary
     skips: tuple[str, ...]
+    ignored: bool = True
+    ignored_only: bool = False
 
     def selects(self, fragment: str) -> bool:
         return not self.filters or any(f in fragment for f in self.filters)
@@ -116,8 +128,7 @@ def line_of(text: str, pos: int) -> int:
 def matching_close(text: str, open_pos: int) -> int:
     """The offset just past the bracket matching `text[open_pos]`."""
     pairs = {"(": ")", "[": "]", "{": "}"}
-    opening = text[open_pos]
-    depth = 1
+    closing = [pairs[text[open_pos]]]
     pos = open_pos + 1
     while pos < len(text):
         char = text[pos]
@@ -135,10 +146,10 @@ def matching_close(text: str, open_pos: int) -> int:
             newline = text.find("\n", pos)
             pos = len(text) if newline == -1 else newline
         elif char in pairs:
-            depth += 1
-        elif char == pairs[opening]:
-            depth -= 1
-            if depth == 0:
+            closing.append(pairs[char])
+        elif char == closing[-1]:
+            closing.pop()
+            if not closing:
                 return pos + 1
         pos += 1
     return len(text)
@@ -222,7 +233,9 @@ def resolve_attribute(text: str, site: re.Match) -> tuple[str, ...]:
         r"(?:async\s+)?fn\s+(\w+)|mod\s+(\w+)|(\w+)\s*:|(\w+)\s*=>", rest
     )
     if item is None:
-        return ()
+        invocation = enclosing_invocation(text, site.start())
+        fragment = postgres_argument(text, invocation) if invocation else None
+        return (fragment,) if fragment else ()
     return (next(group for group in item.groups() if group is not None),)
 
 
@@ -269,6 +282,8 @@ def scan_file(path: Path, text: str) -> list[Site]:
         invocation = enclosing_invocation(text, match.start())
         if invocation is None:
             continue  # a literal about PostgreSQL, not a gate marker
+        if not re.search(r"laws$|^tiered", invocation.group(1)):
+            continue  # diagnostic literals in ordinary macros are not gate markers
         fragment = postgres_argument(text, invocation)
         sites.append(
             Site(
@@ -317,11 +332,16 @@ def postgres_wrapped_suites(workflows: dict[Path, object]) -> set[str]:
             steps = job.get("steps") if isinstance(job, dict) else None
             if not isinstance(steps, list):
                 continue
+            matrix = job.get("strategy", {}).get("matrix", {})
+            services = matrix.get("service", [row.get("service") for row in matrix.get("include", [])])
             for step in steps:
                 run = step.get("run") if isinstance(step, dict) else None
                 if not isinstance(run, str):
                     continue
-                if not re.search(r"with-service\.sh\s+\"?pg", run):
+                if not re.search(r"with-service\.sh\s+\"?pg", run) and not (
+                    'with-service.sh "${SERVICE}"' in run
+                    and services and set(services) <= {"pg", "pg17", "pg18"}
+                ):
                     continue
                 suites.update(
                     re.findall(r"scripts/ci/store-tests\.sh\s+([a-z0-9-]+)", run)
@@ -382,105 +402,207 @@ def covering_suites(root: Path) -> tuple[list[Suite], list[Violation]]:
                     for flag in selections
                     if flag.startswith("skip=")
                 ),
+                ignored_only="ignored-only" in selections,
             )
         )
+    if "pg-release" in wrapped:
+        # Read the literal release legs, not an independently maintained list.
+        for name, arguments, labels in re.findall(
+            r'echo "([^|]+)\|(?:shared|owned)\|([^|]*)\|([^|]*)\|', script
+        ):
+            if "$" in labels:
+                continue  # the generated store row is hermetic already
+            words = arguments.split()
+            suites.append(Suite(
+                name=f"pg-release/{name}", labels=frozenset(labels.split()),
+                filters=tuple(word for word in words if not word.startswith("--")), skips=(),
+                ignored="--include-ignored" in words or "--ignored" in words,
+                ignored_only="--ignored" in words,
+            ))
     return suites, violations
 
 
+def rust_modules(source: Path):
+    """Follow real module declarations, including inline modules and #[path]."""
+    visited = set()
+
+    def file(path, directory, prefix):
+        if path in visited:
+            return
+        if not path.is_file():
+            raise ValueError(f"missing Rust test source {path}")
+        visited.add(path)
+        raw = path.read_text(encoding="utf-8")
+        # The shared lexer preserves offsets but blanks comment newlines.
+        # Restore them so diagnostics retain the source's real line numbers.
+        text = "".join("\n" if before == "\n" else after
+                       for before, after in zip(raw, without_comments(raw)))
+        yield path, prefix, text
+        tokens = list(TOKEN.finditer(text))
+
+        def close(at):
+            opening = tokens[at][0]
+            closing = {"{": "}", "(": ")", "[": "]"}[opening]
+            depth = 1
+            for stop in range(at + 1, len(tokens)):
+                depth += (tokens[stop][0] == opening) - (tokens[stop][0] == closing)
+                if depth == 0:
+                    return stop
+            raise ValueError(f"unclosed {opening} in {path}")
+
+        def block(start, end, base, attribute_base, names):
+            attrs = []
+            at = start
+            while at < end:
+                value = tokens[at][0]
+                if value == "#" and tokens[at + 1][0] == "[":
+                    stop = close(at + 1)
+                    attrs.append(text[tokens[at].start():tokens[stop].end()])
+                    at = stop + 1
+                    continue
+                if value == "pub" and at + 1 < end and tokens[at + 1][0] == "(":
+                    at = close(at + 1) + 1
+                    continue
+                if value == "mod" and at + 2 < end:
+                    name, following = tokens[at + 1][0], tokens[at + 2][0]
+                    if following == "{":
+                        stop = close(at + 2)
+                        yield from block(at + 3, stop, base / name, base / name, (*names, name))
+                        at = stop + 1
+                    elif following == ";":
+                        override = re.search(r'#\[path\s*=\s*("[^"\n]+")\]', "\n".join(attrs))
+                        child = attribute_base / json.loads(override[1]) if override else base / f"{name}.rs"
+                        if not override and not child.is_file():
+                            child = base / name / "mod.rs"
+                        child_dir = child.parent if override or child.name == "mod.rs" else child.with_suffix("")
+                        yield from file(child, child_dir, (*names, name))
+                        at += 3
+                    else:
+                        at += 1
+                    attrs = []
+                    continue
+                if value not in ("pub", "async", "unsafe"):
+                    attrs = []
+                if value in ("{", "(", "["):
+                    at = close(at) + 1
+                else:
+                    at += 1
+
+        yield from block(0, len(tokens), directory, path.parent, prefix)
+
+    yield from file(source, source.parent, ())
+
+
+def postgres_targets(root: Path):
+    """Resolve every generated Rust test root; never infer owners from filenames."""
+    inventory = json.loads((root / "tools/buck2/target-inventory.json").read_text())
+    for package in inventory["packages"]:
+        directory = Path(package["manifest"]).parent
+        rules = {}
+        for statement in ast.parse((root / directory / "BUCK").read_text()).body:
+            if not isinstance(statement, ast.Expr) or not isinstance(statement.value, ast.Call):
+                continue
+            values = {kw.arg: ast.literal_eval(kw.value) for kw in statement.value.keywords
+                      if kw.arg in ("name", "crate_root")}
+            if "crate_root" in values:
+                rules[values["name"]] = values["crate_root"]
+        for target in package["targets"]:
+            if target["kind"] not in ("test", "unit-test", "bin-unit-test"):
+                continue
+            label = target["label"]
+            if label is None:
+                continue  # Cargo-owned feature witnesses have no generated test root
+            source = root / directory / rules[label.split(":", 1)[1]]
+            sites = []
+            markers = []
+            fragments = set()
+            for path, prefix, text in rust_modules(source):
+                relative = path.relative_to(root)
+                for site in scan_file(relative, text):
+                    if not site.reason.startswith("regenerates ") and (POSTGRES.search(site.reason) or any(POSTGRES.search(f) for f in site.fragments)):
+                        sites.append(Site(site.path, site.line, site.reason,
+                                          tuple("::".join((*prefix, f)) for f in site.fragments)))
+                # The tier macro instantiates postgres:: laws even though its
+                # callsite contains neither a URL nor a PostgreSQL test name.
+                marker_text = list(text)
+                for definition in MACRO_DEF.finditer(text):
+                    opening = text.find("{", definition.end())
+                    if opening >= 0:
+                        stop = matching_close(text, opening)
+                        marker_text[definition.start():stop] = " " * (stop - definition.start())
+                marker = re.search(r'\btiered_laws!|\b\w*_on_postgres\b', "".join(marker_text))
+                if marker:
+                    markers.append(f"{relative}:{line_of(text, marker.start())}")
+                concrete = "".join(marker_text)
+                for invocation in re.finditer(r'\btiered_laws!\s*\(', concrete):
+                    opening = invocation.end() - 1
+                    arguments = concrete[opening + 1:matching_close(concrete, opening) - 1]
+                    arguments = arguments.strip().removeprefix("current_thread:")
+                    fragments.update("::".join((*prefix, "postgres", law))
+                                     for law in re.findall(r'\b[a-z_]\w*\b', arguments))
+                fragments.update("::".join((*prefix, name)) for pair in re.findall(
+                    r'\bfn\s+(\w*on_postgres\w*)\s*\(|\b(\w*on_postgres\w*)\s*=>', concrete
+                ) for name in pair if name)
+                for function in TEST_FUNCTION.finditer(concrete):
+                    opening = function.end() - 1
+                    if PG_READ.search(concrete[opening:matching_close(concrete, opening)]):
+                        markers.append(f"{relative}:{line_of(text, function.start())}")
+                        fragments.add("::".join((*prefix, function[1])))
+                if target["kind"] == "test" and re.search(r'\bpostgres::', concrete):
+                    markers.append(str(relative))
+                if target["kind"] == "test" and re.search(r'#\[(?:tokio::)?test\b', text) and PG_READ.search(text):
+                    markers.append(str(relative))
+            if sites or markers:
+                yield dict(target, postgres_laws=sorted(fragments)), sites, markers
+
+
 def check_repository(root: Path) -> list[Violation]:
-    violations: list[Violation] = []
-    suites, suite_violations = covering_suites(root)
-    violations.extend(suite_violations)
-
-    sites: list[Site] = []
-    for subtree in ("src", "tests"):
-        for path in sorted(root.joinpath(CRATE, subtree).rglob("*.rs")):
-            sites.extend(
-                scan_file(path.relative_to(root), path.read_text(encoding="utf-8"))
-            )
-
-    gated = [
-        site
-        for site in sites
-        if POSTGRES.search(site.reason)
-        or any(FILTER_COVERED.search(fragment) for fragment in site.fragments)
-    ]
-    if len(gated) < MIN_GATE_SITES:
-        violations.append(
-            Violation(
-                str(CRATE),
-                "scan",
-                f"found only {len(gated)} PostgreSQL-gated ignored sites; the "
-                "crate's law tables alone mark more than that, so the scanner "
-                "is not seeing the gates it exists to cover",
-            )
-        )
-
-    for site in gated:
-        where = f"{site.path}:{site.line}"
-        if not site.fragments:
-            violations.append(
-                Violation(
-                    site.path,
-                    f"line {site.line}",
-                    "an ignored marker the check cannot resolve to a test name: "
-                    f"{site.reason!r}. Name the gate the way the law tables do "
-                    "so the PostgreSQL suite's selection provably covers it.",
-                )
-            )
-            continue
-        label = target_label(Path(site.path))
+    suites, violations = covering_suites(root)
+    inventory_path = root / "tools/buck2/target-inventory.json"
+    if (root / "Cargo.toml").is_file() and not inventory_path.is_file():
+        return violations + [Violation(str(inventory_path), "test roots", "missing generated target inventory")]
+    if inventory_path.is_file():
+        try:
+            targets = list(postgres_targets(root))
+        except (OSError, ValueError, KeyError, SyntaxError) as error:
+            return violations + [Violation(str(inventory_path), "test roots", str(error))]
+    else:
+        # Source-only fixtures exercise the same selection rules without a
+        # generated workspace. A real checkout must supply its inventory.
+        grouped = {}
+        for subtree in ("src", "tests"):
+            for path in sorted(root.joinpath(CRATE, subtree).rglob("*.rs")):
+                relative = path.relative_to(root)
+                for site in scan_file(relative, without_comments(path.read_text())):
+                    if POSTGRES.search(site.reason) or any(POSTGRES.search(f) for f in site.fragments):
+                        grouped.setdefault(target_label(relative), []).append(site)
+        targets = [({"label": label, "tags": []}, sites, []) for label, sites in grouped.items()]
+    if not targets:
+        violations.append(Violation(str(CRATE), "scan", "no PostgreSQL laws discovered"))
+    for target, ignored_sites, markers in targets:
+        label = target["label"]
         candidates = [suite for suite in suites if label in suite.labels]
-        if not candidates:
-            violations.append(
-                Violation(
-                    site.path,
-                    f"line {site.line}",
-                    f"needs PostgreSQL ({site.reason!r}) but no suite run under "
-                    f"a `with-service.sh pg*` leg selects ignored tests in "
-                    f"{label}; add the binary to the facade-laws suite.",
-                )
-            )
-            continue
-        needs_second_service = SECOND_SERVICE.search(site.reason)
-        for fragment in site.fragments:
-            selected = [suite for suite in candidates if suite.selects(fragment)]
-            if needs_second_service:
-                for suite in selected:
-                    if not suite.skips_(fragment):
-                        violations.append(
-                            Violation(
-                                site.path,
-                                f"line {site.line}",
-                                f"needs a second service ({site.reason!r}) but "
-                                f"`{suite.name}` selects {fragment!r} without "
-                                "skipping it; the law would run without that "
-                                "service and fail. Name a `skip=` for it.",
-                            )
-                        )
-            else:
-                selected = [
-                    suite for suite in selected if not suite.skips_(fragment)
-                ]
-                if not selected:
-                    detail = (
-                        f"is a PostgreSQL-only law ({site.reason!r}) in {label} "
-                        "that no Postgres suite selects"
-                    )
-                    if any(
-                        suite.selects(fragment) and suite.skips_(fragment)
-                        for suite in candidates
-                    ):
-                        detail += "; a `skip=` meant for a second-service law "
-                        "excludes it"
-                    elif candidates and all(suite.filters for suite in candidates):
-                        detail += (
-                            ": every covering suite filters by name, and "
-                            f"{fragment!r} matches none of them -- the "
-                            "convention is `postgres` in the libtest path"
-                        )
-                    violations.append(Violation(site.path, f"line {site.line}", detail))
-
+        hermetic = "hermetic-postgres" in target.get("tags", [])
+        if not hermetic and not candidates:
+            violations.append(Violation(label, "PostgreSQL leg", f"{label} has PostgreSQL legs ({', '.join(markers)}) but neither hermetic-postgres nor a named PostgreSQL gate"))
+        if not hermetic:
+            for fragment in target.get("postgres_laws", []):
+                ignored = any(fragment in site.fragments for site in ignored_sites)
+                if not any(suite.selects(fragment) and not suite.skips_(fragment)
+                           and (suite.ignored if ignored else not suite.ignored_only)
+                           for suite in candidates):
+                    violations.append(Violation(label, "PostgreSQL law", f"{label} law {fragment!r} is selected by no PostgreSQL gate"))
+        for site in ignored_sites:
+            if not site.fragments:
+                violations.append(Violation(site.path, f"line {site.line}", "cannot resolve ignored PostgreSQL marker to a test name"))
+            for fragment in site.fragments:
+                selected = [suite for suite in candidates if suite.ignored and suite.selects(fragment)]
+                if SECOND_SERVICE.search(site.reason):
+                    for suite in selected:
+                        if not suite.skips_(fragment):
+                            violations.append(Violation(site.path, f"line {site.line}", f"{suite.name} selects {fragment!r} needing a second service without a skip="))
+                elif not any(not suite.skips_(fragment) for suite in selected):
+                    violations.append(Violation(site.path, f"line {site.line}", f"{label} ignored PostgreSQL law {fragment!r} is selected by no PostgreSQL gate"))
     return violations
 
 

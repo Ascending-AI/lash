@@ -1453,6 +1453,10 @@ jobs:
             pg-facade-laws \
             pg-pool-wait \
             pg-sim-backend-faults \
+            pg-standard-retention \
+            pg-operator-laws \
+            pg-chaos-laws \
+            pg-schema-laws \
             pg-cross-backend
 
       # Selected PostgreSQL variants require the URL exported by with-service.sh
@@ -1514,6 +1518,16 @@ jobs:
         run: |
           bash scripts/ci/with-service.sh pg -- \
             bash scripts/ci/store-tests.sh pg-sim-backend-faults
+
+      - name: Test remaining PostgreSQL law legs
+        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        run: |
+          bash scripts/ci/with-service.sh pg -- bash -eu -c '
+            bash scripts/ci/store-tests.sh pg-standard-retention
+            bash scripts/ci/store-tests.sh pg-operator-laws
+            bash scripts/ci/store-tests.sh pg-chaos-laws
+            bash scripts/ci/store-tests.sh pg-schema-laws
+          '
 
       # The full differential compares backend semantics.
       - name: Test cross-backend store differential

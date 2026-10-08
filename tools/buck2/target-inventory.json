@@ -44258,7 +44258,9 @@
           "clippy_label": "//crates/lash-durable-test:context_budget_warning__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:context_budget_warning__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:core_node_processes__test",
@@ -44313,7 +44315,9 @@
           "clippy_label": "//crates/lash-durable-test:first_party_tools__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:first_party_tools__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:format_fixtures__test",
@@ -44332,7 +44336,9 @@
           "kind": "test",
           "label": "//crates/lash-durable-test:frame_switch_crash_proof__test",
           "shard_count": 4,
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:frame_switch_laws__test",
@@ -44352,7 +44358,9 @@
           "clippy_label": "//crates/lash-durable-test:live_stream_takeover__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:live_stream_takeover__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:one_slot_process_await__test",
@@ -44361,7 +44369,9 @@
           "clippy_label": "//crates/lash-durable-test:one_slot_process_await__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:one_slot_process_await__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:open_session_commands__test",
@@ -44370,7 +44380,9 @@
           "clippy_label": "//crates/lash-durable-test:open_session_commands__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:open_session_commands__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:plugin_state_storage_laws__test",
@@ -44390,7 +44402,9 @@
           "clippy_label": "//crates/lash-durable-test:pressure_frame_crash_proof__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:pressure_frame_crash_proof__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:process_actor_laws__test",
@@ -44480,7 +44494,9 @@
           "clippy_label": "//crates/lash-durable-test:rlm_execution_maps__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:rlm_execution_maps__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:rlm_session_globals__test",
@@ -44489,7 +44505,9 @@
           "clippy_label": "//crates/lash-durable-test:rlm_session_globals__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:rlm_session_globals__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:round_crash_matrix__test",
@@ -44507,7 +44525,9 @@
           "clippy_label": "//crates/lash-durable-test:schedule_tick_crash_proof__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:schedule_tick_crash_proof__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:session_send__test",
@@ -44628,7 +44648,9 @@
           "clippy_label": "//crates/lash-durable-test:turn_execution_state__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:turn_execution_state__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:turn_phases__test",
@@ -44658,7 +44680,9 @@
           "clippy_label": "//crates/lash-durable-test:turn_terminal_refusals__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:turn_terminal_refusals__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         },
         {
           "build_label": "//crates/lash-durable-test:turn_trace_scope_laws__test",
@@ -44690,7 +44714,9 @@
           "clippy_label": "//crates/lash-durable-test:worker_crashes__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-durable-test:worker_crashes__test",
-          "tags": []
+          "tags": [
+            "hermetic-postgres"
+          ]
         }
       ],
       "test_batch": {
@@ -48047,16 +48073,26 @@
       "//crates/lash-durable-test:cell_restore_laws__test",
       "//crates/lash-durable-test:committed_turns__test",
       "//crates/lash-durable-test:config_change_observer_laws__test",
+      "//crates/lash-durable-test:context_budget_warning__test",
       "//crates/lash-durable-test:core_node_processes__test",
       "//crates/lash-durable-test:declared_start__test",
       "//crates/lash-durable-test:declared_start_crash_laws__test",
       "//crates/lash-durable-test:drain_by_release__test",
+      "//crates/lash-durable-test:first_party_tools__test",
+      "//crates/lash-durable-test:frame_switch_crash_proof__test",
       "//crates/lash-durable-test:frame_switch_laws__test",
+      "//crates/lash-durable-test:live_stream_takeover__test",
+      "//crates/lash-durable-test:one_slot_process_await__test",
+      "//crates/lash-durable-test:open_session_commands__test",
       "//crates/lash-durable-test:plugin_state_storage_laws__test",
+      "//crates/lash-durable-test:pressure_frame_crash_proof__test",
       "//crates/lash-durable-test:process_lifecycle_events__test",
       "//crates/lash-durable-test:process_tool_call_crash_laws__test",
       "//crates/lash-durable-test:process_tool_calls__test",
       "//crates/lash-durable-test:recorded_behaviour_laws__test",
+      "//crates/lash-durable-test:rlm_execution_maps__test",
+      "//crates/lash-durable-test:rlm_session_globals__test",
+      "//crates/lash-durable-test:schedule_tick_crash_proof__test",
       "//crates/lash-durable-test:session_send__test",
       "//crates/lash-durable-test:standard_turn_outcomes__test",
       "//crates/lash-durable-test:steering_crash_laws__test",
@@ -48067,9 +48103,12 @@
       "//crates/lash-durable-test:tool_group_pool_width__test",
       "//crates/lash-durable-test:tool_surface_laws__test",
       "//crates/lash-durable-test:trigger_start_proof__test",
+      "//crates/lash-durable-test:turn_execution_state__test",
       "//crates/lash-durable-test:turn_phases__test",
+      "//crates/lash-durable-test:turn_terminal_refusals__test",
       "//crates/lash-durable-test:turn_trace_scope_laws__test",
       "//crates/lash-durable-test:vertical_crash_proof__test",
+      "//crates/lash-durable-test:worker_crashes__test",
       "//crates/lash-postgres-store:conformance__test",
       "//crates/lash-postgres-store:conformance__test__fv_c830723d",
       "//crates/lash-postgres-store:durable_read_fixture__test",
