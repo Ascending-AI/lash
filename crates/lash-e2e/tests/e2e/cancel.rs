@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, ensure};
+use anyhow::{Context as _, Result, ensure};
 use lash_e2e::{Case, Host};
 use serde_json::json;
 
@@ -25,7 +25,7 @@ case!(
 
 /// A host process sleeps for ten minutes on its durable timer, and an RLM
 /// cell awaits it with `processes.await`. Once the session actor released
-/// itself waiting on the await's wait row, the turn is cancelled through
+/// itself while the process is still running, the turn is cancelled through
 /// the host's public cancel. The terminal cancellation lands long before
 /// the timer, a product observer that attaches only afterwards still sees
 /// it, and the session holds no wait and no unfinished turn after it.
@@ -41,20 +41,46 @@ async fn s18(case: &mut Case) -> Result<()> {
         )
         .await?;
     case.record_barrier(json!({"barrier": "sleeper started", "receipt": sleeper}));
+    let sleeper_id = sleeper["process_id"]
+        .as_str()
+        .context("the sleeper receipt names no process")?;
     let turn = workbench::send(case, "node-a", "S18 await the sleeper").await?;
     let session_actor = format!("s/{}", support::session(case));
-    case.until("the sleeping session released", || async {
-        let ledger = lash_e2e::read_jsonl(&case.dir.join("commits-node-a.jsonl"))?;
-        let admitted = ledger.iter().position(|line| line["label"] == "turn.admit");
-        Ok(admitted
-            .is_some_and(|admitted| {
-                ledger[admitted..].iter().any(|line| {
-                    line["label"] == "session.release" && line["actor"] == session_actor
-                })
-            })
-            .then_some(()))
-    })
-    .await?;
+    let suspended = case
+        .until(
+            "the session released awaiting the sleeping process",
+            || async {
+                // The runtime-wide snapshot takes no session admission while its
+                // turn is awaiting; identify our sleeper by its start receipt.
+                let work = case.node("node-a")?.get("/api/work").await?;
+                // A durable timer leaves the sleeper's lifecycle running; waiting
+                // describes a deferred tool call. The session's release below is
+                // the evidence that its process await is suspended.
+                let sleeping = work.as_array().is_some_and(|items| {
+                    items.iter().any(|item| {
+                        item["process"]["process_id"] == sleeper_id
+                            && item["process"]["lifecycle"] == "running"
+                            && item["process"]["terminal"] == false
+                    })
+                });
+                let ledger = lash_e2e::read_jsonl(&case.dir.join("commits-node-a.jsonl"))?;
+                let admitted = ledger.iter().position(|line| {
+                    line["label"] == "turn.admit"
+                        && line["actor"] == session_actor
+                        && line["applied"] == true
+                });
+                let released = admitted.is_some_and(|admitted| {
+                    ledger[admitted..].iter().any(|line| {
+                        line["label"] == "session.release"
+                            && line["actor"] == session_actor
+                            && line["applied"] == true
+                    })
+                });
+                Ok((sleeping && released).then_some(work))
+            },
+        )
+        .await?;
+    case.record_barrier(json!({"barrier": "process await suspended", "work": suspended}));
     let cancelled_at = Instant::now();
     let receipt = workbench::cancel(case, "node-a").await?;
     ensure!(
@@ -82,17 +108,21 @@ async fn s18(case: &mut Case) -> Result<()> {
     case.evidence
         .outputs
         .push(json!({"late product events": events.len(), "terminal": events.last()}));
-    let waits = case
-        .node("node-a")?
-        .get(&format!("/api/sessions/{session}/waits"))
+    let state = case
+        .until("the cancelled turn left the active set", || async {
+            let state = case
+                .node("node-a")?
+                .get(&format!("/api/state?session_id={session}"))
+                .await?;
+            Ok(state["active_turns"]
+                .as_array()
+                .is_some_and(Vec::is_empty)
+                .then_some(state))
+        })
         .await?;
     case.evidence
         .stores
-        .push(json!({"at": "after the cancel", "waits": waits}));
-    ensure!(
-        waits.as_array().is_some_and(Vec::is_empty),
-        "the cancelled turn left outstanding completions: {waits}"
-    );
+        .push(json!({"at": "after the cancel", "active turns": state["active_turns"]}));
     ensure!(
         workbench::stages(case)? == ["initial"],
         "the provider was asked again: {:?}",
@@ -110,7 +140,7 @@ async fn s18(case: &mut Case) -> Result<()> {
         .push(json!({"at": "after the cancel", "pending waits": pending}));
     ensure!(
         pending.is_empty(),
-        "the cancel left the sleep's wait pending: {pending:?}"
+        "the cancelled turn left outstanding session waits: {pending:?}"
     );
     Ok(())
 }
