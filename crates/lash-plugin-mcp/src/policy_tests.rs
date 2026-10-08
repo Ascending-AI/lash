@@ -1081,6 +1081,67 @@ async fn startup_timeout_drops_handshake_before_graceful_reap() {
     pool.shutdown_all().await;
 }
 
+/// FIG-5538: cleaning up a failed attempt cannot shut down its registered entry.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn startup_cleanup_abandonment_preserves_disabled_reconnect_and_startup_fault() {
+    let clock = scripted::Clock::new().await;
+    let mut lifecycle = scripted::Lifecycle::new();
+    let root = tempfile::tempdir().unwrap();
+    let pool = Arc::new(McpConnectionPool::empty());
+    let current_entry = McpEntry::new(
+        "mock".to_string(),
+        mock_config(
+            root.path(),
+            MockOptions {
+                behavior: "exit_on_eof_after_hang_initialize",
+                startup_timeout_ms: 400,
+                reconnect_max_attempts: ReconnectAttempts::Disabled,
+                probe_interval_ms: 5,
+                ..MockOptions::default()
+            },
+        ),
+        McpHostServices::default(),
+    )
+    .with_never_finishing_child_reap();
+    lifecycle.observe(&current_entry);
+    assert!(
+        pool.install("mock".to_string(), Arc::clone(&current_entry))
+            .is_ok()
+    );
+    let mut establishing = Box::pin(current_entry.establish());
+    assert!(futures_util::poll!(establishing.as_mut()).is_pending());
+    let pid = lifecycle.spawned().await;
+    clock
+        .expire(Instant::now() + Duration::from_millis(400))
+        .await;
+    let (_, grace) = lifecycle.grace_armed().await;
+    clock.expire(grace).await;
+    let term = lifecycle.term_issued(pid).await;
+    clock.expire(term).await;
+    let cleanup = lifecycle.kill_issued(pid).await;
+    clock.expire(cleanup).await;
+    assert!(matches!(
+        establishing.await,
+        Err(McpError::StartupTimeout {
+            timeout_ms: 400,
+            ..
+        })
+    ));
+    tokio::time::advance(Duration::from_millis(100)).await;
+    assert_eq!(
+        current_entry.health.read_recover().clone(),
+        McpServerHealth::Disconnected {
+            last_error: Some(McpServerFault::Connection(
+                "MCP startup timed out for `mock` after 400ms".to_string()
+            ))
+        },
+        "attempt cleanup must retain the startup fault and disabled reconnect across keepalive"
+    );
+    assert_eq!(current_entry.active_pid.load(Ordering::SeqCst), 0);
+    pool.shutdown_all().await;
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn shutdown_during_live_handshake_reaps_actor_owned_child() {

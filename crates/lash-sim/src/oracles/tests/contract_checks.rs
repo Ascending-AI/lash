@@ -549,6 +549,89 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         "unexpected RLM retired-marker replay failure: {err}"
     );
 
+    // FIG-5538 / ADR 0117: ids join cell entries to one record per call;
+    // duplicate records and duplicate dispatches must still fail the oracle.
+    let mut joined = events.clone();
+    let exec = joined
+        .iter_mut()
+        .find(|event| event.kind == BoundaryKind::ExecCode)
+        .unwrap();
+    let result = exec
+        .observed
+        .pointer_mut("/runtime_effect_outcome/result/Ok")
+        .unwrap();
+    let records = ["first", "second"].map(|label| lash_core::ToolCallRecord {
+        call_id: lash_core::ToolCallId::fixture(label),
+        provider_call_id: None,
+        tool: "read_file".to_string(),
+        args: json!({"path": label}),
+        output: lash_core::ToolCallOutput::success(json!(label)),
+    });
+    let mut calls = records
+        .iter()
+        .map(|record| lash_core::ExecutedCall {
+            operation: "tools.read_file".to_string(),
+            outcome: lash_core::ExecutedCallOutcome::Ok,
+            call_id: Some(record.call_id.clone()),
+        })
+        .collect::<Vec<_>>();
+    calls.push(lash_core::ExecutedCall {
+        operation: "finish".to_string(),
+        outcome: lash_core::ExecutedCallOutcome::Ok,
+        call_id: None,
+    });
+    result["calls"] = json!(calls);
+    result["tool_calls"] = json!(records);
+    assert!(
+        exec_semantic_fact(
+            &joined,
+            "joined_calls",
+            ExecFactRequirement::NoToolCallReplay
+        )
+        .is_ok()
+    );
+    for mutation in [
+        "duplicate_record",
+        "duplicate_dispatch",
+        "missing_record",
+        "unjoined_record",
+    ] {
+        let mut corrupted = joined.clone();
+        let result = corrupted
+            .iter_mut()
+            .find(|event| event.kind == BoundaryKind::ExecCode)
+            .unwrap()
+            .observed
+            .pointer_mut("/runtime_effect_outcome/result/Ok")
+            .unwrap();
+        match mutation {
+            "duplicate_record" => result["tool_calls"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!(records[0])),
+            "duplicate_dispatch" => result["calls"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!(calls[0])),
+            "missing_record" => {
+                result["tool_calls"].as_array_mut().unwrap().pop();
+            }
+            "unjoined_record" => {
+                result["tool_calls"][0]["call_id"] = json!(lash_core::ToolCallId::fixture("other"))
+            }
+            _ => unreachable!(),
+        }
+        assert!(
+            exec_semantic_fact(
+                &corrupted,
+                "joined_calls",
+                ExecFactRequirement::NoToolCallReplay
+            )
+            .is_err(),
+            "{mutation}"
+        );
+    }
+
     let mut exec_missing_tool_event = events.clone();
     mutate_contract_execution(
         &mut exec_missing_tool_event,

@@ -483,18 +483,27 @@ impl StdioChildGuard {
         let expiry = tokio::time::sleep_until(deadline);
         tokio::pin!(expiry);
         loop {
-            if self.try_wait()?.is_some() {
-                self.reaped = true;
-                #[cfg(test)]
-                self.emit(LifecycleEvent::Reaped { pid: self.pid });
+            if self.reap_if_exited()? {
                 return Ok(true);
             }
             tokio::select! {
                 biased;
                 () = exits.recv(poll_interval) => {}
-                () = &mut expiry => return Ok(false),
+                // A signal or polling tick may arrive after this shorter
+                // deadline. Check the OS state before declaring abandonment.
+                () = &mut expiry => return self.reap_if_exited(),
             }
         }
+    }
+
+    fn reap_if_exited(&mut self) -> std::io::Result<bool> {
+        if self.try_wait()?.is_none() {
+            return Ok(false);
+        }
+        self.reaped = true;
+        #[cfg(test)]
+        self.emit(LifecycleEvent::Reaped { pid: self.pid });
+        Ok(true)
     }
 
     pub(crate) fn pid(&self) -> u32 {
@@ -661,6 +670,51 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(process_exited(pid));
+    }
+
+    /// FIG-5538: a poll interval beyond the deadline must still reap a child
+    /// that exited while the deadline timer was pending.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn child_exit_at_deadline_is_reaped_without_a_signal_driver() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("time-only runtime");
+        runtime.block_on(async {
+            tokio::time::pause();
+            let transport =
+                McpStdioTransport::new("sh", vec!["-c".to_string(), "read value".to_string()]);
+            let child = spawn_stdio_server("fixture", &transport).expect("spawn");
+            let mut guard = StdioChildGuard::new(
+                "fixture",
+                child,
+                Arc::new(RwLock::new(McpServerHealth::Connecting)),
+            );
+            let pid = guard.pid();
+            let stdin = guard.child.stdin.take().expect("stdin");
+            let mut exits = ChildExits::Polled;
+            let deadline = Instant::now() + Duration::from_millis(5);
+            let mut reaping =
+                Box::pin(guard.exited_by(&mut exits, deadline, Duration::from_millis(20)));
+            assert!(futures_util::poll!(reaping.as_mut()).is_pending());
+            drop(stdin);
+            // Keep runtime time fixed while the OS child exits. Its zombie
+            // remains observable until the guard performs the actual reap.
+            let os_deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !process_exited(pid) {
+                assert!(
+                    std::time::Instant::now() < os_deadline,
+                    "child did not exit"
+                );
+                std::thread::yield_now();
+            }
+            tokio::time::advance(Duration::from_millis(6)).await;
+            assert!(
+                reaping.await.expect("reap"),
+                "deadline must check child exit"
+            );
+        });
     }
 
     /// `getpgid` of a live child: `Some(pgid)` while the process exists.

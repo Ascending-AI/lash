@@ -191,7 +191,7 @@ pub(super) fn exec_semantic_fact(
     ) && !exec_outcome_has_no_tool_call_replay(std::slice::from_ref(exec))
     {
         return Err(format!(
-            "exec semantic fact `{fact}` found replayed tool-call ids in exec runtime outcome"
+            "exec semantic fact `{fact}` found duplicate or unjoined tool-call records in exec runtime outcome"
         ));
     }
     let provider = if matches!(requirement, ExecFactRequirement::ReentersProvider) {
@@ -688,10 +688,32 @@ pub(super) fn exec_outcome_has_no_tool_call_replay(events: &[DeliveredBoundary])
         if outcome.get("type").and_then(Value::as_str) != Some("exec_code") {
             return false;
         }
-        outcome
-            .pointer("/result/Ok/tool_calls")
-            .and_then(Value::as_array)
-            .is_some_and(Vec::is_empty)
+        let Some(result) = outcome.pointer("/result/Ok") else {
+            return false;
+        };
+        let Some(calls) = result.get("calls").and_then(|calls| {
+            serde_json::from_value::<Vec<lash_core::ExecutedCall>>(calls.clone()).ok()
+        }) else {
+            return false;
+        };
+        let Some(records) = result.get("tool_calls").and_then(|records| {
+            serde_json::from_value::<Vec<lash_core::ToolCallRecord>>(records.clone()).ok()
+        }) else {
+            return false;
+        };
+        // Cell entries reference the one record of each host call. An id is
+        // legitimate here; a repeated record or repeated dispatch is replay.
+        let record_ids = records
+            .iter()
+            .map(|record| &record.call_id)
+            .collect::<BTreeSet<_>>();
+        let call_ids = calls
+            .iter()
+            .filter_map(|call| call.call_id.as_ref())
+            .collect::<BTreeSet<_>>();
+        record_ids.len() == records.len()
+            && call_ids.len() == calls.iter().filter(|call| call.call_id.is_some()).count()
+            && record_ids == call_ids
     })
 }
 

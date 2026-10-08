@@ -1206,9 +1206,15 @@ async fn reap_child(
             "MCP stdio child PID {pid} abandoned unreaped after bounded lifecycle cleanup: {error}"
         );
         if let Some(entry) = entry.upgrade() {
-            *entry.health.write_recover() = McpServerHealth::ShuttingDown {
-                reason: Some(McpServerFault::Connection(reason)),
-            };
+            let mut health = entry.health.write_recover();
+            // Attempt cleanup does not request entry shutdown. Preserve the
+            // connection fault and let its configured reconnect policy settle
+            // health; only an actual shutdown retains its cleanup failure here.
+            if health.is_shutting_down() {
+                *health = McpServerHealth::ShuttingDown {
+                    reason: Some(McpServerFault::Connection(reason)),
+                };
+            }
         }
         // StdioChildGuard reports the unreaped child when it drops.
     }

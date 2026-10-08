@@ -562,7 +562,8 @@ pub(super) fn semantic_events() -> Vec<DeliveredBoundary> {
                 "runtime_effect_outcome": {
                     "result": {
                         "Ok": {
-                            "calls": []
+                            "calls": [],
+                            "tool_calls": []
                         }
                     },
                     "type": "exec_code"
