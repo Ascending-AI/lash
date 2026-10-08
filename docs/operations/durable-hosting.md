@@ -46,6 +46,26 @@ mailbox row and wakes the actor that owns the work. Whichever node owns that
 actor runs it. A host never drives a turn itself: there is no handler, effect
 controller or work driver for it to call.
 
+### Retrying host delivery with stable keys
+
+Start a process with `ProcessStartRequest::with_host_start_key(key)` when a
+host delivery may be retried. The same key and request return the same process
+id while that process is retained, including after it ends; reusing the key
+for a different request is refused with `PluginError::StartKeyConflict`.
+The bytes identify one key across the store set, so the host owns any
+partitioning between originators ([ADR 0107](../adr/0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)).
+
+A host that loses a start acknowledgement retries the same request and key
+to recover the id. It must durably record the process id before pruning that
+process. Lash keeps no start receipt after pruning: reusing the key then
+starts a new process with a new id.
+
+`send(input).id(turn_id)` deduplicates by the id within the session and
+validates the original submission digest while the input row or its terminal
+tombstone is retained. An input taken by a run retains that evidence until
+session deletion; an input withdrawn before admission loses it when host
+vacuum removes the tombstone, after which that id can admit new input.
+
 ### Build the backend
 
 `lash::durable::DurableBackendBuilder` builds the one `lash::Backend` a

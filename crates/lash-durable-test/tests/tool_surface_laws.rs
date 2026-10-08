@@ -1014,6 +1014,105 @@ async fn a_host_start_observes_only_the_sessions_it_names(tier: Tier) {
     world.shutdown().await;
 }
 
+/// FIG-5412 / ADR 0107: losing the host's acknowledgement does not lose
+/// the start's identity. A retained host key fences the request through
+/// terminal settlement, and every retry leaves exactly one process.
+async fn a_lost_host_start_acknowledgement_recovers_the_retained_process(tier: Tier) {
+    let Some(world) = served::World::with_engines(
+        tier,
+        vec![Arc::new(lash_core_execution::testing::HeldProcessEngine)],
+        |backend| lash::LashCore::standard_builder(backend.clone()),
+    )
+    .await
+    else {
+        return;
+    };
+    tokio::time::timeout(WATCHDOG, async {
+        let env_ref = world
+            .core
+            .host_artifacts()
+            .publish_process_env(&lash_core::HostArtifactPin::mint(), &process_environment())
+            .await
+            .expect("publish the environment");
+        let request = lash_core::ProcessStartRequest::new(
+            lash_core_execution::testing::held_engine_input(serde_json::json!({ "work": 1 })),
+            lash_core::ProcessOriginator::host(),
+            lash_core::LifetimeDecision::Detached,
+        )
+        .with_env_ref(env_ref)
+        .with_host_start_key("lost-host-start-ack");
+        // The host loses its acknowledgement; only the database keeps the id.
+        let _ = world
+            .core
+            .processes()
+            .start(request.clone(), world.core.effect_host())
+            .await
+            .expect("the first start commits");
+        let filter = lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..Default::default()
+        };
+        let retained = world
+            .core
+            .processes()
+            .list(&filter)
+            .await
+            .expect("read the committed process");
+        assert_eq!(retained.len(), 1);
+        let original_id = retained[0].process_id.clone();
+
+        for terminal in [false, true] {
+            if terminal {
+                world
+                    .core
+                    .processes()
+                    .cancel(&original_id, world.core.effect_host())
+                    .await
+                    .expect("end the retained process");
+                world
+                    .core
+                    .processes()
+                    .await_output(&original_id)
+                    .await
+                    .expect("the process settles");
+            }
+            let retry = world
+                .core
+                .processes()
+                .start(request.clone(), world.core.effect_host())
+                .await
+                .expect("the same host request recovers its id");
+            assert_eq!(retry.process_id, original_id);
+            let mut changed = request.clone();
+            changed.input =
+                lash_core_execution::testing::held_engine_input(serde_json::json!({ "work": 2 }))
+                    .into();
+            let error = world
+                .core
+                .processes()
+                .start(changed, world.core.effect_host())
+                .await
+                .expect_err("a different request under the retained key conflicts");
+            assert!(matches!(
+                error,
+                lash::EmbedError::Plugin(lash_core::PluginError::StartKeyConflict { start_key })
+                    if Some(&start_key) == request.start_key()
+            ));
+            let processes = world
+                .core
+                .processes()
+                .list(&filter)
+                .await
+                .expect("read processes after both retries");
+            assert_eq!(processes.len(), 1, "no retry creates a second process");
+            assert_eq!(processes[0].process_id, original_id);
+        }
+    })
+    .await
+    .expect("the host start and retries settle before the watchdog");
+    world.shutdown().await;
+}
+
 tiered_laws!(
     tool_access_setter_changes_the_next_model_request_in_both_directions,
     updated_tool_access_survives_park_and_resume,
@@ -1026,5 +1125,6 @@ tiered_laws!(
     a_host_restore_on_a_require_core_reports_instead_of_refusing,
     a_require_run_that_would_lose_a_member_is_refused_typed,
     a_host_start_observes_only_the_sessions_it_names,
+    a_lost_host_start_acknowledgement_recovers_the_retained_process,
     session_fork_discovers_live_tools_and_preserves_curation_and_hidden_policy,
 );

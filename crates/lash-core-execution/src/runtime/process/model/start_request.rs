@@ -207,6 +207,14 @@ impl ProcessStartRequest {
     /// the same bytes are one key across the store set, whoever presents them,
     /// and a start under a retained key returns that process only when it is
     /// the same start (ADR 0107).
+    /// Reusing the key with a different request is refused with
+    /// [`crate::PluginError::StartKeyConflict`].
+    ///
+    /// If a host loses the acknowledgement, it retries the same request with
+    /// the same key to recover the process id. This deduplicates for as long
+    /// as the process is retained, including after it ends. The host must
+    /// record that id before pruning the process: Lash keeps no start receipt
+    /// after pruning, and the same key can then start a new process.
     #[must_use]
     pub fn with_host_start_key(self, key: impl AsRef<[u8]>) -> Self {
         self.with_start_key(Some(crate::StartKey::for_host(key)))
