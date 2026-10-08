@@ -75,7 +75,10 @@ evidence. Best-effort diagnostics do not strengthen delivery guarantees.
 Use session observations for app changes, process observations for process facts,
 and host logging/passive tracing for diagnostics. A host collecting them together
 preserves each channel's origin, identity, cursors, gaps and delivery guarantees.
-Wake hints and diagnostics are not durable reliable event feeds.
+Wake hints and diagnostics are not durable reliable event feeds. The
+[process observation guide](../observing-processes.md) separates retained
+process facts from node execution traces and shows how a host keeps a path
+for replay.
 
 Treat content capture consent, detail level, sampling and byte bounds as separate
 controls. Retain identities, outcomes, counts and omission evidence when content

@@ -59,7 +59,9 @@ Only a newly committed lifecycle transition emits a logical completion.
 Only an executed body emits a live attempt observation. Loading a committed
 result or reading a retained terminal grants neither permission.
 Product process and language graphs reconstruct through a separate observer
-on replay, without exporting another lifecycle observation.
+on replay, without exporting another lifecycle observation. The
+[process observation guide](../observing-processes.md) explains the durable
+facts, node execution telemetry and host persistence needed to replay a path.
 
 An admission's export is an obligation of the durable admission that
 retains its scope (FIG-5395): a turn's `turn.admit`, a round's `model.done`,
