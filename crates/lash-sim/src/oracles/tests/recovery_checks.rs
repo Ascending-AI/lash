@@ -228,7 +228,7 @@ fn boundary_kind_name_matches_serde_serialization() {
         BoundaryKind::DurableEffect,
         BoundaryKind::Observer,
         BoundaryKind::Cancellation,
-        BoundaryKind::Trigger,
+        BoundaryKind::ContractExecution,
         BoundaryKind::BackendFailure,
         BoundaryKind::ProviderMutation,
     ];

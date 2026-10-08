@@ -17,11 +17,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core::LlmOutputPart;
 use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{
     LlmRequest, LlmResponse, LlmStreamEvent, LlmUsage, StreamBlockIdentity,
 };
-use lash_core::{LlmOutputPart, ProcessEventLogTestSupport as _};
 use lash_core_execution::StoreSet;
 use lash_sansio::SessionId;
 
@@ -1468,8 +1468,7 @@ fn success(output: &lash_core::ToolCallOutput) -> serde_json::Value {
     output.value_for_projection()
 }
 
-/// The tool engine: it runs the write tool once on its start's `x` (a
-/// trigger start carries its subscription's payload as `args`), and ends
+/// The tool engine: it runs the write tool once on its start's `x` and ends
 /// with what the step answered.
 const TOOL_ENGINE: &str = "core-node-tool-engine";
 
@@ -1702,92 +1701,23 @@ async fn engine_step_without_the_capability_is_refused_before_admission(tier: Ti
 
 on_every_tier!(engine_step_without_the_capability_is_refused_before_admission);
 
-// --- signals ----------------------------------------------------------------
+// --- retained start preparation ----------------------------------------------
 
-/// The signal engine: it waits for a signal and ends with its payload.
-const SIGNAL_ENGINE: &str = "core-node-signal-engine";
+const HOLD_ENGINE: &str = "core-node-hold-engine";
 
-fn signal_engine_advance(
+fn holding_engine_advance(
     _state: &mut serde_json::Value,
     event: lash_core::EngineEvent,
 ) -> lash_core::EngineAction {
     match event {
-        lash_core::EngineEvent::Signal(signal) => {
-            answer(serde_json::json!({ "signal": signal.payload }))
-        }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
+        lash_core::EngineEvent::Cancelled { origin, .. } => lash_core::EngineAction::Terminal(
+            lash_core::ProcessOutcome::from_tool_output(lash_core::ToolCallOutput::cancelled(
+                lash_core::ToolCancellation::runtime("host cancelled").with_origin(origin),
+            )),
+        ),
         _ => lash_core::EngineAction::Idle,
     }
 }
-
-/// The event type of the signal named `name`, which a process that takes
-/// it declares.
-fn signal_type(name: &str) -> lash_core::ProcessEventType {
-    lash_core::ProcessEventType {
-        name: format!("signal.{name}"),
-        payload_schema: lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "object" }))
-            .expect("the signal's schema"),
-        semantics: Default::default(),
-    }
-}
-
-/// Wait until `process`'s actor is released waiting, with nothing to run.
-async fn parked(backend: &lash::Backend, process: &lash_core::ProcessId) {
-    let actor = lash_durable::ActorKey::process(process.as_str()).expect("a process actor key");
-    tokio::time::timeout(Duration::from_secs(60), async {
-        loop {
-            let snapshot = backend
-                .durable()
-                .actor(&actor)
-                .await
-                .expect("the actor is read");
-            if snapshot.is_some_and(|snapshot| snapshot.state == lash_durable::ActorState::Waiting)
-            {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the process parks within a minute");
-}
-
-/// A host's signal through the core's process API wakes a process parked
-/// waiting for it: its engine reads the signal and ends with its payload.
-async fn host_signal_wakes_a_parked_process(tier: Tier) {
-    let deployment = deploy(
-        tier,
-        vec![Arc::new(ScriptEngine {
-            kind: SIGNAL_ENGINE,
-            advance: signal_engine_advance,
-        })],
-        |builder| builder,
-    )
-    .await;
-    let process = start_as(
-        &deployment.core,
-        SIGNAL_ENGINE,
-        serde_json::Value::Null,
-        |request| request.with_event_types([signal_type("go")]),
-    )
-    .await;
-    parked(&deployment.backend, &process).await;
-    let identity = lash_core::ProcessSignalIdentity::new(process.clone(), "go", "core-node-signal")
-        .expect("a signal identity");
-    deployment
-        .core
-        .processes()
-        .signal(
-            lash_core::ProcessSignal::new(identity, serde_json::json!({ "go": true })),
-            deployment.core.effect_host(),
-        )
-        .await
-        .expect("the signal is delivered");
-    let answer = success(&ended(&deployment.core, &process).await);
-    assert_eq!(answer, serde_json::json!({ "signal": { "go": true } }));
-}
-
-on_every_tier!(host_signal_wakes_a_parked_process);
 
 /// A host start is its own operation (ADR 0113 §3.3): its run preparation
 /// holds what it names under its own staging, `Start(key)`, until its
@@ -1801,8 +1731,8 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
     let deployment = deploy(
         tier,
         vec![Arc::new(ScriptEngine {
-            kind: SIGNAL_ENGINE,
-            advance: signal_engine_advance,
+            kind: HOLD_ENGINE,
+            advance: holding_engine_advance,
         })],
         |builder| builder,
     )
@@ -1822,7 +1752,7 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
             .expect("the environment is published");
         let request = lash_core::ProcessStartRequest::new(
             lash_core::ProcessInput::Engine {
-                kind: SIGNAL_ENGINE.to_owned(),
+                kind: HOLD_ENGINE.to_owned(),
                 payload: serde_json::json!({ "run": run }),
             },
             lash_core::ProcessOriginator::host(),
@@ -1873,227 +1803,6 @@ async fn a_host_starts_preparation_is_held_by_its_own_start(tier: Tier) {
 }
 
 on_every_tier!(a_host_starts_preparation_is_held_by_its_own_start);
-
-/// The tool whose call declares a `SignalProcess` intent.
-const SIGNAL_TOOL: &str = "core_node_signal";
-
-/// A tool whose call answers at once and declares one `SignalProcess`
-/// intent: the signal `resume` to `process`, from `session`.
-struct SignalIntent {
-    session: SessionId,
-    process: Arc<Mutex<Option<lash_core::ProcessId>>>,
-    calls: Arc<AtomicUsize>,
-}
-
-fn signal_intent_tool() -> lash_core::ToolDefinition {
-    lash_core::ToolDefinition::raw(
-        format!("tool:{SIGNAL_TOOL}"),
-        SIGNAL_TOOL,
-        "Signal a parked process through the public intent path.",
-        lash_core::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    )
-    .expect("the signal tool's schemas")
-    .with_execution(std::time::Duration::from_secs(120))
-    .with_declaration(
-        lash_core::ToolDeclaration::default()
-            .with_intents([lash_core::ToolIntentKind::SignalProcess]),
-    )
-}
-
-#[async_trait::async_trait]
-impl lash_core::ToolProvider for SignalIntent {
-    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
-        vec![signal_intent_tool().manifest()]
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
-        (name == SIGNAL_TOOL).then(|| Arc::new(signal_intent_tool().contract()))
-    }
-
-    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        let process = self
-            .process
-            .lock()
-            .unwrap()
-            .clone()
-            .expect("the target is started before the turn");
-        lash_core::ToolAttemptOutcome::done(
-            lash_core::ToolOutcomeDone::ok(serde_json::json!({ "signalled": true })),
-            lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
-                lash_core::SignalProcessIntent {
-                    owner: lash_core::RuntimeOwner::Session(self.session.clone()),
-                    process_id: process,
-                    signal_name: "resume".to_owned(),
-                    payload: serde_json::json!({ "tier": "durable" }),
-                },
-            )]),
-        )
-    }
-}
-
-const SIGNALLER: &str = "core-node-signaller";
-
-/// A tool's `SignalProcess` intent, from a turn sent to the core, wakes the
-/// process it names, parked on its process actor: the signal is the
-/// process's mail, its engine reads it once and ends with its payload, and
-/// its event log holds the one signal.
-async fn public_signal_intent_wakes_parked_process(tier: Tier) {
-    let session = SessionId::try_from(SIGNALLER.to_owned()).unwrap();
-    let target = Arc::new(Mutex::new(None));
-    let tool_calls = Arc::new(AtomicUsize::new(0));
-    let model_calls = Arc::new(AtomicUsize::new(0));
-    let model = {
-        let model_calls = Arc::clone(&model_calls);
-        scripted(
-            move |request, _| match model_calls.fetch_add(1, Ordering::SeqCst) {
-                0 => call("core-node-signal-call", SIGNAL_TOOL, serde_json::json!({})),
-                1 => text(request, "signal delivered"),
-                index => panic!("an unexpected model call {index}"),
-            },
-        )
-    };
-    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(SignalIntent {
-        session: session.clone(),
-        process: Arc::clone(&target),
-        calls: Arc::clone(&tool_calls),
-    });
-    let deployment = deploy(
-        tier,
-        vec![Arc::new(ScriptEngine {
-            kind: SIGNAL_ENGINE,
-            advance: signal_engine_advance,
-        })],
-        |builder| {
-            builder
-                .serve_test_llm_profile(model, metadata())
-                .tools(tools)
-        },
-    )
-    .await;
-    let process = start_as(
-        &deployment.core,
-        SIGNAL_ENGINE,
-        serde_json::Value::Null,
-        |request| {
-            request
-                .with_event_types([signal_type("resume")])
-                .with_observers([session.clone()])
-        },
-    )
-    .await;
-    parked(&deployment.backend, &process).await;
-    *target.lock().unwrap() = Some(process.clone());
-    settle(&deployment.core, SIGNALLER, "signal the parked process").await;
-    assert_eq!(tool_calls.load(Ordering::SeqCst), 1, "the tool ran once");
-    assert_eq!(
-        model_calls.load(Ordering::SeqCst),
-        2,
-        "the model was asked twice"
-    );
-    let answer = success(&ended(&deployment.core, &process).await);
-    assert_eq!(
-        answer,
-        serde_json::json!({ "signal": { "tier": "durable" } })
-    );
-    let signals = deployment
-        .backend
-        .process_registry()
-        .full_event_window(&process, 0)
-        .await
-        .expect("the process's events are read")
-        .into_iter()
-        .filter(|event| event.event_type == "signal.resume")
-        .count();
-    assert_eq!(signals, 1, "the process received one signal");
-}
-
-on_every_tier!(public_signal_intent_wakes_parked_process);
-
-// --- triggers ---------------------------------------------------------------
-
-const TRIGGER_SOURCE: &str = "core-node.event";
-const TRIGGER_KEY: &str = "core-node-source";
-
-/// An occurrence a host emits through the core's trigger API starts the
-/// process its subscription names, and the core's node runs it: its tool
-/// step writes once and its terminal carries the tool's answer.
-async fn trigger_started_process_runs_on_the_core_node(tier: Tier) {
-    let world = Arc::new(World::default());
-    let deployment = deploy(
-        tier,
-        vec![Arc::new(ScriptEngine {
-            kind: TOOL_ENGINE,
-            advance: tool_engine_advance,
-        })],
-        |builder| builder.tools(write_tool(&world)),
-    )
-    .await;
-    let core = &deployment.core;
-    let env_ref = core
-        .host_artifacts()
-        .publish_process_env(&lash_core::HostArtifactPin::mint(), &environment())
-        .await
-        .expect("the environment is published");
-    deployment
-        .backend
-        .trigger_store()
-        .execute_command(
-            "core-node-register",
-            lash_core::TriggerCommand::Register {
-                owner_scope: lash_core::TriggerOwnerScope::host("core-node").expect("a host scope"),
-                actor: lash_core::ProcessOriginator::host_scoped("core-node"),
-                draft: lash_core::TriggerSubscriptionDraft::for_process(
-                    "core-node/write",
-                    env_ref,
-                    TRIGGER_SOURCE,
-                    TRIGGER_KEY,
-                    lash_core::ProcessInput::Engine {
-                        kind: TOOL_ENGINE.to_owned(),
-                        payload: serde_json::json!({ "x": 5 }),
-                    },
-                    lash_core::ProcessIdentity::labelled(TOOL_ENGINE, Some("write")),
-                )
-                .with_payload_schema(lash_sansio::JsonSchema::any()),
-            },
-        )
-        .await
-        .expect("the subscription is registered")
-        .expect("the subscription is admitted");
-    let report = core
-        .triggers()
-        .emit(
-            lash_core::TriggerOccurrenceRequest::new(
-                TRIGGER_SOURCE,
-                TRIGGER_KEY,
-                serde_json::json!({ "fired": true }),
-                "core-node-occurrence",
-            ),
-            core.effect_host(),
-        )
-        .await
-        .expect("the occurrence is emitted");
-    let started = report.started_process_ids();
-    assert_eq!(
-        started.len(),
-        1,
-        "the occurrence started one process: {report:?}"
-    );
-    let answer = success(&ended(core, &started[0]).await);
-    assert_eq!(
-        answer,
-        serde_json::json!({ "step": { "wrote": { "x": 5 } } })
-    );
-    let writes = world.writes.lock().unwrap().clone();
-    assert_eq!(
-        writes.len(),
-        1,
-        "the started process's tool ran once: {writes:?}"
-    );
-}
-
-on_every_tier!(trigger_started_process_runs_on_the_core_node);
 
 // --- lashlang ---------------------------------------------------------------
 
@@ -2216,53 +1925,6 @@ async fn lashlang_process_runs_to_its_terminal(tier: Tier) {
 }
 
 on_every_tier!(lashlang_process_runs_to_its_terminal);
-
-/// A lashlang process waiting on its signal parks idle on its process
-/// actor; a host's signal through the core's process API is the process's
-/// mail, and its VM resumes with the signal's payload as the wait's value
-/// and ends with it.
-async fn lashlang_signal_wait_resolves_with_the_hosts_signal(tier: Tier) {
-    use lashlang::testing::ast_builders as b;
-    let deployment = deploy_with(tier, Vec::new(), rlm_core).await;
-    let payload = lashlang_payload(
-        &deployment.backend,
-        "process listen() signals { ready: any } { let payload = wait_signal(ready); finish payload }",
-        b::process_with_signals(
-            "listen",
-            Vec::new(),
-            vec![b::signal("ready", lashlang::TypeExpr::Any)],
-            b::block(vec![
-                b::assign("payload", b::wait_signal("ready")),
-                b::finish(b::var("payload")),
-            ]),
-        ),
-    )
-    .await;
-    let process = start_as(
-        &deployment.core,
-        lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
-        payload,
-        |request| request.with_event_types([signal_type("ready")]),
-    )
-    .await;
-    parked(&deployment.backend, &process).await;
-    let identity =
-        lash_core::ProcessSignalIdentity::new(process.clone(), "ready", "lashlang-signal")
-            .expect("a signal identity");
-    deployment
-        .core
-        .processes()
-        .signal(
-            lash_core::ProcessSignal::new(identity, serde_json::json!({ "received": true })),
-            deployment.core.effect_host(),
-        )
-        .await
-        .expect("the signal is delivered");
-    let answer = success(&ended(&deployment.core, &process).await);
-    assert_eq!(answer, serde_json::json!({ "received": true }));
-}
-
-on_every_tier!(lashlang_signal_wait_resolves_with_the_hosts_signal);
 
 // --- isolated tools ---------------------------------------------------------
 
@@ -2476,9 +2138,6 @@ async fn an_unbound_isolated_tool_is_refused_typed_before_any_body(tier: Tier) {
 
 on_every_tier!(an_isolated_rlm_tool_starts_one_process_and_answers_its_descriptor);
 on_every_tier!(an_unbound_isolated_tool_is_refused_typed_before_any_body);
-
-#[path = "core_node_processes/per_process_surface.rs"]
-mod per_process_surface;
 
 #[path = "core_node_processes/process_endstates.rs"]
 mod process_endstates;

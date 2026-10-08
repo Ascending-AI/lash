@@ -29,10 +29,7 @@ pub(super) fn scenario_transition_facts(
                 "runtime.command_only_queue_drain" => {
                     facts.push(command_queue_drain_fact(contract, selected_events)?);
                 }
-                "runtime.command_before_turn_work" => {
-                    facts.push(trigger_wakeup_fact(contract, selected_events)?);
-                    facts.push(queued_active_turn_fact(contract, selected_events)?);
-                }
+
                 "runtime.observation_replay_preserves_input" => {
                     facts.push(observer_reconnect_transition_fact(
                         contract,
@@ -85,10 +82,7 @@ pub(super) fn scenario_backend_regression_reference(
             "queued-active-turn-cancel-race",
             "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
         ),
-        "runtime.command_before_turn_work" => (
-            "trigger-wakeup-routes-process",
-            "trigger occurrence records a stable source key, reserves a matching delivery, and starts process wake routing without live external input",
-        ),
+
         "standard.provider_error_without_checkpoint" => (
             "provider-protocol-terminalization",
             "scripted provider mutation matrices classify retryable 429 and dropped-terminal parser failures through every migrated provider parser",
@@ -241,52 +235,6 @@ fn cancellation_terminalization_fact(
         contract,
         "cancellation_terminalized_pending_input",
         "cancellation targets a generated queued input and returns a terminal cancelled outcome",
-        events,
-        observed,
-    )
-}
-
-fn trigger_wakeup_fact(
-    contract: &ScenarioContractSpec,
-    selected_events: &[TraceEventLine],
-) -> Result<ScenarioTransitionFact, FixedScriptRunnerError> {
-    let events = selected_events
-        .iter()
-        .filter(|line| {
-            line.event.kind == BoundaryKind::Trigger
-                && line
-                    .event
-                    .observed
-                    .get("trigger_delivered")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line
-                    .event
-                    .observed
-                    .get("started_process")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line
-                    .event
-                    .observed
-                    .get("reservation_count")
-                    .and_then(Value::as_u64)
-                    .is_some_and(|count| count > 0)
-        })
-        .collect::<Vec<_>>();
-    let observed = json!({
-        "trigger_deliveries": events.iter().map(|line| json!({
-            "boundary_id": line.event.boundary_id,
-            "source_key": line.event.observed.get("source_key").cloned().unwrap_or(Value::Null),
-            "occurrence_id": line.event.observed.get("occurrence_id").cloned().unwrap_or(Value::Null),
-            "reservation_count": line.event.observed.get("reservation_count").cloned().unwrap_or(Value::Null),
-            "started_process": true,
-        })).collect::<Vec<_>>(),
-    });
-    require_transition_fact(
-        contract,
-        "trigger_routes_process_wakeup",
-        "trigger occurrence records a stable source key, reserves matching delivery, and starts process routing",
         events,
         observed,
     )

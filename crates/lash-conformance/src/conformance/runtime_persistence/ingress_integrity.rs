@@ -10,18 +10,6 @@ use crate::conformance::admission_support::*;
 use lash_core::store::{IngressTerminal, IngressTerminalCause};
 use pretty_assertions::assert_eq;
 
-/// A process wake of `process` at `sequence` carrying `text`, keyed by the
-/// wake's own source key.
-fn wake(session: &SessionId, process: &str, sequence: u64, text: &str) -> QueuedWorkBatchDraft {
-    crate::conformance::helpers::process_wake_work(
-        session,
-        process,
-        sequence,
-        text,
-        DeliveryPolicy::EarliestSafeBoundary,
-    )
-}
-
 /// A `RefreshToolCatalog` command for `reason` filed under `source_key`.
 fn keyed_command(session: &SessionId, source_key: &str, reason: &str) -> QueuedWorkBatchDraft {
     queued_session_command_draft(session, reason).with_source_key(source_key)
@@ -107,46 +95,6 @@ pub async fn a_changed_resubmission_is_a_typed_conflict_for_every_kind(
         }
     };
 
-    let wake_batch = store
-        .enqueue_queued_work(wake(&session, "conflict-process", 1, "original fact"))
-        .await
-        .expect("enqueue the wake");
-    assert!(
-        wake_batch
-            .submission_digest
-            .starts_with("queued-work-submission:"),
-        "admission records the wake's digest: {}",
-        wake_batch.submission_digest
-    );
-    assert_eq!(
-        resubmitted_terminal(
-            &store,
-            wake(&session, "conflict-process", 1, "original fact"),
-            &wake_batch
-        )
-        .await,
-        None
-    );
-    let mut reconfigured = crate::conformance::helpers::process_wake_work(
-        &session,
-        "conflict-process",
-        1,
-        "original fact",
-        DeliveryPolicy::AfterCurrentTurnCommit,
-    )
-    .with_merge_key("host-configured");
-    reconfigured = reconfigured.with_authority(crate::QueuedWorkAuthority::new("host"));
-    assert_eq!(
-        resubmitted_terminal(&store, reconfigured, &wake_batch).await,
-        None,
-        "a wake redelivered under other host configuration is the same submission"
-    );
-    conflicting(
-        wake(&session, "conflict-process", 1, "a different fact"),
-        wake_batch.clone(),
-    )
-    .await;
-
     let command = store
         .enqueue_queued_work(keyed_command(&session, "conflict-command", "original"))
         .await
@@ -229,7 +177,7 @@ pub async fn a_settled_command_resubmitted_under_its_key_is_not_a_new_command(
 pub async fn a_recorded_queued_batch_refuses_multiple_payloads(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("ingress-one-payload");
     let batch = store
-        .enqueue_queued_work(wake(&session, "single-process", 1, "wake"))
+        .enqueue_queued_work(keyed_command(&session, "single-command", "one command"))
         .await
         .expect("enqueue one wake");
     let recorded = serde_json::to_value(&batch).expect("record the batch");

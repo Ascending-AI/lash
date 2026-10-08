@@ -6,10 +6,7 @@ use super::*;
 )]
 pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn ProcessRegistry>) {
     let process_id = registry
-        .register_process(
-            registration("process-event-page-sql-cursor-range")
-                .with_extra_event_types([plain_event_type("cursor.event")]),
-        )
+        .register_process(registration("process-event-page-sql-cursor-range"))
         .await
         .expect("register cursor-range process")
         .id;
@@ -17,7 +14,9 @@ pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn
         registry
             .append_event(
                 &process_id,
-                ProcessEventAppendRequest::new(
+                call_wait_event(
+                    &process_id,
+                    "cursor.event",
                     "cursor.event",
                     serde_json::json!({ "index": index }),
                 ),

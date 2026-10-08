@@ -413,10 +413,6 @@ where
             lash_core::FrameNodeId::new("canonical-frame").expect("frame id"),
         )),
         ArtifactReferrer::ProcessRecord(lash_core::ProcessId::fixture("canonical-process")),
-        ArtifactReferrer::SubscriptionRevision(
-            lash_core::SubscriptionRevisionId::new("sub".into(), "incarnation".into(), 1)
-                .expect("subscription revision"),
-        ),
         ArtifactReferrer::Start(lash_core::StartKey::for_host("canonical-start")),
         ArtifactReferrer::StartInput {
             start_key: lash_core::StartKey::for_host("canonical-start"),

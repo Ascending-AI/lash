@@ -66,10 +66,7 @@ mod floor_tests {
         let (_backend, handles) = memory_handles().await;
         let registry = Arc::clone(&handles.registry);
         let mut scenario = StoreContractScenario::new(handles);
-        let register = StoreContractOp::Register {
-            process: 0,
-            wake_target: Some(0),
-        };
+        let register = StoreContractOp::Register { process: 0 };
         for operation in [
             register.clone(),
             StoreContractOp::FirstStart {
@@ -141,15 +138,12 @@ mod floor_tests {
         ));
     }
     #[tokio::test]
-    async fn repeated_observer_and_retarget_operations_replay_their_audit_events() {
+    async fn repeated_observer_operations_replay_their_audit_events() {
         let (_backend, handles) = memory_handles().await;
         replay_case(
             handles,
             &[
-                StoreContractOp::Register {
-                    process: 2,
-                    wake_target: None,
-                },
+                StoreContractOp::Register { process: 2 },
                 StoreContractOp::AddObserver {
                     process: 2,
                     session: 1,
@@ -165,18 +159,6 @@ mod floor_tests {
                 StoreContractOp::RemoveObserver {
                     process: 2,
                     session: 1,
-                },
-                StoreContractOp::Retarget {
-                    process: 2,
-                    session: Some(0),
-                },
-                StoreContractOp::Retarget {
-                    process: 2,
-                    session: Some(1),
-                },
-                StoreContractOp::Retarget {
-                    process: 2,
-                    session: Some(0),
                 },
             ],
         )

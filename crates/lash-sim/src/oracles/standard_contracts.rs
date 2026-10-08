@@ -293,7 +293,7 @@ pub(super) fn contract_execution_event<'a>(
     events
         .iter()
         .find(|event| {
-            event.kind == BoundaryKind::Trigger
+            event.kind == BoundaryKind::ContractExecution
                 && event
                     .observed
                     .pointer("/contract_execution/contract")
@@ -347,7 +347,7 @@ pub(super) fn contract_execution_payload_matches_observed<'a>(
         || event.payload.get("semantic_proof").is_some()
     {
         return Err(format!(
-            "contract execution boundary `{}` used semantic-proof-only trigger evidence",
+            "contract execution boundary `{}` used semantic-proof-only contract evidence",
             event.boundary_id
         ));
     }

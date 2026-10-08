@@ -3,7 +3,7 @@
 //! the session's close (`mail.session`). The session actor closes itself,
 //! one labelled step at a time (`session.close.*`): it cancels its turn,
 //! revokes its waits, marks its `Until` process for cancel, waits for that
-//! process's terminal (`wait.mint`), deletes its triggers, arms its
+//! process's terminal (`wait.mint`), arms its
 //! artifact cleanup and writes its tombstone.
 //!
 //! Laws: the close ends at its tombstone with the session's actor terminal;

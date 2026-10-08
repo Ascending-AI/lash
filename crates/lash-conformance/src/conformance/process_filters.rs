@@ -61,11 +61,8 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
                     ProcessIdentity::labelled("filter-kind", Some("target-label")),
                 ))
                 .with_process_provenance(ProcessProvenance::session(scope).with_caused_by(Some(
-                    CausalRef::TriggerOccurrence {
-                        occurrence_id: "occurrence-target".to_string(),
-                        subscription_id: Some("subscription-target".to_string()),
-                        subscription_incarnation: None,
-                        subscription_revision: None,
+                    CausalRef::Process {
+                        process_id: crate::ProcessId::fixture("filter-cause"),
                     },
                 ))),
         )
@@ -145,30 +142,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
         .await,
         vec![target.id.clone()]
     );
-    assert_eq!(
-        filtered_ids(
-            &registry,
-            ProcessListFilter {
-                status: ProcessStatusFilter::Any,
-                caused_by_occurrence_id: Some("occurrence-target".to_string()),
-                ..ProcessListFilter::default()
-            }
-        )
-        .await,
-        vec![target.id.clone()]
-    );
-    assert_eq!(
-        filtered_ids(
-            &registry,
-            ProcessListFilter {
-                status: ProcessStatusFilter::Any,
-                caused_by_subscription_id: Some("subscription-target".to_string()),
-                ..ProcessListFilter::default()
-            }
-        )
-        .await,
-        vec![target.id.clone()]
-    );
+
     assert_eq!(
         filtered_ids(
             &registry,

@@ -801,7 +801,7 @@ fn apply_contract_execution_field_mutation(
     for event in trace
         .events
         .iter_mut()
-        .filter(|event| event.kind == BoundaryKind::Trigger)
+        .filter(|event| event.kind == BoundaryKind::ContractExecution)
     {
         let observed_matches = event
             .observed
@@ -1298,11 +1298,6 @@ mod tests {
         (
             "queued-input-operational-missing",
             include_str!("../failure-fixtures/queued-input-operational-missing.json"),
-            false,
-        ),
-        (
-            "trigger-wakeup-operational-missing",
-            include_str!("../failure-fixtures/trigger-wakeup-operational-missing.json"),
             false,
         ),
     ];

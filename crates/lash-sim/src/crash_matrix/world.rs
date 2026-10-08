@@ -18,7 +18,7 @@ use lash_core_execution::Backend;
 use lash_durable::domain::OwnerKey;
 use lash_durable::{ActorKey, DurableError, StoreFailureKind};
 use lash_durable_test::{SimClock, SimNodes, Tripwire};
-use lash_sansio::{ExecutionPolicy, ProcessId, SessionId, ToolCallId};
+use lash_sansio::{ExecutionPolicy, ToolCallId};
 
 /// One body entry, noted before the body does anything else.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,7 +122,6 @@ pub struct World {
     actors: Mutex<Vec<ActorKey>>,
     notes: Mutex<Vec<String>>,
     /// The process each session's tools address.
-    targets: Mutex<BTreeMap<SessionId, ProcessId>>,
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
@@ -286,16 +285,6 @@ impl World {
     /// Everything noted so far.
     pub fn notes(&self) -> Vec<String> {
         self.notes.lock_recover().clone()
-    }
-
-    /// Name `process` as the one `session`'s tools address.
-    pub fn set_target(&self, session: SessionId, process: ProcessId) {
-        self.targets.lock_recover().insert(session, process);
-    }
-
-    /// The process `session`'s tools address.
-    pub fn target(&self, session: &SessionId) -> Option<ProcessId> {
-        self.targets.lock_recover().get(session).cloned()
     }
 
     /// Whether `note` was recorded.

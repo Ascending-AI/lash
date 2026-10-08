@@ -904,24 +904,6 @@ async fn session_store_factory_round_trips_every_relation_shape(
             })),
         ),
         (
-            "child-trigger-minimal",
-            child(Some(crate::CausalRef::TriggerOccurrence {
-                occurrence_id: "cause-occurrence".to_string(),
-                subscription_id: None,
-                subscription_incarnation: None,
-                subscription_revision: None,
-            })),
-        ),
-        (
-            "child-trigger-complete",
-            child(Some(crate::CausalRef::TriggerOccurrence {
-                occurrence_id: "cause-occurrence".to_string(),
-                subscription_id: Some("cause-subscription".to_string()),
-                subscription_incarnation: Some("cause-incarnation".to_string()),
-                subscription_revision: Some(u64::MAX),
-            })),
-        ),
-        (
             "child-session-node",
             child(Some(crate::CausalRef::SessionNode {
                 session_id: SessionId::from("cause-session"),

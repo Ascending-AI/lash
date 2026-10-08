@@ -4,7 +4,7 @@
 //! A case seeds what producers outside the deployment put there before it
 //! runs (a session's admitted turn, a registered process) straight into the
 //! database, uncut; what the host does while the deployment runs (a cancel,
-//! a resolve, a signal, a close request) goes through the host's producer
+//! a resolve, a cancel, a close request) goes through the host's producer
 //! store, so the matrix cuts it like any node's write.
 
 pub mod cancel;
@@ -18,8 +18,6 @@ pub mod pressure;
 pub mod process;
 pub mod prompt;
 pub mod round;
-pub mod signal;
-pub mod trigger;
 pub mod turn;
 
 use std::sync::Arc;
@@ -35,7 +33,7 @@ use lash_durable_test::SimNodes;
 use lash_sansio::{SessionId, TurnId};
 use serde_json::Value;
 
-use super::engine::{KIND, declared_event_types};
+use super::engine::KIND;
 use super::services::{TurnScript, turn_id};
 use super::world::World;
 
@@ -134,8 +132,7 @@ pub async fn register(
     )
     .with_execution_env_ref(Some(
         lash_core_execution::testing::process_execution_env_fixture_ref(),
-    ))
-    .with_extra_event_types(declared_event_types().map_err(|error| error.to_string())?);
+    ));
     if let Some(scope) = scope {
         registration.ancestry = Ancestry::from_scopes([scope]);
     }
@@ -222,7 +219,10 @@ pub async fn event_types(world: &World, process: &ProcessId) -> Vec<String> {
         .await
         .unwrap_or_default();
     events.sort_by_key(|event| event.sequence);
-    events.into_iter().map(|event| event.event_type).collect()
+    events
+        .into_iter()
+        .map(|event| event.fact.event_type().to_owned())
+        .collect()
 }
 
 /// The first value under `key` anywhere in `value`.

@@ -32,8 +32,6 @@
   "minimum_completed_turns": 10000,
   "llm_requests_per_turn": 0.5,
   "host_process_starts_per_turn": 0.5,
-  "external_occurrences_per_turn": 0.05,
-  "trigger_edits_per_turn": 0.01,
   "promotion_reads_per_turn": 0.01,
   "prompt_bytes": [
     [
@@ -151,9 +149,6 @@
       ]
     ],
     "await_share": 1,
-    "signal_share": 0.5,
-    "park_share": 0.5,
-    "wake_delay_ms": 1000,
     "cancel_share": 0.25
   },
   "attachments": {
@@ -190,11 +185,6 @@
     "cancel_share": 0.3,
     "maximum_drain_batch": 64
   },
-  "cron": {
-    "subscriptions": 2,
-    "cadence_s": 30,
-    "jitter": "seeded_phase"
-  },
   "turn_cancel_share": 0.15,
   "delete_per_turn": 0.15,
   "observation": {
@@ -205,7 +195,6 @@
     "workflow_read_sets_per_start": 1,
     "projector_poll_s": 1,
     "projector_idle_s": 2,
-    "subscription_reconcile_s": 60,
     "process_prune_s": 3600
   },
   "provider": {
@@ -274,8 +263,6 @@
       "/minimum_completed_turns": "I: synthetic default from FIG-3790 section 2",
       "/llm_requests_per_turn": "I: synthetic default from FIG-3790 section 2",
       "/host_process_starts_per_turn": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
-      "/external_occurrences_per_turn": "I: synthetic default from FIG-3790 section 2",
-      "/trigger_edits_per_turn": "I: synthetic default from FIG-3790 section 2",
       "/promotion_reads_per_turn": "I: synthetic default from FIG-3790 section 2",
       "/prompt_bytes": "I: synthetic default from FIG-3790 section 2",
       "/input_bytes": "I: synthetic default from FIG-3790 section 2",
@@ -290,9 +277,6 @@
       "/processes/turn_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
       "/processes/fanout": "I: synthetic default from FIG-3790 section 2",
       "/processes/await_share": "I: synthetic default from FIG-3790 section 2",
-      "/processes/signal_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
-      "/processes/park_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
-      "/processes/wake_delay_ms": "I: synthetic default from FIG-3790 section 2",
       "/processes/cancel_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
       "/attachments/turn_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
       "/attachments/count": "I: synthetic default from FIG-3790 section 2",
@@ -302,9 +286,6 @@
       "/queued/active_turn_share": "I: synthetic default from FIG-3790 section 2",
       "/queued/cancel_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
       "/queued/maximum_drain_batch": "V: turns.rs:547",
-      "/cron/subscriptions": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
-      "/cron/cadence_s": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
-      "/cron/jitter": "I: synthetic default from FIG-3790 section 2",
       "/turn_cancel_share": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
       "/delete_per_turn": "I: smoke coverage override of figments-v1 for the FIG-4168 durable pipeline proof",
       "/observation/streams_per_turn": "I: synthetic default from FIG-3790 section 2",
@@ -314,7 +295,6 @@
       "/observation/workflow_read_sets_per_start": "I: synthetic default from FIG-3790 section 2",
       "/observation/projector_poll_s": "V: inventory observation rows",
       "/observation/projector_idle_s": "V: inventory observation rows",
-      "/observation/subscription_reconcile_s": "V: inventory observation rows",
       "/observation/process_prune_s": "V: config.rs:30",
       "/provider/latency_ms": "I: synthetic default from FIG-3790 section 2",
       "/provider/stream_share": "I: synthetic default from FIG-3790 section 2",

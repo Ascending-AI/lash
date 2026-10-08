@@ -273,13 +273,6 @@ pub(super) fn write_generated_backend_regression_fixtures(
             predicate: trace_has_queued_cancel_race,
         },
         BackendRegressionSpec {
-            fixture_id: "trigger-wakeup-routes-process",
-            required_boundary_kinds: &["trigger"],
-            semantic_oracles: &["sim.oracle.state-machine-semantic-invariants.v1"],
-            regression_contract: "trigger occurrence records a stable source key, reserves a matching delivery, and starts process wake routing without live external input",
-            predicate: trace_has_trigger_wakeup_route,
-        },
-        BackendRegressionSpec {
             fixture_id: "durable-effect-crash-reopen-replay",
             required_boundary_kinds: &["durable_effect"],
             semantic_oracles: &["sim.oracle.state-machine-semantic-invariants.v1"],

@@ -60,7 +60,8 @@ pub(super) async fn contract(
         "different origins must not alias before the fold"
     );
     assert_ne!(
-        first_append.payload, second_append.payload,
+        first_append.fact.payload(),
+        second_append.fact.payload(),
         "the two proposed facts must remain distinct"
     );
     let receipt = writer
@@ -98,7 +99,7 @@ pub(super) async fn contract(
         .await
         .expect("fresh-clock retry replays the first fact");
     assert_eq!(replay.event.sequence, receipt.event.sequence);
-    assert_eq!(replay.event.payload, serde_json::json!(first));
+    assert_eq!(replay.event.fact.payload(), serde_json::json!(first));
     let unchanged = writer
         .request_process_cancel(&process_id, first.origin, first.requester.clone(), None)
         .await
@@ -227,9 +228,7 @@ pub(super) async fn contract(
     assert_eq!(events.len(), 1);
     assert_eq!(
         events[0]
-            .semantics
-            .terminal
-            .as_ref()
+            .terminal()
             .expect("terminal event semantics")
             .status(),
         crate::TerminalProcessStatus::Cancelled
@@ -321,43 +320,5 @@ pub(super) async fn contract(
     assert!(
         !pending.is_terminal(),
         "submitted work must settle through its owner"
-    );
-
-    let mut custom_type = plain_event_type("custom.finished");
-    custom_type.semantics.terminal = Some(lash_core::ProcessTerminalSpec {
-        status: crate::TerminalProcessStatus::Completed,
-        await_output: Some(lash_core::ProcessValueSelector::Pointer(
-            "/await_output".to_string(),
-        )),
-    });
-    let custom = writer
-        .register_process(
-            registration("cancel-custom-projector").with_extra_event_types([custom_type]),
-        )
-        .await
-        .expect("register custom terminal producer");
-    let custom_ref = custom.id.clone();
-    writer
-        .append_event(
-            &custom_ref,
-            ProcessEventAppendRequest::new(
-                "custom.finished",
-                serde_json::json!({
-                    "await_output": settled_success(serde_json::json!("custom payload")),
-                }),
-            )
-            .with_replay_key("custom:finished"),
-        )
-        .await
-        .expect("append custom terminal event");
-    let custom = read(&reader, &custom_ref).await;
-    assert_eq!(custom.status(), ProcessStatus::Completed);
-    assert_eq!(
-        custom.outcome(),
-        Some(settled_success(serde_json::json!("custom payload")))
-    );
-    assert!(
-        custom.cancel_request.is_none(),
-        "custom projection must not synthesize a cancellation"
     );
 }

@@ -1,6 +1,5 @@
 //! The process seam: a root process runs a `Once` and a `Repeatable` step,
-//! pins a custom key and emits it, and awaits it; the host reads the key
-//! from the root's events and resolves it (`wait.resolve`); the root then
+//! pins a custom key and awaits it; the host lists the root's pending keys and resolves it (`wait.resolve`); the root then
 //! awaits a detached process that idles, until that wait's one-second
 //! deadline (`wait.timeout`), and ends; its terminal cascades over its three
 //! `Until` children in batches of two (`cascade.batch`).
@@ -21,7 +20,7 @@ use serde_json::{Value, json};
 
 use super::{LOOK_EVERY, LOOKS, ended, find, outcome, process_actor, register, state};
 use crate::crash_matrix::deployment::{CASCADE_BATCH, Workload};
-use crate::crash_matrix::engine::{KEY_EVENT, hold, root};
+use crate::crash_matrix::engine::{hold, root};
 use crate::crash_matrix::world::{World, poll, retry};
 
 /// How many `Until` children the root has: more than one cascade batch.
@@ -115,27 +114,25 @@ impl Workload for ProcessCase {
     }
 }
 
-/// The host: read the root's pinned key from its event, then resolve it.
+/// The host: list the root's pinned key, then resolve it.
 async fn resolve_key(world: &Arc<World>, root_process: &ProcessId) {
     if let Some(key) = pinned_key(world, root_process).await {
         resolve(world, key).await;
     }
 }
 
-/// The key `root_process` pinned, once its event is out: the root is then
+/// The key `root_process` pinned, once its durable wait exists: the root is then
 /// parked awaiting it.
 pub(super) async fn pinned_key(world: &Arc<World>, root_process: &ProcessId) -> Option<String> {
     poll(world, LOOK_EVERY, LOOKS, || async {
         let backend = world.backend().ok()?;
-        let events = backend
-            .process_registry()
-            .recent_events(root_process, 64)
+        let actor = process_actor(root_process).ok()?;
+        waits::outstanding_keys(&backend, &actor)
             .await
-            .ok()?;
-        events
+            .ok()?
             .into_iter()
-            .find(|event| event.event_type == KEY_EVENT)
-            .and_then(|event| event.payload["key"].as_str().map(str::to_owned))
+            .next()
+            .map(|key| key.as_str().to_owned())
     })
     .await
 }

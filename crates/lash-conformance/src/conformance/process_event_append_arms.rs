@@ -3,7 +3,6 @@
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
 use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 
 /// The two arms of a process-event append leave different durable footprints,
@@ -25,25 +24,21 @@ use pretty_assertions::assert_eq;
 pub async fn process_event_append_arms_are_ordered(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
-    let target_session_id = SessionId::from("append-arm-ordering-target");
-
     // Entry point 1: the unfenced host append, which reaches the replay arm
     // proper through a repeated replay key.
     let host_id = registry
-        .register_process(
-            registration("append-arm-host")
-                .with_extra_event_types([wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(target_session_id.clone())),
-        )
+        .register_process(registration("append-arm-host"))
         .await
         .expect("register host-append arm process")
         .id;
     let host_request = || {
-        ProcessEventAppendRequest::new(
-            "producer.wake",
-            serde_json::json!({"wake_input": "append arm ordering"}),
+        call_wait_event(
+            &host_id,
+            "lifecycle.wait",
+            "lifecycle.wait",
+            serde_json::json!({"call_label": "append arm ordering"}),
         )
-        .with_replay_key("append-arm-host:wake:1")
+        .with_replay_key("append-arm-host:wait:1")
     };
     let baseline = append_arm_footprint(&registry, &host_id).await;
     assert_eq!(baseline, 0, "a registered process has no events yet");
@@ -70,11 +65,13 @@ pub async fn process_event_append_arms_are_ordered(
     let later = registry
         .append_event(
             &host_id,
-            ProcessEventAppendRequest::new(
-                "producer.wake",
-                serde_json::json!({"wake_input": "later append"}),
+            call_wait_event(
+                &host_id,
+                "lifecycle.wait",
+                "lifecycle.wait",
+                serde_json::json!({"call_label": "later append"}),
             )
-            .with_replay_key("append-arm-host:wake:2"),
+            .with_replay_key("append-arm-host:wait:2"),
         )
         .await
         .expect("a later host append takes the insert arm");
@@ -95,10 +92,7 @@ pub async fn process_event_append_arms_are_ordered(
 
     // Entry point 2: workflow-key completion.
     let workflow_id = registry
-        .register_process(
-            executed_registration("append-arm-workflow-key-completion")
-                .with_wake_session_id(Some(target_session_id.clone())),
-        )
+        .register_process(executed_registration("append-arm-workflow-key-completion"))
         .await
         .expect("register workflow-key completion arm process")
         .id;
@@ -217,7 +211,7 @@ async fn durable_effect_outcome_event_crash_windows(
         .expect("incorporate the recorded failure");
     assert_eq!(inserted.event.sequence, 2);
     assert_eq!(
-        inserted.event.event_type,
+        inserted.event.fact.event_type(),
         lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
     );
 
@@ -227,7 +221,7 @@ async fn durable_effect_outcome_event_crash_windows(
         .await
         .expect("recover the append after a lost acknowledgement");
     assert_eq!(replayed.event.sequence, inserted.event.sequence);
-    assert_eq!(replayed.event.payload, inserted.event.payload);
+    assert_eq!(replayed.event.fact.payload(), inserted.event.fact.payload());
 
     let mut changed = recorded.clone();
     changed.code = Some(lash_sansio::FailureCode::from_foreign_wire(
@@ -312,7 +306,10 @@ async fn durable_effect_outcome_event_crash_windows(
         .await
         .expect("a redrive after terminalisation recovers the append");
     assert_eq!(terminal_replay.event.sequence, invoked.event.sequence);
-    assert_eq!(terminal_replay.event.payload, invoked.event.payload);
+    assert_eq!(
+        terminal_replay.event.fact.payload(),
+        invoked.event.fact.payload()
+    );
     registry
         .append_event_with_authority(&invoked_id, changed.append_request(), &invocation)
         .await
@@ -324,7 +321,7 @@ async fn durable_effect_outcome_event_crash_windows(
     assert_eq!(
         events
             .iter()
-            .filter(|event| event.event_type == lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
+            .filter(|event| event.fact.event_type() == lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
             .count(),
         1,
         "exactly one effect outcome survives every redrive: {events:?}"

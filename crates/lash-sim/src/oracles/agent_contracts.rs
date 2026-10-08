@@ -203,9 +203,9 @@ fn check_agent_durable_input_suspension_resolution(
     require_agent_lifted_process_entries(result, 1, contract)?;
     require_agent_process_event(
         result,
-        "process.yield",
-        "/payload/type",
-        "work.input_request.opened",
+        "process.waiting",
+        "/payload/wait/kind/kind",
+        "call",
         contract,
     )?;
     require_agent_call_wait_pair(result, contract)?;
@@ -214,7 +214,7 @@ fn check_agent_durable_input_suspension_resolution(
         "await_tool_call_id_present": true,
         "suspended_before_resolution": true,
         "completed_lifted_processes": 1,
-        "process_event": "work.input_request.opened",
+        "process_event": "process.waiting",
     }))
 }
 

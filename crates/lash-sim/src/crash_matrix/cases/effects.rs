@@ -1,14 +1,4 @@
-//! The store-local seam (ADR 0132 §5): one turn whose model calls two
-//! `Once` tools with store-local effects, one starting a process and one
-//! signalling the session's target process; the round is presented and the
-//! model answers.
-//!
-//! Laws: the turn answered; no effect was refused; the spawning call's
-//! process is registered
-//! exactly when the call's outcome completed; and the target holds the
-//! poke's signal exactly when the poking call's outcome completed. A cut at
-//! `round.outcome`, a stale owner's or a zombie's outcome commit, leaves
-//! neither effect without its outcome.
+//! A store-local start and its call outcome commit together at every cut.
 
 use std::sync::{Arc, Mutex};
 
@@ -20,9 +10,9 @@ use lash_durable::domain::OwnerKey;
 use lash_durable_test::{Cut, SimNodes};
 use lash_sansio::{SessionId, ToolCallId};
 
-use super::{admit_turn, event_types, run_of, turn_end, turn_settled};
+use super::{admit_turn, run_of, turn_end, turn_settled};
 use crate::crash_matrix::deployment::Workload;
-use crate::crash_matrix::effects::{POKE, register_target, spawn_key};
+use crate::crash_matrix::effects::spawn_key;
 use crate::crash_matrix::services::{Tool, TurnScript};
 use crate::crash_matrix::world::World;
 
@@ -50,9 +40,6 @@ impl EffectsCase {
 #[async_trait::async_trait]
 impl Workload for EffectsCase {
     async fn seed(&self, world: &Arc<World>, _nodes: &Arc<SimNodes>) -> Result<(), String> {
-        let target = register_target(world, &format!("target{}", self.tag)).await?;
-        let session = TurnScript::Effects.session(&format!("effects{}", self.tag));
-        world.set_target(session.clone(), target);
         let admitted =
             admit_turn(world, TurnScript::Effects, &format!("effects{}", self.tag)).await?;
         *self.session.lock_recover() = Some(admitted);
@@ -103,20 +90,7 @@ impl Workload for EffectsCase {
                         ));
                     }
                 }
-                Tool::Poke => {
-                    let signalled = match world.target(&session) {
-                        Some(target) => event_types(world, &target)
-                            .await
-                            .iter()
-                            .any(|event| *event == format!("signal.{POKE}")),
-                        None => false,
-                    };
-                    if signalled != completed {
-                        violations.push(format!(
-                            "store-local signal: call {call} completed {completed}, its signal delivered {signalled}"
-                        ));
-                    }
-                }
+
                 _ => {}
             }
         }
@@ -145,7 +119,6 @@ async fn outcomes(
         };
         let tool = match execution.draft().tool().as_str() {
             name if name == Tool::Spawn.name() => Tool::Spawn,
-            name if name == Tool::Poke.name() => Tool::Poke,
             _ => continue,
         };
         let Recovery::Settled(outcome) = recovery else {
@@ -157,9 +130,9 @@ async fn outcomes(
             matches!(outcome, SettledOutput::Completed(_)),
         ));
     }
-    if settled.len() != 2 {
+    if settled.len() != 1 {
         return Err(format!(
-            "the round settled {} of its two effect calls",
+            "the round settled {} of its one effect call",
             settled.len()
         ));
     }

@@ -215,7 +215,6 @@ impl RuntimeBoundaryHarness {
                 }),
                 intents: lash_core::ToolIntents::default(),
             }),
-            triggers: Vec::new(),
         };
         let (outcome, execution_count) = self
             .run_once(&scope, envelope, scripted)

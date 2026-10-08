@@ -58,7 +58,6 @@ mod process_prune_reclaim;
 mod process_prune_start_staging;
 mod process_references;
 mod process_registry;
-mod process_trigger_retention;
 mod queue_observation;
 pub mod registration_macro_support;
 mod release_stamp;
@@ -72,7 +71,6 @@ mod session_graph_state_machine;
 mod session_history;
 mod session_ingress;
 mod session_mail;
-mod start_operation_staging;
 mod trace_provenance;
 pub use session_mail::{
     WakeCut, a_producer_commits_its_row_and_its_wake_together,
@@ -87,9 +85,7 @@ mod store_recovery;
 mod support_prelude;
 mod tool_access_persistence;
 mod tool_intent_retention;
-mod trigger_store;
 
-pub(crate) use admission_support::*;
 #[cfg(feature = "lashlang")]
 pub use artifact_referrers::*;
 pub use artifact_store::*;
@@ -110,7 +106,6 @@ pub use process_change_horizon::*;
 pub use process_prune_reclaim::*;
 pub use process_prune_start_staging::*;
 pub use process_registry::*;
-pub use process_trigger_retention::*;
 pub use release_stamp::{ReleaseStampDeployment, release_stamp_conformance};
 pub use retention::*;
 pub use revision_pins::*;
@@ -130,4 +125,3 @@ pub use store_recovery::*;
 pub(crate) use support_prelude::*;
 pub use tool_access_persistence::*;
 pub use tool_intent_retention::*;
-pub use trigger_store::*;

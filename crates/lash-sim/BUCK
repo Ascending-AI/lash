@@ -205,31 +205,6 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
-    name = "signal_replay_key_constructor__test",
-    crate_features = [],
-    crate_name = "signal_replay_key_constructor",
-    crate_root = "tests/signal_replay_key_constructor.rs",
-    declared_features = [],
-    exec_properties = sized_exec_properties("lash-sim", "signal_replay_key_constructor", "//crates/lash-sim:signal_replay_key_constructor__test"),
-    extra_compile_data = [
-        "//crates/lash-postgres-store:package_files",
-        "//crates/lash-sqlite-store:package_files",
-        "//:workspace_rust_sources",
-    ],
-    extra_data = [
-        "//crates/lash-vm-worker:lash-vm-worker__bin",
-    ],
-    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
-    library = ":lash-sim",
-    library_crate_name = "lash_sim",
-    manifest_dir = "crates/lash-sim",
-    package_name = "lash-sim",
-    rustc_env = {},
-    tags = [],
-    version = "0.0.0-dev",
-)
-
-lash_rust_integration_test(
     name = "stack_policy__test",
     crate_features = [],
     crate_name = "stack_policy",

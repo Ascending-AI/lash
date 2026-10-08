@@ -3,12 +3,10 @@
 //! [`SimProcessEngine`] is a pure state machine; its start payload names what
 //! a process does (`act`):
 //!
-//! - `root` runs a `Once` and a `Repeatable` step, pins a custom key and
-//!   emits it for the host (`sim.key`), awaits the key's resolution, then
+//! - `root` runs a `Once` and a `Repeatable` step, pins a custom key, awaits the key's resolution, then
 //!   awaits the process `await` with a one-second deadline, and ends when
 //!   that wait times out or the process ends;
-//! - `hold` idles until it is cancelled; a signal it receives is emitted
-//!   back (`sim.signalled`).
+//! - `hold` idles until it is cancelled.
 //!
 //! Every process answers its cancel with its terminal. A counter makes every
 //! committed state distinct. The step bodies write their entries to the
@@ -21,8 +19,8 @@ use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     EngineAction, EngineEvent, EngineState, EngineStateFormat, HostWaitKind, KeyName,
-    ProcessEngine, ProcessEventType, ProcessId, ProcessInfraError, ProcessOutcome, ProcessRecord,
-    StepName, StepRequest, ToolCallOutput, ToolCancellation,
+    ProcessEngine, ProcessId, ProcessInfraError, ProcessOutcome, ProcessRecord, StepName,
+    StepRequest, ToolCallOutput, ToolCancellation,
 };
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 use lash_durable::domain::OwnerKey;
@@ -37,10 +35,6 @@ pub const KIND: &str = "lash-sim";
 pub const ONCE: &str = "sim_once";
 /// The `Repeatable` step a root runs.
 pub const AGAIN: &str = "sim_again";
-/// The event a root emits its pinned key in.
-pub const KEY_EVENT: &str = "sim.key";
-/// The event a holding process answers a signal with.
-pub const SIGNALLED_EVENT: &str = "sim.signalled";
 /// How long a root awaits the process it names.
 pub const AWAIT_MS: u64 = 1_000;
 /// How long a root's key stays open.
@@ -65,24 +59,6 @@ fn step(name: &str, tool: &str) -> StepRequest {
     }
 }
 
-pub(crate) fn event_type(name: &str) -> Result<ProcessEventType, ProcessInfraError> {
-    Ok(ProcessEventType {
-        name: name.to_owned(),
-        payload_schema: lash_sansio::JsonSchema::admit(json!({ "type": "object" }))
-            .map_err(infra)?,
-        semantics: Default::default(),
-    })
-}
-
-/// The event types the engine emits, which a registration declares.
-///
-/// # Errors
-///
-/// A payload schema is refused.
-pub fn declared_event_types() -> Result<Vec<ProcessEventType>, ProcessInfraError> {
-    Ok(vec![event_type(KEY_EVENT)?, event_type(SIGNALLED_EVENT)?])
-}
-
 /// A root's start payload: it awaits `await` once its steps and its key are
 /// done.
 #[must_use]
@@ -97,7 +73,7 @@ pub fn hold(tag: &str) -> Value {
 }
 
 /// A process's start payload that ends with its success as soon as it
-/// starts: what a trigger's deliveries start.
+/// starts.
 #[must_use]
 pub fn ends_at_once(tag: &str) -> Value {
     json!({ "tag": tag, "act": "ends_at_once" })
@@ -194,11 +170,7 @@ impl ProcessEngine for SimProcessEngine {
                     EngineAction::Idle
                 }
             }
-            EngineEvent::KeyPinned { key, .. } if root => EngineAction::Emit {
-                event_type: event_type(KEY_EVENT)?,
-                payload: json!({ "key": key.as_str() }),
-            },
-            EngineEvent::Emitted if root => EngineAction::AwaitExternal {
+            EngineEvent::KeyPinned { .. } if root => EngineAction::AwaitExternal {
                 name: KeyName(KEY.to_owned()),
             },
             EngineEvent::ExternalResolved { .. } | EngineEvent::ExternalTimedOut { .. } if root => {
@@ -215,10 +187,7 @@ impl ProcessEngine for SimProcessEngine {
             EngineEvent::ProcessEnded { .. } if root => {
                 ended(json!({ "timed_out": false, "key": script["key"] }))
             }
-            EngineEvent::Signal(_) => EngineAction::Emit {
-                event_type: event_type(SIGNALLED_EVENT)?,
-                payload: json!({ "n": script["n"] }),
-            },
+
             _ => EngineAction::Idle,
         };
         let bytes = serde_json::to_vec(&script).map_err(infra)?;

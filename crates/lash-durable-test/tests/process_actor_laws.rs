@@ -2,7 +2,7 @@
 //!
 //! Each law runs the production process activation over a SQLite memory
 //! store set on simulated nodes and virtual time. Producers outside the
-//! deployment (a host registering, signalling, pruning or redriving) write
+//! deployment (a host registering, pruning or redriving) write
 //! straight to the store set, uncut; the nodes' own writes go through the
 //! fault script. Every process runs [`LawEngine`], whose start payload is
 //! its state and says what it does.
@@ -20,10 +20,9 @@ use lash_core_execution::runtime::actor::round::{Material, SettledOutput};
 use lash_core_execution::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use lash_core_execution::{
     Backend, BackendParts, DurableSettings, EngineAction, EngineEvent, EngineState,
-    EngineStateFormat, JsonSchema, LifetimeDecision, NoProjectionProviders, ProcessEngine,
-    ProcessEventLogTestSupport as _, ProcessEventSemanticsSpec, ProcessEventType, ProcessId,
-    ProcessInfraError, ProcessInput, ProcessOutcome, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ProcessSignal, ProcessSignalIdentity, ProcessStatus, ProjectionWatermark,
+    EngineStateFormat, LifetimeDecision, NoProjectionProviders, ProcessEngine,
+    ProcessEventLogTestSupport as _, ProcessId, ProcessInfraError, ProcessInput, ProcessOutcome,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessStatus, ProjectionWatermark,
     StartKey, StepName, StepRequest, ToolCallOutput, ToolCancellation,
 };
 use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
@@ -37,10 +36,6 @@ use serde_json::{Value, json};
 const KIND: &str = "l9d-law";
 /// The tool a step names that its admission refuses.
 const REFUSED_TOOL: &str = "l9d_refused";
-/// The signal every signalled law process declares.
-const SIGNAL: &str = "nudge";
-/// The event type an emitting law process declares.
-const EMITTED: &str = "l9d.emitted";
 /// A wait deadline no law reaches.
 const LONG: Duration = Duration::from_secs(3_600);
 /// How many clock steps a law drives before it gives up.
@@ -53,13 +48,11 @@ type AdvanceLog = Arc<Mutex<Vec<(String, String)>>>;
 
 /// The law engine. `act` in its start payload says what it does:
 ///
-/// - `hold`: idles; keeps each signal's payload, and ends with them once it
-///   has `until` of them;
+/// - `hold`: idles until cancellation;
 /// - `sleep`: sleeps until `until_ms`, then ends;
 /// - `await`: awaits process `await` for `deadline_ms` (default [`LONG`]),
 ///   and ends with what it saw;
 /// - `refused_step`: asks for one step whose admission is refused;
-/// - `emit`: emits one event of type `event`, then ends;
 /// - `flaky`: ends at once, but its `advance` fails opaquely while the
 ///   engine's `refuse` flag is set.
 ///
@@ -83,11 +76,9 @@ fn event_name(event: &EngineEvent) -> String {
     match event {
         EngineEvent::Started { .. } => "started".to_owned(),
         EngineEvent::StepSettled { .. } => "step_settled".to_owned(),
-        EngineEvent::Emitted => "emitted".to_owned(),
         EngineEvent::ProcessEnded { .. } => "process_ended".to_owned(),
         EngineEvent::ProcessWaitTimedOut { .. } => "process_wait_timed_out".to_owned(),
         EngineEvent::Woke => "woke".to_owned(),
-        EngineEvent::Signal(_) => "signal".to_owned(),
         EngineEvent::Cancelled { .. } => "cancelled".to_owned(),
         other => format!("{other:?}"),
     }
@@ -140,7 +131,7 @@ impl ProcessEngine for LawEngine {
         state: EngineState,
         event: EngineEvent,
     ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
-        let mut script: Value = match &event {
+        let script: Value = match &event {
             EngineEvent::Started { payload } => payload.clone(),
             _ => serde_json::from_slice(&state.bytes).map_err(infra)?,
         };
@@ -157,16 +148,7 @@ impl ProcessEngine for LawEngine {
                         .with_origin(origin),
                 )))
             }
-            ("hold", EngineEvent::Signal(signal)) => {
-                let mut signals = script["signals"].as_array().cloned().unwrap_or_default();
-                signals.push(signal.payload.clone());
-                script["signals"] = Value::Array(signals.clone());
-                if Some(signals.len() as u64) == script["until"].as_u64() {
-                    success(json!({ "signals": signals }))
-                } else {
-                    EngineAction::Idle
-                }
-            }
+
             ("sleep", EngineEvent::Started { .. }) => EngineAction::Sleep {
                 until: DurableInstant(script["until_ms"].as_i64().unwrap_or_default()),
             },
@@ -196,11 +178,7 @@ impl ProcessEngine for LawEngine {
                 }])
             }
             ("refused_step", EngineEvent::StepSettled { .. }) => success(json!({ "ran": true })),
-            ("emit", EngineEvent::Started { .. }) => EngineAction::Emit {
-                event_type: event_type(script["event"].as_str().unwrap_or_default()),
-                payload: json!({ "emitted_by": script["tag"] }),
-            },
-            ("emit", EngineEvent::Emitted) => success(json!({ "emitted": true })),
+
             ("flaky", EngineEvent::Started { .. }) => success(json!({ "ran": true })),
             _ => EngineAction::Idle,
         };
@@ -249,14 +227,6 @@ impl ProcessEngine for LawEngine {
             lash_core_execution::ProcessSignature::Unknown,
             Vec::new(),
         ))
-    }
-}
-
-fn event_type(name: &str) -> ProcessEventType {
-    ProcessEventType {
-        name: name.to_owned(),
-        payload_schema: JsonSchema::any(),
-        semantics: ProcessEventSemanticsSpec::default(),
     }
 }
 
@@ -472,10 +442,6 @@ fn registration(payload: Value) -> ProcessRegistration {
     ))
 }
 
-fn signal_type() -> ProcessEventType {
-    event_type(&lash_core_execution::runtime::process_signal_event_type(SIGNAL).unwrap())
-}
-
 /// The first value under `key` anywhere in `value`.
 fn find<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
     match value {
@@ -530,7 +496,7 @@ async fn a_refused_step_admission_ends_the_process_failed_and_its_awaiter_reads_
         .into_iter()
         .filter(|event| {
             matches!(
-                event.event_type.as_str(),
+                event.fact.event_type(),
                 "process.completed" | "process.failed" | "process.cancelled" | "process.abandoned"
             )
         })
@@ -752,94 +718,6 @@ async fn a_transient_read_failure_after_claim_never_strands_the_process() {
         .await;
 }
 
-/// A signal is admitted by its first append: a repeat of it after the
-/// engine consumed it reaches the engine never again, a resend under the
-/// same identity with a changed payload is refused before anything
-/// resolves, and the next distinct signal arrives as the next event
-/// (signal admission, FIG-4298).
-#[tokio::test]
-async fn a_signal_is_admitted_once_and_a_changed_resend_is_refused() {
-    let world = World::new(Script::new()).await;
-    let process = world
-        .register(
-            registration(json!({ "tag": "signalled", "act": "hold", "until": 2 }))
-                .with_extra_event_types([signal_type()]),
-        )
-        .await;
-    let registry = world.backend.process_registry();
-    let send = |id: &str, payload: Value| {
-        let signal = ProcessSignal::new(
-            ProcessSignalIdentity::new(process.clone(), SIGNAL, id).expect("a signal identity"),
-            payload,
-        );
-        let registry = Arc::clone(&registry);
-        let process = process.clone();
-        async move {
-            registry
-                .append_event(&process, signal.append_request())
-                .await
-        }
-    };
-    world.nodes.start("a");
-    world
-        .until("the process started", || async {
-            world.advances("signalled") == ["started"]
-        })
-        .await;
-
-    let first = send("first", json!({ "n": 1 }))
-        .await
-        .expect("the first signal is admitted");
-    world
-        .until("the first signal reached the engine", || async {
-            world.advances("signalled") == ["started", "signal"]
-        })
-        .await;
-    let repeat = send("first", json!({ "n": 1 }))
-        .await
-        .expect("a repeat of an admitted signal is served its admission");
-    assert_eq!(
-        repeat.event.sequence, first.event.sequence,
-        "the repeat is the admitted event"
-    );
-    let changed = send("first", json!({ "n": 99 })).await;
-    assert!(
-        changed.is_err(),
-        "a resend with a changed payload is refused: {changed:?}"
-    );
-    for _ in 0..5 {
-        world.nodes.step().await;
-    }
-    assert_eq!(
-        world.advances("signalled"),
-        ["started", "signal"],
-        "neither the repeat nor the refused resend reached the engine"
-    );
-
-    send("second", json!({ "n": 2 }))
-        .await
-        .expect("the next signal is admitted");
-    world
-        .until("the process ended", || async {
-            world.terminal(&process).await.is_some()
-        })
-        .await;
-    let end = world.terminal(&process).await.expect("its end");
-    assert_eq!(
-        find(&end, "signals"),
-        Some(&json!([{ "n": 1 }, { "n": 2 }])),
-        "the engine saw each admitted signal once, in order: {end}"
-    );
-    let signals = registry
-        .full_event_window(&process, 0)
-        .await
-        .expect("read its events")
-        .into_iter()
-        .filter(|event| event.event_type == signal_type().name)
-        .count();
-    assert_eq!(signals, 2, "the log holds each admitted signal once");
-}
-
 /// A process started under the start key of a pruned process is a new
 /// process: its own id, its own engine run from `Started`, its own terminal
 /// (successor after prune, FIG-3611).
@@ -945,76 +823,4 @@ async fn an_opaque_advance_failure_parks_the_process_and_a_redrive_runs_it_on() 
         .await;
     let end = world.terminal(&process).await.expect("its end");
     assert_eq!(find(&end, "ran"), Some(&json!(true)), "{end}");
-}
-
-/// An `Emit` whose commit meets a transient store fault, or whose commit's
-/// answer is lost, is never the step's answer: the transition is
-/// recomputed from the committed rows, and the event is appended exactly
-/// once (store faults, FIG-4649).
-#[tokio::test]
-async fn an_emit_whose_commit_meets_a_store_fault_is_appended_exactly_once() {
-    for fault in [Fault::FailBefore, Fault::AckHidden] {
-        let script = Script::new();
-        script.cut(CommitLabel::PROCESS_ADVANCE, 1, fault);
-        let world = World::new(script).await;
-        let process = world
-            .register(
-                registration(json!({ "tag": "emitter", "act": "emit", "event": EMITTED }))
-                    .with_extra_event_types([event_type(EMITTED)]),
-            )
-            .await;
-        world.nodes.start("a");
-        world
-            .until("the emitter ended", || async {
-                world.terminal(&process).await.is_some()
-            })
-            .await;
-        assert_eq!(
-            world.nodes.script().cuts().len(),
-            1,
-            "{fault}: the emit's commit was cut"
-        );
-        let emitted = world
-            .backend
-            .process_registry()
-            .full_event_window(&process, 0)
-            .await
-            .expect("read its events")
-            .into_iter()
-            .filter(|event| event.event_type == EMITTED)
-            .count();
-        assert_eq!(emitted, 1, "{fault}: the event is appended exactly once");
-        assert_eq!(
-            world.advances("emitter"),
-            ["started", "emitted"],
-            "{fault}: the engine saw its emit committed once"
-        );
-    }
-}
-
-/// An `Emit` the registry refuses, typed, is the process's recorded answer:
-/// the process ends `Failed` with the refusal instead of retrying a commit
-/// that can never land (the typed half of the store-fault laws, FIG-4649).
-#[tokio::test]
-async fn an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal() {
-    let world = World::new(Script::new()).await;
-    let process = world
-        .register(registration(
-            json!({ "tag": "undeclared", "act": "emit", "event": "l9d.undeclared" }),
-        ))
-        .await;
-    world.nodes.start("a");
-    world
-        .until("the emitter ended", || async {
-            world.terminal(&process).await.is_some()
-        })
-        .await;
-    let record = world.record(&process).await.expect("the process");
-    assert_eq!(record.status(), ProcessStatus::Failed, "{record:?}");
-    let end = world.terminal(&process).await.expect("its end");
-    assert!(
-        end.to_string().contains("l9d.undeclared"),
-        "the failure names the refused event type: {end}"
-    );
-    assert_eq!(world.advances("undeclared"), ["started"]);
 }

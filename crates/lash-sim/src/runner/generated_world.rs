@@ -10,10 +10,8 @@ use lash_sansio::sync::MutexExt as _;
 
 mod provider_turn;
 mod suspend;
-mod trigger;
 
 use suspend::{FinishedSuspend, SuspendingTurn};
-use trigger::SimTriggerHarness;
 
 /// Suspend resolutions resume a turn only after the generated workload has
 /// drained, so they are scheduled past every workload boundary. The generator's
@@ -26,11 +24,10 @@ pub(super) struct GeneratedRuntimeWorld {
     queued_inputs: BTreeMap<String, String>,
     backend_faults: GeneratedBackendFaultHarness,
     provider_mutations: SimProviderMutationHarness,
-    trigger_harness: SimTriggerHarness,
     /// The workload's seed: every engine of the world derives its own from
     /// it.
     seed: u64,
-    /// The world's own engine, under the workload's seed: triggers land in
+    /// The world's own engine, under the workload's seed: work lands in
     /// its store. No core runs on it.
     engine: crate::backend::SimEngine,
     /// Each session's engine, by session alias. Each session, with its own
@@ -119,7 +116,6 @@ impl GeneratedRuntimeWorld {
             queued_inputs: BTreeMap::new(),
             backend_faults: GeneratedBackendFaultHarness::default(),
             provider_mutations: SimProviderMutationHarness::default(),
-            trigger_harness: SimTriggerHarness::over(engine.backend()),
             runtime_boundaries: RuntimeBoundaryHarness::new(seed),
             seed,
             engine,
@@ -336,6 +332,7 @@ impl GeneratedRuntimeWorld {
             return self.resolve_suspended_turn(event).await;
         }
         match event.kind {
+            BoundaryKind::ContractExecution => Ok(event.payload.clone()),
             BoundaryKind::Ingress => {
                 if event.payload.get("suspend_kind").is_some() {
                     self.open_suspending_session(event).await
@@ -348,7 +345,6 @@ impl GeneratedRuntimeWorld {
             BoundaryKind::ProviderEvent => self.release_provider_event(event),
             BoundaryKind::Observer => self.observe_session(event).await,
             BoundaryKind::Cancellation => self.cancel_queued_input(event).await,
-            BoundaryKind::Trigger => self.trigger_harness.deliver(event).await,
             BoundaryKind::BackendFailure => self.backend_faults.inject(event).await,
             BoundaryKind::ProviderMutation => self.provider_mutations.reject(event).await,
             BoundaryKind::DurableEffect | BoundaryKind::Tool | BoundaryKind::ExecCode => self

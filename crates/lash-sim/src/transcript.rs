@@ -234,7 +234,7 @@ fn commit_entry(write: &CheckpointWriteEvent) -> Entry {
 /// vocabulary. `ProviderEvent` is filtered out before this point.
 fn boundary_kind(kind: BoundaryKind) -> Kind {
     match kind {
-        BoundaryKind::Ingress | BoundaryKind::QueuedIngress | BoundaryKind::Trigger => {
+        BoundaryKind::Ingress | BoundaryKind::QueuedIngress | BoundaryKind::ContractExecution => {
             Kind::Ingress
         }
         BoundaryKind::Provider | BoundaryKind::ProviderEvent => Kind::Provider,
@@ -366,9 +366,8 @@ mod attribution_tests {
             "both sessions must render their own commit: {transcript}"
         );
     }
-
     #[test]
-    fn contract_checkpoint_renders_after_its_causal_trigger() {
+    fn contract_checkpoint_renders_after_its_causal_boundary() {
         let mut write = test_write(&SessionId::from("contract-store-session"), 1);
         write.attribution = Some(crate::store::CheckpointAttribution {
             session_id: SessionId::from("alpha"),
@@ -377,18 +376,20 @@ mod attribution_tests {
         let trace = trace_with_events(
             vec![
                 test_boundary(1, "alpha", BoundaryKind::Ingress, 1),
-                test_boundary(2, "alpha", BoundaryKind::Trigger, 1),
+                test_boundary(2, "alpha", BoundaryKind::ContractExecution, 1),
             ],
             vec![write],
         );
 
         let transcript = trace.render_transcript();
-        let trigger = transcript.find("Trigger").expect("trigger line");
+        let cause = transcript
+            .find("ContractExecution")
+            .expect("contract boundary line");
         let checkpoint = transcript
             .find("checkpoint.commit")
             .expect("checkpoint line");
         assert!(
-            checkpoint > trigger,
+            checkpoint > cause,
             "contract checkpoint rendered before its cause:\n{transcript}"
         );
     }
@@ -396,72 +397,17 @@ mod attribution_tests {
 
 #[cfg(test)]
 mod tests {
-    use lash_core::{
-        ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
-        ProcessRegistrar as _, ProcessRetention as _,
-    };
     use std::sync::Arc;
 
     use lash_core::store::RuntimeCommit;
     use lash_core::{
-        PluginState, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
-        ProcessEventSemanticsSpec, ProcessEventType, ProcessValueSelector, ProcessWakeSpec,
-        ProjectionWatermark, RuntimeSessionState, SessionCatalogStore as _, SessionCreationHead,
+        PluginState, RuntimeSessionState, SessionCatalogStore as _, SessionCreationHead,
         SessionRelation, SessionStoreCreateRequest, ToolState,
     };
 
     use super::*;
     use crate::store::{CheckpointWriteCollector, ObservedDeploymentStore};
     use crate::trace::{AbstractWorldView, OracleVerdict};
-
-    async fn collect_process_events(
-        registry: &dyn lash_core::ProcessRegistry,
-        process_id: &lash_core::ProcessId,
-    ) -> Result<Vec<lash_core::ProcessEvent>, lash_core::PluginError> {
-        let limit = std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN);
-        let mut after_sequence = 0;
-        let mut events = Vec::new();
-        loop {
-            let outcome = registry
-                .event_page_after(
-                    process_id,
-                    after_sequence,
-                    limit,
-                    lash_core::ProcessEventQueryMode::Full,
-                )
-                .await?;
-            let page = match outcome {
-                lash_core::ProcessEventReadOutcome::Retained(page) => page,
-                lash_core::ProcessEventReadOutcome::NoLongerRetained(
-                    lash_core::ProcessEventHistoryRetention::Pruned {
-                        terminal_label,
-                        pruned_at_ms,
-                    },
-                ) => {
-                    return Err(lash_core::PluginError::ProcessNoLongerRetained {
-                        terminal_label,
-                        pruned_at_ms,
-                    });
-                }
-                lash_core::ProcessEventReadOutcome::NoLongerRetained(
-                    lash_core::ProcessEventHistoryRetention::Released { released_through },
-                ) => {
-                    return Err(lash_core::PluginError::ProcessEventsReleased {
-                        process_id: process_id.clone(),
-                        released_through,
-                    });
-                }
-            };
-            let lash_core::ProcessEventPageEvents::Full(page_events) = page.events else {
-                unreachable!("full process event query returned a lite page");
-            };
-            events.extend(page_events);
-            after_sequence = match page.more {
-                lash_core::ProcessEventPageMore::Complete => return Ok(events),
-                lash_core::ProcessEventPageMore::More { after_sequence } => after_sequence,
-            };
-        }
-    }
 
     #[tokio::test]
     async fn transcript_discriminates_missing_checkpoint_component_bodies() {
@@ -490,112 +436,6 @@ mod tests {
                 .lines()
                 .any(|line| line.contains("tool_state") && line.contains("ref (unchanged)")),
             "mutated transcript must expose the missing body: {defect}"
-        );
-    }
-
-    /// The retarget/prune cutover is checked against the registry's own reported
-    /// facts. It deliberately does **not** snapshot a transcript: this test runs
-    /// no scheduler, so the only boundary events available to render would be
-    /// ones the test constructed itself, which ADR 0044 rules out. Transcript
-    /// coverage of real boundary shapes lives in the scenario harnesses.
-    #[tokio::test]
-    async fn process_cutover_reports_retarget_discard_and_pruned_await_as_information() {
-        let backend = lash_sqlite_store::SqliteStoreSet::memory()
-            .await
-            .expect("SQLite memory store set");
-        lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
-            .await;
-        let registry = backend.process_registry();
-        let process_id = registry
-            .register_process(
-                lash_core::testing::held_engine_registration(
-                    serde_json::Value::Null,
-                    lash_core::ProcessProvenance::host(),
-                    lash_core::Lifetime::Detached,
-                )
-                .with_extra_event_types([ProcessEventType {
-                    name: "producer.wake".to_string(),
-                    payload_schema: lash_core::JsonSchema::any(),
-                    semantics: ProcessEventSemanticsSpec {
-                        wake: Some(ProcessWakeSpec {
-                            when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
-                            input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                        }),
-                        ..ProcessEventSemanticsSpec::default()
-                    },
-                }])
-                .with_wake_session_id(Some(SessionId::from("source-session"))),
-            )
-            .await
-            .expect("register transcript process")
-            .id;
-        registry
-            .append_event(
-                &process_id,
-                ProcessEventAppendRequest::new(
-                    "producer.wake",
-                    serde_json::json!({"wake_input": "resume"}),
-                ),
-            )
-            .await
-            .expect("append wake event");
-        registry
-            .retarget_subscription(&process_id, Some("branch-session"))
-            .await
-            .expect("retarget subscription");
-        let retarget_event = collect_process_events(registry.as_ref(), &process_id)
-            .await
-            .expect("read process audit events")
-            .into_iter()
-            .find(|event| event.event_type == "process.subscription_retargeted")
-            .expect("retarget audit event");
-        assert_eq!(retarget_event.event_type, "process.subscription_retargeted");
-
-        let terminal = registry
-            .complete_process(
-                &process_id,
-                ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-                    serde_json::json!({"done": true}),
-                )),
-                ProcessCompletionAuthority::workflow_key(&process_id),
-            )
-            .await
-            .expect("complete transcript process");
-        registry
-            .prune_terminal_processes(
-                terminal.updated_at_ms.saturating_add(1),
-                None,
-                ProjectionWatermark::NoProjector,
-            )
-            .await
-            .expect("prune transcript process");
-        let output =
-            lash_core::NoProcessWork::for_registry(registry as Arc<dyn lash_core::ProcessRegistry>)
-                .await_terminal(&process_id)
-                .await
-                .expect("await pruned process");
-        assert!(matches!(
-            output,
-            ProcessAwaitOutput::NoLongerRetained { .. }
-        ));
-        let rendered_output = output.into_tool_output();
-        let rendered_value = match rendered_output.outcome {
-            lash_core::ToolCallOutcome::Success(value) => value.to_json_value(),
-            other => panic!("pruned await must render as information success, got {other:?}"),
-        };
-        assert_eq!(
-            rendered_value
-                .get("type")
-                .and_then(serde_json::Value::as_str),
-            Some("information"),
-            "a pruned await must not be reported as a failure: {rendered_value}"
-        );
-        assert_eq!(
-            rendered_value
-                .get("code")
-                .and_then(serde_json::Value::as_str),
-            Some("process_no_longer_retained"),
-            "a pruned await must report retention loss by code: {rendered_value}"
         );
     }
 

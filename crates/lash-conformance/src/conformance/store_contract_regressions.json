@@ -1,26 +1,16 @@
 [
   {
-    "seed": 83001,
-    "operations": [
-      { "op": "enqueue_wake", "process": 0 },
-      { "op": "enqueue_wake", "process": 0 },
-      {
-        "op": "consume_wake",
-        "selection": 0,
-        "highest_in_group": true,
-        "stale": false
-      }
-    ]
-  },
-  {
     "seed": 83002,
     "operations": [
       {
         "op": "register",
-        "process": 0,
-        "wake_target": null
+        "process": 0
       },
-      { "op": "terminal", "process": 0, "disposition": 0 }
+      {
+        "op": "terminal",
+        "process": 0,
+        "disposition": 0
+      }
     ]
   },
   {
@@ -28,27 +18,20 @@
     "operations": [
       {
         "op": "register",
-        "process": 2,
-        "wake_target": null
+        "process": 2
       },
-      { "op": "terminal", "process": 2, "disposition": 0 },
-      { "op": "prune", "watermark": false },
+      {
+        "op": "terminal",
+        "process": 2,
+        "disposition": 0
+      },
+      {
+        "op": "prune",
+        "watermark": false
+      },
       {
         "op": "register",
-        "process": 2,
-        "wake_target": null
-      }
-    ]
-  },
-  {
-    "seed": 83004,
-    "operations": [
-      { "op": "enqueue_wake", "process": 0 },
-      {
-        "op": "consume_wake",
-        "selection": 0,
-        "highest_in_group": false,
-        "stale": false
+        "process": 2
       }
     ]
   },
@@ -57,11 +40,18 @@
     "operations": [
       {
         "op": "register",
-        "process": 2,
-        "wake_target": null
+        "process": 2
       },
-      { "op": "cancel_request", "process": 2, "requester": 0 },
-      { "op": "terminal", "process": 2, "disposition": 2 }
+      {
+        "op": "cancel_request",
+        "process": 2,
+        "requester": 0
+      },
+      {
+        "op": "terminal",
+        "process": 2,
+        "disposition": 2
+      }
     ]
   }
 ]

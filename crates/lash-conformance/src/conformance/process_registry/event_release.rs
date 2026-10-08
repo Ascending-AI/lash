@@ -35,7 +35,7 @@ fn retained_sequences(
 
 /// A host release of a running process's event prefix (FIG-3482) strips the
 /// payloads at or below the horizon and nothing else: reads below it are
-/// refused typed, reads after it are unchanged, sequences and signal ordinals
+/// refused typed, reads after it are unchanged, sequences and invocation ordinals
 /// keep counting the released events, and a re-presented replay key still
 /// coalesces on the released payload or conflicts on another one. The horizon
 /// is clamped to the last event and never moves back, so repeated cleanup
@@ -48,23 +48,23 @@ pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_repla
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let process_id = registry
-        .register_process(
-            registration("release-event-prefix").with_extra_event_types([
-                plain_event_type("signal.tick"),
-                plain_event_type("producer.note"),
-            ]),
-        )
+        .register_process(registration("release-event-prefix"))
         .await
         .expect("register a process whose prefix the host releases")
         .id;
     let blob = serde_json::json!({ "blob": "x".repeat(4096) });
-    let tick = |signal_id: &str, payload: serde_json::Value| {
-        signal_request(&process_id, "tick", signal_id, payload)
+    let tick = |replay: &str, payload: serde_json::Value| {
+        call_wait_event(&process_id, "tick", replay, payload)
     };
     let mut sequences = Vec::new();
     for request in [
         tick("1", blob.clone()),
-        ProcessEventAppendRequest::new("producer.note", serde_json::json!({ "n": 2 })),
+        call_wait_event(
+            &process_id,
+            "producer.note",
+            "producer.note",
+            serde_json::json!({ "n": 2 }),
+        ),
         tick("2", serde_json::json!({ "n": 3 })),
         tick("3", serde_json::json!({ "n": 4 })),
     ] {
@@ -137,15 +137,6 @@ pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_repla
         vec![kept],
         "the recent tail never returns a released event"
     );
-    assert_eq!(
-        registry
-            .count_events_through(&process_id, "signal.tick", u64::MAX)
-            .await
-            .expect("count tick signals"),
-        3,
-        "released signals still count toward the next signal's ordinal"
-    );
-
     let replayed = registry
         .append_event(&process_id, tick("1", blob.clone()))
         .await
@@ -154,9 +145,13 @@ pub(super) async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_repla
         (
             replayed.event.sequence,
             replayed.realization,
-            replayed.event.payload
+            replayed.event.fact.payload()
         ),
-        (first, crate::StoreRealization::Coalesced, blob),
+        (
+            first,
+            crate::StoreRealization::Coalesced,
+            tick("1", blob.clone()).fact.payload()
+        ),
         "the replay answers the released event with the re-presented payload"
     );
     let conflict = registry

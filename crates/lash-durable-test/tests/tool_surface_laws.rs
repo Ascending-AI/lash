@@ -953,9 +953,8 @@ fn process_environment() -> lash_core_execution::ProcessExecutionEnvSpec {
     environment
 }
 
-/// A host start observes only the sessions it names: the session a start
-/// wakes gains no observer edge from being its wake target, and a session
-/// the start names as an observer does (ported from the start half of
+/// A host start observes only the sessions it names: a default start
+/// gains no observer edge, and a session named as an observer does (ported from the start half of
 /// `session_creation_applies_only_named_process_observers_with_typed_outcomes`).
 async fn a_host_start_observes_only_the_sessions_it_names(tier: Tier) {
     let Some(world) = served::World::with_engines(
@@ -987,7 +986,6 @@ async fn a_host_start_observes_only_the_sessions_it_names(tier: Tier) {
         )
         .with_env_ref(env_ref.clone())
         .with_host_start_key(label);
-        request.wake_session_id = Some(parent_id.clone());
         request.observers = observers;
         let receipt = world
             .core
@@ -1003,7 +1001,7 @@ async fn a_host_start_observes_only_the_sessions_it_names(tier: Tier) {
             .is_observer(&parent_id, &started["default-start"])
             .await
             .expect("read the default start's observers"),
-        "the wake target does not imply an observer edge"
+        "a default start gains no observer edge"
     );
     assert!(
         registry

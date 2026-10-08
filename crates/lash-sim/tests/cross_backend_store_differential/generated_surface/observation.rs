@@ -13,93 +13,34 @@ pub(super) struct ProcessRows {
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
-pub(super) struct TriggerRows {
-    pub(super) subscriptions: Vec<serde_json::Value>,
-    pub(super) mutation_receipts: Vec<serde_json::Value>,
-    pub(super) occurrences: Vec<serde_json::Value>,
-    pub(super) deliveries: Vec<serde_json::Value>,
-}
-
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub(super) struct SurfaceState {
     pub(super) processes: ProcessRows,
-    pub(super) triggers: TriggerRows,
-    pub(super) trigger_feed_reads: Vec<serde_json::Value>,
 }
 
 pub(super) enum SurfaceReader {
-    Sqlite {
-        process_path: PathBuf,
-        trigger_path: PathBuf,
-    },
-    Postgres {
-        pool: PgPool,
-    },
+    Sqlite { process_path: PathBuf },
+    Postgres { pool: PgPool },
 }
 
 impl SurfaceReader {
     pub(super) async fn observe(&self) -> SurfaceState {
         match self {
-            Self::Sqlite {
-                process_path,
-                trigger_path,
-            } => read_sqlite_surface(process_path, trigger_path),
+            Self::Sqlite { process_path } => read_sqlite_surface(process_path),
             Self::Postgres { pool } => read_postgres_surface(pool).await,
         }
     }
 }
 
 pub(super) fn normalized_json(mut value: serde_json::Value) -> serde_json::Value {
-    normalize_json_fields(&mut value, None);
+    normalize_json_fields(&mut value);
     value
 }
 
-pub(super) fn normalized_trigger_json(
-    mut value: serde_json::Value,
-    incarnations: &mut BTreeMap<String, String>,
-) -> serde_json::Value {
-    normalize_json_fields(&mut value, Some(incarnations));
-    value
-}
-
-pub(super) fn normalized_trigger_receipt_json(
-    value: serde_json::Value,
-    incarnations: &mut BTreeMap<String, String>,
-) -> serde_json::Value {
-    normalized_trigger_json(value, incarnations)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) fn normalized_trigger_delivery_json(
-    mut value: serde_json::Value,
-    incarnations: &mut BTreeMap<String, String>,
-) -> serde_json::Value {
-    let fields = value
-        .as_object_mut()
-        .expect("trigger delivery observation must be an object");
-    // A delivery is bound to its process in the transaction that records
-    // it; the process rows are compared on their own.
-    let process_id_bound = fields
-        .remove("process_id")
-        .is_some_and(|process_id| !process_id.is_null());
-    fields.insert(
-        "process_id_bound".to_string(),
-        serde_json::Value::Bool(process_id_bound),
-    );
-    normalized_trigger_json(value, incarnations)
-}
-
-pub(super) fn normalize_json_fields(
-    value: &mut serde_json::Value,
-    mut incarnations: Option<&mut BTreeMap<String, String>>,
-) {
+pub(super) fn normalize_json_fields(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Array(values) => {
             for value in values {
-                normalize_json_fields(value, incarnations.as_deref_mut());
+                normalize_json_fields(value);
             }
         }
         serde_json::Value::Object(fields) => {
@@ -130,19 +71,7 @@ pub(super) fn normalize_json_fields(
                     "claim_token" | "lease_token" | "lease_owner_id" => {
                         *value = serde_json::Value::Bool(!value.is_null());
                     }
-                    "incarnation" | "subscription_incarnation" => {
-                        if let (Some(raw), Some(map)) =
-                            (value.as_str(), incarnations.as_deref_mut())
-                        {
-                            let next = map.len();
-                            let alias = map
-                                .entry(raw.to_string())
-                                .or_insert_with(|| format!("incarnation-{next}"))
-                                .clone();
-                            *value = serde_json::Value::String(alias);
-                        }
-                    }
-                    _ => normalize_json_fields(value, incarnations.as_deref_mut()),
+                    _ => normalize_json_fields(value),
                 }
             }
         }
@@ -155,9 +84,10 @@ pub(super) fn normalize_json_fields(
     clippy::unwrap_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-pub(super) fn read_sqlite_surface(process_path: &Path, trigger_path: &Path) -> SurfaceState {
+
+pub(super) fn read_sqlite_surface(process_path: &Path) -> SurfaceState {
     let process = rusqlite::Connection::open(process_path).expect("open SQLite process reader");
-    let trigger = rusqlite::Connection::open(trigger_path).expect("open SQLite trigger reader");
+
     let records = sqlite_simple_json_rows(
         &process,
         "SELECT record_json, change_seq FROM processes ORDER BY process_id",
@@ -214,8 +144,6 @@ pub(super) fn read_sqlite_surface(process_path: &Path, trigger_path: &Path) -> S
             observers,
             tombstones,
         },
-        triggers: read_sqlite_triggers(&trigger),
-        trigger_feed_reads: Vec::new(),
     }
 }
 
@@ -236,43 +164,6 @@ where
         .unwrap()
         .collect::<Result<Vec<_>, _>>()
         .unwrap()
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) fn read_sqlite_triggers(connection: &rusqlite::Connection) -> TriggerRows {
-    let mut incarnations = BTreeMap::new();
-    let subscriptions = sqlite_simple_json_rows(
-        connection,
-        "SELECT record_json FROM trigger_subscriptions ORDER BY subscription_id",
-        |row| {
-            let json: String = row.get(0)?;
-            Ok(serde_json::from_str(&json).unwrap())
-        },
-    )
-    .into_iter()
-    .map(|row| normalized_trigger_json(row, &mut incarnations))
-    .collect();
-    let mutation_receipts = sqlite_simple_json_rows(connection, "SELECT operation_id, owner_kind, owner_id, request_fingerprint, result_json FROM trigger_mutation_receipts ORDER BY operation_id", |row| {
-        let result: String = row.get(4)?;
-        Ok(serde_json::json!({"operation_id": row.get::<_, String>(0)?, "owner_kind": row.get::<_, String>(1)?, "owner_id": row.get::<_, String>(2)?, "request_fingerprint": row.get::<_, String>(3)?, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}))
-    }).into_iter().map(|row| normalized_trigger_receipt_json(row, &mut incarnations)).collect();
-    let occurrences = sqlite_simple_json_rows(connection, "SELECT record_json FROM trigger_occurrences ORDER BY occurrence_id", |row| {
-        let record: String = row.get(0)?;
-        Ok(serde_json::json!({"record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}))
-    }).into_iter().map(|row| normalized_trigger_json(row, &mut incarnations)).collect();
-    let deliveries = sqlite_simple_json_rows(connection, "SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM trigger_deliveries ORDER BY occurrence_id, subscription_id", |row| {
-        let snapshot: String = row.get(3)?;
-        Ok(serde_json::json!({"occurrence_id": row.get::<_, String>(0)?, "subscription_id": row.get::<_, String>(1)?, "process_id": row.get::<_, Option<String>>(2)?, "subscription_snapshot": serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()}))
-    }).into_iter().map(|row| normalized_trigger_delivery_json(row, &mut incarnations)).collect();
-    TriggerRows {
-        subscriptions,
-        mutation_receipts,
-        occurrences,
-        deliveries,
-    }
 }
 
 #[expect(
@@ -316,52 +207,13 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
             observers,
             tombstones,
         },
-        triggers: read_postgres_triggers(pool).await,
-        trigger_feed_reads: Vec::new(),
-    }
-}
-
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
-pub(super) async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
-    let mut incarnations = BTreeMap::new();
-    let subscriptions: Vec<String> = sqlx::query_scalar(
-        "SELECT record_json FROM lash_trigger_subscriptions ORDER BY subscription_id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    let subscriptions = subscriptions
-        .into_iter()
-        .map(|row| normalized_trigger_json(serde_json::from_str(&row).unwrap(), &mut incarnations))
-        .collect();
-    let receipts: Vec<(String, String, String, String, String)> = sqlx::query_as("SELECT operation_id, owner_kind, owner_id, request_fingerprint, result_json FROM lash_trigger_mutation_receipts ORDER BY operation_id").fetch_all(pool).await.unwrap();
-    let mutation_receipts = receipts.into_iter().map(|(operation_id, owner_kind, owner_id, request_fingerprint, result)| normalized_trigger_receipt_json(serde_json::json!({"operation_id": operation_id, "owner_kind": owner_kind, "owner_id": owner_id, "request_fingerprint": request_fingerprint, "result": serde_json::from_str::<serde_json::Value>(&result).unwrap()}), &mut incarnations)).collect();
-    let occurrence_rows: Vec<String> = sqlx::query_scalar(
-        "SELECT record_json FROM lash_trigger_occurrences ORDER BY occurrence_id",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap();
-    let occurrences = occurrence_rows.into_iter().map(|record| normalized_trigger_json(serde_json::json!({"record": serde_json::from_str::<serde_json::Value>(&record).unwrap()}), &mut incarnations)).collect();
-    let delivery_rows: Vec<(String, String, Option<String>, String)> = sqlx::query_as("SELECT occurrence_id, subscription_id, process_id, subscription_snapshot_json FROM lash_trigger_deliveries ORDER BY occurrence_id, subscription_id").fetch_all(pool).await.unwrap();
-    let deliveries = delivery_rows.into_iter().map(|(occurrence_id, subscription_id, process_id, snapshot)| normalized_trigger_delivery_json(serde_json::json!({"occurrence_id": occurrence_id, "subscription_id": subscription_id, "process_id": process_id, "subscription_snapshot": serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()}), &mut incarnations)).collect();
-    TriggerRows {
-        subscriptions,
-        mutation_receipts,
-        occurrences,
-        deliveries,
     }
 }
 
 pub(super) fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
-    observations.windows(2).all(|pair| {
-        pair[0].1.processes == pair[1].1.processes
-            && pair[0].1.triggers == pair[1].1.triggers
-            && pair[0].1.trigger_feed_reads == pair[1].1.trigger_feed_reads
-    })
+    observations
+        .windows(2)
+        .all(|pair| pair[0].1.processes == pair[1].1.processes)
 }
 
 /// A process id a store row holds: always one a registrar minted, or a

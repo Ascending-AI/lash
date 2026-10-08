@@ -204,26 +204,6 @@ fn ingress_admission_projection_profile_uses_latest_request_item_marker() {
     );
 }
 
-#[test]
-fn high_traffic_trigger_registration_is_session_scoped() {
-    let mut request = empty_request();
-    request.messages.push(request_input(
-        "load-kind:trigger operation:7 session:runtime-perf-session-a",
-    ));
-    let profile = high_traffic_stream_profile(&request);
-
-    assert!(
-        profile
-            .full_text
-            .contains("runtime-perf-load-trigger-runtime-perf-session-a")
-    );
-    assert!(
-        !profile
-            .full_text
-            .contains("name: \"runtime-perf-load-trigger\"")
-    );
-}
-
 fn request_input(text: &str) -> LlmMessage {
     LlmMessage::new(
         LlmRole::User,

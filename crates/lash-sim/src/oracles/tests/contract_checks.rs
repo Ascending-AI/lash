@@ -877,18 +877,18 @@ fn critic_named_contracts_reject_generic_proxy_fact_backings() {
             ScenarioContractGeneratedFact {
                 fact: "generated_transition_evidence_present",
                 assertion: "scenario contract selected generated trace events for its required state transition",
-                boundary_ids: vec!["session-001:trigger:001".to_string()],
+                boundary_ids: vec!["session-001:contract-execution:001".to_string()],
                 observed: json!({
                     "selected_event_count": 1,
-                    "boundary_kinds": ["Trigger"],
+                    "boundary_kinds": ["ContractExecution"],
                 }),
             },
         ),
         (
-            "semantic-proof-only trigger",
+            "semantic-proof-only contract boundary",
             ScenarioContractGeneratedFact {
                 fact: "semantic_proof_proxy",
-                assertion: "trigger payload claimed a semantic proof without fixed execution source identity",
+                assertion: "contract payload claimed a semantic proof without fixed execution source identity",
                 boundary_ids: vec!["session-001:semantic-proof:001".to_string()],
                 observed: json!({
                     "semantic_proof_boundary": "session-001:semantic-proof:001",
@@ -963,7 +963,6 @@ fn coverage_oracles_are_failing_capable_not_presence_only() {
     for verdict in [
         queued_ingress_observed(&summary, &events),
         cancellation_observed(&summary, &events),
-        trigger_delivery_observed(&summary, &events),
         observer_reconnect_observed(&summary, &events),
         backend_failure_observed(&summary, &events),
         provider_mutation_rejected(&summary, &events),
@@ -984,7 +983,6 @@ fn coverage_oracles_are_failing_capable_not_presence_only() {
     for verdict in [
         queued_ingress_observed(&summary, &[]),
         cancellation_observed(&summary, &[]),
-        trigger_delivery_observed(&summary, &[]),
         observer_reconnect_observed(&summary, &[]),
         backend_failure_observed(&summary, &[]),
         provider_mutation_rejected(&summary, &[]),

@@ -260,7 +260,7 @@ fn contract_execution_boundary(
     BoundaryEvent::new(
         format!("{actor_alias}:contract-execution:{proof_id}"),
         actor_alias.to_string(),
-        BoundaryKind::Trigger,
+        BoundaryKind::ContractExecution,
         at,
         format!("contract-execution.{proof_id}"),
         json!({
@@ -479,12 +479,6 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
             ))
             .into();
         }
-        let question = call
-            .args
-            .get("question")
-            .and_then(Value::as_str)
-            .unwrap_or("answer")
-            .to_string();
         let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => {
@@ -493,23 +487,8 @@ impl lash_core::ToolProvider for ContractDurableInputTools {
             }
         };
         self.increment_attempt_count();
-        // The attempt body cannot append process events. It declares the
-        // announcement instead, and the runtime appends it when the call parks.
-        let announcement = lash_core::PendingAnnouncement::new(
-            "process.yield",
-            json!({
-                "type": "work.input_request.opened",
-                "request_id": "request-1",
-                "question": question,
-                "await_key": key.as_str(),
-            }),
-            "mock-input-request:request-1",
-        );
         self.send_key_result(Ok(key));
-        lash_core::ToolOutcome::pending(
-            lash_core::PendingCompletion::new().announcing(announcement),
-        )
-        .into()
+        lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new()).into()
     }
 }
 

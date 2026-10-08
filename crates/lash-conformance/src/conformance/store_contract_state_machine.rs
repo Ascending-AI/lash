@@ -9,7 +9,7 @@ use crate::ProcessEventLogTestSupport as _;
 use crate::{
     ProcessCompletionOutcome, ProcessExecutionWriteAuthority, ProcessExternalRef,
     ProcessObserverBy, ProcessRecord, ProcessStartOutcome, ProjectionWatermark,
-    apply_process_event_projection, fold_process_record, process_wake_batch_draft,
+    apply_process_event_projection, fold_process_record,
 };
 use generated_prefix::generated_prefix;
 use lash_sansio::{ProcessId, SessionId};
@@ -25,7 +25,7 @@ const SESSION_COUNT: u8 = 2;
 const DEFAULT_CASES: u32 = 32;
 const DEFAULT_RUNNER_SEED: u64 = 830;
 const MAX_OPS: usize = 48;
-const GENERATED_PREFIX_OPS: usize = 11;
+const GENERATED_PREFIX_OPS: usize = 8;
 const DEDICATED_LAW_SEED: u64 = 0xded1_ca7e;
 mod counterexamples;
 use counterexamples::persist_counterexample;
@@ -37,7 +37,6 @@ mod model_agreement;
 mod run_shape;
 use generator::generated_case;
 pub use generator::sample_store_contract_operations;
-use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use model_agreement::{assert_model_agreement, terminal_outcome_under_standing_cancel};
 /// Fresh process-registry and runtime-persistence handles for one generated case.
 pub struct StoreContractHandles {
@@ -48,67 +47,17 @@ pub struct StoreContractHandles {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum StoreContractOp {
-    Register {
-        process: u8,
-        wake_target: Option<u8>,
-    },
-    FirstStart {
-        process: u8,
-        owner: u8,
-        attempt: u8,
-    },
-    EnterWait {
-        process: u8,
-        stale: bool,
-    },
-    ClearWait {
-        process: u8,
-        stale: bool,
-    },
-    SetExternalRef {
-        process: u8,
-        value: u8,
-    },
-    Signal {
-        process: u8,
-        replay: u8,
-        value: u8,
-        wake: bool,
-        stale: bool,
-    },
-    CancelRequest {
-        process: u8,
-        requester: u8,
-    },
-    Terminal {
-        process: u8,
-        disposition: u8,
-    },
-    AddObserver {
-        process: u8,
-        session: u8,
-    },
-    RemoveObserver {
-        process: u8,
-        session: u8,
-    },
-    Retarget {
-        process: u8,
-        session: Option<u8>,
-    },
-    EnqueueWake {
-        process: u8,
-    },
-    ConsumeWake {
-        selection: u8,
-        highest_in_group: bool,
-    },
-    Prune {
-        watermark: bool,
-    },
-    CompactTombstones {
-        caught_up: bool,
-    },
+    Register { process: u8 },
+    FirstStart { process: u8, owner: u8, attempt: u8 },
+    EnterWait { process: u8, stale: bool },
+    ClearWait { process: u8, stale: bool },
+    SetExternalRef { process: u8, value: u8 },
+    CancelRequest { process: u8, requester: u8 },
+    Terminal { process: u8, disposition: u8 },
+    AddObserver { process: u8, session: u8 },
+    RemoveObserver { process: u8, session: u8 },
+    Prune { watermark: bool },
+    CompactTombstones { caught_up: bool },
 }
 
 /// Stateful driver for the shared generated store-contract operation language.
@@ -169,20 +118,10 @@ enum ProcessLifecycle {
 #[derive(Clone, Debug, Default)]
 struct ModelProcess {
     lifecycle: ProcessLifecycle,
-    wake_target: Option<SessionId>,
     observers: BTreeSet<SessionId>,
     lifecycle_replay_keys: BTreeSet<String>,
     current_authority: Option<ProcessExecutionWriteAuthority>,
     superseded_authorities: Vec<ProcessExecutionWriteAuthority>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct ExpectedQueuedWake {
-    wake: crate::ProcessWakeDelivery,
-    delivery_policy: DeliveryPolicy,
-    kind: crate::QueuedWorkKind,
-    authority: crate::QueuedWorkAuthority,
-    merge_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -191,8 +130,6 @@ struct ReferenceModel {
     /// run. A slot re-registered after its run was pruned names a new run.
     slot_ids: BTreeMap<u8, ProcessId>,
     processes: BTreeMap<ProcessId, ModelProcess>,
-    live_wakes: BTreeMap<(SessionId, ProcessId), BTreeMap<u64, ExpectedQueuedWake>>,
-    next_wake_sequence: BTreeMap<(SessionId, ProcessId), u64>,
     projection_cursor: ProcessChangeCursor,
     process_counts: ProcessCountConservation,
 }
@@ -336,14 +273,6 @@ where
             runtime.block_on(async {
                 let handles = make(case.seed, "prop-runtime-session".to_string()).await;
                 let shape = replay_case(handles, &case.operations).await?;
-                prop_assert!(
-                    shape[RunShapeCounter::ConsumesCommitted] > 0,
-                    "generated alphabet starvation: case committed no wake consumes"
-                );
-                prop_assert!(
-                    shape[RunShapeCounter::OutOfOrderStates] > 0,
-                    "generated alphabet starvation: case reached no out-of-order settlement state"
-                );
                 runner_shape_totals.add(&shape);
                 Ok(())
             })
@@ -452,20 +381,7 @@ where
         |handles| async move { assert_stale_authority_non_mutation(&handles.registry).await },
     )
     .await?;
-    assert_on_fresh_handles(
-        make,
-        seed,
-        &SessionId::from("law-high-water"),
-        |handles| async move { assert_enqueued_wake_high_water_safety(&handles.runtime).await },
-    )
-    .await?;
-    assert_on_fresh_handles(
-        make,
-        seed,
-        &SessionId::from("law-prune-wake"),
-        |handles| async move { assert_prune_reregister_wake_names_the_new_run(&handles).await },
-    )
-    .await?;
+
     assert_on_fresh_handles(
         make,
         seed,
@@ -516,7 +432,7 @@ fn session_id(index: u8) -> SessionId {
 }
 
 /// A generated process: an `Engine` input with its execution env.
-fn registration(label: &str, wake_target: Option<SessionId>) -> ProcessRegistration {
+fn registration(label: &str) -> ProcessRegistration {
     let registration = ProcessRegistration::new(
         ProcessInput::Engine {
             kind: "store-contract-property".to_string(),
@@ -527,25 +443,6 @@ fn registration(label: &str, wake_target: Option<SessionId>) -> ProcessRegistrat
     )
     .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()));
     registration
-        .with_extra_event_types([
-            ProcessEventType {
-                name: "property.signal".to_string(),
-                payload_schema: JsonSchema::any(),
-                semantics: ProcessEventSemanticsSpec::default(),
-            },
-            ProcessEventType {
-                name: "property.wake".to_string(),
-                payload_schema: JsonSchema::any(),
-                semantics: ProcessEventSemanticsSpec {
-                    wake: Some(ProcessWakeSpec {
-                        when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
-                        input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-                    }),
-                    ..ProcessEventSemanticsSpec::default()
-                },
-            },
-        ])
-        .with_wake_session_id(wake_target)
 }
 
 fn invocation_authority(
@@ -564,14 +461,12 @@ fn stale_authority(process_id: &ProcessId) -> ProcessExecutionWriteAuthority {
     invocation_authority(process_id, 250, 250)
 }
 
-fn wait_state(process_id: &ProcessId) -> WaitState {
+fn wait_state(_process_id: &ProcessId) -> WaitState {
     WaitState {
         since_ms: 1,
-        kind: WaitKind::Signal {
-            name: "property".to_string(),
-            event_type: "property.signal".to_string(),
-            key: format!("{process_id}:wait"),
-            ordinal: 1,
+        kind: WaitKind::Call {
+            call_id: lash_sansio::ToolCallId::fixture("store-call"),
+            tool_id: lash_sansio::ToolId::new("store_call"),
         },
     }
 }
@@ -588,16 +483,12 @@ async fn apply_operation(
 ) -> Result<(), String> {
     let event_sequences = EventSequenceStep::capture(model);
     match operation {
-        StoreContractOp::Register {
-            process,
-            wake_target,
-        } => {
+        StoreContractOp::Register { process } => {
             let slot = *process % PROCESS_COUNT;
-            let target = wake_target.map(session_id);
             let result = handles
                 .registry
                 .register_process(
-                    registration(&format!("prop-process-{slot}"), target.clone())
+                    registration(&format!("prop-process-{slot}"))
                         .with_start_key(Some(slot_start_key(slot))),
                 )
                 .await;
@@ -609,7 +500,6 @@ async fn apply_operation(
                 // is pruned the key starts a new run under a new id (ADR 0107).
                 if !entry.is_live() {
                     entry.install_fresh(record);
-                    entry.wake_target = target;
                     model.process_counts.record_spawn();
                     shape[RunShapeCounter::Spawns] =
                         shape[RunShapeCounter::Spawns].saturating_add(1);
@@ -717,58 +607,7 @@ async fn apply_operation(
                 expected.external_ref = Some(external_ref);
             }
         }
-        StoreContractOp::Signal {
-            process,
-            replay,
-            value,
-            wake,
-            stale,
-        } => {
-            let id = model.slot_id(*process);
-            let (event_type, payload) = if *wake {
-                ("property.wake", serde_json::json!({"wake_input": value}))
-            } else {
-                ("property.signal", serde_json::json!({"value": value}))
-            };
-            let request = ProcessEventAppendRequest::new(event_type, payload)
-                .with_replay_key(format!("{id}:property:{replay}"));
-            let before = registry_snapshot(&handles.registry, &id).await;
-            let must_reject = *stale && has_current_authority(model, &id);
-            let result = if *stale {
-                let authority = selected_authority(model, &id, true);
-                handles
-                    .registry
-                    .append_event_with_authority(&id, request, &authority)
-                    .await
-            } else if let Some(authority) = model
-                .processes
-                .get(&id)
-                .and_then(|process| process.current_authority.as_ref())
-            {
-                handles
-                    .registry
-                    .append_event_with_authority(&id, request, authority)
-                    .await
-            } else {
-                handles.registry.append_event(&id, request).await
-            };
-            assert_typed_stale_authority_rejection(&result, must_reject, &id, "append event")?;
-            assert_rejected_write_is_noop(
-                &handles.registry,
-                &id,
-                before,
-                result.is_err(),
-                "Replay-key idempotency / stale append",
-            )
-            .await?;
-            if let Ok(appended) = result
-                && let Some(expected) = model.process_mut(&id).expected_mut()
-            {
-                apply_process_event_projection(expected, &appended.event)
-                    .map_err(|error| error.to_string())?;
-                expected.last_event_sequence = appended.last_event_sequence;
-            }
-        }
+
         StoreContractOp::CancelRequest { process, requester } => {
             let id = model.slot_id(*process);
             if let Ok(process_id) = handles.registry.require_process_id(&id).await
@@ -866,84 +705,7 @@ async fn apply_operation(
                 }
             }
         }
-        StoreContractOp::Retarget { process, session } => {
-            let id = model.slot_id(*process);
-            let target = session.map(session_id);
-            if handles
-                .registry
-                .retarget_subscription(&id, target.as_deref())
-                .await
-                .is_ok()
-            {
-                let process = model.process_mut(&id);
-                if process.wake_target != target {
-                    process.wake_target = target.clone();
-                    event_sequences.advance_lifecycle(
-                        process,
-                        ProcessEventAppendRequest::subscription_retargeted(&id, target.as_deref()),
-                    );
-                }
-            }
-        }
-        StoreContractOp::EnqueueWake { process } => {
-            let process = model.slot_id(*process);
-            let key = (SessionId::from("prop-runtime-session"), process.clone());
-            let sequence = model.next_wake_sequence.entry(key.clone()).or_insert(1);
-            let wake = runtime_wake(&process, *sequence);
-            let draft = process_wake_batch_draft(wake.clone());
-            let receipt = handles
-                .runtime
-                .enqueue_queued_work(draft.clone())
-                .await
-                .map_err(|error| error.to_string())?;
-            if receipt.enqueue_seq == 0 {
-                return Err(format!(
-                    "Enqueued-wake high-water safety: fresh contiguous sequence {} for `{process}` was deduped",
-                    *sequence
-                ));
-            }
-            model.live_wakes.entry(key).or_default().insert(
-                *sequence,
-                ExpectedQueuedWake {
-                    wake,
-                    delivery_policy: draft.delivery_policy,
-                    kind: draft.kind(),
-                    authority: draft.authority,
-                    merge_key: draft.merge_key,
-                },
-            );
-            *sequence = sequence
-                .checked_add(1)
-                .expect("generated enqueue sequence must remain in range");
-            shape[RunShapeCounter::EnqueuesCommitted] =
-                shape[RunShapeCounter::EnqueuesCommitted].saturating_add(1);
-        }
-        StoreContractOp::ConsumeWake {
-            selection,
-            highest_in_group,
-        } => {
-            let Some((key, sequence)) = select_live_wake(model, *selection, *highest_in_group)
-            else {
-                return Ok(());
-            };
-            let lower_live = model
-                .live_wakes
-                .get(&key)
-                .is_some_and(|wakes| wakes.keys().any(|candidate| *candidate < sequence));
-            if consume_wake(handles.runtime.as_ref(), &key.1, sequence).await? {
-                let wakes = model
-                    .live_wakes
-                    .get_mut(&key)
-                    .expect("selected live wake group exists");
-                wakes.remove(&sequence);
-                shape[RunShapeCounter::ConsumesCommitted] =
-                    shape[RunShapeCounter::ConsumesCommitted].saturating_add(1);
-                if lower_live {
-                    shape[RunShapeCounter::OutOfOrderStates] =
-                        shape[RunShapeCounter::OutOfOrderStates].saturating_add(1);
-                }
-            }
-        }
+
         StoreContractOp::Prune { watermark } => {
             let cursor = cursor_after_full_relist_if_required(&handles.registry).await?;
             model.projection_cursor = cursor;
@@ -997,7 +759,7 @@ async fn apply_operation(
             };
             handles
                 .registry
-                .compact_process_tombstones(u64::MAX, watermark, None)
+                .compact_process_tombstones(u64::MAX, watermark)
                 .await
                 .map_err(|error| error.to_string())?;
         }
@@ -1047,27 +809,6 @@ fn assert_typed_stale_authority_rejection<T>(
         ));
     }
     Ok(())
-}
-
-fn select_live_wake(
-    model: &ReferenceModel,
-    selection: u8,
-    highest_in_group: bool,
-) -> Option<((SessionId, ProcessId), u64)> {
-    if highest_in_group
-        && let Some((key, wakes)) = model.live_wakes.iter().find(|(_, wakes)| wakes.len() > 1)
-    {
-        return wakes
-            .last_key_value()
-            .map(|(sequence, _)| (key.clone(), *sequence));
-    }
-    let live = model
-        .live_wakes
-        .iter()
-        .flat_map(|(key, wakes)| wakes.keys().map(|sequence| (key.clone(), *sequence)))
-        .collect::<Vec<_>>();
-    live.get(usize::from(selection) % live.len().max(1))
-        .cloned()
 }
 
 fn terminal_output(index: u8) -> ProcessAwaitOutput {
@@ -1161,13 +902,17 @@ async fn assert_replay_key_idempotency(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let id = registry
-        .register_process(registration("law-replay-key", None))
+        .register_process(registration("law-replay-key"))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
-    let request =
-        ProcessEventAppendRequest::new("property.signal", serde_json::json!({"value": 1}))
-            .with_replay_key("law-replay-key:stable");
+    let request = call_wait_event(
+        &id,
+        "store-contract",
+        "fixture",
+        serde_json::json!({"value": 1}),
+    )
+    .with_replay_key("law-replay-key:stable");
     let first = registry
         .append_event(&id, request.clone())
         .await
@@ -1194,8 +939,13 @@ async fn assert_replay_key_idempotency(
     let conflict = registry
         .append_event(
             &id,
-            ProcessEventAppendRequest::new("property.signal", serde_json::json!({"value": 2}))
-                .with_replay_key("law-replay-key:stable"),
+            call_wait_event(
+                &id,
+                "store-contract",
+                "fixture",
+                serde_json::json!({"value": 2}),
+            )
+            .with_replay_key("law-replay-key:stable"),
         )
         .await;
     prop_assert!(
@@ -1224,7 +974,7 @@ async fn assert_attempt_monotonicity(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let executed = registry
-        .register_process(registration("law-attempt-monotonicity", None))
+        .register_process(registration("law-attempt-monotonicity"))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1274,7 +1024,7 @@ async fn assert_stale_authority_non_mutation(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let id = registry
-        .register_process(registration("law-stale-authority", None))
+        .register_process(registration("law-stale-authority"))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1300,8 +1050,13 @@ async fn assert_stale_authority_non_mutation(
     let stale = registry
         .append_event_with_authority(
             &id,
-            ProcessEventAppendRequest::new("property.signal", serde_json::json!({"stale": true}))
-                .with_replay_key("law:stale"),
+            call_wait_event(
+                &id,
+                "store-contract",
+                "fixture",
+                serde_json::json!({"stale": true}),
+            )
+            .with_replay_key("law:stale"),
             &current,
         )
         .await;
@@ -1317,260 +1072,11 @@ async fn assert_stale_authority_non_mutation(
     Ok(())
 }
 
-async fn assert_enqueued_wake_high_water_safety(
-    runtime: &Arc<dyn RuntimeStore>,
-) -> Result<(), TestCaseError> {
-    let session = SessionId::from("law-high-water");
-    let process = crate::ProcessId::fixture("law-high-water-process");
-    // Removal is intentionally not required to be contiguous: a host cancel withdraws any open
-    // row. The law is that withdrawing a later sequence never removes an already-enqueued lower
-    // row.
-    let earlier = runtime
-        .enqueue_queued_work(process_wake_batch_draft(runtime_wake_for(
-            &session, &process, 1,
-        )))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let later = runtime
-        .enqueue_queued_work(process_wake_batch_draft(runtime_wake_for(
-            &session, &process, 2,
-        )))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    runtime
-        .cancel_queued_work_batch(&session, &later.batch_id)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .ok_or_else(|| {
-            TestCaseError::fail("Enqueued-wake high-water safety: later wake was not cancellable")
-        })?;
-    let after_later = runtime
-        .list_queued_work(&session)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(
-        after_later
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![earlier.batch_id.as_str()],
-        "Enqueued-wake high-water safety: cancelling sequence 2 removed or disturbed live sequence 1"
-    );
-
-    // The cancelled tombstone answers the redelivery.
-    let answered = runtime
-        .enqueue_queued_work_with_outcome(process_wake_batch_draft(runtime_wake_for(
-            &session, &process, 2,
-        )))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(
-        matches!(
-            &answered,
-            crate::QueuedWorkEnqueueOutcome::Existing(batch)
-                if batch.batch_id == later.batch_id && batch.terminal.is_some()
-        ),
-        "Enqueued-wake high-water safety: the redelivery must answer the cancelled tombstone: \
-         {answered:?}"
-    );
-
-    // A retry whose receiver row is still live is idempotent: the live row is the durable
-    // evidence that this exact semantic source was accepted. The retry's delivery metadata may
-    // differ; its process fact may not (ADR 0101 §8).
-    let mut changed = runtime_wake_for(&session, &process, 1);
-    changed.input = "a different process fact under the same sequence".to_string();
-    let conflict = runtime
-        .enqueue_queued_work_with_outcome(process_wake_batch_draft(changed))
-        .await;
-    prop_assert!(
-        matches!(
-            &conflict,
-            Err(StoreError::QueuedWorkSourceKeyConflict { existing_batch_id, .. })
-                if *existing_batch_id == earlier.batch_id
-        ),
-        "Enqueued-wake source key: a changed process fact must be a typed conflict: \
-         {conflict:?}"
-    );
-    let mut rewound = runtime_wake_for(&session, &process, 1);
-    rewound.created_at_ms = 2;
-    let retry = runtime
-        .enqueue_queued_work_with_outcome(process_wake_batch_draft(rewound))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let crate::QueuedWorkEnqueueOutcome::Existing(retried_batch) = retry else {
-        return Err(TestCaseError::fail(
-            "Enqueued-wake source key: live-row retry was not idempotent",
-        ));
-    };
-    prop_assert_eq!(
-        retried_batch.batch_id,
-        earlier.batch_id.clone(),
-        "Enqueued-wake source key: the live-row retry answered another batch"
-    );
-    let after_live_retry = runtime
-        .list_queued_work(&session)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert_eq!(
-        after_live_retry
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![earlier.batch_id.as_str()],
-        "Enqueued-wake source key: live-row absorption changed pending receiver work"
-    );
-
-    let head = runtime
-        .list_queued_work(&session)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            TestCaseError::fail(
-                "Enqueued-wake high-water safety: lower wake did not remain admissible",
-            )
-        })?;
-    // The wake leaves through a terminal transition: the host cancel raises
-    // the receiver floor exactly as a settled claim does (FIG-3545).
-    runtime
-        .cancel_queued_work_batch(&session, &head.batch_id)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .ok_or_else(|| TestCaseError::fail("Enqueued-wake high-water safety: head not open"))?;
-    prop_assert!(
-        runtime
-            .list_queued_work(&session)
-            .await
-            .map_err(|error| TestCaseError::fail(error.to_string()))?
-            .is_empty(),
-        "Enqueued-wake high-water safety: sequence 1 did not consume exactly once"
-    );
-    Ok(())
-}
-
-async fn assert_prune_reregister_wake_names_the_new_run(
-    handles: &StoreContractHandles,
-) -> Result<(), TestCaseError> {
-    let session = SessionId::from("law-prune-wake");
-    let start_key = crate::StartKey::for_host("law-prune-reregister-wake-process");
-    let process = handles
-        .registry
-        .register_process(
-            registration("law-prune-reregister-wake-process", Some(session.clone()))
-                .with_start_key(Some(start_key.clone())),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .id;
-    let original = handles
-        .registry
-        .append_event(
-            &process,
-            ProcessEventAppendRequest::new(
-                "property.wake",
-                serde_json::json!({"wake_input": "old incarnation"}),
-            )
-            .with_replay_key("law:prune-reregister-wake:old"),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .wake_delivery
-        .ok_or_else(|| TestCaseError::fail("old incarnation did not materialize a wake"))?;
-    handles
-        .runtime
-        .enqueue_queued_work(process_wake_batch_draft(original))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-
-    let head = handles
-        .runtime
-        .list_queued_work(&session)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .into_iter()
-        .next()
-        .ok_or_else(|| TestCaseError::fail("old-incarnation wake was not admissible"))?;
-    handles
-        .runtime
-        .cancel_queued_work_batch(&session, &head.batch_id)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .ok_or_else(|| TestCaseError::fail("old-incarnation wake was not open"))?;
-
-    handles
-        .registry
-        .complete_process(
-            &process,
-            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!("old incarnation done"),
-            )),
-            ProcessCompletionAuthority::workflow_key(&process),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    let (_, terminal_cursor) = handles
-        .registry
-        .processes_changed_since(ProcessChangeCursor::initial(), 1_000)
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    handles
-        .registry
-        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::UpTo(terminal_cursor))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    // The same start key after prune starts a new run under a new id: the
-    // pruned run's wakes can never be confused with the new run's (ADR 0107).
-    let restarted = handles
-        .registry
-        .register_process(
-            registration("law-prune-reregister-wake-process", Some(session.clone()))
-                .with_start_key(Some(start_key)),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .id;
-    prop_assert_ne!(
-        &restarted,
-        &process,
-        "prune/restart wake: the restarted run reused the pruned run's id"
-    );
-    let replacement = handles
-        .registry
-        .append_event(
-            &restarted,
-            ProcessEventAppendRequest::new(
-                "property.wake",
-                serde_json::json!({"wake_input": "new incarnation"}),
-            )
-            .with_replay_key("law:prune-reregister-wake:new"),
-        )
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?
-        .wake_delivery
-        .ok_or_else(|| TestCaseError::fail("new incarnation did not materialize a wake"))?;
-    prop_assert_eq!(
-        &replacement.process_id,
-        &restarted,
-        "prune/restart wake: the new run's wake names the new run"
-    );
-    let receipt = handles
-        .runtime
-        .enqueue_queued_work(process_wake_batch_draft(replacement))
-        .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    prop_assert!(
-        receipt.enqueue_seq > 0,
-        "prune/restart wake was suppressed instead of enqueued"
-    );
-    Ok(())
-}
-
 async fn assert_prune_tombstone_watermark_safety(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
     let live_id = registry
-        .register_process(registration("law-prune-live-must-survive", None))
+        .register_process(registration("law-prune-live-must-survive"))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1583,7 +1089,7 @@ async fn assert_prune_tombstone_watermark_safety(
         "Prune/tombstone/watermark safety: live process was pruned"
     );
     let eligible_id = registry
-        .register_process(registration("law-prune-watermark-eligible", None))
+        .register_process(registration("law-prune-watermark-eligible"))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1598,7 +1104,7 @@ async fn assert_prune_tombstone_watermark_safety(
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let id = registry
-        .register_process(registration("law-prune-watermark", None))
+        .register_process(registration("law-prune-watermark"))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .id;
@@ -1648,7 +1154,7 @@ async fn assert_prune_tombstone_watermark_safety(
         "Prune/tombstone/watermark safety: pruned id was indistinguishable from never-existing id"
     );
     registry
-        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(terminal_cursor), None)
+        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(terminal_cursor))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
@@ -1680,7 +1186,7 @@ async fn assert_prune_tombstone_watermark_safety(
         "Prune/tombstone/watermark safety: tombstone retained payload"
     );
     registry
-        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor), None)
+        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
@@ -1704,11 +1210,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
     let start_key = crate::StartKey::for_host("law-prune-reregister");
     let id = registry
         .register_process(
-            registration(
-                "law-prune-reregister",
-                Some(SessionId::from("law-prune-reregister-old")),
-            )
-            .with_start_key(Some(start_key.clone())),
+            registration("law-prune-reregister").with_start_key(Some(start_key.clone())),
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?
@@ -1716,8 +1218,10 @@ async fn assert_prune_reregister_registry_state_is_fresh(
     registry
         .append_event(
             &id,
-            ProcessEventAppendRequest::new(
-                "property.signal",
+            call_wait_event(
+                &id,
+                "store-contract",
+                "fixture",
                 serde_json::json!({"identity": "old"}),
             )
             .with_replay_key("law:prune-reregister:old"),
@@ -1755,13 +1259,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
 
     let fresh_base = registry
-        .register_process(
-            registration(
-                "law-prune-reregister",
-                Some(SessionId::from("law-prune-reregister-new")),
-            )
-            .with_start_key(Some(start_key)),
-        )
+        .register_process(registration("law-prune-reregister").with_start_key(Some(start_key)))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     let fresh_id = fresh_base.id.clone();
@@ -1803,7 +1301,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
     );
 
     let compacted = registry
-        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor), None)
+        .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert_eq!(
@@ -1816,55 +1314,4 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         "Prune/restart registry state: compacting the stale tombstone removed the restarted run"
     );
     Ok(())
-}
-
-fn runtime_wake(process_id: &ProcessId, sequence: u64) -> ProcessWakeDelivery {
-    runtime_wake_for(
-        &SessionId::from("prop-runtime-session"),
-        process_id,
-        sequence,
-    )
-}
-fn runtime_wake_for(
-    session_id: &SessionId,
-    process_id: &ProcessId,
-    sequence: u64,
-) -> ProcessWakeDelivery {
-    ProcessWakeDelivery {
-        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
-            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
-        )),
-        target_session_id: session_id.clone(),
-        process_id: process_id.clone(),
-        sequence,
-        event_type: "property.wake".to_string(),
-        process_caused_by: None,
-        authority: crate::QueuedWorkAuthority::default(),
-        input: format!("wake-{sequence}"),
-        created_at_ms: 1,
-        trace_cause: Default::default(),
-    }
-}
-
-async fn consume_wake(
-    runtime: &dyn RuntimeStore,
-    process_id: &ProcessId,
-    sequence: u64,
-) -> Result<bool, String> {
-    let session = SessionId::from("prop-runtime-session");
-    let queued = runtime
-        .list_queued_work(&session)
-        .await
-        .map_err(|error| error.to_string())?;
-    let Some(batch) = queued.iter().find(|batch| matches!(
-        &batch.payload, QueuedWorkPayload::ProcessWake { wake } if wake.process_id == process_id && wake.sequence == sequence
-    )) else { return Ok(false); };
-    // A wake leaves the lane through a terminal transition. The one a store
-    // law can drive without a session actor is the host cancel, which raises
-    // the same receiver floor a settled claim does (FIG-3545).
-    runtime
-        .cancel_queued_work_batch(&session, &batch.batch_id)
-        .await
-        .map(|cancelled| cancelled.is_some())
-        .map_err(|error| error.to_string())
 }

@@ -56,7 +56,6 @@ pub struct AbstractSessionView {
     pub observer_reconnects: usize,
     pub queued_ingress_count: usize,
     pub cancellation_count: usize,
-    pub trigger_count: usize,
     pub backend_failure_count: usize,
     pub provider_mutation_count: usize,
     pub durable_effect_keys: Vec<String>,

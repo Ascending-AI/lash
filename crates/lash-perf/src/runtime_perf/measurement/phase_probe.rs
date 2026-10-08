@@ -363,7 +363,6 @@ async fn run_once_inner(
         | RuntimePerfScenario::RlmToolCalls
         | RuntimePerfScenario::RlmAsyncToolCompletion
         | RuntimePerfScenario::RlmProcessHandles
-        | RuntimePerfScenario::RlmTriggerMailPipeline
         | RuntimePerfScenario::RlmProcessAsyncToolCompletion
         | RuntimePerfScenario::RlmSubagentSpawn
         | RuntimePerfScenario::RlmLlmQuery
@@ -415,11 +414,8 @@ async fn run_once_inner(
             } else {
                 None
             };
-            let lashlang_trace_root = if matches!(
-                scenario,
-                RuntimePerfScenario::RlmTriggerMailPipeline
-                    | RuntimePerfScenario::RlmObliqueStackMix
-            ) {
+            let lashlang_trace_root = if matches!(scenario, RuntimePerfScenario::RlmObliqueStackMix)
+            {
                 Some(make_temp_bench_dir(
                     format!("lash-runtime-perf-{}", scenario.name()).as_str(),
                 )?)
@@ -575,11 +571,6 @@ async fn run_once_inner(
             );
         }
 
-        let trigger_end_to_end = matches!(scenario, RuntimePerfScenario::RlmTriggerMailPipeline);
-        if trigger_end_to_end {
-            phase_probe.defer_named_close("trigger.occurrence_to_delivery");
-        }
-
         if let Some(variant) = catalog_variant {
             let (manifest_count, rendered_bytes) = runtime.tool_catalog_metrics().await?;
             extra_counters.lock_recover().insert(
@@ -601,10 +592,10 @@ async fn run_once_inner(
         // The run closure moves the turn input in, so pre-bind shared
         // references for everything else it touches; the delivery
         // observation crosses into the await span through the Mutex.
-        let trigger_delivery_observation = std::sync::Mutex::new(None);
+
         let runtime_ref = &runtime;
         let counters_ref = &extra_counters;
-        let observation_ref = &trigger_delivery_observation;
+
         let probe_ref = &phase_probe;
         let deep_session_ref = &deep_session;
         executed
@@ -613,7 +604,7 @@ async fn run_once_inner(
                 async move {
                     let runtime = runtime_ref;
                     let extra_counters = counters_ref;
-                    let trigger_delivery_observation = observation_ref;
+
                     let phase_probe = probe_ref;
                     let cancel = CancellationToken::new();
                     let turn = if matches!(scenario, RuntimePerfScenario::ScopedEffects) {
@@ -699,20 +690,6 @@ async fn run_once_inner(
                             )),
                         )
                         .await
-                    } else if trigger_end_to_end {
-                        let (turn, observation) = tokio::join!(
-                            runtime_perf_timed(
-                                scenario,
-                                turn_index,
-                                "run_turn",
-                                Some(cancel.clone()),
-                                runtime.run_turn(turn_input, cancel),
-                            ),
-                            runtime.observe_trigger_delivery_terminals(),
-                        );
-                        phase_probe.close_deferred_named("trigger.occurrence_to_delivery");
-                        *trigger_delivery_observation.lock_recover() = Some(observation?);
-                        turn
                     } else {
                         runtime_perf_timed(
                             scenario,
@@ -784,24 +761,7 @@ async fn run_once_inner(
                             turn_index + 1
                         )
                     })?;
-                    if trigger_end_to_end {
-                        let observation = trigger_delivery_observation
-                            .lock_recover()
-                            .take()
-                            .context("trigger delivery observation was not collected")?;
-                        extra_counters.lock_recover().insert(
-                            "trigger.delivery_process_count".to_string(),
-                            observation.process_count,
-                        );
-                        extra_counters.lock_recover().insert(
-                            "trigger.delivery_durable_claim_count".to_string(),
-                            observation.durable_claim_count,
-                        );
-                        extra_counters.lock_recover().insert(
-                            "trigger.delivery_terminal_count".to_string(),
-                            observation.terminal_count,
-                        );
-                    }
+
                     Ok(())
                 },
                 |_, _, tail| {

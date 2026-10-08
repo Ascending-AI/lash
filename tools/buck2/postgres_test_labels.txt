@@ -34,7 +34,6 @@
 //crates/lash-durable-test:tool_crash_laws__test
 //crates/lash-durable-test:tool_group_pool_width__test
 //crates/lash-durable-test:tool_surface_laws__test
-//crates/lash-durable-test:trigger_start_proof__test
 //crates/lash-durable-test:turn_callback_crash_laws__test
 //crates/lash-durable-test:turn_execution_state__test
 //crates/lash-durable-test:turn_phases__test

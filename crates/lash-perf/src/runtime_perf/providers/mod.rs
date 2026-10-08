@@ -15,9 +15,8 @@ use lash_core::llm::types::{
 use lash_core::testing::TestProvider;
 use lash_core::{
     Resolution, ToolAttemptOutcome, ToolContract, ToolDefinition, ToolManifest, ToolOutcome,
-    ToolOutcomeDone, ToolOutputContract, ToolProvider, TriggerOccurrenceRequest,
-    facade_support::DirectJsonSchema, facade_support::DirectRequest,
-    facade_support::empty_trigger_source_key,
+    ToolOutcomeDone, ToolOutputContract, ToolProvider, facade_support::DirectJsonSchema,
+    facade_support::DirectRequest,
 };
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use lash_sansio::sync::MutexExt;
@@ -282,6 +281,6 @@ mod tests;
 pub(crate) use profiles::benchmark_stream_profile;
 use profiles::{benchmark_stream_profile_for_request, latest_request_item_contains};
 pub(crate) use tools::{
-    BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE, BenchmarkLargeToolCatalog, BenchmarkObliqueTools,
-    BenchmarkToolCatalogObservation, BenchmarkToolCatalogObserver, BenchmarkWorkbenchMailTool,
+    BenchmarkLargeToolCatalog, BenchmarkObliqueTools, BenchmarkToolCatalogObservation,
+    BenchmarkToolCatalogObserver,
 };

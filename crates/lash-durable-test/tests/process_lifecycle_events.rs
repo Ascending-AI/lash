@@ -5,9 +5,6 @@
 //! whose own node runs the processes. Work enters only through the core's
 //! process API.
 //!
-//! - **waiting:** a process parked on a signal is recorded `waiting` on it,
-//!   once however many unrelated events reach it, and resumes when it asks
-//!   for anything else.
 //! - **effects:** each committed step outcome that names an effect node is
 //!   one `process.effect_outcome` event; one past the per-node cap is
 //!   counted in the `process.effect_omissions` record its terminal carries.
@@ -366,17 +363,7 @@ fn environment() -> lash_core::ProcessExecutionEnvSpec {
     environment
 }
 
-fn signal_type(name: &str) -> lash_core::ProcessEventType {
-    lash_core::ProcessEventType {
-        name: format!("signal.{name}"),
-        payload_schema: lash_sansio::JsonSchema::admit(serde_json::json!({ "type": "object" }))
-            .expect("the signal's schema"),
-        semantics: Default::default(),
-    }
-}
-
-/// Start a detached process of the scripted engine, taking the signals
-/// `go` and `other`.
+/// Start a detached process of the scripted engine.
 async fn start(core: &lash::LashCore) -> lash_core::ProcessId {
     let env_ref = core
         .host_artifacts()
@@ -391,60 +378,12 @@ async fn start(core: &lash::LashCore) -> lash_core::ProcessId {
         lash_core::ProcessOriginator::host(),
         lash_core::LifetimeDecision::Detached,
     )
-    .with_env_ref(env_ref)
-    .with_event_types([signal_type("go"), signal_type("other")]);
+    .with_env_ref(env_ref);
     core.processes()
         .start(request, core.effect_host())
         .await
         .expect("the process starts")
         .process_id
-}
-
-async fn signal(core: &lash::LashCore, process: &lash_core::ProcessId, name: &str, id: &str) {
-    let identity = lash_core::ProcessSignalIdentity::new(process.clone(), name, id)
-        .expect("a signal identity");
-    core.processes()
-        .signal(
-            lash_core::ProcessSignal::new(identity, serde_json::json!({})),
-            core.effect_host(),
-        )
-        .await
-        .expect("the signal is delivered");
-}
-
-/// Wait until `process`'s record shows it waiting on the signal wait of
-/// `ordinal`, as the host reads it, and answer that wait.
-async fn waiting(
-    core: &lash::LashCore,
-    backend: &lash::Backend,
-    process: &lash_core::ProcessId,
-    ordinal: u64,
-) -> lash_core::WaitState {
-    tokio::time::timeout(Duration::from_secs(60), async {
-        loop {
-            let observed = core
-                .processes()
-                .get(process)
-                .await
-                .expect("the process is read")
-                .expect("the process is known");
-            let record = backend
-                .process_registry()
-                .get_process(process)
-                .await
-                .expect("the record is read")
-                .expect("the record is known");
-            if observed.lifecycle == lash_core::ProcessStatus::Waiting
-                && let Some(wait) = record.wait()
-                && matches!(&wait.kind, lash_core::WaitKind::Signal { ordinal: at, .. } if *at == ordinal)
-            {
-                return wait.clone();
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("the process waits within a minute")
 }
 
 async fn ended(core: &lash::LashCore, process: &lash_core::ProcessId) {
@@ -503,93 +442,11 @@ fn of_type<'a>(
 ) -> Vec<&'a lash::process::ProcessEvent> {
     events
         .iter()
-        .filter(|event| event.event_type == event_type)
+        .filter(|event| event.fact.event_type() == event_type)
         .collect()
 }
 
 // --- waiting ----------------------------------------------------------------------
-
-/// Waits on `go`; an unrelated signal leaves it waiting; the first `go`
-/// runs a write, then it waits on `go` again; the second ends it.
-fn waiting_advance(
-    state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
-    let wait = || lash_core::EngineAction::AwaitSignal {
-        name: "go".to_owned(),
-    };
-    match event {
-        lash_core::EngineEvent::Started { .. } => wait(),
-        lash_core::EngineEvent::Signal(signal) if signal.identity.signal_name() == "go" => {
-            if state.is_null() {
-                *state = serde_json::json!("wrote");
-                write("write", 1, None)
-            } else {
-                answer(serde_json::json!("done"))
-            }
-        }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => wait(),
-    }
-}
-
-/// A process parked on a signal is observed waiting on it, as its first
-/// wait on that name; an unrelated signal leaves its one wait standing; a
-/// transition that asks for anything else resumes it, and its next wait on
-/// the name is the second. The host's sink hears the whole log, once.
-async fn a_process_waiting_on_a_signal_is_observed_waiting_until_it_resumes(tier: Tier) {
-    let (stores, _keep) = stores(tier).await;
-    let world = Arc::new(World::default());
-    let heard = Heard::default();
-    let (backend, core) = core(&stores, waiting_advance, &world, &heard, "waiting");
-    let process = start(&core).await;
-
-    let first = waiting(&core, &backend, &process, 1).await;
-    let lash_core::WaitKind::Signal {
-        name,
-        event_type,
-        key,
-        ..
-    } = &first.kind
-    else {
-        panic!("expected a signal wait")
-    };
-    assert_eq!(name, "go");
-    assert_eq!(event_type, "signal.go");
-    assert_eq!(
-        key,
-        &lash_core::runtime::process_signal_wait_key(&process, "go", 1)
-    );
-
-    signal(&core, &process, "other", "other-1").await;
-    signal(&core, &process, "go", "go-1").await;
-    waiting(&core, &backend, &process, 2).await;
-    signal(&core, &process, "go", "go-2").await;
-    ended(&core, &process).await;
-
-    let events = heard_the_log(&heard, &backend, &process).await;
-    let waits: Vec<u64> = of_type(&events, "process.waiting")
-        .into_iter()
-        .map(|event| {
-            event.payload["wait"]["kind"]["ordinal"]
-                .as_u64()
-                .expect("a signal wait's ordinal")
-        })
-        .collect();
-    assert_eq!(
-        waits,
-        vec![1, 2],
-        "one wait per signal wait, however many events reached it: {events:#?}"
-    );
-    assert_eq!(
-        of_type(&events, "process.resumed").len(),
-        1,
-        "the write resumed the first wait; the terminal ended the second"
-    );
-    assert_eq!(world.writes.lock().unwrap().len(), 1);
-}
-
-on_every_tier!(a_process_waiting_on_a_signal_is_observed_waiting_until_it_resumes);
 
 // --- effects ----------------------------------------------------------------------
 
@@ -635,7 +492,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
         of_type(&events, lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
             .into_iter()
             .map(|event| {
-                lash_core::ProcessEffectOccurrence::decode(event.payload.clone(), fleet)
+                lash_core::ProcessEffectOccurrence::decode(event.fact.payload(), fleet)
                     .expect("an effect outcome decodes")
             })
             .collect();
@@ -656,7 +513,7 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
     assert_eq!(omitted.nodes[NODE].success, 1);
     assert_eq!(omitted.nodes[NODE].total(), 1);
     let terminal = events.last().expect("the log ends");
-    assert_eq!(terminal.event_type, "process.completed");
+    assert_eq!(terminal.fact.event_type(), "process.completed");
     assert_eq!(
         omissions[0].sequence + 1,
         terminal.sequence,
@@ -668,22 +525,6 @@ async fn each_committed_effect_is_one_effect_outcome_event(tier: Tier) {
 on_every_tier!(each_committed_effect_is_one_effect_outcome_event);
 
 // --- publication across commits and cuts -------------------------------------------
-
-/// Waits on `go` and ends on it.
-fn takeover_advance(
-    _state: &mut serde_json::Value,
-    event: lash_core::EngineEvent,
-) -> lash_core::EngineAction {
-    match event {
-        lash_core::EngineEvent::Signal(signal) if signal.identity.signal_name() == "go" => {
-            answer(serde_json::json!("done"))
-        }
-        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
-        _ => lash_core::EngineAction::AwaitSignal {
-            name: "go".to_owned(),
-        },
-    }
-}
 
 /// The host's half of a step: these laws' processes ask for none.
 struct NoSteps;
@@ -746,16 +587,17 @@ struct Fleet {
 }
 
 impl Fleet {
-    async fn new(script: lash_durable_test::Script) -> Self {
+    async fn new(
+        script: lash_durable_test::Script,
+        advance: fn(&mut serde_json::Value, lash_core::EngineEvent) -> lash_core::EngineAction,
+    ) -> Self {
         let clock = lash_durable_test::SimClock::new();
         let stores = sim::memory(Arc::clone(&clock)).await;
         let database: Arc<dyn lash_durable::DurableStore> = Arc::new(stores.durable_store());
         let backend = lash_core_execution::Backend::assemble(lash_core_execution::BackendParts {
             stores: Arc::new(stores),
             settings: lash_core_execution::DurableSettings::default(),
-            engines: vec![Arc::new(ScriptEngine {
-                advance: takeover_advance,
-            })],
+            engines: vec![Arc::new(ScriptEngine { advance })],
             providers: Arc::new(lash_core_execution::NoProjectionProviders),
             formats: Vec::new(),
         })
@@ -811,8 +653,7 @@ impl Fleet {
         (watched, registration)
     }
 
-    /// Register a detached process of the scripted engine, taking the
-    /// signal `go`.
+    /// Register a detached process of the scripted engine.
     async fn register(&self) -> lash_core::ProcessId {
         let registration = lash_core::ProcessRegistration::new(
             lash_core::ProcessInput::Engine {
@@ -824,8 +665,7 @@ impl Fleet {
         )
         .with_execution_env_ref(Some(
             lash_core_execution::testing::process_execution_env_fixture_ref(),
-        ))
-        .with_extra_event_types([signal_type("go")]);
+        ));
         self.backend
             .process_registry()
             .register_process(registration)
@@ -854,7 +694,7 @@ impl Fleet {
         self.events(process)
             .await
             .into_iter()
-            .map(|event| event.event_type)
+            .map(|event| event.fact.event_type().to_owned())
             .collect()
     }
 
@@ -901,27 +741,11 @@ impl Fleet {
     }
 }
 
-/// `go` from a host, through its node's `registry`.
-async fn go(registry: &Arc<dyn lash_core::ProcessRegistry>, process: &lash_core::ProcessId) {
-    let identity =
-        lash_core::ProcessSignalIdentity::new(process.clone(), "go", "go-1").expect("an identity");
-    registry
-        .append_event(
-            process,
-            lash_core::ProcessSignal::new(identity, serde_json::json!({})).append_request(),
-        )
-        .await
-        .expect("the signal is admitted");
-}
-
-/// A host's signal append holds its node's publication from before its
-/// append until after the woken actor committed the terminal the signal
-/// ends the process with; the actor's own publication waits behind it.
-/// The host's sink hears each logged event once, in sequence order: the
-/// two publishers share one mark, which the terminal does not drop
-/// (FIG-5396).
+/// Host cancellation holds publication across the actor's terminal commit.
+/// Both publishers share one mark, so every event arrives once in log order
+/// even after the terminal is committed (FIG-5396).
 async fn a_host_append_held_across_the_terminal_commit_publishes_each_event_once() {
-    let fleet = Fleet::new(lash_durable_test::Script::new()).await;
+    let fleet = Fleet::new(lash_durable_test::Script::new(), publication_idle).await;
     let faults =
         lash_core_execution::runtime::ProcessRegistryFaults::new(fleet.backend.process_registry());
     let heard = Heard::default();
@@ -936,19 +760,29 @@ async fn a_host_append_held_across_the_terminal_commit_publishes_each_event_once
         .await;
 
     let held = faults.pause_next_event_page();
-    let signalled = tokio::spawn({
+    let requested = tokio::spawn({
         let registry = Arc::clone(watched.registry());
         let process = process.clone();
-        async move { go(&registry, &process).await }
+        async move {
+            registry
+                .request_process_cancel(
+                    &process,
+                    lash_core::CancelOrigin::OperatorRequested,
+                    "publication-host".to_owned(),
+                    None,
+                )
+                .await
+                .expect("host cancellation is admitted");
+        }
     });
     held.wait_until_validated().await;
     fleet
-        .until("the woken actor commits the terminal", || async {
+        .until("the cancelled actor commits the terminal", || async {
             fleet.ended(&process).await
         })
         .await;
     held.resume();
-    signalled.await.expect("the host's signal task");
+    requested.await.expect("the host cancellation task");
     fleet
         .until("the ended process released", || async {
             fleet.actor_state(&process).await == Some(lash_durable::ActorState::Terminal)
@@ -957,7 +791,7 @@ async fn a_host_append_held_across_the_terminal_commit_publishes_each_event_once
 
     assert_eq!(
         fleet.types(&process).await,
-        ["process.waiting", "signal.go", "process.completed"]
+        ["process.cancel_requested", "process.cancelled"]
     );
     let logged = fleet.log(&process).await;
     assert_eq!(
@@ -973,28 +807,24 @@ async fn a_host_append_held_across_the_terminal_commit_publishes_each_event_once
     a_host_append_held_across_the_terminal_commit_publishes_each_event_once().await;
 }
 
-/// A's first transition commits its wait, appending `process.waiting`,
-/// and A dies before it publishes anything. B takes the process over and
-/// publishes from the durable publication mark, not the log's end: B's host
-/// hears the wait A committed, then the rest, each
-/// once, in order, and each by the `(process, sequence)` the log holds it
-/// under (FIG-5396).
+/// A dies after committing a terminal and before publishing it. B takes over
+/// and publishes that durable event once with its logged identity (FIG-5396).
 async fn a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_owners_events() {
     let script = lash_durable_test::Script::new();
     script.cut_on(
         "a",
-        lash_durable::CommitLabel::PROCESS_ADVANCE,
+        lash_durable::CommitLabel::PROCESS_TERMINAL,
         1,
         lash_durable_test::Fault::CommitThenAbort,
     );
-    let fleet = Fleet::new(script).await;
+    let fleet = Fleet::new(script, publication_terminal).await;
     let (a_heard, b_heard) = (Heard::default(), Heard::default());
     let (_a, _a_sink) = fleet.host("a", fleet.backend.process_registry(), &a_heard);
-    let (b, _b_sink) = fleet.host("b", fleet.backend.process_registry(), &b_heard);
+    let (_b, _b_sink) = fleet.host("b", fleet.backend.process_registry(), &b_heard);
     let process = fleet.register().await;
     fleet.nodes.start("a");
     fleet
-        .until("A commits its wait and dies", || async {
+        .until("A commits its terminal and dies", || async {
             !fleet.nodes.script().cuts().is_empty()
         })
         .await;
@@ -1002,7 +832,11 @@ async fn a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_own
         a_heard.sequences(&process).is_empty(),
         "A died before it published"
     );
-    assert_eq!(fleet.types(&process).await, ["process.waiting"], "A's wait");
+    assert_eq!(
+        fleet.types(&process).await,
+        ["process.completed"],
+        "A's terminal"
+    );
     let committed = fleet.log(&process).await;
 
     fleet.nodes.start("b");
@@ -1011,17 +845,13 @@ async fn a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_own
             b_heard.sequences(&process).starts_with(&committed)
         })
         .await;
-    go(b.registry(), &process).await;
     fleet
         .until("the ended process released", || async {
             fleet.actor_state(&process).await == Some(lash_durable::ActorState::Terminal)
         })
         .await;
 
-    assert_eq!(
-        fleet.types(&process).await,
-        ["process.waiting", "signal.go", "process.completed"]
-    );
+    assert_eq!(fleet.types(&process).await, ["process.completed"]);
     let logged = fleet.log(&process).await;
     assert_eq!(
         b_heard.sequences(&process),
@@ -1032,8 +862,12 @@ async fn a_takeover_after_a_cut_between_commit_and_publish_delivers_the_dead_own
     let heard = b_heard.0.lock().unwrap().clone();
     for (event, logged) in heard.iter().zip(&log) {
         assert_eq!(
-            (&event.process_id, event.sequence, &event.event_type),
-            (&logged.process_id, logged.sequence, &logged.event_type),
+            (&event.process_id, event.sequence, &event.fact.event_type()),
+            (
+                &logged.process_id,
+                logged.sequence,
+                &logged.fact.event_type()
+            ),
             "a heard event is the logged event of its (process, sequence)"
         );
     }
@@ -1296,3 +1130,20 @@ async fn a_deferred_call_survives_takeover_without_duplicate_publication(tier: T
     second.shutdown().await.unwrap();
 }
 on_every_tier!(a_deferred_call_survives_takeover_without_duplicate_publication);
+
+fn publication_idle(
+    _state: &mut serde_json::Value,
+    event: lash_core::EngineEvent,
+) -> lash_core::EngineAction {
+    match event {
+        lash_core::EngineEvent::Cancelled { origin, .. } => cancelled(origin),
+        _ => lash_core::EngineAction::Idle,
+    }
+}
+
+fn publication_terminal(
+    _state: &mut serde_json::Value,
+    _event: lash_core::EngineEvent,
+) -> lash_core::EngineAction {
+    answer(serde_json::json!("done"))
+}

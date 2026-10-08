@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use super::process_registry::{plain_event_type, registration};
+use super::process_registry::registration;
 use super::*;
 use pretty_assertions::assert_eq;
 
@@ -140,10 +140,7 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
         writer_handles.push(crate::task::spawn(async move {
             writer_start.wait().await;
             let process_id = writer_registry
-                .register_process(
-                    registration(&label)
-                        .with_extra_event_types([plain_event_type(MUTATION_EVENT_TYPE)]),
-                )
+                .register_process(registration(&label))
                 .await
                 .expect("concurrent writer register")
                 .id;
@@ -157,8 +154,10 @@ pub async fn process_change_feed_never_misses_concurrent_terminal_writers(
             writer_registry
                 .append_event(
                     &process_id,
-                    ProcessEventAppendRequest::new(
-                        MUTATION_EVENT_TYPE,
+                    call_wait_event(
+                        &process_id,
+                        "concurrent-mutation",
+                        &writer_index.to_string(),
                         serde_json::json!({ "writer": writer_index }),
                     ),
                 )

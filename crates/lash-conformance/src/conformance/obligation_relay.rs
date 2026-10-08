@@ -22,7 +22,6 @@ use std::time::Duration;
 use lash_core::ClockWallTime as _;
 use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupAuthorities, ArtifactCleanupPorts, ArtifactCleanupRelay, RetainedStart,
-    SubscriptionRevisionStanding,
 };
 use lash_core::runtime::obligations::relay::{
     DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
@@ -151,13 +150,6 @@ impl ArtifactCleanupAuthorities for NoGuardAuthorities {
         _key: &crate::StartKey,
     ) -> Result<Option<RetainedStart>, String> {
         unreachable!("a host pin has no retained start")
-    }
-
-    async fn subscription_revision(
-        &self,
-        _revision: &crate::SubscriptionRevisionId,
-    ) -> Result<SubscriptionRevisionStanding, String> {
-        unreachable!("a host pin has no subscription revision")
     }
 }
 

@@ -61,8 +61,7 @@ pub enum TurnScript {
     /// [`Self::Cell`], whose operation's first body never returns: the host
     /// kills the node running it there and restarts it.
     CellKilled,
-    /// A round of two `Once` tools with store-local effects: one starts a
-    /// process, the other signals the session's target process.
+    /// A `Once` tool with a store-local process start.
     Effects,
     /// A turn behind the facade whose every model call composes plugin
     /// prompt sections ([`super::prompts`]).
@@ -159,19 +158,15 @@ pub enum Tool {
     Hang,
     /// A `Once` call that starts a process: a store-local effect.
     Spawn,
-    /// A `Once` call that signals the session's target process: a
-    /// store-local effect.
-    Poke,
 }
 
 impl Tool {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 5] = [
         Self::WriteSlow,
         Self::WriteNow,
         Self::Flaky,
         Self::Hang,
         Self::Spawn,
-        Self::Poke,
     ];
 
     /// The tool's name.
@@ -183,7 +178,6 @@ impl Tool {
             Self::Flaky => "flaky",
             Self::Hang => "hang",
             Self::Spawn => "spawn",
-            Self::Poke => "poke",
         }
     }
 
@@ -195,9 +189,7 @@ impl Tool {
     #[must_use]
     pub fn policy(self) -> ExecutionPolicy {
         match self {
-            Self::WriteSlow | Self::WriteNow | Self::Hang | Self::Spawn | Self::Poke => {
-                ExecutionPolicy::Once
-            }
+            Self::WriteSlow | Self::WriteNow | Self::Hang | Self::Spawn => ExecutionPolicy::Once,
             Self::Flaky => {
                 ExecutionPolicy::repeatable(NonZeroU32::MIN.saturating_add(2), 100, 1_000)
             }
@@ -648,7 +640,7 @@ impl TurnDrive for SimDrive {
             | TurnScript::Pressure => &[],
             TurnScript::Round => &[Tool::WriteSlow, Tool::Flaky, Tool::WriteNow],
             TurnScript::Hang => &[Tool::Hang],
-            TurnScript::Effects => &[Tool::Spawn, Tool::Poke],
+            TurnScript::Effects => &[Tool::Spawn],
         };
         let parts = if !tools.is_empty() {
             tools
@@ -871,19 +863,7 @@ impl RoundTools for Catalog {
                             return refused(&opener, &error);
                         }
                     },
-                    Tool::Poke => {
-                        let staged = match world.target(&session) {
-                            Some(target) => super::effects::signal(&world, &target, &call).await,
-                            None => Err(format!("session {session} has no target")),
-                        };
-                        match staged {
-                            Ok(staged) => effects = staged,
-                            Err(error) => {
-                                world.note(format!("effect.refused {error}"));
-                                return refused(&opener, &error);
-                            }
-                        }
-                    }
+
                     Tool::WriteNow | Tool::Flaky => {}
                 }
                 let output = turn_output(&opener, format!("{}#{attempt}", tool.name()));

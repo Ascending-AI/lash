@@ -243,13 +243,7 @@ pub fn operational_coverage(
     {
         missing.push("queueing inputs");
     }
-    if !summary
-        .sessions
-        .iter()
-        .any(|session| session.trigger_count > 0)
-    {
-        missing.push("triggers");
-    }
+
     if !summary
         .sessions
         .iter()
@@ -330,7 +324,7 @@ pub fn operational_coverage(
     if missing.is_empty() {
         OracleVerdict::passed(
             OPERATIONAL_COVERAGE_ORACLE,
-            "generated DST trace hit queueing, triggers, cancellation, observer reconnects, provider failure/mutation, tool/exec, durable effect, backend choice, retry, and duplicate cases",
+            "generated DST trace hit queueing, cancellation, observer reconnects, provider failure/mutation, tool/exec, durable effect, backend choice, retry, and duplicate cases",
         )
     } else {
         OracleVerdict::failed(
@@ -354,9 +348,7 @@ pub fn state_machine_semantic_invariants(
     if !cancellation_terminalizes_pending_input(events) {
         missing.push("cancellation terminalizes a pending queued input");
     }
-    if !trigger_wakeup_route_semantics(events) {
-        missing.push("trigger wakeup routes through TriggerStore reservation");
-    }
+
     if !backend_fault_classification_semantics(events) {
         missing.push("production backend fault classification");
     }
@@ -370,7 +362,7 @@ pub fn state_machine_semantic_invariants(
     if missing.is_empty() {
         OracleVerdict::passed(
             STATE_MACHINE_SEMANTIC_INVARIANTS_ORACLE,
-            "queued input, cancellation, trigger wakeup, retry terminalization, duplicate delivery/replay, and protocol terminal-state invariants held",
+            "queued input, cancellation, retry terminalization, duplicate delivery/replay, and protocol terminal-state invariants held",
         )
     } else {
         OracleVerdict::failed(

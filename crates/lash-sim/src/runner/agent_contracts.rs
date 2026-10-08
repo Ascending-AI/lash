@@ -1237,12 +1237,12 @@ async fn agent_contract_process_event_facts(
                 unreachable!("full process event query returned a lite page");
             };
             for event in page_events {
-                let event_type = event.event_type;
+                let event_type = event.fact.event_type().to_owned();
                 events.push(json!({
                     "process_ref": process.process_ref.clone(),
                     "sequence": event.sequence,
                     "event_type": event_type,
-                    "payload": identities.normalize(&event_type, event.payload),
+                    "payload": identities.normalize(&event_type, event.fact.payload()),
                 }));
             }
             from = match (page.more, read.cursor) {

@@ -56,7 +56,7 @@ impl RuntimeCompletionState {
             | BoundaryKind::DurableEffect
             | BoundaryKind::Observer
             | BoundaryKind::Cancellation
-            | BoundaryKind::Trigger
+            | BoundaryKind::ContractExecution
             | BoundaryKind::BackendFailure
             | BoundaryKind::ProviderMutation => {}
         }
@@ -225,7 +225,7 @@ pub(super) fn runtime_completion_ready(
         BoundaryKind::Ingress
         | BoundaryKind::QueuedIngress
         | BoundaryKind::ProviderEvent
-        | BoundaryKind::Trigger => false,
+        | BoundaryKind::ContractExecution => false,
     }
 }
 
@@ -242,7 +242,7 @@ pub(super) fn runtime_completion_family(kind: BoundaryKind) -> Option<RuntimeCom
         BoundaryKind::Ingress
         | BoundaryKind::QueuedIngress
         | BoundaryKind::ProviderEvent
-        | BoundaryKind::Trigger => return None,
+        | BoundaryKind::ContractExecution => return None,
     })
 }
 
@@ -304,7 +304,7 @@ pub(super) fn runtime_completion_units(
         | BoundaryKind::Ingress
         | BoundaryKind::QueuedIngress
         | BoundaryKind::ProviderEvent
-        | BoundaryKind::Trigger => "runtime:completion",
+        | BoundaryKind::ContractExecution => "runtime:completion",
     };
     Ok(vec![RuntimeCompletionUnit::new(unit, event.at)])
 }

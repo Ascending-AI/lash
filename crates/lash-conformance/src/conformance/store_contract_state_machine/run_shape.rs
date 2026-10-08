@@ -5,9 +5,6 @@ use crate::conformance::run_shape;
 /// without being reported.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum RunShapeCounter {
-    EnqueuesCommitted,
-    ConsumesCommitted,
-    OutOfOrderStates,
     Spawns,
     TerminalTransitions,
     TailTerminalTransitions,
@@ -18,9 +15,6 @@ pub(super) enum RunShapeCounter {
 
 impl run_shape::Counter for RunShapeCounter {
     const ALL: &'static [Self] = &[
-        Self::EnqueuesCommitted,
-        Self::ConsumesCommitted,
-        Self::OutOfOrderStates,
         Self::Spawns,
         Self::TerminalTransitions,
         Self::TailTerminalTransitions,
@@ -31,9 +25,6 @@ impl run_shape::Counter for RunShapeCounter {
 
     fn name(self) -> &'static str {
         match self {
-            Self::EnqueuesCommitted => "enqueues_committed",
-            Self::ConsumesCommitted => "consumes_committed",
-            Self::OutOfOrderStates => "out_of_order_states",
             Self::Spawns => "spawns",
             Self::TerminalTransitions => "terminal_transitions",
             Self::TailTerminalTransitions => "tail_terminal_transitions",

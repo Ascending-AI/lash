@@ -3,10 +3,7 @@ use std::{fmt::Write as _, future::IntoFuture as _, path::PathBuf, sync::Arc};
 
 use lash::{
     LashCore, TurnOutcome,
-    plugins::{
-        PluginError, PluginExtensionContribution, PluginFactory, PluginRegistrar,
-        PluginSessionContext, PluginSpec, SessionPlugin, StaticPluginFactory,
-    },
+    plugins::{PluginFactory, PluginSpec, StaticPluginFactory},
     provider::{ProviderHandle, ProviderOptions, ProviderReliability},
     runtime::SessionSnapshot,
 };
@@ -18,9 +15,8 @@ use lash_rlm_types::{RlmProtocolEvent, RlmTrajectoryEntry};
 use super::openai_compat::OpenAiCompatBenchServer;
 use super::plugin_stack::runtime_perf_plugin_stack;
 use super::providers::{
-    BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE, BenchmarkEchoTool, BenchmarkLargeToolCatalog,
-    BenchmarkObliqueTools, BenchmarkProviderControl, BenchmarkSettlementControl,
-    BenchmarkToolCatalogObserver, BenchmarkWorkbenchMailTool, benchmark_provider,
+    BenchmarkEchoTool, BenchmarkLargeToolCatalog, BenchmarkObliqueTools, BenchmarkProviderControl,
+    BenchmarkSettlementControl, BenchmarkToolCatalogObserver, benchmark_provider,
     benchmark_provider_with_control, benchmark_stream_profile,
 };
 use super::scenarios::{ExecutionMode, RuntimePerfScenario};
@@ -47,10 +43,6 @@ fn runtime_perf_owner() -> lash::persistence::LeaseOwnerIdentity {
             .clone(),
     )
 }
-
-const BENCHMARK_MAIL_RESOURCE: &str = "Mail";
-const BENCHMARK_MAIL_ALIAS: &str = "mail";
-const BENCHMARK_MAIL_EVENT: &str = "received";
 
 #[expect(
     clippy::expect_used,
@@ -816,9 +808,7 @@ fn benchmark_plugin_factories(
             ),
         )));
     }
-    if wiring.workbench_trigger_plugin {
-        factories.push(Arc::new(BenchmarkWorkbenchTriggerPluginFactory));
-    }
+
     factories
 }
 
@@ -1006,116 +996,6 @@ pub(crate) async fn build_runtime(
         tool_catalog_observer,
         _openai_compat_server: openai_compat_server,
     })
-}
-
-struct BenchmarkWorkbenchTriggerPluginFactory;
-
-impl PluginFactory for BenchmarkWorkbenchTriggerPluginFactory {
-    fn id(&self) -> &'static str {
-        "runtime_perf_workbench_trigger"
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "the extension id and contribution are workspace constants wired by the benchmark itself, so construction cannot fail"
-    )]
-    fn extension_contributions(&self) -> Vec<PluginExtensionContribution> {
-        vec![
-            PluginExtensionContribution::new(
-                lash::rlm::LASHLANG_SURFACE_EXTENSION_ID,
-                lash::rlm::LashlangSurfaceContribution::new(
-                    lash::rlm::LashlangAbilities::default().with_sleep(),
-                    lash::rlm::LashlangLanguageFeatures::default(),
-                    benchmark_workbench_lashlang_resources(),
-                ),
-            )
-            .expect("runtime perf lashlang surface serializes"),
-        ]
-    }
-
-    fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-        Ok(Arc::new(BenchmarkWorkbenchTriggerPlugin))
-    }
-}
-
-impl lash_core::plugin::PluginDefinition for BenchmarkWorkbenchTriggerPluginFactory {
-    fn declaration() -> lash_core::plugin::PluginDeclaration {
-        lash_core::plugin::PluginDeclaration::initial("runtime_perf_workbench_trigger")
-    }
-}
-
-struct BenchmarkWorkbenchTriggerPlugin;
-
-impl SessionPlugin for BenchmarkWorkbenchTriggerPlugin {
-    fn id(&self) -> &'static str {
-        "runtime_perf_workbench_trigger"
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "this module declares the tool or payload schema and admission checks its invariant"
-    )]
-    fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
-        reg.triggers()
-            .declare(lash_core::facade_support::TriggerEvent::new(
-                BENCHMARK_MAIL_RESOURCE,
-                BENCHMARK_MAIL_ALIAS,
-                BENCHMARK_MAIL_EVENT,
-                lash_core::JsonSchema::admit(serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "account": { "type": "string" },
-                        "title": { "type": "string" },
-                        "text": { "type": "string" }
-                    },
-                    "required": ["account", "title", "text"],
-                    "additionalProperties": false
-                }))
-                .expect("valid declared payload schema"),
-            ))?;
-        reg.tools().provider(Arc::new(BenchmarkWorkbenchMailTool))?;
-        Ok(())
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the benchmark's own trigger source constructor is added to a freshly built catalog and cannot conflict, per the site's message"
-)]
-fn benchmark_workbench_lashlang_resources() -> lash::rlm::LashlangHostCatalog {
-    let mut resources = lash::rlm::LashlangHostCatalog::new();
-    resources
-        .add_trigger_source_constructor(
-            BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE.split('.'),
-            lash::rlm::TypeExpr::Object(vec![]),
-            benchmark_mail_received_event_type(),
-        )
-        .expect("valid benchmark mail trigger source");
-    resources
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the mail.Received type is built from three Str fields fixed here, so validation passes, per the site's message"
-)]
-fn benchmark_mail_received_event_type() -> lash::rlm::NamedDataType {
-    lash::rlm::NamedDataType::object(
-        "mail.Received",
-        vec![
-            benchmark_field("account", lash::rlm::TypeExpr::Str),
-            benchmark_field("title", lash::rlm::TypeExpr::Str),
-            benchmark_field("text", lash::rlm::TypeExpr::Str),
-        ],
-    )
-    .expect("valid benchmark mail received type")
-}
-
-fn benchmark_field(name: &str, ty: lash::rlm::TypeExpr) -> lash::rlm::TypeField {
-    lash::rlm::TypeField {
-        name: name.into(),
-        ty,
-        optional: false,
-    }
 }
 
 pub(crate) async fn durable_sqlite_session_store_factory_without_commit_measurement(

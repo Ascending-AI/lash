@@ -71,19 +71,10 @@ pub struct ToolCallPlan {
 pub struct ProcessPlan {
     pub idempotency_key: String,
     pub await_result: bool,
-    pub parked: bool,
-    pub signal: bool,
     pub cancel: bool,
-    pub wake_delay_ms: u32,
 }
 
-impl ProcessPlan {
-    /// A body waits for its `resume` signal when it parks, when the host
-    /// signals it, or when the host cancels it: a cancel must meet active work.
-    pub fn waits_for_signal(&self) -> bool {
-        self.parked || self.signal || self.cancel
-    }
-}
+impl ProcessPlan {}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AttachmentPlan {
@@ -118,8 +109,6 @@ pub struct TurnPlan {
     pub attachments: Vec<AttachmentPlan>,
     pub queued_inputs: Vec<QueuedInputPlan>,
     pub auxiliary_llm_requests: u32,
-    pub external_occurrences: u32,
-    pub trigger_edits: u32,
     pub promotion_reads: u32,
     pub cancel: bool,
     pub delete: bool,
@@ -200,21 +189,6 @@ impl<'a> Generator<'a> {
 
     pub fn run(&self) -> &str {
         &self.run
-    }
-
-    /// The name of cron schedule `subscription`, unique within the run.
-    pub fn cron_schedule(&self, subscription: u64) -> String {
-        format!("{}/cron/{subscription}", self.run)
-    }
-
-    /// The idempotency key of one scheduled cron emission.
-    pub fn cron_tick_key(&self, subscription: u64, tick: u64) -> String {
-        format!("{}/tick/{tick}", self.cron_schedule(subscription))
-    }
-
-    pub fn cron_phase_s(&self, subscription: u64) -> f64 {
-        unit(&mut self.stream(subscription, 0, "cron-phase"))
-            * f64::from(self.workload.spec().cron.cadence_s)
     }
 
     pub fn plan(&self, actor: u64, ordinal: u64) -> Result<TurnPlan> {
@@ -357,18 +331,6 @@ impl<'a> Generator<'a> {
                 "llm-count",
                 spec.llm_requests_per_turn,
             ),
-            external_occurrences: self.count(
-                actor,
-                ordinal,
-                "occurrence-count",
-                spec.external_occurrences_per_turn,
-            ),
-            trigger_edits: self.count(
-                actor,
-                ordinal,
-                "trigger-edit-count",
-                spec.trigger_edits_per_turn,
-            ),
             promotion_reads: self.count(
                 actor,
                 ordinal,
@@ -459,10 +421,7 @@ impl<'a> Generator<'a> {
         ProcessPlan {
             idempotency_key: operation.child_key(kind, index as usize),
             await_result: chance("await", spec.await_share),
-            parked: chance("park", spec.park_share),
-            signal: kind == "host" && chance("signal", spec.signal_share),
             cancel: kind == "host" && chance("cancel", spec.cancel_share),
-            wake_delay_ms: spec.wake_delay_ms,
         }
     }
 }

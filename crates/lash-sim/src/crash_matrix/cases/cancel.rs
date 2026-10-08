@@ -1,6 +1,7 @@
 //! The turn-cancel seam: one turn whose only tool runs until the turn's
 //! cancel, which the host requests once the tool runs (`mail.session`); the
-//! owner ends the turn in one `turn.cancel` commit.
+//! owner ends the turn in one `turn.cancel` commit. A detached idle process
+//! also receives an operator cancellation and must end with that origin.
 //!
 //! Laws: a cancelled turn calls the model no more and publishes no head;
 //! a turn that answered instead did so only because a crash interrupted the
@@ -22,6 +23,7 @@ use crate::crash_matrix::world::World;
 pub struct CancelCase {
     tag: String,
     session: Mutex<Option<SessionId>>,
+    process: Mutex<Option<lash_sansio::ProcessId>>,
 }
 
 impl CancelCase {
@@ -31,6 +33,7 @@ impl CancelCase {
         Self {
             tag: tag.to_owned(),
             session: Mutex::default(),
+            process: Mutex::default(),
         }
     }
 
@@ -44,12 +47,56 @@ impl Workload for CancelCase {
     async fn seed(&self, world: &Arc<World>, _nodes: &Arc<SimNodes>) -> Result<(), String> {
         let session = admit_turn(world, TurnScript::Hang, &format!("cancel{}", self.tag)).await?;
         *self.session.lock_recover() = Some(session);
+        let process = super::register(
+            world,
+            crate::crash_matrix::engine::hold("cancelled-process"),
+            None,
+        )
+        .await?;
+        *self.process.lock_recover() = Some(process.clone());
+        let host = Arc::clone(world);
+        world.spawn(async move {
+            use lash_core_execution::ProcessWorkSubstrate as _;
+            let requested_at = host.now_ms();
+            let _ = crate::crash_matrix::world::retry(&host, |backend| {
+                let process = process.clone();
+                async move {
+                    backend.wake_process(&process).await?;
+                    lash_core_execution::DurableProcessWork::new(backend)
+                        .deliver_cancel(
+                            &process,
+                            &lash_core_execution::CancelRequest::new(
+                                lash_core_execution::CancelOrigin::OperatorRequested,
+                                "lash-sim",
+                                requested_at,
+                            ),
+                            "",
+                        )
+                        .await
+                        .map_err(|error| {
+                            lash_durable::DurableError::Store(lash_durable::StoreFailure {
+                                kind: lash_durable::StoreFailureKind::Unavailable,
+                                message: error.to_string(),
+                            })
+                        })
+                }
+            })
+            .await;
+        });
         Ok(())
     }
 
     async fn done(&self, _world: &World, nodes: &SimNodes) -> bool {
         match self.session() {
-            Some(session) => turn_settled(nodes, &session).await,
+            Some(session) => {
+                let process = self.process.lock_recover().clone();
+                match process {
+                    Some(process) => {
+                        turn_settled(nodes, &session).await && super::ended(nodes, &[process]).await
+                    }
+                    None => false,
+                }
+            }
             None => false,
         }
     }
@@ -59,7 +106,7 @@ impl Workload for CancelCase {
             return vec!["the turn was never seeded".to_owned()];
         };
         let final_call = world.noted(&format!("model.call {session} final"));
-        match turn_end(nodes, &session).await {
+        let mut violations = match turn_end(nodes, &session).await {
             Some(end) if end.kind() == RunTerminalKind::Cancelled => {
                 let mut violations = Vec::new();
                 if final_call {
@@ -83,7 +130,20 @@ impl Workload for CancelCase {
                 }
             }
             other => vec![format!("turn cancel: the turn ended {other:?}")],
+        };
+        let process = self.process.lock_recover().clone();
+        match process {
+            Some(process) => match super::outcome(world, &process).await {
+                Some(end)
+                    if super::find(&end, "origin")
+                        == Some(&serde_json::json!("operator_requested")) => {}
+                other => violations.push(format!(
+                    "process cancel: operator request did not end the idle process: {other:?}"
+                )),
+            },
+            None => violations.push("process cancel: no process was seeded".to_owned()),
         }
+        violations
     }
 }
 

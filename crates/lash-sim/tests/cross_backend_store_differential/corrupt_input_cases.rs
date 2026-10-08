@@ -52,7 +52,7 @@ impl CorruptTarget {
 }
 
 /// Bytes that are not a valid encoding of any persisted record.
-const CORRUPT_QUEUED_PAYLOAD: &str = r#"{"type":"process_wake","wake":null}"#;
+const CORRUPT_QUEUED_PAYLOAD: &str = r#"{"type":"session_command","command":null}"#;
 const CORRUPT_TEXT: &str = "{\"fig-2841\": not-json";
 const CORRUPT_BYTES: &[u8] = &[0x00, 0xff, 0x00, 0xff];
 

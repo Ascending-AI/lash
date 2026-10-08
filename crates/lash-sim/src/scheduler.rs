@@ -13,12 +13,12 @@ pub enum BoundaryKind {
     QueuedIngress,
     Provider,
     ProviderEvent,
+    ContractExecution,
     Tool,
     ExecCode,
     DurableEffect,
     Observer,
     Cancellation,
-    Trigger,
     BackendFailure,
     ProviderMutation,
 }

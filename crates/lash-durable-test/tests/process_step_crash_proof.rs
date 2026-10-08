@@ -10,7 +10,7 @@
 //!   tool is pinned from the process's catalog and runs through the round a
 //!   turn's tools run on;
 //! - or a host step its engine's registration declares, whose body
-//!   registers a trigger subscription in the deployment's trigger store as
+//!   records an external write in the deployment's external world as
 //!   the process's originator: its store-local effect.
 //!
 //! The process actor runs on the production process activation with the
@@ -57,13 +57,7 @@ const ENGINE: &str = "process-step-proof";
 const TOOL: &str = "ext_write";
 const WROTE: &str = "wrote";
 /// The host operation the engine's host step performs.
-const HOST_WRITE: &str = "proof.register";
-/// The host binding the process's originator acts for, which owns the
-/// subscription its host step registers.
-const BINDING: &str = "process-step-proof-binding";
-/// The subscription the host step registers.
-const SUBSCRIPTION: &str = "process-step-proof-subscription";
-
+const HOST_WRITE: &str = "proof.write";
 /// Which step the engine asks for.
 #[derive(Clone, Copy, Debug)]
 enum StepKind {
@@ -130,8 +124,7 @@ struct WriteEngine {
     step: StepKind,
 }
 
-/// The engine's host step: it registers [`SUBSCRIPTION`] in the trigger
-/// store as the process's originator, counting its runs in the world.
+/// The engine's host step records its call and input in the external world.
 struct HostWrite {
     world: Arc<ExternalWorld>,
 }
@@ -148,60 +141,14 @@ impl lash_core::EngineHostSteps for HostWrite {
 
     async fn run(
         &self,
-        context: lash_core::RuntimeExecutionContext<'static>,
+        _context: lash_core::RuntimeExecutionContext<'static>,
         run: lash_core::HostStepRun,
     ) -> lash_core::ToolCallOutput {
         self.world
             .writes
             .lock_recover()
             .push((run.call.clone(), run.input.clone()));
-        match register(&context, run).await {
-            Ok(revision) => lash_core::ToolCallOutput::success(
-                serde_json::json!({ WROTE: { "revision": revision } }),
-            ),
-            Err(error) => lash_core::ToolCallOutput::failure(lash_core::ToolFailure::runtime(
-                lash_core::ToolFailureClass::Execution,
-                "proof_register_failed",
-                error,
-            )),
-        }
-    }
-}
-
-/// Register [`SUBSCRIPTION`] over `context`, keyed by the step's call.
-async fn register(
-    context: &lash_core::RuntimeExecutionContext<'static>,
-    run: lash_core::HostStepRun,
-) -> Result<u64, String> {
-    let claim = context.execution_claim().map_err(|e| e.to_string())?;
-    let env_ref = context
-        .captured_process_execution_env_ref(&claim)
-        .await
-        .map_err(|e| e.to_string())?;
-    let draft = lash_core::TriggerSubscriptionDraft::for_process(
-        SUBSCRIPTION,
-        env_ref,
-        "timer.tick",
-        "proof-source",
-        lash_core::ProcessInput::Engine {
-            kind: ENGINE.to_owned(),
-            payload: run.input,
-        },
-        lash_core::ProcessIdentity::new(ENGINE),
-    );
-    let command = lash_core::TriggerCommand::Register {
-        owner_scope: context.trigger_owner_scope().map_err(|e| e.to_string())?,
-        actor: context.trigger_actor().map_err(|e| e.to_string())?,
-        draft,
-    };
-    match context
-        .execute_trigger_effect(run.call.to_string(), command)
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?
-    {
-        lash_core::TriggerCommandOutcome::Mutation { receipt } => Ok(receipt.record.revision),
-        other => Err(format!("a registration answered {other:?}")),
+        lash_core::ToolCallOutput::success(serde_json::json!({ WROTE: run.input }))
     }
 }
 
@@ -217,7 +164,6 @@ impl lash_core::plugin::SessionPlugin for NoSessionPlugin {
     fn id(&self) -> &'static str {
         "process-step-proof-plugin"
     }
-
     fn register(
         &self,
         _registrar: &mut lash_core::plugin::PluginRegistrar,
@@ -488,7 +434,7 @@ impl StepProof {
                 kind: ENGINE.to_owned(),
                 payload: serde_json::json!({ "x": 7 }),
             },
-            lash_core::ProcessOriginator::host_scoped(BINDING),
+            lash_core::ProcessOriginator::host_scoped("proof-host"),
             lash_core::LifetimeDecision::Detached,
         )
         .with_env_ref(env_ref);
@@ -584,33 +530,9 @@ impl Scenario for StepProof {
                 writes.len()
             ));
         }
-        // A host step's write is its subscription: at most one, and only
-        // from the body's one run.
-        let subscriptions = match self
-            .backend()
-            .trigger_store()
-            .list_subscriptions(lash_core::TriggerSubscriptionFilter::default())
-            .await
-        {
-            Ok(subscriptions) => subscriptions,
-            Err(error) => return vec![format!("the trigger store lists nothing: {error}")],
-        };
-        if subscriptions.len() > writes.len() {
-            violations.push(format!(
-                "{} subscriptions from {} runs: {subscriptions:?}",
-                subscriptions.len(),
-                writes.len()
-            ));
-        }
-        let wrote = match self.step {
-            StepKind::Tool => writes.len(),
-            StepKind::Host => subscriptions.len(),
-        };
-        // Uncut, the step writes exactly once.
+        let wrote = writes.len();
         if cut.is_none() && wrote != 1 {
-            violations.push(format!(
-                "the uncut step wrote {wrote} times ({writes:?}, {subscriptions:?})"
-            ));
+            violations.push(format!("the uncut step wrote {wrote} times ({writes:?})"));
         }
 
         // The work resumed and ended once.
@@ -635,7 +557,7 @@ impl Scenario for StepProof {
         match answer {
             Some(answer) if answer.contains(WROTE) && wrote != 1 => violations.push(format!(
                 "the terminal says the step wrote, but it wrote {wrote} times \
-                 ({writes:?}, {subscriptions:?}): {answer}"
+                 ({writes:?}, {writes:?}): {answer}"
             )),
             Some(_) => {}
             None => violations.push("the process holds no terminal".to_owned()),
@@ -733,7 +655,7 @@ async fn a_host_engines_once_tool_step_killed_at_every_label_runs_at_most_once()
     }
 }
 
-/// The uncut run of a host step: it registers its subscription once, as the
+/// The uncut run of a host step: it registers its external write once, as the
 /// process's originator, and the process ends with its answer.
 #[tokio::test]
 async fn a_host_engines_host_step_runs_on_the_production_steps() {
@@ -752,8 +674,8 @@ async fn a_host_engines_host_step_runs_on_the_production_steps() {
 }
 
 /// A host engine's host step killed at every process commit label resumes
-/// on another owner, never registers its subscription twice, and ends its
-/// process once: its trigger write is its store-local effect, admitted
+/// on another owner, never registers its external write twice, and ends its
+/// process once: its external write is its store-local effect, admitted
 /// `Once` (FIG-5313).
 #[tokio::test]
 async fn a_host_engines_host_step_killed_at_every_label_writes_at_most_once() {

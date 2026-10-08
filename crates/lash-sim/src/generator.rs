@@ -278,7 +278,6 @@ struct SessionPlan {
     provider_script: &'static str,
     provider_turns: Vec<ProviderTurnPlan>,
     queued_ingress_count: usize,
-    trigger_count: usize,
     backend_failure_count: usize,
     provider_mutation_count: usize,
     tool_count: usize,
@@ -301,7 +300,6 @@ impl SessionPlan {
             provider_script,
             provider_turns: Vec::new(),
             queued_ingress_count: 0,
-            trigger_count: 0,
             backend_failure_count: 0,
             provider_mutation_count: 0,
             tool_count: 0,
@@ -333,11 +331,6 @@ impl SessionPlan {
     fn next_queue(&mut self) -> usize {
         self.queued_ingress_count += 1;
         self.queued_ingress_count
-    }
-
-    fn next_trigger(&mut self) -> usize {
-        self.trigger_count += 1;
-        self.trigger_count
     }
 
     fn next_backend_failure(&mut self) -> usize {
@@ -387,6 +380,12 @@ struct ProviderTurnRef {
 
 #[derive(Clone, Debug)]
 enum PlannedOperation {
+    BackendFailure {
+        session: usize,
+        failure_index: usize,
+        operation_index: usize,
+        fault: BackendFault,
+    },
     ProviderTurn {
         session: usize,
         turn_index: usize,
@@ -406,16 +405,6 @@ enum PlannedOperation {
     Cancellation {
         session: usize,
         queue_index: usize,
-    },
-    Trigger {
-        session: usize,
-        trigger_index: usize,
-    },
-    BackendFailure {
-        session: usize,
-        failure_index: usize,
-        operation_index: usize,
-        fault: BackendFault,
     },
     ProviderMutation {
         session: usize,
@@ -495,7 +484,6 @@ impl StateMachinePlanner {
         let primary = (self.next_usize() % self.sessions.len()).min(self.sessions.len() - 1);
         let secondary = (primary + 1) % self.sessions.len();
         self.plan_observer_reconnect(primary);
-        self.plan_trigger(primary);
         let backend_retry_operation = self.plan_backend_failure(primary, BackendFault::Refused);
         self.plan_backend_retry(primary, backend_retry_operation, BackendFault::Refused);
         self.plan_backend_failure(secondary, BackendFault::ReplyLost);
@@ -536,7 +524,7 @@ impl StateMachinePlanner {
                     };
                     self.plan_queue_cancel_pair(session, active_turn, mode);
                 }
-                2 => self.plan_trigger(session),
+                2 => self.plan_observer_reconnect(session),
                 3 => {
                     let fault = if (self.next_usize() & 1) == 0 {
                         BackendFault::Refused
@@ -563,7 +551,7 @@ impl StateMachinePlanner {
                 _ if remaining >= 2 && self.can_plan_provider_turn(session) => {
                     self.plan_provider_turn_with_observer(session);
                 }
-                _ => self.plan_trigger(session),
+                _ => self.plan_observer_reconnect(session),
             }
         }
     }
@@ -626,14 +614,6 @@ impl StateMachinePlanner {
         self.operations.push(PlannedOperation::Cancellation {
             session,
             queue_index,
-        });
-    }
-
-    fn plan_trigger(&mut self, session: usize) {
-        let trigger_index = self.sessions[session].next_trigger();
-        self.operations.push(PlannedOperation::Trigger {
-            session,
-            trigger_index,
         });
     }
 
@@ -954,24 +934,6 @@ impl StateMachinePlanner {
                     "queued-ingress.cancel",
                     json!({
                         "target": queued_boundary_id(session, queue_index),
-                    }),
-                )
-            }
-            PlannedOperation::Trigger {
-                session,
-                trigger_index,
-            } => {
-                let session = &self.sessions[session];
-                BoundaryEvent::new(
-                    format!("{}:trigger:{trigger_index:03}", session.alias),
-                    session.alias.clone(),
-                    BoundaryKind::Trigger,
-                    at,
-                    "trigger.delivery",
-                    json!({
-                        "session": session.alias.clone(),
-                        "source_key": format!("trigger/button/{}/{trigger_index:03}", session.alias),
-                        "started_process": true,
                     }),
                 )
             }
@@ -1371,7 +1333,6 @@ mod tests {
             BoundaryKind::DurableEffect,
             BoundaryKind::Observer,
             BoundaryKind::Cancellation,
-            BoundaryKind::Trigger,
             BoundaryKind::BackendFailure,
             BoundaryKind::ProviderMutation,
         ] {

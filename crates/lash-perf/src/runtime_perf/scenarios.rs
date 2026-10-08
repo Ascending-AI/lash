@@ -75,7 +75,6 @@ pub(crate) enum RuntimePerfScenario {
     RlmToolCalls,
     RlmAsyncToolCompletion,
     RlmProcessHandles,
-    RlmTriggerMailPipeline,
     RlmProcessAsyncToolCompletion,
     RlmSubagentSpawn,
     RlmLlmQuery,
@@ -123,7 +122,7 @@ pub(crate) enum RuntimePerfScenario {
 }
 
 // The harness wiring facts the builders read once per scenario: which
-// benchmark plugins, tools, stores, and trigger surfaces to install. Declared
+// benchmark plugins, tools and stores to install. Declared
 // on the metadata table so the builders hold no per-scenario predicates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ScenarioWiring {
@@ -133,7 +132,6 @@ pub(crate) struct ScenarioWiring {
     pub(crate) delegation_plugin: bool,
     pub(crate) oblique_tools_plugin: bool,
     pub(crate) large_tool_catalog_plugin: bool,
-    pub(crate) workbench_trigger_plugin: bool,
     pub(crate) measure_commit_bytes: bool,
 }
 
@@ -145,7 +143,6 @@ impl ScenarioWiring {
         delegation_plugin: false,
         oblique_tools_plugin: false,
         large_tool_catalog_plugin: false,
-        workbench_trigger_plugin: false,
         measure_commit_bytes: true,
     };
 }
@@ -400,14 +397,6 @@ impl RuntimePerfScenario {
             ["agent_scenario_nested_process_start_await"]
         ),
         runtime_perf_metadata!(
-            RlmTriggerMailPipeline,
-            "rlm_trigger_mail_pipeline",
-            Rlm,
-            AgentScenario,
-            "Measures facade/plugin process pipeline behavior initiated through an RLM agent turn.",
-            wiring { workbench_trigger_plugin = true }
-        ),
-        runtime_perf_metadata!(
             RlmProcessAsyncToolCompletion,
             "rlm_process_async_tool_completion",
             Rlm,
@@ -567,7 +556,7 @@ impl RuntimePerfScenario {
             Standard,
             RuntimeScenario,
             "Measures runtime checkpoint paths shared across protocols and below facade ownership.",
-            ["runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint"]
+            ["runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"]
         ),
         runtime_perf_metadata!(
             CheckpointStateHotPaths,
@@ -604,7 +593,7 @@ impl RuntimePerfScenario {
             AgentScenario,
             "Measures the composed parent/child turn future with active ingress, tool and process loops, cancellation observation, and timer/await-event durable waits.",
             ["agent_scenario_nested_process_start_await"],
-            wiring { delegation_plugin = true, workbench_trigger_plugin = true }
+            wiring { delegation_plugin = true }
         ),
         runtime_perf_metadata!(
             TurnStartGate,
@@ -706,7 +695,7 @@ impl RuntimePerfScenario {
             Rlm,
             AgentScenario,
             "Measures two gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return.",
-            wiring { workbench_trigger_plugin = true },
+            wiring {},
             false
         ),
         runtime_perf_metadata!(
@@ -715,7 +704,7 @@ impl RuntimePerfScenario {
             Rlm,
             AgentScenario,
             "Measures eight gated async child processes from spawn through terminal settlement and final graph drain; spawn_ms starts at turn start and includes parent return.",
-            wiring { workbench_trigger_plugin = true },
+            wiring {},
             false
         ),
         runtime_perf_metadata!(
@@ -726,7 +715,7 @@ impl RuntimePerfScenario {
             "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared SQLite persistence.",
             Durable,
             HighTraffic,
-            wiring { delegation_plugin = true, workbench_trigger_plugin = true },
+            wiring { delegation_plugin = true },
             false
         ),
         runtime_perf_metadata!(
@@ -737,7 +726,7 @@ impl RuntimePerfScenario {
             "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
             Durable,
             HighTraffic,
-            wiring { delegation_plugin = true, workbench_trigger_plugin = true },
+            wiring { delegation_plugin = true },
             false
         ),
         runtime_perf_metadata!(

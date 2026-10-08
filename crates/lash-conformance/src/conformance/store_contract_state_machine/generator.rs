@@ -52,10 +52,7 @@ pub fn sample_store_contract_operations(runner_seed: u64, max_ops: usize) -> Vec
 
 fn operation() -> impl Strategy<Value = StoreContractOp> {
     prop_oneof![
-        4 => (0..PROCESS_COUNT, prop::option::of(0..SESSION_COUNT))
-            .prop_map(|(process, wake_target)| StoreContractOp::Register {
-                process, wake_target,
-            }),
+        4 => (0..PROCESS_COUNT).prop_map(|process| StoreContractOp::Register { process }),
         4 => (0..PROCESS_COUNT, 0_u8..3, 1_u8..5)
             .prop_map(|(process, owner, attempt)| StoreContractOp::FirstStart { process, owner, attempt }),
         2 => (0..PROCESS_COUNT, any::<bool>())
@@ -64,8 +61,6 @@ fn operation() -> impl Strategy<Value = StoreContractOp> {
             .prop_map(|(process, stale)| StoreContractOp::ClearWait { process, stale }),
         2 => (0..PROCESS_COUNT, 0_u8..3)
             .prop_map(|(process, value)| StoreContractOp::SetExternalRef { process, value }),
-        5 => (0..PROCESS_COUNT, 0_u8..4, any::<u8>(), any::<bool>(), any::<bool>())
-            .prop_map(|(process, replay, value, wake, stale)| StoreContractOp::Signal { process, replay, value, wake, stale }),
         2 => (0..PROCESS_COUNT, any::<u8>())
             .prop_map(|(process, requester)| StoreContractOp::CancelRequest { process, requester }),
         3 => (0..PROCESS_COUNT, 0_u8..4)
@@ -74,12 +69,6 @@ fn operation() -> impl Strategy<Value = StoreContractOp> {
             .prop_map(|(process, session)| StoreContractOp::AddObserver { process, session }),
         2 => (0..PROCESS_COUNT, 0..SESSION_COUNT)
             .prop_map(|(process, session)| StoreContractOp::RemoveObserver { process, session }),
-        2 => (0..PROCESS_COUNT, prop::option::of(0..SESSION_COUNT))
-            .prop_map(|(process, session)| StoreContractOp::Retarget { process, session }),
-        3 => (0..PROCESS_COUNT)
-            .prop_map(|process| StoreContractOp::EnqueueWake { process }),
-        3 => (any::<u8>(), any::<bool>())
-            .prop_map(|(selection, highest_in_group)| StoreContractOp::ConsumeWake { selection, highest_in_group }),
         3 => any::<bool>().prop_map(|watermark| StoreContractOp::Prune { watermark }),
         2 => any::<bool>().prop_map(|caught_up| StoreContractOp::CompactTombstones { caught_up }),
     ]

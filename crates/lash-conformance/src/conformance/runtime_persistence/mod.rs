@@ -68,5 +68,5 @@ pub use append_receipts::{
 use checkpoint_admissions::*;
 pub use checkpoint_admissions::{
     checkpoint_admission_probe_transaction_counts, checkpoint_rejects_unknown_component_ref,
-    complete_runtime_checkpoint_component_set_survives_cold_reopens, queued_process_wake_draft,
+    complete_runtime_checkpoint_component_set_survives_cold_reopens,
 };

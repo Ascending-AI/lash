@@ -1,5 +1,4 @@
 use super::*;
-use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION;
 use pretty_assertions::assert_eq;
 
@@ -401,10 +400,9 @@ pub async fn checkpoint_admission_probe_transaction_counts(
     assert_eq!(counts(), (1, 0));
 
     let deferred = store
-        .enqueue_queued_work(queued_process_wake_draft(
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(
             session_id,
             "deferred checkpoint head",
-            DeliveryPolicy::AfterCurrentTurnCommit,
         ))
         .await
         .expect("enqueue deferred checkpoint head");
@@ -419,33 +417,31 @@ pub async fn checkpoint_admission_probe_transaction_counts(
     )
     .await
     .expect("probe deferred checkpoint head");
-    assert!(
-        deferred_checkpoint.is_empty(),
-        "after-current-turn-commit work must not be admitted at an active checkpoint"
-    );
+    assert!(deferred_checkpoint.is_empty());
     assert_eq!(
         counts(),
         (2, 0),
-        "a deferred queue head must not open a checkpoint write transaction"
+        "a deferred input opens no checkpoint write transaction"
     );
-
-    // The run whose checkpoint the rest probes starts; the deferred head
-    // leaves the lane.
-    active_run(&store, session_id, &turn_id).await;
+    expect_cancelled_pending_input(
+        store
+            .cancel_pending_turn_input(session_id, &deferred.input_id)
+            .await
+            .expect("withdraw deferred input"),
+        &deferred.input_id,
+    );
+    super::super::admission_support::active_run(&store, session_id, &turn_id).await;
     store
-        .cancel_queued_work_batch(session_id, &deferred.batch_id)
-        .await
-        .expect("withdraw the deferred head")
-        .expect("the deferred head is open");
-
-    store
-        .enqueue_queued_work(queued_process_wake_draft(
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
             session_id,
-            "pending checkpoint work",
-            DeliveryPolicy::EarliestSafeBoundary,
+            crate::TurnInputIngress::active_turn(
+                turn_id.clone(),
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("pending checkpoint work"),
         ))
         .await
-        .expect("enqueue counter work");
+        .expect("enqueue active checkpoint input");
     let pending = at_checkpoint(
         &store,
         session_id,
@@ -456,68 +452,9 @@ pub async fn checkpoint_admission_probe_transaction_counts(
         crate::testing::queued_work_admission_policy(64),
     )
     .await
-    .expect("admit pending checkpoint work");
-    assert!(pending.queued.is_some());
+    .expect("admit active checkpoint input");
+    assert!(pending.inputs.is_some());
     assert_eq!(counts(), (3, 1));
-}
-
-pub fn queued_process_wake_draft(
-    session_id: &SessionId,
-    text: &str,
-    delivery_policy: DeliveryPolicy,
-) -> QueuedWorkBatchDraft {
-    let wake = ProcessWakeDelivery {
-        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
-            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
-        )),
-        target_session_id: session_id.clone(),
-        process_id: crate::ProcessId::fixture(&format!("process:{text}")),
-        sequence: 1,
-        event_type: "process.wake".to_string(),
-        process_caused_by: None,
-        authority: crate::QueuedWorkAuthority::default(),
-        input: text.to_string(),
-        created_at_ms: 1,
-        trace_cause: Default::default(),
-    };
-    QueuedWorkBatchDraft::new(
-        session_id,
-        delivery_policy,
-        crate::QueuedWorkPayload::process_wake(wake),
-    )
-    .with_source_key(crate::process_wake_source_key(
-        &crate::ProcessId::fixture(&format!("process:{text}")),
-        1,
-    ))
-    .with_process_wake_source(crate::ProcessId::fixture(&format!("process:{text}")), 1)
-}
-
-/// Some queued turn work carrying `text`: a process wake, the one turn-work
-/// payload (a frame handoff is a head fact, never a queue row; ADR 0101 §3).
-pub(super) fn queued_draft(
-    session_id: &SessionId,
-    text: &str,
-    delivery_policy: DeliveryPolicy,
-) -> QueuedWorkBatchDraft {
-    queued_process_wake_draft(session_id, text, delivery_policy)
-}
-
-/// Queued turn work carrying `text` whose source is `key`: the wake of
-/// process `key` at sequence 1, so the source key is that wake's own and the
-/// same `key` names the same row.
-pub(super) fn keyed_queued_draft(
-    session_id: &SessionId,
-    text: &str,
-    delivery_policy: DeliveryPolicy,
-    key: impl AsRef<str>,
-) -> QueuedWorkBatchDraft {
-    crate::conformance::helpers::process_wake_work(
-        session_id,
-        key.as_ref(),
-        1,
-        text,
-        delivery_policy,
-    )
 }
 
 pub(super) fn queued_session_command_draft(
@@ -531,13 +468,6 @@ pub(super) fn queued_session_command_draft(
             reason: reason.to_string(),
         },
     )
-}
-
-pub(super) fn queued_batch_text(batch: &QueuedWorkBatch) -> Option<&str> {
-    match &batch.payload {
-        QueuedWorkPayload::ProcessWake { wake } => Some(wake.input.as_str()),
-        QueuedWorkPayload::SessionCommand { .. } => None,
-    }
 }
 
 pub(super) fn pending_next_turn_input_draft(
@@ -620,4 +550,33 @@ pub(super) fn caller_frame_node_id(session_id: &SessionId, material: &str) -> cr
     let frame_key =
         crate::FrameKey::from_caller_material(material).expect("non-empty frame material");
     crate::frame_node_id(session_id, frame_key.as_str())
+}
+
+pub(super) fn queued_draft(
+    session: &SessionId,
+    text: &str,
+    policy: DeliveryPolicy,
+) -> QueuedWorkBatchDraft {
+    QueuedWorkBatchDraft::new(
+        session,
+        policy,
+        crate::SessionCommand::RefreshToolCatalog {
+            reason: text.to_owned(),
+        },
+    )
+}
+pub(super) fn keyed_queued_draft(
+    session: &SessionId,
+    text: &str,
+    policy: DeliveryPolicy,
+    key: impl AsRef<str>,
+) -> QueuedWorkBatchDraft {
+    queued_draft(session, text, policy).with_source_key(key.as_ref())
+}
+pub(super) fn queued_batch_text(batch: &QueuedWorkBatch) -> Option<&str> {
+    let QueuedWorkPayload::SessionCommand { command } = &batch.payload;
+    match command.as_ref() {
+        crate::SessionCommand::RefreshToolCatalog { reason } => Some(reason),
+        _ => None,
+    }
 }

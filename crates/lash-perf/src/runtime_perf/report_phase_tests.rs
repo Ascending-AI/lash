@@ -12,19 +12,12 @@ use crate::runtime_perf::measurement::{
     run_once_durable_checkpoint_curve, run_once_store_hardening_hot_paths,
 };
 use crate::runtime_perf::scenarios::ScenarioPhaseContract;
-use lash_core::runtime::RuntimeTurnPhaseProbe;
 use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
 
 fn high_traffic_config() -> HighTrafficConfig {
-    HighTrafficConfig::parse(
-        4,
-        0,
-        "plain=1,tool=1,queued=1,child=1,wake=1,trigger=1",
-        "2,4",
-        1.25,
-    )
-    .expect("valid high-traffic test config")
+    HighTrafficConfig::parse(4, 0, "plain=1,tool=1,queued=1,child=1", "2,4", 1.25)
+        .expect("valid high-traffic test config")
 }
 
 fn checkpoint_curve_config() -> CheckpointCurveConfig {
@@ -458,86 +451,6 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn high_traffic_trigger_waits_for_terminal_delivery() {
-    let config = HighTrafficConfig::parse(1, 0, "trigger=1", "1,2", 1.25)
-        .expect("valid trigger-only config");
-    let result = Box::pin(run_once(
-        RuntimePerfScenario::HighTrafficLoadSqlite,
-        1,
-        &checkpoint_curve_config(),
-        &config,
-    ))
-    .await
-    .expect("trigger-only high-traffic operation should observe terminal delivery");
-    eprintln!(
-        "PERF_SCENARIO {}",
-        serde_json::to_string(&result).expect("serialize measurement")
-    );
-
-    assert_eq!(
-        result.extra_counters.get("turn_mix.trigger.completed"),
-        Some(&1)
-    );
-    assert_eq!(result.turns.len(), 1);
-}
-
-#[test]
-fn turn_scenarios_require_the_typed_commit_phase_metrics() {
-    for scenario in [
-        RuntimePerfScenario::DeepTurnComposition,
-        RuntimePerfScenario::RlmAsyncToolCompletion,
-        RuntimePerfScenario::RlmTriggerMailPipeline,
-        RuntimePerfScenario::RlmLargePrint,
-        RuntimePerfScenario::RlmObliqueStackMix,
-        RuntimePerfScenario::RlmStreamedPairedLashlang,
-        RuntimePerfScenario::RlmProcessHandles,
-        RuntimePerfScenario::RlmGlobals,
-        RuntimePerfScenario::Standard,
-    ] {
-        let phases = required_phases(scenario);
-        for expected in ["prepared_turn", "committed_turn", "post_commit_delivery"] {
-            assert!(
-                phases.contains(&expected),
-                "{} is missing required phase {expected}",
-                scenario.name()
-            );
-        }
-        // A turn commits in its own phase transaction, so the in-process
-        // lane never takes local commit admission.
-        assert!(
-            !phases.contains(&"commit_admission.product_attempt"),
-            "{} requires local commit admission on the durable lane",
-            scenario.name()
-        );
-        for removed in [
-            "finalize_turn",
-            "persist_turn",
-            "final_commit",
-            "post_persist_hooks",
-        ] {
-            assert!(
-                !phases.contains(&removed),
-                "{} still requires removed phase {removed}",
-                scenario.name()
-            );
-        }
-    }
-    // The durable SQLite lanes admit their commits locally.
-    for scenario in [
-        RuntimePerfScenario::DurableStandardToolTurnSqlite,
-        RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
-        RuntimePerfScenario::DurableAgentChildTurnSqlite,
-        RuntimePerfScenario::SqliteStoreReopen,
-    ] {
-        assert!(
-            required_phases(scenario).contains(&"commit_admission.product_attempt"),
-            "{} is missing required phase commit_admission.product_attempt",
-            scenario.name()
-        );
-    }
-}
-
 #[test]
 fn every_required_phase_has_a_checked_in_wall_clock_budget() {
     for scenario in RuntimePerfScenario::KNOWN {
@@ -698,5 +611,60 @@ async fn async_completion_smoke_witnesses_match_session_geometry() {
         )
         .await
         .unwrap_or_else(|error| panic!("{} completion witness: {error:#}", scenario.name()));
+    }
+}
+
+#[test]
+fn turn_scenarios_require_the_typed_commit_phase_metrics() {
+    for scenario in [
+        RuntimePerfScenario::DeepTurnComposition,
+        RuntimePerfScenario::RlmAsyncToolCompletion,
+        RuntimePerfScenario::RlmLargePrint,
+        RuntimePerfScenario::RlmObliqueStackMix,
+        RuntimePerfScenario::RlmStreamedPairedLashlang,
+        RuntimePerfScenario::RlmProcessHandles,
+        RuntimePerfScenario::RlmGlobals,
+        RuntimePerfScenario::Standard,
+    ] {
+        let phases = required_phases(scenario);
+        for expected in ["prepared_turn", "committed_turn", "post_commit_delivery"] {
+            assert!(
+                phases.contains(&expected),
+                "{} is missing required phase {expected}",
+                scenario.name()
+            );
+        }
+        // A turn commits in its own phase transaction, so the in-process
+        // lane never takes local commit admission.
+        assert!(
+            !phases.contains(&"commit_admission.product_attempt"),
+            "{} requires local commit admission on the durable lane",
+            scenario.name()
+        );
+        for removed in [
+            "finalize_turn",
+            "persist_turn",
+            "final_commit",
+            "post_persist_hooks",
+        ] {
+            assert!(
+                !phases.contains(&removed),
+                "{} still requires removed phase {removed}",
+                scenario.name()
+            );
+        }
+    }
+    // The durable SQLite lanes admit their commits locally.
+    for scenario in [
+        RuntimePerfScenario::DurableStandardToolTurnSqlite,
+        RuntimePerfScenario::DurableRlmCheckpointTurnSqlite,
+        RuntimePerfScenario::DurableAgentChildTurnSqlite,
+        RuntimePerfScenario::SqliteStoreReopen,
+    ] {
+        assert!(
+            required_phases(scenario).contains(&"commit_admission.product_attempt"),
+            "{} is missing required phase commit_admission.product_attempt",
+            scenario.name()
+        );
     }
 }

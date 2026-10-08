@@ -4,7 +4,6 @@
 
 use super::*;
 use crate::ActorContext;
-use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 
 pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, suite: &str) {
     assert!(
@@ -123,64 +122,6 @@ pub struct ReopenableRuntimeStore {
 pub struct ReopenableAttachmentStore {
     pub open: Arc<dyn crate::AttachmentStore>,
     pub reopen: Arc<dyn crate::AttachmentStore>,
-}
-
-/// One store set's trigger store, with the process registry and durable
-/// store an occurrence starts through: its start records the occurrence, its
-/// processes and their deliveries in one `trigger.start` transaction.
-#[derive(Clone)]
-pub struct TriggerStores {
-    pub triggers: Arc<dyn crate::TriggerStore>,
-    pub registry: Arc<dyn crate::ProcessRegistry>,
-    pub durable: Arc<dyn crate::DurableStore>,
-    pub process_envs: Arc<dyn crate::ProcessExecutionEnvStore>,
-}
-
-impl TriggerStores {
-    /// The stores `stores` holds.
-    pub fn of(stores: &dyn crate::StoreSet) -> Self {
-        Self {
-            triggers: stores.trigger_store(),
-            registry: stores.process_registry(),
-            durable: stores.durable_store(),
-            process_envs: stores.process_env_store(),
-        }
-    }
-
-    /// Record `request`'s occurrence as a trigger router's start does, each
-    /// delivery bound to a fixture process.
-    ///
-    /// # Errors
-    ///
-    /// The plan's or the start's refusal.
-    pub async fn record_occurrence(
-        &self,
-        request: crate::TriggerOccurrenceRequest,
-    ) -> Result<crate::TriggerIngressReceipt, crate::PluginError> {
-        lash_core::testing::process_execution_env_fixture(self.process_envs.as_ref()).await;
-        lash_core::testing::record_trigger_occurrence(
-            self.triggers.as_ref(),
-            self.registry.as_ref(),
-            self.durable.as_ref(),
-            request,
-        )
-        .await
-    }
-}
-
-impl std::ops::Deref for TriggerStores {
-    type Target = dyn crate::TriggerStore;
-
-    fn deref(&self) -> &Self::Target {
-        self.triggers.as_ref()
-    }
-}
-
-/// A pair of [`TriggerStores`] opened against the same durable backing
-/// store.
-pub struct ReopenableTriggerStore {
-    pub open: TriggerStores,
-    pub reopen: TriggerStores,
 }
 
 /// Push an unpersisted event node onto `state`'s active path and make it the
@@ -333,41 +274,6 @@ pub(crate) async fn node_readable(
     }
 }
 
-/// Queued turn work carrying `text`: one process wake of `process` at
-/// `sequence`. A process wake is the one turn-work payload; a frame handoff is
-/// the head's pending follow-on, never a queue row (ADR 0101 §3). The source
-/// key is the wake's own, so the same `(process, sequence)` names the same row.
-pub(crate) fn process_wake_work(
-    session_id: &crate::SessionId,
-    process: &str,
-    sequence: u64,
-    text: &str,
-    delivery_policy: crate::DeliveryPolicy,
-) -> crate::QueuedWorkBatchDraft {
-    let process_id = crate::ProcessId::fixture(process);
-    let wake = crate::ProcessWakeDelivery {
-        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
-            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
-        )),
-        target_session_id: session_id.clone(),
-        process_id: process_id.clone(),
-        sequence,
-        event_type: "process.wake".to_string(),
-        process_caused_by: None,
-        authority: crate::QueuedWorkAuthority::default(),
-        input: text.to_string(),
-        created_at_ms: 1,
-        trace_cause: Default::default(),
-    };
-    crate::QueuedWorkBatchDraft::new(
-        session_id,
-        delivery_policy,
-        crate::QueuedWorkPayload::process_wake(wake),
-    )
-    .with_source_key(crate::process_wake_source_key(&process_id, sequence))
-    .with_process_wake_source(process_id, sequence)
-}
-
 /// `registration` as a runtime start realized under `starter` records it: its
 /// ancestry is `[starter]`, and it lives `Until` its starter (FIG-3607 R1,
 /// R3).
@@ -406,4 +312,22 @@ pub(crate) fn started_detached(
     registration.ancestry = crate::Ancestry::from_scopes([starter]);
     registration.lifetime = crate::LifetimeDecision::Detached;
     registration
+}
+
+/// A lifecycle wait fact with stable replay identity for store laws.
+pub(crate) fn call_wait_event(
+    process: &crate::ProcessId,
+    label: &str,
+    replay: &str,
+    payload: serde_json::Value,
+) -> crate::ProcessEventAppendRequest {
+    let wait = crate::WaitState {
+        since_ms: 1,
+        kind: crate::WaitKind::Call {
+            call_id: lash_core::ToolCallId::fixture(&format!("{label}:{payload}")),
+            tool_id: lash_core::ToolId::new(label),
+        },
+    };
+    crate::ProcessEventAppendRequest::wait_entered(process, &wait)
+        .with_replay_key(format!("law:{label}:{replay}"))
 }

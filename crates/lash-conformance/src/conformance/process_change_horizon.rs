@@ -48,7 +48,7 @@ pub async fn process_change_cursor_below_tombstone_compaction_horizon_is_refused
     )));
     assert_eq!(
         registry
-            .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector, None)
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::NoProjector)
             .await
             .expect("compact tombstone without a configured projector"),
         1

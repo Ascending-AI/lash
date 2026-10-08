@@ -2,10 +2,7 @@ use super::*;
 
 pub(super) fn generated_prefix() -> Vec<StoreContractOp> {
     let operations = vec![
-        StoreContractOp::Register {
-            process: 0,
-            wake_target: Some(0),
-        },
+        StoreContractOp::Register { process: 0 },
         StoreContractOp::FirstStart {
             process: 0,
             owner: 0,
@@ -20,16 +17,7 @@ pub(super) fn generated_prefix() -> Vec<StoreContractOp> {
             process: 0,
             stale: true,
         },
-        StoreContractOp::EnqueueWake { process: 0 },
-        StoreContractOp::EnqueueWake { process: 0 },
-        StoreContractOp::ConsumeWake {
-            selection: 0,
-            highest_in_group: true,
-        },
-        StoreContractOp::Register {
-            process: 1,
-            wake_target: None,
-        },
+        StoreContractOp::Register { process: 1 },
         StoreContractOp::Terminal {
             process: 1,
             disposition: 0,

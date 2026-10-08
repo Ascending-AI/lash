@@ -751,14 +751,6 @@
     "peak_bytes": 2429485056,
     "samples": 3060
   },
-  "//crates/lash-sim:signal_replay_key_constructor__test": {
-    "cpu_count": 1,
-    "memory_kb": 262144,
-    "p95_cores": 0.92,
-    "p99_peak_bytes": 15675392,
-    "peak_bytes": 40095744,
-    "samples": 202
-  },
   "//crates/lash-sim:stack_policy__test": {
     "cpu_count": 3,
     "memory_kb": 262144,

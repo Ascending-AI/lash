@@ -16,10 +16,6 @@ struct RawSessionMetaRow {
     caused_by_call_id: Option<String>,
     caused_by_process_id: Option<ProcessId>,
     caused_by_process_event_sequence: Option<String>,
-    caused_by_occurrence_id: Option<String>,
-    caused_by_subscription_id: Option<String>,
-    caused_by_subscription_incarnation: Option<String>,
-    caused_by_subscription_revision: Option<String>,
     caused_by_node_id: Option<String>,
     source_session_id: Option<SessionId>,
     source_node_id: Option<String>,
@@ -38,10 +34,6 @@ impl RawSessionMetaRow {
             caused_by_call_id: None,
             caused_by_process_id: None,
             caused_by_process_event_sequence: None,
-            caused_by_occurrence_id: None,
-            caused_by_subscription_id: None,
-            caused_by_subscription_incarnation: None,
-            caused_by_subscription_revision: None,
             caused_by_node_id: None,
             source_session_id: None,
             source_node_id: None,
@@ -245,51 +237,6 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
         },
         SessionMetaLayoutCase {
             meta: child(
-                &SessionId::from("layout-child-trigger-minimal-literal"),
-                Some(CausalRef::TriggerOccurrence {
-                    occurrence_id: "layout-occurrence-minimal-literal".to_string(),
-                    subscription_id: None,
-                    subscription_incarnation: None,
-                    subscription_revision: None,
-                }),
-            ),
-            row: RawSessionMetaRow {
-                parent_session_id: Some(SessionId::from("layout-parent-literal")),
-                caused_by_kind: Some("trigger_occurrence".to_string()),
-                caused_by_occurrence_id: Some("layout-occurrence-minimal-literal".to_string()),
-                ..RawSessionMetaRow::literal(
-                    &SessionId::from("layout-child-trigger-minimal-literal"),
-                    "child",
-                )
-            },
-            pending_observer_intents: vec![],
-        },
-        SessionMetaLayoutCase {
-            meta: child(
-                &SessionId::from("layout-child-trigger-complete-literal"),
-                Some(CausalRef::TriggerOccurrence {
-                    occurrence_id: "layout-occurrence-complete-literal".to_string(),
-                    subscription_id: Some("layout-subscription-literal".to_string()),
-                    subscription_incarnation: Some("layout-incarnation-literal".to_string()),
-                    subscription_revision: Some(u64::MAX),
-                }),
-            ),
-            row: RawSessionMetaRow {
-                parent_session_id: Some(SessionId::from("layout-parent-literal")),
-                caused_by_kind: Some("trigger_occurrence".to_string()),
-                caused_by_occurrence_id: Some("layout-occurrence-complete-literal".to_string()),
-                caused_by_subscription_id: Some("layout-subscription-literal".to_string()),
-                caused_by_subscription_incarnation: Some("layout-incarnation-literal".to_string()),
-                caused_by_subscription_revision: Some("18446744073709551615".to_string()),
-                ..RawSessionMetaRow::literal(
-                    &SessionId::from("layout-child-trigger-complete-literal"),
-                    "child",
-                )
-            },
-            pending_observer_intents: vec![],
-        },
-        SessionMetaLayoutCase {
-            meta: child(
                 &SessionId::from("layout-child-session-node-literal"),
                 Some(CausalRef::SessionNode {
                     session_id: SessionId::from("layout-node-session-literal"),
@@ -397,9 +344,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
 const RAW_SESSION_META_SELECT: &str = "session_id, relation_kind, parent_session_id,
     caused_by_kind, caused_by_session_id, caused_by_turn_id,
     caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-    caused_by_process_event_sequence, caused_by_occurrence_id,
-    caused_by_subscription_id, caused_by_subscription_incarnation,
-    caused_by_subscription_revision, caused_by_node_id, source_session_id,
+    caused_by_process_event_sequence, caused_by_node_id, source_session_id,
     source_node_id";
 
 fn sqlite_raw_session_meta_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawSessionMetaRow> {
@@ -414,13 +359,9 @@ fn sqlite_raw_session_meta_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawS
         caused_by_call_id: row.get(7)?,
         caused_by_process_id: row.get::<_, Option<String>>(8)?.map(stored_process_id),
         caused_by_process_event_sequence: row.get(9)?,
-        caused_by_occurrence_id: row.get(10)?,
-        caused_by_subscription_id: row.get(11)?,
-        caused_by_subscription_incarnation: row.get(12)?,
-        caused_by_subscription_revision: row.get(13)?,
-        caused_by_node_id: row.get(14)?,
-        source_session_id: row.get::<_, Option<String>>(15)?.map(SessionId::fixture),
-        source_node_id: row.get(16)?,
+        caused_by_node_id: row.get(10)?,
+        source_session_id: row.get::<_, Option<String>>(11)?.map(SessionId::fixture),
+        source_node_id: row.get(12)?,
     })
 }
 
@@ -436,13 +377,9 @@ fn postgres_raw_session_meta_row(row: sqlx::postgres::PgRow) -> RawSessionMetaRo
         caused_by_call_id: row.get(7),
         caused_by_process_id: row.get::<Option<String>, _>(8).map(stored_process_id),
         caused_by_process_event_sequence: row.get(9),
-        caused_by_occurrence_id: row.get(10),
-        caused_by_subscription_id: row.get(11),
-        caused_by_subscription_incarnation: row.get(12),
-        caused_by_subscription_revision: row.get(13),
-        caused_by_node_id: row.get(14),
-        source_session_id: row.get::<Option<String>, _>(15).map(SessionId::fixture),
-        source_node_id: row.get(16),
+        caused_by_node_id: row.get(10),
+        source_session_id: row.get::<Option<String>, _>(11).map(SessionId::fixture),
+        source_node_id: row.get(12),
     }
 }
 
@@ -567,12 +504,9 @@ fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLa
                  (session_id, relation_kind, parent_session_id,
                   caused_by_kind, caused_by_session_id, caused_by_turn_id,
                   caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-                  caused_by_process_event_sequence, caused_by_occurrence_id,
-                  caused_by_subscription_id, caused_by_subscription_incarnation,
-                  caused_by_subscription_revision, caused_by_node_id, source_session_id,
+                  caused_by_process_event_sequence, caused_by_node_id, source_session_id,
                   source_node_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                         ?14, ?15, ?16, ?17)",
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
                 rusqlite::params![
                     case.row.session_id.as_str(),
                     case.row.relation_kind,
@@ -590,10 +524,6 @@ fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLa
                         .as_ref()
                         .map(ProcessId::as_str),
                     case.row.caused_by_process_event_sequence,
-                    case.row.caused_by_occurrence_id,
-                    case.row.caused_by_subscription_id,
-                    case.row.caused_by_subscription_incarnation,
-                    case.row.caused_by_subscription_revision,
                     case.row.caused_by_node_id,
                     case.row.source_session_id.as_ref().map(SessionId::as_str),
                     case.row.source_node_id,
@@ -657,12 +587,9 @@ async fn replace_postgres_session_meta_with_raw_rows(
              (session_id, relation_kind, parent_session_id,
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
               caused_by_effect_id, caused_by_call_id, caused_by_process_id,
-              caused_by_process_event_sequence, caused_by_occurrence_id,
-              caused_by_subscription_id, caused_by_subscription_incarnation,
-              caused_by_subscription_revision, caused_by_node_id, source_session_id,
+              caused_by_process_event_sequence, caused_by_node_id, source_session_id,
               source_node_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                     $14, $15, $16, $17)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(case.row.session_id.as_str())
         .bind(&case.row.relation_kind)
@@ -684,10 +611,6 @@ async fn replace_postgres_session_meta_with_raw_rows(
                 .map(ProcessId::as_str),
         )
         .bind(&case.row.caused_by_process_event_sequence)
-        .bind(&case.row.caused_by_occurrence_id)
-        .bind(&case.row.caused_by_subscription_id)
-        .bind(&case.row.caused_by_subscription_incarnation)
-        .bind(&case.row.caused_by_subscription_revision)
         .bind(&case.row.caused_by_node_id)
         .bind(case.row.source_session_id.as_ref().map(SessionId::as_str))
         .bind(&case.row.source_node_id)

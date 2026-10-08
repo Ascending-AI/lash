@@ -2,7 +2,6 @@ use super::*;
 use lash_sansio::SessionId;
 
 const HARDENING_IDENTITY_ITERATIONS: usize = 64;
-const HARDENING_OCCURRENCE_ITERATIONS: usize = 256;
 const HARDENING_PRUNE_BATCH: usize = 16;
 
 #[derive(Clone, Copy)]
@@ -267,7 +266,6 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
         let _export_shape = serde_json::json!({
             "backends": 3,
             "identity_iterations": HARDENING_IDENTITY_ITERATIONS,
-            "occurrence_iterations": HARDENING_OCCURRENCE_ITERATIONS,
             "pruned_processes_per_backend_turn": HARDENING_PRUNE_BATCH,
         })
         .to_string();
@@ -280,10 +278,6 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             (
                 "identity_iterations".to_string(),
                 (chat_turns * HARDENING_IDENTITY_ITERATIONS) as u64,
-            ),
-            (
-                "occurrence_iterations".to_string(),
-                (chat_turns * HARDENING_OCCURRENCE_ITERATIONS) as u64,
             ),
         ]),
         ..RunTail::default()
@@ -302,23 +296,6 @@ fn measure_hardening_identity_phases(
                 std::hint::black_box(lash_core::StartKey::for_host(format!(
                     "identity-process-{turn_index}-{index}"
                 )));
-            }
-            Ok(())
-        })?;
-    phase_profile.insert(phase.0, phase.1);
-
-    let occurrence = lash_core::TriggerOccurrenceRequest::new(
-        "perf-source",
-        "perf-source-key",
-        serde_json::json!({"payload": [1, 2, 3]}),
-        format!("occurrence-{turn_index}"),
-    );
-    let (_, phase) =
-        measure_runtime_perf_phase("store_hardening.identity.trigger_occurrence", || {
-            for _ in 0..HARDENING_OCCURRENCE_ITERATIONS {
-                std::hint::black_box(lash_core::facade_support::deterministic_occurrence_id(
-                    &occurrence,
-                ));
             }
             Ok(())
         })?;

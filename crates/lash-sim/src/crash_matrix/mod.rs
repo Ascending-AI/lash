@@ -5,8 +5,7 @@
 //! ([`Case`]) is one seam of the runtime: a turn, a tool round, a tool
 //! round's store-local effects, a turn cancel, a code cell, a code cell
 //! killed inside its body, a process with its waits and cascade, a
-//! process's mail, a session close, a session's commands, a trigger
-//! occurrence, a node's drain by release, a turn's prompt sections, a
+//! session close, a session's commands, a node's drain by release, a turn's prompt sections, a
 //! session's compaction and a context-pressure frame. Each runs
 //! as a [`deployment::Deployment`]: the production session and process
 //! activations behind one dispatch on simulated nodes `a` and `b` over one
@@ -61,7 +60,7 @@ pub enum Case {
     /// presentation.
     Round,
     /// A turn's tool round whose members' store-local effects, a process
-    /// start and a signal, commit with their outcomes.
+    /// start, commit with their outcomes.
     Effects,
     /// A turn cancelled by the host while its tool runs.
     Cancel,
@@ -73,17 +72,12 @@ pub enum Case {
     /// A process's steps, its pinned key resolved by the host, its bounded
     /// wait on another process and its terminal's cascade.
     Process,
-    /// A process signalled and then cancelled by the host.
-    Signal,
     /// A session closed by the host after its turn, over its `Until`
     /// process.
     Close,
     /// A session's host appends, applied by its actor as session commands:
     /// one appends, one settles `StaleBranch`.
     Command,
-    /// A trigger occurrence emitted by the host, starting a process per
-    /// matching subscription.
-    Trigger,
     /// A rolling deploy by release: the serving node drained while a
     /// process is parked, and its actors claimed by the next.
     Drain,
@@ -103,7 +97,7 @@ pub enum Case {
 
 impl Case {
     /// Every case, in registry order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 13] = [
         Self::Turn,
         Self::Round,
         Self::Effects,
@@ -111,10 +105,8 @@ impl Case {
         Self::Cell,
         Self::CellKilled,
         Self::Process,
-        Self::Signal,
         Self::Close,
         Self::Command,
-        Self::Trigger,
         Self::Drain,
         Self::Prompt,
         Self::Compaction,
@@ -132,10 +124,8 @@ impl Case {
             Self::Cell => "cell",
             Self::CellKilled => "cell_killed",
             Self::Process => "process",
-            Self::Signal => "signal",
             Self::Close => "close",
             Self::Command => "command",
-            Self::Trigger => "trigger",
             Self::Drain => "drain",
             Self::Prompt => "prompt",
             Self::Compaction => "compaction",
@@ -161,10 +151,8 @@ impl Case {
             Self::Cell => Box::new(cases::cell::CellCase::tagged(false, tag)),
             Self::CellKilled => Box::new(cases::cell::CellCase::tagged(true, tag)),
             Self::Process => Box::<cases::process::ProcessCase>::default(),
-            Self::Signal => Box::<cases::signal::SignalCase>::default(),
             Self::Close => Box::new(cases::close::CloseCase::tagged(tag)),
             Self::Command => Box::new(cases::command::CommandCase::tagged(tag)),
-            Self::Trigger => Box::new(cases::trigger::TriggerCase::tagged(tag)),
             Self::Drain => Box::<cases::drain::DrainCase>::default(),
             Self::Prompt => Box::new(cases::prompt::PromptCase::tagged(tag)),
             Self::Compaction => Box::new(cases::compaction::CompactionCase::tagged(tag)),

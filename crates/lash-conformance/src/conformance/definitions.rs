@@ -23,7 +23,6 @@ use std::sync::{Arc, Mutex};
 use lash_core::ClockWallTime as _;
 use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupAuthorities, ArtifactCleanupPorts, ArtifactCleanupRelay, RetainedStart,
-    SubscriptionRevisionStanding,
 };
 use lash_core::runtime::obligations::relay::{RelayPolicy, relay_due};
 use lash_core::testing::TestClock;
@@ -188,15 +187,6 @@ impl ArtifactCleanupAuthorities for LawAuthorities {
                 definition_id: record.identity.definition_id,
             }))
     }
-
-    async fn subscription_revision(
-        &self,
-        revision: &crate::SubscriptionRevisionId,
-    ) -> Result<SubscriptionRevisionStanding, String> {
-        Err(format!(
-            "the law asks no subscription revision `{revision:?}`"
-        ))
-    }
 }
 
 /// One store under test, its ports, its engines and its relay.
@@ -353,7 +343,6 @@ impl World {
             session_turn_admission: None,
             executor: "definition conformance start",
             starter,
-            trigger_route: None,
         }
     }
 

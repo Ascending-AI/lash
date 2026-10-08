@@ -5,6 +5,10 @@
 # By class: mechanical 213, semantic 156, delete 905, replace 458.
 # By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 367, L9d 124, L9e 141, L9f 125, L9g 98, L9h 122, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 22, P5 2.
 # By status: todo 0, ported 211, deleted 1521.
+# 1736 rows over 873 files, 4098 laws.
+# By class: mechanical 196, semantic 140, delete 955, replace 445.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 99, L9c 368, L9d 124, L9e 141, L9f 125, L9g 98, L9h 124, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 0, ported 191, deleted 1545.
 #
 # New laws owed (replace rows), by owning lane:
 # - none
@@ -213,7 +217,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "L9d (FIG-5182) re-wrote the three start laws L10a deleted on a SQLite memory backend, run by the process executor as the store-local start it is; the signal law has its own row"
+note = "L9d (FIG-5182) re-wrote the three start laws L10a deleted on a SQLite memory backend, run by the process executor as the store-local start it is; the signal law has its own row FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/mod.rs"
@@ -244,7 +248,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "L9d (FIG-5182) re-wrote delete_session_process_command_revokes_only_observer_edges on a SQLite memory store set, run by the process executor"
+note = "L9d (FIG-5182) re-wrote delete_session_process_command_revokes_only_observer_edges on a SQLite memory store set, run by the process executor FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/process_handles.rs"
@@ -325,7 +329,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5311: the closing laws are ported to crates/lash/src/tests/cell_race_loser.rs, TypeScript cells on the durable turn over SQLite memory: l06_closing_lets_a_cooperative_loser_finish_its_own_work and l17_closing_cuts_a_loser_in_retry_backoff_promptly pass; l06_closing_lets_a_cooperative_loser_record_its_own_cancellation, l06_closing_records_its_own_cause_for_a_loser_it_drops and l17_closing_decides_a_loser_in_retry_backoff_cancelled are #[ignore]d red on FIG-5379 (a closing loser is recorded with the runtime's own cancellation and no RunClosing origin, and a loser in backoff gets no recorded completion). The cancelled-sibling laws are crates/lash/src/tests/round_cancel_state.rs, a native round on SQLite memory: l19_native_inline_cancel_discards_the_same_key_unrecorded_sibling passes (a member answering once it observed its stop applies nothing, on its finished sibling's key; one law, the disjoint-key case being the same guarantee); the finished sibling's retained state is the cancelled turn's committed progress, FIG-5373's crates/lash/src/tests/turn_cancel_modes.rs::an_after_step_stop_keeps_its_completed_step_in_the_session; l03_native_cancel_accepted_before_inline_ack_discards_the_unrecorded_sibling is #[ignore]d red on FIG-5381 (a member answering after the accepted cancel, before the owner observed it, is recorded Completed); l03_accepted_cancel_survives_crash_before_retry_wake_without_second_bodies is crates/lash/src/tests/turn_cancel_modes.rs::an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_a_second_body; l03_native_cancel_replays_before_the_inline_loser_ack's journal replay of an unacknowledged X is subject-deleted with the journal (5ad9641f9e, FIG-5190), the restored round being crates/lash-durable-test/tests/round_crash_matrix.rs's"
+note = "FIG-5311: the closing laws are ported to crates/lash/src/tests/cell_race_loser.rs, TypeScript cells on the durable turn over SQLite memory: l06_closing_lets_a_cooperative_loser_finish_its_own_work and l17_closing_cuts_a_loser_in_retry_backoff_promptly pass; l06_closing_lets_a_cooperative_loser_record_its_own_cancellation, l06_closing_records_its_own_cause_for_a_loser_it_drops and l17_closing_decides_a_loser_in_retry_backoff_cancelled are #[ignore]d red on FIG-5379 (a closing loser is recorded with the runtime's own cancellation and no RunClosing origin, and a loser in backoff gets no recorded completion). The cancelled-sibling laws are crates/lash/src/tests/round_cancel_state.rs, a native round on SQLite memory: l19_native_inline_cancel_discards_the_same_key_unrecorded_sibling passes (a member answering once it observed its stop applies nothing, on its finished sibling's key; one law, the disjoint-key case being the same guarantee); the finished sibling's retained state is the cancelled turn's committed progress, FIG-5373's crates/lash/src/tests/turn_cancel_modes.rs::an_after_step_stop_keeps_its_completed_step_in_the_session; l03_native_cancel_accepted_before_inline_ack_discards_the_unrecorded_sibling is #[ignore]d red on FIG-5381 (a member answering after the accepted cancel, before the owner observed it, is recorded Completed); l03_accepted_cancel_survives_crash_before_retry_wake_without_second_bodies is crates/lash/src/tests/turn_cancel_modes.rs::an_accepted_cancel_survives_its_owners_loss_in_a_retry_backoff_without_a_second_body; l03_native_cancel_replays_before_the_inline_loser_ack's journal replay of an unacknowledged X is subject-deleted with the journal (5ad9641f9e, FIG-5190), the restored round being crates/lash-durable-test/tests/round_crash_matrix.rs's FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/output_retention.rs"
@@ -361,7 +365,7 @@ path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
 test = "*"
 area = "triggers"
 needs = ["process"]
-class = "semantic"
+class = "delete"
 lane = "L9d"
 laws = [
   "update_after_reservation_leaves_the_reserved_delivery_capture_intact",
@@ -374,65 +378,65 @@ laws = [
   "an_emit_whose_bind_is_lost_pins_its_child_until_recovery_binds_it",
   "an_emit_whose_bind_meets_an_outage_binds_when_its_attempt_runs_again",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309 ported delivery_refuses_an_occurrence_that_leaves_the_captured_contract and session_trigger_process_is_observed_by_its_registrant into the file over SQLite memory; every other law listed here has a row of its own"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309 ported delivery_refuses_an_occurrence_that_leaves_the_captured_contract and session_trigger_process_is_observed_by_its_registrant into the file over SQLite memory; every other law listed here has a row of its own FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
 test = "transient_route_failure_retries_the_same_identity_and_revocation_refuses"
 area = "triggers"
 needs = ["process"]
-class = "semantic"
+class = "delete"
 lane = "L9d"
 laws = [
   "transient_route_failure_retries_the_same_identity_and_revocation_refuses",
 ]
-disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::an_unavailable_route_records_nothing_before_a_successful_retry"
+disposition = "subject-deleted"
 status = "deleted"
-note = "an unavailable route records nothing, so the retry is a fresh emission of the same occurrence; the revoked half is a_held_occurrence_keeps_its_revoked_route_refusal"
+note = "an unavailable route records nothing, so the retry is a fresh emission of the same occurrence; the revoked half is a_held_occurrence_keeps_its_revoked_route_refusal FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
 test = "a_replayed_trigger_emission_reports_the_delivery_its_first_emission_started"
 area = "triggers"
 needs = ["process"]
-class = "semantic"
+class = "delete"
 lane = "L9d"
 laws = [
   "a_replayed_trigger_emission_reports_the_delivery_its_first_emission_started",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/trigger_start_proof.rs::held_emissions_preserve_refusals_on_sqlite_memory"
+disposition = "subject-deleted"
 status = "deleted"
-note = "a held occurrence's emission answers the receipt its first emission recorded, its started and refused dispositions alike (FIG-5236)"
+note = "a held occurrence's emission answers the receipt its first emission recorded, its started and refused dispositions alike (FIG-5236) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
 test = "an_emit_whose_bind_is_lost_pins_its_child_until_recovery_binds_it"
 area = "triggers"
 needs = ["process"]
-class = "semantic"
+class = "delete"
 lane = "L9d"
 laws = [
   "an_emit_whose_bind_is_lost_pins_its_child_until_recovery_binds_it",
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5175 (4ff06e18f6) deleted the delivery bind, its pins and its recovery: an occurrence's deliveries commit bound to their processes in its trigger.start transaction, so no bind can be lost (TS1, TS2)"
+note = "FIG-5175 (4ff06e18f6) deleted the delivery bind, its pins and its recovery: an occurrence's deliveries commit bound to their processes in its trigger.start transaction, so no bind can be lost (TS1, TS2) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
 test = "an_emit_whose_bind_meets_an_outage_binds_when_its_attempt_runs_again"
 area = "triggers"
 needs = ["process"]
-class = "semantic"
+class = "delete"
 lane = "L9d"
 laws = [
   "an_emit_whose_bind_meets_an_outage_binds_when_its_attempt_runs_again",
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5175 (4ff06e18f6) deleted the separate bind: a store outage before trigger.start commits leaves nothing, and the store holds the whole start or none of it (TS2)"
+note = "FIG-5175 (4ff06e18f6) deleted the separate bind: a store outage before trigger.start commits leaves nothing, and the store holds the whole start or none of it (TS2) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/support.rs"
@@ -460,7 +464,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "the law runs in the file over a clocked SQLite memory backend"
+note = "the law runs in the file over a clocked SQLite memory backend FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core/src/runtime/session_manager/mod.rs"
@@ -952,14 +956,14 @@ path = "crates/lash-core/tests/runtime/tests/effect/fig1127.rs"
 test = "*"
 area = "triggers"
 needs = ["turn", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9d"
 laws = [
   "controller_owned_non_tool_trigger_reemission_answers_its_bound_process_without_session_nodes",
 ]
-disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::a_held_occurrence_answers_the_capture_it_started_against_and_asks_no_route"
+disposition = "subject-deleted"
 status = "deleted"
-note = "a re-emitted occurrence answers the delivery its first emission started and starts nothing; the ingest, bind and process-start command counting went with the relays (FIG-5175, 4ff06e18f6), which trigger.start replaced with one transaction"
+note = "a re-emitted occurrence answers the delivery its first emission started and starts nothing; the ingest, bind and process-start command counting went with the relays (FIG-5175, 4ff06e18f6), which trigger.start replaced with one transaction FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect/fig2471.rs"
@@ -1047,6 +1051,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/language_runtime_value.rs"
@@ -1202,7 +1207,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312: publication_failure_preserves_committed_turn_and_exposes_gap is ported to crates/lash/src/tests/turn_streaming/publication_gap.rs on SQLite memory; the scenario runner drove the double's turn loop, and its queue classes, admission boundaries and session lease went with run admission (0cc1b81d98, FIG-5196) and the turn loop (bbffe67d98, FIG-5208); each other case's cover is on its own row"
+note = "FIG-5312: publication_failure_preserves_committed_turn_and_exposes_gap is ported to crates/lash/src/tests/turn_streaming/publication_gap.rs on SQLite memory; the scenario runner drove the double's turn loop, and its queue classes, admission boundaries and session lease went with run admission (0cc1b81d98, FIG-5196) and the turn loop (bbffe67d98, FIG-5208); each other case's cover is on its own row FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
@@ -1243,11 +1248,12 @@ path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
 test = "runtime_scenario_admits_process_wake_at_active_checkpoint_boundary"
 area = "runtime-scenarios"
 needs = ["turn", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9d"
 laws = ["runtime_scenario_admits_process_wake_at_active_checkpoint_boundary"]
-disposition = "covered-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_filed_during_a_round_is_delivered_at_the_next_work_checkpoint"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
@@ -1315,9 +1321,9 @@ needs = ["turn", "process"]
 class = "mechanical"
 lane = "L9d"
 laws = ["runtime_scenario_opted_in_provider_drains_every_v1_tool_intent"]
-disposition = "covered-by:crates/lash-durable-test/tests/core_node_processes.rs::public_signal_intent_wakes_parked_process"
+disposition = "covered-by:crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome"
 status = "deleted"
-note = "a durable turn's tool-call intent realizes; start, emit and cancel realization: crates/lash/src/tests/tool_intent_ingress.rs::ingress_start_intent_crosses_the_engine_admission_gate and ::identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success"
+note = "a durable turn's tool-call intent realizes; start, emit and cancel realization: crates/lash/src/tests/tool_intent_ingress.rs::ingress_start_intent_crosses_the_engine_admission_gate and ::identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/support.rs"
@@ -1521,7 +1527,7 @@ laws = [
 ]
 disposition = "replaced-by:crates/lash-durable-test/tests/tool_surface_laws.rs"
 status = "deleted"
-note = "FIG-5310: the surface laws run on the served node in tool_surface_laws.rs: tool access in both directions, access across park and resume on a restarted core, cold-resume discovery without flapping, hidden tools never offered nor run nor curated, the orphan lifecycle, the apply_state delta and fence, the session fork, and a host start's observers; the laws covered elsewhere have function rows"
+note = "FIG-5310: the surface laws run on the served node in tool_surface_laws.rs: tool access in both directions, access across park and resume on a restarted core, cold-resume discovery without flapping, hidden tools never offered nor run nor curated, the orphan lifecycle, the apply_state delta and fence, the session fork, and a host start's observers; the laws covered elsewhere have function rows FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1591,7 +1597,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-core/src/runtime/session_manager/mod.rs::process_service_filter_policy_is_enforced_by_every_production_operation"
 status = "deleted"
-note = "FIG-5310: the model-tool view narrows list and validate, the full (host) view and signal never consult the filter; wakes are session mail since FIG-5196 and never read the process service"
+note = "FIG-5310: the model-tool view narrows list and validate, the full (host) view and signal never consult the filter; wakes are session mail since FIG-5196 and never read the process service FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1605,7 +1611,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/session/process_handles.rs::process_handle_operations_share_one_authority_rule"
 status = "deleted"
-note = "FIG-5310: a pruned handle's await is information (process_no_longer_retained) and its cancel and signal keep the typed no-longer-retained outcome"
+note = "FIG-5310: a pruned handle's await is information (process_no_longer_retained) and its cancel and signal keep the typed no-longer-retained outcome FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1619,7 +1625,7 @@ laws = [
 ]
 disposition = "replaced-by:crates/lash-core-execution/tests/store_backed/kernel/runtime/process/observer_intent.rs::named_observer_intents_add_only_their_edges_with_typed_outcomes"
 status = "deleted"
-note = "FIG-5310: the creation half; the start half (a wake target implies no observer edge) is crates/lash-durable-test/tests/tool_surface_laws.rs::a_host_start_observes_only_the_sessions_it_names"
+note = "FIG-5310: the creation half; the start half (a wake target implies no observer edge) is crates/lash-durable-test/tests/tool_surface_laws.rs::a_host_start_observes_only_the_sessions_it_names FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_surface_lifecycle.rs"
@@ -1674,7 +1680,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "ported by FIG-5307 to crates/lash/src/tests/tracing.rs: a host's send() on the core's node over SQLite memory with a JSONL trace sink; the model-call and tool-call record laws pass; ignored on their tickets: composition_trace_is_snapshot_on_change_and_ignores_route_capacity_noise (FIG-5353), composition_trace_fires_once_when_tool_membership_changes_with_full_ordered_schemas (FIG-5353), composition_trace_fires_once_when_same_member_tool_schema_changes (FIG-5353), provider_spans_are_children_of_the_turn_span (FIG-5353), unavailable_tool_name_emits_an_ordered_lifecycle_pair (FIG-5353), golden_tree_survives_a_kill_and_resume_on_another_node (FIG-5353)"
+note = "ported by FIG-5307 to crates/lash/src/tests/tracing.rs: a host's send() on the core's node over SQLite memory with a JSONL trace sink; the model-call and tool-call record laws pass; ignored on their tickets: composition_trace_is_snapshot_on_change_and_ignores_route_capacity_noise (FIG-5353), composition_trace_fires_once_when_tool_membership_changes_with_full_ordered_schemas (FIG-5353), composition_trace_fires_once_when_same_member_tool_schema_changes (FIG-5353), provider_spans_are_children_of_the_turn_span (FIG-5353), unavailable_tool_name_emits_an_ordered_lifecycle_pair (FIG-5353), golden_tree_survives_a_kill_and_resume_on_another_node (FIG-5353) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turn_cancel_modes.rs"
@@ -1696,7 +1702,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5311: the laws no durable law proves are written through send() and cancel() on SQLite memory in crates/lash/src/tests/turn_cancel_modes.rs: after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled, immediate_after_after_step_escalates_and_aborts_the_running_tool (whose first run found an escalated request keeping the base request's id, origin and reason, where ADR 0039 gives the escalating request's; fixed in lash-store-sql escalate_cancel and both stores through TurnCancelRequest::escalate_to, the store law a_turn_cancel_is_a_first_winner_row_with_a_wake reading the escalated identity back), a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it, a_defer_cancel_keeps_the_turn_s_undelivered_input_for_a_later_turn, immediate_stop_tail_after_checkpoint_is_absent_from_next_turn_context and after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_boundary pass. #[ignore]d red: an_after_step_stop_records_the_step_it_was_honoured_at (FIG-5364), a_drop_cancel_never_delivers_the_turn_s_undelivered_input (FIG-5365), an_after_step_stop_keeps_its_completed_step_in_the_session and an_immediate_stop_keeps_the_prose_checkpointed_before_it (FIG-5373), a_cancelled_run_reports_the_undelivered_input_its_disposition_applied_to (FIG-5321). Covered elsewhere, not re-written: after_step_stop_mid_model_call_waits_for_the_response_and_its_tools by crates/lash-durable-test/tests/turn_round_crash_matrix.rs::an_after_step_cancel_while_the_model_streams_keeps_the_response_and_its_tools; start_gate_refuses_the_next_turn_for_both_modes by crates/lash-durable-test/tests/turn_phases.rs::a_cancelled_queued_input_is_withdrawn_and_never_runs (a cancel of a turn whose input is still queued withdraws it, FIG-5262); immediate_abort_during_retry_sleep_lands_at_wake_without_the_retry by crates/lash-durable-test/tests/round_crash_matrix.rs::a_cancel_during_a_retry_backoff_starts_no_next_attempt. The Restate double's manual timer clock is subject-deleted with Restate (5ad9641f9e, FIG-5190)"
+note = "FIG-5311: the laws no durable law proves are written through send() and cancel() on SQLite memory in crates/lash/src/tests/turn_cancel_modes.rs: after_step_stop_mid_tool_call_lets_the_tool_finish_uncancelled, immediate_after_after_step_escalates_and_aborts_the_running_tool (whose first run found an escalated request keeping the base request's id, origin and reason, where ADR 0039 gives the escalating request's; fixed in lash-store-sql escalate_cancel and both stores through TurnCancelRequest::escalate_to, the store law a_turn_cancel_is_a_first_winner_row_with_a_wake reading the escalated identity back), a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it, a_defer_cancel_keeps_the_turn_s_undelivered_input_for_a_later_turn, immediate_stop_tail_after_checkpoint_is_absent_from_next_turn_context and after_step_stop_during_retry_sleep_lands_at_wake_and_stops_at_the_boundary pass. #[ignore]d red: an_after_step_stop_records_the_step_it_was_honoured_at (FIG-5364), a_drop_cancel_never_delivers_the_turn_s_undelivered_input (FIG-5365), an_after_step_stop_keeps_its_completed_step_in_the_session and an_immediate_stop_keeps_the_prose_checkpointed_before_it (FIG-5373), a_cancelled_run_reports_the_undelivered_input_its_disposition_applied_to (FIG-5321). Covered elsewhere, not re-written: after_step_stop_mid_model_call_waits_for_the_response_and_its_tools by crates/lash-durable-test/tests/turn_round_crash_matrix.rs::an_after_step_cancel_while_the_model_streams_keeps_the_response_and_its_tools; start_gate_refuses_the_next_turn_for_both_modes by crates/lash-durable-test/tests/turn_phases.rs::a_cancelled_queued_input_is_withdrawn_and_never_runs (a cancel of a turn whose input is still queued withdraws it, FIG-5262); immediate_abort_during_retry_sleep_lands_at_wake_without_the_retry by crates/lash-durable-test/tests/round_crash_matrix.rs::a_cancel_during_a_retry_backoff_starts_no_next_attempt. The Restate double's manual timer clock is subject-deleted with Restate (5ad9641f9e, FIG-5190) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/active_input_settlement.rs"
@@ -1753,7 +1759,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5308: crates/lash/src/tests/turn_checkpoints.rs has normal_turn_stores_effective_user_text_in_state, retryable_llm_failures_exhaust_and_fail_turn and provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue (read from the call ledger: a durable send's report carries no TurnIssue, D1 §1.5 3b), queued_checkpoint_input_preserves_images, checkpoint_observer_failure_leaves_active_input_pending_without_application_evidence, process_wake_admitted_at_checkpoint_is_completed_when_turn_is_cancelled. Covered: queued_checkpoint_input_commits_before_continuing_standard_turn and queued_checkpoint_input_accepts_and_persists_one_normal_user_message -> steering_crash_laws.rs::a_steer_sent_during_a_round_is_delivered_at_the_next_work_checkpoint; next_turn_input_turn_admits_process_wake_at_active_checkpoint -> steering_crash_laws.rs::a_process_wake_filed_during_a_round_is_delivered_at_the_next_work_checkpoint; wake_admitted_at_a_terminal_checkpoint_executes_a_follow_on_turn -> steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next; a_follow_on_whose_commit_is_refused_leaves_no_withheld_row_bound -> steering_crash_laws.rs::a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory. Subject-deleted: checkpoint_hook_can_inject_messages and checkpoint_attachment_failure_leaves_active_input_pending_without_application_evidence (5a7f31f0d0, FIG-5258, deleted plugin message injection); assembled_turn_reports_turn_timing_from_injected_clock (a durable report is rebuilt from the store and carries no execution metrics)."
+note = "FIG-5308: crates/lash/src/tests/turn_checkpoints.rs has normal_turn_stores_effective_user_text_in_state, retryable_llm_failures_exhaust_and_fail_turn and provider_failure_surfaces_typed_kind_and_retryability_on_turn_issue (read from the call ledger: a durable send's report carries no TurnIssue, D1 \u00a71.5 3b), queued_checkpoint_input_preserves_images, checkpoint_observer_failure_leaves_active_input_pending_without_application_evidence, process_wake_admitted_at_checkpoint_is_completed_when_turn_is_cancelled. Covered: queued_checkpoint_input_commits_before_continuing_standard_turn and queued_checkpoint_input_accepts_and_persists_one_normal_user_message -> steering_crash_laws.rs::a_steer_sent_during_a_round_is_delivered_at_the_next_work_checkpoint; next_turn_input_turn_admits_process_wake_at_active_checkpoint -> steering_crash_laws.rs::a_process_wake_filed_during_a_round_is_delivered_at_the_next_work_checkpoint; wake_admitted_at_a_terminal_checkpoint_executes_a_follow_on_turn -> steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next; a_follow_on_whose_commit_is_refused_leaves_no_withheld_row_bound -> steering_crash_laws.rs::a_withheld_steer_killed_at_every_label_runs_once_next_on_sqlite_memory. Subject-deleted: checkpoint_hook_can_inject_messages and checkpoint_attachment_failure_leaves_active_input_pending_without_application_evidence (5a7f31f0d0, FIG-5258, deleted plugin message injection); assembled_turn_reports_turn_timing_from_injected_clock (a durable report is rebuilt from the store and carries no execution metrics). FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/config_transactions.rs"
@@ -1796,7 +1802,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported the generation and effort laws to crates/lash/src/tests/generation_policy.rs (an unsupported effort is now refused typed at session creation, ReasoningRefused/UnsupportedEffort, before any provider call); FIG-5385 disposes the two generation-disposition duplicates in their named rows. Ported session_manager_rejects_duplicate_child_session_ids to crates/lash/src/tests/session_create.rs::a_second_create_of_a_session_id_is_refused_already_exists; the runtime's in-process turn loop and drain entry went with bbffe67d98 (FIG-5208) and 0cc1b81d98 (FIG-5196)"
+note = "FIG-5312 ported the generation and effort laws to crates/lash/src/tests/generation_policy.rs (an unsupported effort is now refused typed at session creation, ReasoningRefused/UnsupportedEffort, before any provider call); FIG-5385 disposes the two generation-disposition duplicates in their named rows. Ported session_manager_rejects_duplicate_child_session_ids to crates/lash/src/tests/session_create.rs::a_second_create_of_a_session_id_is_refused_already_exists; the runtime's in-process turn loop and drain entry went with bbffe67d98 (FIG-5208) and 0cc1b81d98 (FIG-5196) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
@@ -1814,11 +1820,12 @@ path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
 test = "durable_process_wake_drains_as_committed_event_history_and_acknowledges"
 area = "session-shift"
 needs = ["turn", "process"]
-class = "semantic"
+class = "delete"
 lane = "L9d"
 laws = ["durable_process_wake_drains_as_committed_event_history_and_acknowledges"]
-disposition = "covered-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
@@ -1854,7 +1861,7 @@ lane = "L9d"
 laws = ["no_queued_work_submit_defers_without_refreshing_resident_state"]
 disposition = "subject-deleted"
 status = "deleted"
-note = "NoSessionWork was deleted (0cc1b81d98, FIG-5196); a submitted command is a mail row committed with its wake (session_mail::a_producer_commits_its_row_and_its_wake_together)"
+note = "NoSessionWork was deleted (0cc1b81d98, FIG-5196); a submitted command is a mail row committed with its wake (session_mail::a_producer_commits_its_row_and_its_wake_together) FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
@@ -1916,7 +1923,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported admitted_plugin_abort_commits_and_settles_input and stream_turn_tool_put_is_bound_to_the_turn_id to crates/lash/src/tests/run_effects.rs on facade turns over SQLite memory; the second is #[ignore] FIG-5357 (a durable turn's tool put is staged on an expiring upload, not held by the turn's execution; its session edge holds since 8786bf572d). The runtime queue and shift entry points went with 0cc1b81d98 and bbffe67d98"
+note = "FIG-5312 ported admitted_plugin_abort_commits_and_settles_input and stream_turn_tool_put_is_bound_to_the_turn_id to crates/lash/src/tests/run_effects.rs on facade turns over SQLite memory; the second is #[ignore] FIG-5357 (a durable turn's tool put is staged on an expiring upload, not held by the turn's execution; its session edge holds since 8786bf572d). The runtime queue and shift entry points went with 0cc1b81d98 and bbffe67d98 FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
@@ -1956,11 +1963,12 @@ path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
 test = "pending_process_wake_drains_into_idle_queued_turn_as_turn_event"
 area = "turn-queue"
 needs = ["turn", "process"]
-class = "semantic"
+class = "delete"
 lane = "L9d"
 laws = ["pending_process_wake_drains_into_idle_queued_turn_as_turn_event"]
-disposition = "covered-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
@@ -2225,7 +2233,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5310: the guarantee is gone. 0cc1b81d98 (FIG-5196) deleted run admission and the binding that kept withheld work on its run until the switch's follow-on, and the follow-on became ordinary session mail at the next ingress position (ADR 0101 §3, fd2db318d6, FIG-5232), so work queued before the switch commits runs first. The new order is pinned by crates/lash-sim/tests/logical_turn.rs::admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once, and a withheld wake running once next by crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next"
+note = "FIG-5310: the guarantee is gone. 0cc1b81d98 (FIG-5196) deleted run admission and the binding that kept withheld work on its run until the switch's follow-on, and the follow-on became ordinary session mail at the next ingress position (ADR 0101 \u00a73, fd2db318d6, FIG-5232), so work queued before the switch commits runs first. The new order is pinned by crates/lash-sim/tests/logical_turn.rs::admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once, and a withheld wake running once next by crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-core/tests/runtime_support/effect_recording_authority.rs"
@@ -2291,7 +2299,7 @@ path = "crates/lash-lashlang-runtime/src/deferred_triggers.rs"
 test = "*"
 area = "lashlang"
 needs = ["cell"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "registry_applies_zero_one_two_provider_rule",
@@ -2300,8 +2308,9 @@ laws = [
   "recorded_unavailable_masks_later_ambient_trigger_definition",
   "ambiguous_definition_fails_before_linking",
 ]
-disposition = "port"
-status = "ported"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
@@ -2339,6 +2348,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
@@ -2387,14 +2397,14 @@ path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
 test = "real_process_signal_wait_names_the_durable_key_and_resolves"
 area = "lashlang"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "real_process_signal_wait_names_the_durable_key_and_resolves",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::lashlang_signal_wait_resolves_with_the_hosts_signal"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5309 re-wrote the law on the core's node: a lashlang process waiting on its signal parks idle, and a host's signal through the core's process API resumes its VM with the payload. The journaled signal-wait key and its trace event went with FIG-5198 (96558d9d7b): a signal is the process's mail"
+note = "FIG-5309 re-wrote the law on the core's node: a lashlang process waiting on its signal parks idle, and a host's signal through the core's process API resumes its VM with the payload. The journaled signal-wait key and its trace event went with FIG-5198 (96558d9d7b): a signal is the process's mail FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
@@ -2618,7 +2628,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "L9g (FIG-5185): every surviving law of this row runs on the durable backend on PostgreSQL: the store laws in place, and runtime_persistence_reopenable_tests!, session_store_factory_tests!, process_prune_session_store_tests!, turn_config_tests! and session_config_settlement_tests! in crates/lash-postgres-store/tests/conformance/durable_laws.rs, each effect context an ActorContext over the backend. The laws that are not ported have their own rows: deleted ones with a disposition, the blocked one as todo."
+note = "L9g (FIG-5185): every surviving law of this row runs on the durable backend on PostgreSQL: the store laws in place, and runtime_persistence_reopenable_tests!, session_store_factory_tests!, process_prune_session_store_tests!, turn_config_tests! and session_config_settlement_tests! in crates/lash-postgres-store/tests/conformance/durable_laws.rs, each effect context an ActorContext over the backend. The laws that are not ported have their own rows: deleted ones with a disposition, the blocked one as todo. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/dialect.rs"
@@ -2656,6 +2666,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/deferred_and_processes.rs"
@@ -2704,14 +2715,14 @@ path = "crates/lash-protocol-rlm/src/executor/tests/deferred_and_processes.rs"
 test = "typescript_signal_round_trip_crosses_protocol_and_process_engine"
 area = "deferred-tools"
 needs = ["cell", "process"]
-class = "semantic"
+class = "delete"
 lane = "L9e"
 laws = [
   "typescript_signal_round_trip_crosses_protocol_and_process_engine",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5310: runs on the served node at crates/lash-durable-test/tests/cell_process_handles.rs"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5310: runs on the served node at crates/lash-durable-test/tests/cell_process_handles.rs FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/deferred_and_processes.rs"
@@ -2889,7 +2900,7 @@ laws = [
 ]
 disposition = "covered-by:row:crates/lash-restate/src/tests/turn_cancel_modes.rs"
 status = "deleted"
-note = "a cell's sleep is a durable wait the turn's cancel races as session mail (ADR 0132); an Immediate stop aborting a waiting turn at wake is that row's owed law (L9c)"
+note = "a cell's sleep is a durable wait the turn's cancel races as session mail (ADR 0132); an Immediate stop aborting a waiting turn at wake is that row's owed law (L9c) FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/lifecycle_and_diagnostics.rs"
@@ -3087,7 +3098,7 @@ path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "*"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "deferred_trigger_constructor_and_event_schema_link",
@@ -3111,176 +3122,177 @@ laws = [
   "executor_reports_a_disabled_lashlang_ability_at_link_time",
   "subcap_prints_stay_fully_inline_including_empty_and_null_values",
 ]
-disposition = "port"
-status = "ported"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "deferred_trigger_constructor_and_event_schema_link"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "deferred_trigger_constructor_and_event_schema_link",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "deferred_trigger_record_and_provider_route_survive_snapshot_restore"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "deferred_trigger_record_and_provider_route_survive_snapshot_restore",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "deferred_trigger_references_inside_helpers_and_processes_are_gathered"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "deferred_trigger_references_inside_helpers_and_processes_are_gathered",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "mixed_deferred_trigger_and_tool_links_keep_provider_records_separate"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "mixed_deferred_trigger_and_tool_links_keep_provider_records_separate",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "typescript_register_trigger_executes_end_to_end"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "typescript_register_trigger_executes_end_to_end",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "trigger_registry_operations_execute_foreground_code"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "trigger_registry_operations_execute_foreground_code",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "removing_a_declaration_and_running_unrelated_code_does_not_unregister"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "removing_a_declaration_and_running_unrelated_code_does_not_unregister",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory; each of its two cells now runs under its own invocation, since a cell's snapshots hold only its own source"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory; each of its two cells now runs under its own invocation, since a cell's snapshots hold only its own source FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "trigger_disable_is_revision_checked_and_keeps_registry_entry"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "trigger_disable_is_revision_checked_and_keeps_registry_entry",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309: FIG-5175 fixed ActorContext::process_effect, so the law runs un-ignored on a claimed cell context over SQLite memory FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "reordered_keyless_registration_calls_keep_derived_keys_across_module_regeneration"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "reordered_keyless_registration_calls_keep_derived_keys_across_module_regeneration",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309 re-wrote the law over SQLite memory: each module runs in one cell on its own trigger store, and the derived keys and regenerated definitions are read off the store's registrations instead of an effect-seam capture"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309 re-wrote the law over SQLite memory: each module runs in one cell on its own trigger store, and the derived keys and regenerated definitions are read off the store's registrations instead of an effect-seam capture FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "bare_host_process_trigger_is_refused_before_store_mutation"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "bare_host_process_trigger_is_refused_before_store_mutation",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5309 re-wrote the law at the trigger command handler a process body's trigger operation runs through (execute_trigger_operation): in a host-originated process context, a list and the delete of a live session subscription are refused naming bare host authority, and the store is unchanged. FIG-5313 routed a lashlang process body's trigger operation to it as a host step of the process, acting as the process's recorded originator"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5309 re-wrote the law at the trigger command handler a process body's trigger operation runs through (execute_trigger_operation): in a host-originated process context, a list and the delete of a live session subscription are refused naming bare host authority, and the store is unchanged. FIG-5313 routed a lashlang process body's trigger operation to it as a host step of the process, acting as the process's recorded originator FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "typescript_process_body_uses_trigger_command_handler"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "typescript_process_body_uses_trigger_command_handler",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_calls.rs::process_body_uses_trigger_command_handler"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the lashlang engine declares, and the law runs on every tier"
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the lashlang engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
 test = "typescript_process_local_helper_reaches_trigger_command_handler"
 area = "triggers"
 needs = ["cell", "process"]
-class = "mechanical"
+class = "delete"
 lane = "L9e"
 laws = [
   "typescript_process_local_helper_reaches_trigger_command_handler",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_calls.rs::process_local_helper_reaches_trigger_command_handler"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the lashlang engine declares, and the law runs on every tier"
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the lashlang engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -3294,7 +3306,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "it read trigger commands off an effect-seam layer; the effect-seam wrappers are removed machinery, and a trigger command runs in place inside its tool call"
+note = "it read trigger commands off an effect-seam layer; the effect-seam wrappers are removed machinery, and a trigger command runs in place inside its tool call FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/typescript_cells.rs"
@@ -4010,7 +4022,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "the double's request bodies"
+note = "the double's request bodies FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate-test/src/server/ids.rs"
@@ -4025,7 +4037,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "the double's invocation ids"
+note = "the double's invocation ids FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate-test/src/server/model.rs"
@@ -4115,8 +4127,9 @@ lane = "L10a"
 laws = [
   "a_crash_between_a_trigger_reservation_and_its_start_recovers_one_bound_process",
 ]
-disposition = "covered-by:planned:F3"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows.rs"
@@ -4128,8 +4141,9 @@ lane = "L10a"
 laws = [
   "live_restate_a_crash_between_a_trigger_reservation_and_its_start_recovers_one_bound_process",
 ]
-disposition = "covered-by:planned:F3"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/attachment_delivery.rs"
@@ -4309,8 +4323,9 @@ laws = [
   "signal_id_deduplicates_append_without_caller_replay_key_on_the_double",
   "live_restate_signal_id_deduplicates_append_without_caller_replay_key",
 ]
-disposition = "covered-by:row:crates/lash-restate/src/tests/process_signal_admission.rs::*"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/superseded_child_run.rs"
@@ -4800,6 +4815,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate-test/tests/server_semantics.rs"
@@ -4842,6 +4858,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-restate-test/tests/session_send.rs"
@@ -4864,7 +4881,7 @@ laws = [
 disposition = "replaced-by:crates/lash/src/tests/send_handle/arrival.rs::sends_run_once_each_in_arrival_order_one_at_a_time"
 status = "deleted"
 owed = "session sends: an idle send is admitted at once, busy sends answer in arrival order, at most one drive is queued, dropping a handle stops nothing"
-note = "FIG-5312: the session actor runs an idle send at once and busy sends once each, in arrival order, one at a time; dropping_a_send_handle_stops_nothing is the dropped-handle law, a child turn being its own session's mail (bbffe67d98). The shift's queueing, its hold, its reconcile and the engine driver went with the shift (0cc1b81d98, FIG-5196); a row and its wake commit together (session_mail::a_producer_commits_its_row_and_its_wake_together)"
+note = "FIG-5312: the session actor runs an idle send at once and busy sends once each, in arrival order, one at a time; dropping_a_send_handle_stops_nothing is the dropped-handle law, a child turn being its own session's mail (bbffe67d98). The shift's queueing, its hold, its reconcile and the engine driver went with the shift (0cc1b81d98, FIG-5196); a row and its wake commit together (session_mail::a_producer_commits_its_row_and_its_wake_together) FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-restate-test/tests/session_send.rs"
@@ -5394,7 +5411,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "the Restate scope controller and pending-result fusing"
+note = "the Restate scope controller and pending-result fusing FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/admin_namespace_filters.rs"
@@ -5426,7 +5443,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "the Restate controller's cancel gates and awakeable races"
+note = "the Restate controller's cancel gates and awakeable races FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-restate/src/tests/cancellation_and_effects.rs"
@@ -5438,8 +5455,9 @@ lane = "L10a"
 laws = [
   "a_process_parked_on_a_signal_is_cancelled_by_its_durable_race",
 ]
-disposition = "covered-by:planned:C1"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/cancellation_and_effects.rs"
@@ -5597,7 +5615,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
-note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/conformance_and_poison.rs"
@@ -5880,7 +5898,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
-note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-restate/src/tests/durable_wait_source_seal.rs"
@@ -5896,6 +5914,7 @@ laws = [
 ]
 disposition = "covered-by:planned:R1"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/durable_wait_source_seal.rs"
@@ -5909,6 +5928,7 @@ laws = [
 ]
 disposition = "covered-by:planned:MATRIX"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/durable_wait_source_seal.rs"
@@ -6286,7 +6306,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
-note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-restate/src/tests/postgres_ingress.rs"
@@ -6311,8 +6331,9 @@ lane = "L9g"
 laws = [
   "a_reattached_emission_reports_the_deliveries_its_committed_attempt_started_on_postgres",
 ]
-disposition = "covered-by:row:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::a_replayed_trigger_emission_reports_the_delivery_its_first_emission_started"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "crates/lash-restate/src/tests/postgres_ingress.rs"
@@ -6337,8 +6358,9 @@ lane = "L9g"
 laws = [
   "duplicate_signal_after_wait_advances_does_not_resolve_next_wait_on_postgres",
 ]
-disposition = "covered-by:row:crates/lash-restate/src/tests/process_signal_admission.rs::*"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/postgres_ingress.rs"
@@ -6350,8 +6372,9 @@ lane = "L9g"
 laws = [
   "partial_signal_replay_rejects_changed_request_before_resolution_on_postgres",
 ]
-disposition = "covered-by:row:crates/lash-restate/src/tests/process_signal_admission.rs::*"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/postgres_ingress.rs"
@@ -6652,6 +6675,7 @@ laws = [
 ]
 disposition = "covered-by:planned:R1"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_cancel_steps.rs"
@@ -6696,7 +6720,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "process commands answered from their journal after the target moved"
+note = "process commands answered from their journal after the target moved FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_drive_inputs.rs"
@@ -6785,7 +6809,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes/process_endstates.rs"
 status = "deleted"
 owed = "a process resumed on another node after its worker and registry reopen keeps its snapshot plugin options, lashlang admission codes and trigger binding, and a TypeScript artifact runs to its terminal"
-note = "FIG-5311: sqlite_process_recovery_preserves_lashlang_admission_failure_codes is crates/lash-durable-test/tests/core_node_processes/process_endstates.rs::a_lashlang_process_whose_input_disagrees_with_its_artifact_ends_with_its_typed_refusal (every tier): a host-requirements or process-ref mismatch ends the process at its first vm_run with process_host_requirements_mismatch or process_ref_mismatch; the host-environment codes come from the same validate_lashlang_process_admission. Covered elsewhere: sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_reopen by crates/lash-durable-test/tests/process_tool_call_crash_laws.rs::tool_call_limit_counts_what_a_process_holds_across_a_worker_kill (a lashlang process recovered on the other node calls its tools under its recorded environment); typescript_artifact_runs_through_process_engine_to_terminal by crates/lash-durable-test/tests/process_tool_calls.rs (a cell creates a TypeScript-dialect process and runs it to its terminal); sqlite_trigger_started_process_recovered_after_worker_registry_reopen by crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_sqlite_memory. Subject-deleted with Restate (5ad9641f9e, FIG-5190): the file's Restate invocation-identity, segment-continuation and ingress-relay laws"
+note = "FIG-5311: sqlite_process_recovery_preserves_lashlang_admission_failure_codes is crates/lash-durable-test/tests/core_node_processes/process_endstates.rs::a_lashlang_process_whose_input_disagrees_with_its_artifact_ends_with_its_typed_refusal (every tier): a host-requirements or process-ref mismatch ends the process at its first vm_run with process_host_requirements_mismatch or process_ref_mismatch; the host-environment codes come from the same validate_lashlang_process_admission. Covered elsewhere: sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_reopen by crates/lash-durable-test/tests/process_tool_call_crash_laws.rs::tool_call_limit_counts_what_a_process_holds_across_a_worker_kill (a lashlang process recovered on the other node calls its tools under its recorded environment); typescript_artifact_runs_through_process_engine_to_terminal by crates/lash-durable-test/tests/process_tool_calls.rs (a cell creates a TypeScript-dialect process and runs it to its terminal); sqlite_trigger_started_process_recovered_after_worker_registry_reopen by crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_sqlite_memory. Subject-deleted with Restate (5ad9641f9e, FIG-5190): the file's Restate invocation-identity, segment-continuation and ingress-relay laws FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_recovery.rs"
@@ -6799,6 +6823,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_recovery.rs"
@@ -6825,6 +6850,7 @@ laws = [
 ]
 disposition = "covered-by:planned:R1"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_recovery.rs"
@@ -6931,6 +6957,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_session_turn_cancel.rs"
@@ -6999,15 +7026,15 @@ path = "crates/lash-restate/src/tests/process_signal_admission.rs"
 test = "*"
 area = "signals"
 needs = ["process", "wait"]
-class = "replace"
+class = "delete"
 lane = "L9d"
 laws = [
   "duplicate_signal_after_wait_advances_does_not_resolve_next_wait",
   "partial_signal_replay_rejects_changed_request_before_resolution",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::a_signal_is_admitted_once_and_a_changed_resend_is_refused"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a duplicate signal delivered after its wait advanced never resolves the next wait, and a signal resent with a changed payload is refused before resolution"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_source_wait_end.rs"
@@ -7120,6 +7147,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_workflow.rs"
@@ -7215,6 +7243,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/recording_context/turn_cancel_gate.rs"
@@ -7228,6 +7257,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/remote_turn_cancel.rs"
@@ -7352,6 +7382,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/restate_redrive.rs"
@@ -7577,6 +7608,7 @@ laws = [
 ]
 disposition = "covered-by:planned:T1"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_coordinator_on_the_double.rs"
@@ -7628,6 +7660,7 @@ laws = [
 ]
 disposition = "covered-by:planned:T1"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/run_coordinator_on_the_double/cold_selection.rs"
@@ -7861,7 +7894,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
-note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-restate/src/tests/session_shift_roll_on_the_double.rs"
@@ -7911,7 +7944,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
-note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/singleton_tool_run_on_the_double.rs"
@@ -8010,26 +8043,25 @@ lane = "L9d"
 laws = [
   "a_refused_append_is_the_steps_journaled_answer",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal"
+disposition = "covered-by:crates/lash-durable-test/tests/process_actor_laws.rs::a_refused_step_admission_ends_the_process_failed_and_its_awaiter_reads_it"
 status = "deleted"
 owed = "a process step's typed append refusal is its recorded answer"
-note = "L9d (FIG-5182) wrote the law as crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal; FIG-5175 un-ignored it once the process activation ended a process Failed on the first commit refused as corrupt"
+note = "L9d (FIG-5182) wrote the law as crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_the_registry_refuses_ends_the_process_failed_with_the_refusal; FIG-5175 un-ignored it once the process activation ended a process Failed on the first commit refused as corrupt FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "crates/lash-restate/src/tests/store_fault_journaling.rs"
 test = "an_emit_whose_append_meets_a_store_fault_is_never_journaled_as_its_answer"
 area = "store-faults"
 needs = ["process"]
-class = "replace"
+class = "delete"
 lane = "L9d"
 laws = [
   "an_emit_whose_append_meets_a_store_fault_is_never_journaled_as_its_answer",
   "an_await_whose_read_meets_a_store_fault_is_never_journaled_as_its_answer",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/process_actor_laws.rs::an_emit_whose_commit_meets_a_store_fault_is_appended_exactly_once"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a process step whose append or read meets a transient store fault is retried and never recorded as its answer"
-note = "an await's reads are a pass's, and a failed pass commits nothing; process_crash_proof cuts the await's wait.timeout commit under every fault"
+note = "an await's reads are a pass's, and a failed pass commits nothing; process_crash_proof cuts the await's wait.timeout commit under every fault FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/substrate_lost.rs"
@@ -8168,7 +8200,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
-note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-restate/src/tests/tool_call_identity_on_the_double.rs"
@@ -8184,7 +8216,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
-note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-restate/src/tests/tool_context_conformance.rs"
@@ -8289,8 +8321,9 @@ lane = "L10a"
 laws = [
   "restate_double_refuses_foreign_register_trigger_authority_before_effects",
 ]
-disposition = "covered-by:row:crates/lash/src/tests/wrong_authority_redeploy.rs::a_send_under_another_authority_is_answered_with_the_binding_mismatch"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/trigger_emit_outside_a_handler_on_the_double.rs"
@@ -8304,6 +8337,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/trigger_emit_reattach_on_the_double.rs"
@@ -8315,8 +8349,9 @@ lane = "L10a"
 laws = [
   "a_reattached_emission_reports_the_deliveries_its_committed_attempt_started_on_sqlite",
 ]
-disposition = "covered-by:row:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::a_replayed_trigger_emission_reports_the_delivery_its_first_emission_started"
+disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/turn_cancel_modes.rs"
@@ -8337,7 +8372,7 @@ laws = [
 disposition = "replaced-by:crates/lash/src/tests/turn_cancel_waits.rs"
 status = "deleted"
 owed = "stop modes over a waiting turn: after-step lets a sleep, event wait or process await finish, immediate aborts it at wake, and escalating a deferred stop aborts the wait; the conformance turn_runner_tests re-instantiate (L9g)"
-note = "FIG-5311: on the durable turn a wait is a code cell's, so the stop modes are laws over a turn whose cell waits, through send() and cancel() on SQLite memory: after_step_during_a_cell_sleep_lets_the_timer_finish, immediate_during_a_cell_sleep_aborts_it and escalating_a_deferred_stop_aborts_the_cell_sleep pass. after_step_during_a_parked_process_await_lets_the_process_finish is crates/lash-durable-test/tests/cell_restore_laws.rs::an_after_step_stop_during_a_process_await_lets_the_process_finish_on_sqlite_memory, #[ignore]d red on FIG-5377 (a pass finalizes an after-step request on a parked turn before its wait ends). Subject-deleted: after_step_during_a_parked_await_event_keeps_waiting_for_the_event, since a turn's cell cannot await an event (process events and wait_signal are refused in cells, lash-protocol-rlm executor/host_bridge.rs; event waits are process-body waits); gate_resolutions_carry_the_request_mode_into_the_wake, the Restate gate's journaled wake encoding (5ad9641f9e, FIG-5190), where the durable gate reads the mode from the turn's cancel row (pinned by the store law a_turn_cancel_is_a_first_winner_row_with_a_wake); and lash_conformance::turn_runner_tests!, deleted with its in-process runner by FIG-5208"
+note = "FIG-5311: on the durable turn a wait is a code cell's, so the stop modes are laws over a turn whose cell waits, through send() and cancel() on SQLite memory: after_step_during_a_cell_sleep_lets_the_timer_finish, immediate_during_a_cell_sleep_aborts_it and escalating_a_deferred_stop_aborts_the_cell_sleep pass. after_step_during_a_parked_process_await_lets_the_process_finish is crates/lash-durable-test/tests/cell_restore_laws.rs::an_after_step_stop_during_a_process_await_lets_the_process_finish_on_sqlite_memory, #[ignore]d red on FIG-5377 (a pass finalizes an after-step request on a parked turn before its wait ends). Subject-deleted: after_step_during_a_parked_await_event_keeps_waiting_for_the_event, since a turn's cell cannot await an event (process events and wait_signal are refused in cells, lash-protocol-rlm executor/host_bridge.rs; event waits are process-body waits); gate_resolutions_carry_the_request_mode_into_the_wake, the Restate gate's journaled wake encoding (5ad9641f9e, FIG-5190), where the durable gate reads the mode from the turn's cancel row (pinned by the store law a_turn_cancel_is_a_first_winner_row_with_a_wake); and lash_conformance::turn_runner_tests!, deleted with its in-process runner by FIG-5208 FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/turn_cancel_modes.rs"
@@ -8351,6 +8386,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/turn_cancel_modes.rs"
@@ -8377,6 +8413,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-restate/src/tests/turn_crash_on_the_double.rs"
@@ -8412,7 +8449,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance"
 status = "deleted"
-note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows."
+note = "L9g (FIG-5185): each lash-conformance law this row names is now instantiated on the durable backend (SQLite file, SQLite memory and PostgreSQL, in crates/lash-sqlite-store/tests/conformance/durable_laws.rs and crates/lash-postgres-store/tests/conformance/durable_laws.rs), or deleted with a row of its own (L3s deleted the shift-era turn laws; L9g deleted segment_redrive, served_process_start, bound_trigger_duplicate, admitted_head_redrive, direct_turn_acceptance, session_failure_evidence and the turn_config laws that drive a turn in process, and the effect_controller_replay, effect_controller_replay_mismatch, effect_controller_response_derivation, effect_host_await_event_witness and effect_host_cold_await_event macros, whose laws earlier lanes had already deleted), or not ported yet: the laws that drive a turn in process from a crate above lash-conformance (tool_batch_parallelism, batch_sugar, tool_call_limit, declared_start, tool_call_identity, turn_runner, migrated_tools_redrive) answer SessionRunPending on the durable backend and are owed, see the protocol and subagent rows. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-restate/src/tests/vm_broker_on_the_double.rs"
@@ -8457,6 +8494,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/wire.rs"
@@ -8580,7 +8618,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-sim/tests/crash_matrix.rs::a_turn_cut_at_every_label_commits_once"
 status = "deleted"
-note = "FIG-5311: the S-1..S-4 cells (an accepted input and the turn that consumes it, cut at every point) are the Turn case, which admits the input and cuts every label. a_waiter_follows_its_input_past_a_lost_ask and a_turn_outlasts_an_outage_past_its_attempt_budget are subject-deleted: an input is a pending-input row written with its session's wake in one transaction (0cc1b81d98, FIG-5196), so no relay ask exists to lose, and the turn handler's attempt budget went with Restate (5ad9641f9e, FIG-5190)"
+note = "FIG-5311: the S-1..S-4 cells (an accepted input and the turn that consumes it, cut at every point) are the Turn case, which admits the input and cuts every label. a_waiter_follows_its_input_past_a_lost_ask and a_turn_outlasts_an_outage_past_its_attempt_budget are subject-deleted: an input is a pending-input row written with its session's wake in one transaction (0cc1b81d98, FIG-5196), so no relay ask exists to lose, and the turn handler's attempt budget went with Restate (5ad9641f9e, FIG-5190) FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-sim/src/crash_matrix/cases/process.rs"
@@ -8800,7 +8838,7 @@ laws = [
 ]
 disposition = "replaced-by:crates/lash-sim/tests/crash_matrix.rs::a_session_close_cut_at_every_label_ends_at_its_tombstone"
 status = "deleted"
-note = "the SessionDelete obligation's relay ticks, backoff and stall ceiling are deleted with ADR 0109's relay; a session delete is the session actor's own durable close (FIG-5176), and every cut of it reaches its tombstone within its bound; open finding FIG-5184 M2 (L6b, FIG-5176) is a lost wake in its triggers step"
+note = "the SessionDelete obligation's relay ticks, backoff and stall ceiling are deleted with ADR 0109's relay; a session delete is the session actor's own durable close (FIG-5176), and every cut of it reaches its tombstone within its bound; open finding FIG-5184 M2 (L6b, FIG-5176) is a lost wake in its triggers step FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/conformance/attachment_store.rs"
@@ -8880,7 +8918,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "L9g (FIG-5185): every surviving law of this row runs on the durable backend on SQLite file and SQLite memory: the store laws in place, and runtime_persistence_reopenable_tests!, session_store_factory_tests!, process_prune_session_store_tests!, turn_config_tests! in crates/lash-sqlite-store/tests/conformance/durable_laws.rs, each effect context an ActorContext over the backend. The laws that are not ported have their own rows: deleted ones with a disposition, the blocked one as todo."
+note = "L9g (FIG-5185): every surviving law of this row runs on the durable backend on SQLite file and SQLite memory: the store laws in place, and runtime_persistence_reopenable_tests!, session_store_factory_tests!, process_prune_session_store_tests!, turn_config_tests! in crates/lash-sqlite-store/tests/conformance/durable_laws.rs, each effect context an ActorContext over the backend. The laws that are not ported have their own rows: deleted ones with a disposition, the blocked one as todo. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
@@ -9365,7 +9403,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5308: every law restored in place on a SQLite memory backend."
+note = "FIG-5308: every law restored in place on a SQLite memory backend. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_delete_finalizer.rs"
@@ -9472,7 +9510,7 @@ laws = [
 ]
 disposition = "covered-by:planned:D1"
 status = "deleted"
-note = "event-subscription handover across a generation drain"
+note = "event-subscription handover across a generation drain FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash/src/tests/drain_hand_over/run_segment.rs"
@@ -9692,7 +9730,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5311: two laws no durable law proved are written: a_process_outlives_its_deleted_session_and_resumes_on_a_host_signal in crates/lash-durable-test/tests/core_node_processes/process_endstates.rs (every tier), and a_signal_is_admitted_only_under_a_declared_name_with_a_payload_its_schema_accepts in crates/lash-core-execution/src/runtime/process/validation_tests.rs, a unit law of the pure admit_process_signal_append. Covered elsewhere, not re-written: host_owned_processes_run_without_application_session by core_node_processes.rs::lashlang_process_runs_to_its_terminal; session_trigger_process_visibility_conformance by core_node_processes.rs::trigger_started_process_runs_on_the_core_node and the process registry's observer conformance (crates/lash-conformance/src/conformance/process_registry/observer_transfer.rs); repeated_waits_on_one_signal_consume_in_order by crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order; process_starts_and_awaits_child_process by advance_tests.rs::an_await_stands_until_its_process_ends and crates/lash-durable-test/tests/cell_restore_laws.rs::processes_await_in_a_cell_parks_and_resumes_on_sqlite_memory; process_children_inherit_session_chain_provenance by crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs::a_process_lineage_carries_its_recorded_ancestry and crates/lash-durable-test/tests/declared_start.rs::declared_start_child_records_only_its_creators_facts; sqlite_facade_prune_removes_tombstoned_process_delivery by crates/lash-conformance/src/conformance/process_trigger_retention.rs::trigger_occurrence_tombstones_survive_every_reclaim and ::trigger_tombstone_forget_has_an_exclusive_write_time_cutoff; rlm_trigger_register_is_a_leaf_tool_and_fires_in_a_later_turn and rlm_process_body_registers_a_trigger_through_the_leaf_tool by crates/lash/src/tests/tool_intent_ingress.rs::host_register_trigger_realizes_and_fires_on_sqlite_memory and crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_sqlite_memory. Subject-deleted: process_prune_waits_for_process_scoped_turn_cancel_closure, with the turn-cancel closure obligation (11780f9839, FIG-5191)"
+note = "FIG-5311: two laws no durable law proved are written: a_process_outlives_its_deleted_session_and_resumes_on_a_host_signal in crates/lash-durable-test/tests/core_node_processes/process_endstates.rs (every tier), and a_signal_is_admitted_only_under_a_declared_name_with_a_payload_its_schema_accepts in crates/lash-core-execution/src/runtime/process/validation_tests.rs, a unit law of the pure admit_process_signal_append. Covered elsewhere, not re-written: host_owned_processes_run_without_application_session by core_node_processes.rs::lashlang_process_runs_to_its_terminal; session_trigger_process_visibility_conformance by core_node_processes.rs::trigger_started_process_runs_on_the_core_node and the process registry's observer conformance (crates/lash-conformance/src/conformance/process_registry/observer_transfer.rs); repeated_waits_on_one_signal_consume_in_order by crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order; process_starts_and_awaits_child_process by advance_tests.rs::an_await_stands_until_its_process_ends and crates/lash-durable-test/tests/cell_restore_laws.rs::processes_await_in_a_cell_parks_and_resumes_on_sqlite_memory; process_children_inherit_session_chain_provenance by crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs::a_process_lineage_carries_its_recorded_ancestry and crates/lash-durable-test/tests/declared_start.rs::declared_start_child_records_only_its_creators_facts; sqlite_facade_prune_removes_tombstoned_process_delivery by crates/lash-conformance/src/conformance/process_trigger_retention.rs::trigger_occurrence_tombstones_survive_every_reclaim and ::trigger_tombstone_forget_has_an_exclusive_write_time_cutoff; rlm_trigger_register_is_a_leaf_tool_and_fires_in_a_later_turn and rlm_process_body_registers_a_trigger_through_the_leaf_tool by crates/lash/src/tests/tool_intent_ingress.rs::host_register_trigger_realizes_and_fires_on_sqlite_memory and crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_sqlite_memory. Subject-deleted: process_prune_waits_for_process_scoped_turn_cancel_closure, with the turn-cancel closure obligation (11780f9839, FIG-5191) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired. FIG-5419: the signal delivery and schema subjects are deleted; detached-process survival after session deletion is retained by core_node_processes/process_endstates.rs::a_detached_process_outlives_its_deleted_session_and_accepts_host_cancellation. Trigger successors above are historical and subject-deleted; generic observer, child-await and lineage successors remain."
 
 [[row]]
 path = "crates/lash/src/tests/recorded_execution_controls.rs"
@@ -10159,7 +10197,7 @@ lane = "L9c"
 laws = ["a_lost_shift_schedule_is_healed_by_the_reconcile_tick"]
 disposition = "covered-by:crates/lash-conformance/src/conformance/session_mail.rs::a_producer_commits_its_row_and_its_wake_together"
 status = "deleted"
-note = "a row and its wake commit in one transaction, so no work exists whose schedule was lost; the reconcile tick is gone"
+note = "a row and its wake commit in one transaction, so no work exists whose schedule was lost; the reconcile tick is gone FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash/src/tests/session_shift.rs"
@@ -10183,6 +10221,7 @@ lane = "L9c"
 laws = ["a_shift_on_a_deleted_session_answers_its_retirement"]
 disposition = "covered-by:crates/lash-conformance/src/conformance/session_mail.rs::a_producer_wakes_no_absent_or_deleted_session"
 status = "deleted"
+note = "FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash/src/tests/session_shift.rs"
@@ -10831,7 +10870,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set. The accounts-context redrive crosses an owner change: one build drains the session at its next committed phase (LashCore::drain) and a second build over the same stores resumes the turn; the trigger-reopen law drains its first build the same way. The button route now emits its occurrence with the host's own runtime-operation authority, so both button laws drive the route; the cancel route aborts a running turn (a cancel aimed at a turn that never started is UnknownOrRevoked on the durable engine)"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set. The accounts-context redrive crosses an owner change: one build drains the session at its next committed phase (LashCore::drain) and a second build over the same stores resumes the turn; the trigger-reopen law drains its first build the same way. The button route now emits its occurrence with the host's own runtime-operation authority, so both button laws drive the route; the cancel route aborts a running turn (a cancel aimed at a turn that never started is UnknownOrRevoked on the durable engine) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests.rs"
@@ -10843,9 +10882,9 @@ lane = "L9h"
 laws = [
   "button_trigger_occurrence_is_finishted_to_restate_workflow",
 ]
-disposition = "covered-by:examples/agent-workbench/src/main_sections/tests.rs::a_button_press_emits_its_occurrence_under_the_selected_model"
+disposition = "subject-deleted"
 status = "deleted"
-note = "The press is no longer submitted to a Restate workflow (removed in 5ad9641f9e, FIG-5190); the route's model selection and its one emitted button occurrence are the renamed law's (FIG-5316)"
+note = "The press is no longer submitted to a Restate workflow (removed in 5ad9641f9e, FIG-5190); the route's model selection and its one emitted button occurrence are the renamed law's (FIG-5316) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests.rs"
@@ -10871,37 +10910,37 @@ lane = "L9h"
 laws = [
   "reset_chat_deletes_old_session_and_clears_trigger_started_work",
 ]
-disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/reset_chat.rs::reset_chat_deletes_old_session_and_clears_trigger_started_work"
+disposition = "subject-deleted"
 status = "deleted"
-note = "Moved beside the other reset laws and ported onto the harness; the press goes through the button route (FIG-5316)"
+note = "Moved beside the other reset laws and ported onto the harness; the press goes through the button route (FIG-5316) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests.rs"
 test = "live_restate_cron_zombie_cancel_path_end_to_end"
 area = "workbench"
 needs = ["turn", "process", "cell"]
-class = "semantic"
+class = "delete"
 lane = "L9h"
 laws = [
   "live_restate_cron_zombie_cancel_path_end_to_end",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires: the workbench's cron timer ticks only enabled registrations, and a deleted session's close deletes its registrations, so no tick fires after its tombstone; there is no separate job left to cancel (FIG-5394: lash has no scheduler)"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires: the workbench's cron timer ticks only enabled registrations, and a deleted session's close deletes its registrations, so no tick fires after its tombstone; there is no separate job left to cancel (FIG-5394: lash has no scheduler) FIG-5419: the cron trigger fixture subject is deleted with the trigger API."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests.rs"
 test = "live_restate_cron_queued_turn_sync_cancel_path_end_to_end"
 area = "workbench"
 needs = ["turn", "process", "cell"]
-class = "semantic"
+class = "delete"
 lane = "L9h"
 laws = [
   "live_restate_cron_queued_turn_sync_cancel_path_end_to_end",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_cron_schedule_disabled_while_its_tick_turn_runs_never_fires_again: a disable made while a tick's wake turn still runs is read by the workbench's cron timer before its next emission, so no later boundary fires (FIG-5394)"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5348 ported the property onto the in-process workbench harness as examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_cron_schedule_disabled_while_its_tick_turn_runs_never_fires_again: a disable made while a tick's wake turn still runs is read by the workbench's cron timer before its next emission, so no later boundary fires (FIG-5394) FIG-5419: the cron trigger fixture subject is deleted with the trigger API."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/attachments_usage.rs"
@@ -11079,7 +11118,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "The reset's Restate cron-job cancellation was removed in 5ad9641f9e (FIG-5190). The workbench's cron timer (FIG-5394) keeps no per-session job for a reset to cancel: the deleted session's close deletes its registrations, so the timer ticks none (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
+note = "The reset's Restate cron-job cancellation was removed in 5ad9641f9e (FIG-5190). The workbench's cron timer (FIG-5394) keeps no per-session job for a reset to cancel: the deleted session's close deletes its registrations, so the timer ticks none (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires) FIG-5419: the cron trigger fixture subject is deleted with the trigger API."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
@@ -11093,7 +11132,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "The reset's Restate cron-job cancellation and its close were removed in 5ad9641f9e (FIG-5190). The workbench's cron timer (FIG-5394) keeps no per-session job for a reset to cancel: the deleted session's close deletes its registrations, so the timer ticks none (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
+note = "The reset's Restate cron-job cancellation and its close were removed in 5ad9641f9e (FIG-5190). The workbench's cron timer (FIG-5394) keeps no per-session job for a reset to cancel: the deleted session's close deletes its registrations, so the timer ticks none (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires) FIG-5419: the cron trigger fixture subject is deleted with the trigger API."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat.rs"
@@ -11122,7 +11161,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5299 re-wrote the two projection-gate laws the Restate driver held on a SQLite memory durable backend: canonical rows commit through the session's own admin append and feed tests/transcript_projection.mjs over durable().transcript(); the browser suite's trigger identities and typed Stop terminal are pure facade values, fed to tests/browser_projection.mjs"
+note = "FIG-5299 re-wrote the two projection-gate laws the Restate driver held on a SQLite memory durable backend: canonical rows commit through the session's own admin append and feed tests/transcript_projection.mjs over durable().transcript(); the browser suite's trigger identities and typed Stop terminal are pure facade values, fed to tests/browser_projection.mjs FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "examples/agent-workbench/tests/timeline_projection.mjs"
@@ -11151,7 +11190,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5299 deleted the suite: its only driver was the Restate gate FIG-5190 removed, and its LASH_WORKBENCH_TURN_EVENTS, LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT and LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE fixtures came only from that gate's deleted app-state fixture. The FIG-5086 laws it also ran live on in tests/timeline_laws.mjs for the dormant Chromium runner tests/timeline_browser.py."
+note = "FIG-5299 deleted the suite: its only driver was the Restate gate FIG-5190 removed, and its LASH_WORKBENCH_TURN_EVENTS, LASH_WORKBENCH_DURABLE_TOOL_TRANSCRIPT and LASH_WORKBENCH_MULTI_ATTACHMENT_MESSAGE fixtures came only from that gate's deleted app-state fixture. The FIG-5086 laws it also ran live on in tests/timeline_laws.mjs for the dormant Chromium runner tests/timeline_browser.py. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/reference_transport.rs"
@@ -11201,21 +11240,21 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5316 wired the workbench's session delete to the core's delete with a tombstone confirmation and ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set. The laws exposed a core bug, fixed in the same change: a session created but never given work answered its close request Absent and stayed live (crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_created_session_with_no_work_is_closed_by_its_close_request)"
+note = "FIG-5316 wired the workbench's session delete to the core's delete with a tombstone confirmation and ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set. The laws exposed a core bug, fixed in the same change: a session created but never given work answered its close request Absent and stayed live (crates/lash-core/src/runtime/durable/scope_end_tests.rs::a_created_session_with_no_work_is_closed_by_its_close_request) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/restate_cron.rs"
 test = "*"
 area = "workbench-cron"
 needs = ["turn", "wait"]
-class = "semantic"
+class = "delete"
 lane = "L9h"
 laws = [
   "(no test functions) defines: live_restate_cron_tick_wait, live_restate_cron_provider, gated_live_restate_cron_provider, kill_open, shutdown, start_live_restate_cron_scenario, disable_cron_registration_for_sync_scenario, assert_queued_turn_sync_cancelled, cron_trace_records_for_job, wait_for_cron_workbench_message",
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "cron-trigger helpers over the live Restate cron workflow; the workflow is gone. The workbench's cron laws run on its own cron timer (FIG-5394) in examples/agent-workbench/src/main_sections/tests/cron_schedule.rs, over a frozen store clock"
+note = "cron-trigger helpers over the live Restate cron workflow; the workflow is gone. The workbench's cron laws run on its own cron timer (FIG-5394) in examples/agent-workbench/src/main_sections/tests/cron_schedule.rs, over a frozen store clock FIG-5419: the cron trigger fixture subject is deleted with the trigger API."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_delete_workflow.rs"
@@ -11262,14 +11301,14 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5186: the support module names no double; the stack-budget runner is all that is left."
+note = "FIG-5186: the support module names no double; the stack-budget runner is all that is left. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/trigger_retention.rs"
 test = "*"
 area = "workbench"
 needs = ["turn", "wait"]
-class = "semantic"
+class = "delete"
 lane = "L9h"
 laws = [
   "operator_forget_requires_an_explicit_cutoff_and_operator_authorization",
@@ -11277,9 +11316,9 @@ laws = [
   "operator_forget_reports_exact_exclusive_write_time_count",
   "operator_redelivery_after_forget_runs_and_retained_tombstone_suppresses",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set, over a store set on a settable wall clock (SqliteStoreSet::memory_with_clock), emitting with the host's own runtime-operation authority; an emission records its occurrence (FIG-5175). The redelivery law exposed a core bug, fixed in the same change: a tool call in a process-owned dispatch did not run inside its process, so processes.emit in a trigger's process definition failed"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5316 ported these laws onto the in-process workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core, AppState and session watchers over a SQLite memory store set, over a store set on a settable wall clock (SqliteStoreSet::memory_with_clock), emitting with the host's own runtime-operation authority; an emission records its occurrence (FIG-5175). The redelivery law exposed a core bug, fixed in the same change: a tool call in a process-owned dispatch did not run inside its process, so processes.emit in a trigger's process definition failed FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/turn_control.rs"
@@ -11336,16 +11375,16 @@ path = "examples/agent-workbench/src/restate/tests/cron_replay.rs"
 test = "*"
 area = "workbench-cron"
 needs = ["turn", "wait"]
-class = "semantic"
+class = "delete"
 lane = "L9h"
 laws = [
   "handler_cancels_an_absent_registration_without_rearming_or_emitting",
   "handler_cancels_a_disabled_registration_without_rearming_or_emitting",
   "non_live_session_cancels_without_reading_a_failing_registration_store",
 ]
-disposition = "covered-by:examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete"
+disposition = "subject-deleted"
 status = "deleted"
-note = "The Restate cron handler these laws drove went with FIG-5190. The workbench's cron timer (FIG-5394) reads the enabled registrations before every emission, so a disabled or deleted registration emits nothing at its next boundary (CRON1); a deleted session's close deletes its registrations (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires)"
+note = "The Restate cron handler these laws drove went with FIG-5190. The workbench's cron timer (FIG-5394) reads the enabled registrations before every emission, so a disabled or deleted registration emits nothing at its next boundary (CRON1); a deleted session's close deletes its registrations (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_replay.rs"
@@ -11359,6 +11398,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: the cron trigger fixture subject is deleted with the trigger API."
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_replay.rs"
@@ -11372,6 +11412,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: the cron trigger fixture subject is deleted with the trigger API."
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_replay.rs"
@@ -11385,6 +11426,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: the cron trigger fixture subject is deleted with the trigger API."
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_tests.rs"
@@ -11421,7 +11463,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "Laws of the Restate cron job (its route-synchronous arm and cancel, ingress calls, journaled tick basis and terminal codes, and the registration-state aggregate it decided on), which went with FIG-5190. Lash has no scheduler (FIG-5394): the workbench's cron timer keeps no job to arm or cancel, and emits the due tick of every enabled registration it reads. The properties that remain are laws of that timer: a disable, re-enable or delete takes effect at the next boundary (CRON1, examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete), a deleted session fires nothing (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires, whose schedule names no time zone and still starts its delivery), and a tick emitted by two hosts lands once (CRON1); a tick's occurrence starts through the router's crash-proven start (crates/lash-durable-test/tests/trigger_start_proof.rs)"
+note = "Laws of the Restate cron job (its route-synchronous arm and cancel, ingress calls, journaled tick basis and terminal codes, and the registration-state aggregate it decided on), which went with FIG-5190. Lash has no scheduler (FIG-5394): the workbench's cron timer keeps no job to arm or cancel, and emits the due tick of every enabled registration it reads. The properties that remain are laws of that timer: a disable, re-enable or delete takes effect at the next boundary (CRON1, examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_registered_cron_schedule_fires_one_turn_per_tick_and_obeys_disable_enable_and_delete), a deleted session fires nothing (examples/agent-workbench/src/main_sections/tests/cron_schedule.rs::a_deleted_sessions_cron_schedule_never_fires, whose schedule names no time zone and still starts its delivery), and a tick emitted by two hosts lands once (CRON1); a tick's occurrence starts through the router's crash-proven start (crates/lash-durable-test/tests/trigger_start_proof.rs) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_tests.rs"
@@ -11435,6 +11477,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
+note = "FIG-5419: the cron trigger fixture subject is deleted with the trigger API."
 
 [[row]]
 path = "examples/e2e-consumer/src/fixture.rs"
@@ -12715,15 +12758,14 @@ path = "crates/lash-protocol-rlm/src/executor/tests/per_process_surface.rs"
 test = "*"
 area = "lash-protocol-rlm"
 needs = ["cell", "process"]
-class = "replace"
+class = "delete"
 lane = "L9d"
 laws = [
   "trigger_fired_process_runs_under_session_contributed_event_type",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes/per_process_surface.rs::trigger_fired_process_runs_under_session_contributed_event_type"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "trigger fired process runs under session contributed event type"
-note = "FIG-5307 re-wrote the law on the core's node: a trigger registered for a module compiled against a session plugin's contributed event type fires a process that records the type in its engine config and succeeds, every tier"
+note = "FIG-5307 re-wrote the law on the core's node: a trigger registered for a module compiled against a session plugin's contributed event type fires a process that records the type in its engine config and succeeds, every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/testing/cell_conformance/durable_values.rs"
@@ -13036,7 +13078,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/controller/context/contract.rs"
@@ -13760,15 +13802,14 @@ path = "crates/lash-sim/src/minimize.rs"
 test = "minimizer_preserves_trigger_wakeup_operational_fixture_reason"
 area = "lash-sim"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9f"
 laws = [
   "minimizer_preserves_trigger_wakeup_operational_fixture_reason",
 ]
-disposition = "covered-by:crates/lash-sim/src/minimize.rs::minimizer_preserves_every_failure_fixture_oracle_and_reason"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "minimizer preserves trigger wakeup operational fixture reason"
-note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture)."
+note = "FIG-5308 found it with no generated run to stand on; FIG-5359 rebuilt generated worlds on the durable engine, and one law runs every checked-in failure fixture through its seeded mutation and the minimizer (one law per guarantee, not one per fixture). FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -14187,7 +14228,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/tests/logical_turn.rs::admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once"
 status = "deleted"
 owed = "admitted switch is seeded atomic ordered and exactly once; and 4 more law(s) of the file, by test name"
-note = "FIG-5308: restored on durable sessions. The switch law follows ADR 0101 §3 (the follow-on takes the next ingress position, so work queued before the switch runs first; the send answers with the switch and the follow-on answers under its frame-task run); atomicity at the switch commit is crates/lash-durable-test/tests/frame_switch_crash_proof.rs. admissions_settle -> admissions_settle_for_finish_cancel_and_error; its chain bound is covered by crates/lash-sim/tests/logical_turn.rs::a_frame_switch_chain_stops_at_its_bound, crates/lash-sim/tests/logical_turn.rs::a_frame_switch_chain_stops_at_the_configured_bound and crates/lash-sim/tests/logical_turn.rs::a_frame_switch_chain_under_the_bound_completes (FIG-5356), restored on durable mail with a persisted chain depth and a typed terminal. rlm_continue_as_seed and the shadowed-control law run. terminal_checkpoint_withheld_admission -> crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next. The ingress.admitted/settled trace events the admission oracle read were deleted in 0cc1b81d98; the store-based input-settlement invariant each law checks judges the same property."
+note = "FIG-5308: restored on durable sessions. The switch law follows ADR 0101 \u00a73 (the follow-on takes the next ingress position, so work queued before the switch runs first; the send answers with the switch and the follow-on answers under its frame-task run); atomicity at the switch commit is crates/lash-durable-test/tests/frame_switch_crash_proof.rs. admissions_settle -> admissions_settle_for_finish_cancel_and_error; its chain bound is covered by crates/lash-sim/tests/logical_turn.rs::a_frame_switch_chain_stops_at_its_bound, crates/lash-sim/tests/logical_turn.rs::a_frame_switch_chain_stops_at_the_configured_bound and crates/lash-sim/tests/logical_turn.rs::a_frame_switch_chain_under_the_bound_completes (FIG-5356), restored on durable mail with a persisted chain depth and a typed terminal. rlm_continue_as_seed and the shadowed-control law run. terminal_checkpoint_withheld_admission -> crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next. The ingress.admitted/settled trace events the admission oracle read were deleted in 0cc1b81d98; the store-based input-settlement invariant each law checks judges the same property. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-upgrade-harness/src/e2e/cluster/leg.rs"
@@ -15560,7 +15601,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/commit_budget.rs"
@@ -16457,10 +16498,10 @@ lane = "L9d"
 laws = [
   "native_process_await_sink_and_prune_end_to_end",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/core_node_processes.rs::lashlang_signal_wait_resolves_with_the_hosts_signal"
+disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry.rs::work_wait_seam_covers_unknown_pruned_and_backend_owned_processes"
 status = "deleted"
 owed = "native process await sink and prune end to end"
-note = "a host's signal resumes a parked lashlang process with its payload as the wait's value, through the core's process API on every tier; a pruned process's await and history answer the typed retained-history miss in crates/lash-durable-test/tests/process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended"
+note = "a host's signal resumes a parked lashlang process with its payload as the wait's value, through the core's process API on every tier; a pruned process's await and history answer the typed retained-history miss in crates/lash-durable-test/tests/process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "crates/lash/src/tests/response_phase_replay/catalog_fork.rs"
@@ -16929,7 +16970,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_steer_at_the_terminal_checkpoint_is_withheld_and_runs_next"
 status = "deleted"
 owed = "a stopped turn runs withheld input in a follow on"
-note = "Superseded by FIG-5293's next-run decision (6b69a8765a, its report's decision (b)): a durable run is one physical turn, so there is no follow-on physical turn inside a run. Input the terminal checkpoint withholds is never bound by the turn and stays session mail; it runs as the session's next run under its own id, however the turn ended. The replacing law proves it, killed at every label on three tiers; a_process_wake_after_the_last_work_checkpoint_runs_next (FIG-5294) proves the same for a process wake."
+note = "Superseded by FIG-5293's next-run decision (6b69a8765a, its report's decision (b)): a durable run is one physical turn, so there is no follow-on physical turn inside a run. Input the terminal checkpoint withholds is never bound by the turn and stays session mail; it runs as the session's next run under its own id, however the turn ended. The replacing law proves it, killed at every label on three tiers; a_process_wake_after_the_last_work_checkpoint_runs_next (FIG-5294) proves the same for a process wake. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash/tests/facade_host_wrappers.rs"
@@ -17120,7 +17161,7 @@ laws = [
 disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/done_stream_items.rs"
 status = "deleted"
 owed = "done stream items are transient and not snapshotted; and 1 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: a turn's Done now retires from the snapshot at its settlement (retire_settled_product_rows), which the transient law pins on a routed turn; the dispatch law presses the button route with and without a foreground claim"
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: a turn's Done now retires from the snapshot at its settlement (retire_settled_product_rows), which the transient law pins on a routed turn; the dispatch law presses the button route with and without a foreground claim FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/facade_homes.rs"
@@ -17277,7 +17318,7 @@ laws = [
 disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/queued_work.rs"
 status = "deleted"
 owed = "workbench lists and controls individual queued batches; and 3 more law(s) of the file, by test name"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the queue controls act while a gated foreground turn holds the session, and the wake turns are woken by a real button trigger's emission. workbench_wake_redelivery_absorbs_into_the_live_receiver_row is subject-deleted: its subject, the wake outbox and its redelivery driver (WakeDeliveryDriver, wake allocation floors, redelivery fences), went in e47f096f7f (FIG-5175)"
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the queue controls act while a gated foreground turn holds the session, and the wake turns are woken by a real button trigger's emission. workbench_wake_redelivery_absorbs_into_the_live_receiver_row is subject-deleted: its subject, the wake outbox and its redelivery driver (WakeDeliveryDriver, wake allocation floors, redelivery fences), went in e47f096f7f (FIG-5175) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/recoverable_chat_bare_prose.rs"
@@ -17350,7 +17391,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/restate_recovery/closure_lifecycle.rs"
@@ -17453,7 +17494,7 @@ laws = [
 disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/session_isolation.rs::concurrent_sessions_isolate_transcripts_triggers_and_processes"
 status = "deleted"
 owed = "concurrent sessions isolate transcripts triggers and processes"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: two rostered sessions register and press through the routes"
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: two rostered sessions register and press through the routes FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/session_resume.rs"
@@ -17505,15 +17546,14 @@ path = "examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs"
 test = "*"
 area = "agent-workbench"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn",
 ]
-disposition = "replaced-by:examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs::button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "button trigger lifecycle stays visible and queues wakes during active turn"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the lifecycle runs through the trigger and button routes while a gated foreground turn holds the session"
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5335 ported the law(s) onto the in-process durable workbench harness (examples/agent-workbench/src/main_sections/tests/harness.rs), which boots the binary's own core and AppState over a SQLite memory store set: the lifecycle runs through the trigger and button routes while a gated foreground turn holds the session FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "examples/agent-workbench/src/main_sections/tests/typescript_dialect.rs"
@@ -17608,7 +17648,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "examples/shared/local_restate.rs"
@@ -17642,7 +17682,7 @@ laws = [
 disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/authoring.rs::renaming_a_node_keeps_the_authored_title_through_save_and_reprojection"
 status = "deleted"
 owed = "blank workflow full authoring round trip rejects malformed then runs; and 5 more law(s) of the file, by test name"
-note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. All six pass; blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs runs since FIG-5337/FIG-5339 gave a process step's tools their process execution."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. All six pass; blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs runs since FIG-5337/FIG-5339 gave a process step's tools their process execution. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/durable_run.rs"
@@ -17657,7 +17697,7 @@ laws = [
 disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/durable_run.rs::a_saved_workflow_runs_as_a_durable_process"
 status = "deleted"
 owed = "a saved workflow runs as a durable process"
-note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Since FIG-5337/FIG-5339 the run completes; ignored on FIG-5372 (no durable engine path records process.effect_outcome events, so it has no graph effects to check)."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Since FIG-5337/FIG-5339 the run completes; ignored on FIG-5372 (no durable engine path records process.effect_outcome events, so it has no graph effects to check). FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/roundtrip.rs"
@@ -17692,7 +17732,7 @@ laws = [
 disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/roundtrip.rs::operation_catalog_and_fragment_validation_match_the_editor_contract"
 status = "deleted"
 owed = "operation catalog and fragment validation match the editor contract; and 20 more law(s) of the file, by test name"
-note = "FIG-5308 restored these laws onto a durable SQLite core. FIG-5372 restored committed lifecycle and effect outcomes. FIG-5378 enables project_mutate_save_and_run_streams_correlated_events and new_call_node_saves_reprojects_and_runs_with_canonical_correlation; both pass with admitted call-to-node language bindings accepted by the process observation hub. lists_selects_projects_and_runs_built_in_workflows remains ignored because preparing a workflow after another is refused with artifact_referrer_ended for the detached execution referrer, as found by FIG-5372."
+note = "FIG-5308 restored these laws onto a durable SQLite core. FIG-5372 restored committed lifecycle and effect outcomes. FIG-5378 enables project_mutate_save_and_run_streams_correlated_events and new_call_node_saves_reprojects_and_runs_with_canonical_correlation; both pass with admitted call-to-node language bindings accepted by the process observation hub. lists_selects_projects_and_runs_built_in_workflows remains ignored because preparing a workflow after another is refused with artifact_referrer_ended for the detached execution referrer, as found by FIG-5372. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "examples/workflow-graph-roundtrip/tests/type_facets.rs"
@@ -17708,7 +17748,7 @@ laws = [
 disposition = "replaced-by:examples/workflow-graph-roundtrip/tests/type_facets.rs::type_facets_are_projected_and_client_echoes_are_ignored_on_save"
 status = "deleted"
 owed = "type facets are projected and client echoes are ignored on save; and 1 more law(s) of the file, by test name"
-note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Both pass."
+note = "FIG-5308: restored from 5ad9641f9e^ onto a durable SQLite core; the example's process commands now start and signal through the core's process API. Both pass. FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "runbooks/restate-postgres-workers/src/batch_journal.rs"
@@ -17799,7 +17839,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "runbooks/restate-postgres-workers/src/bin/runner/tests.rs"
@@ -17875,7 +17915,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
+note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "runbooks/restate-postgres-workers/src/load/fault_verify.rs"
@@ -18316,7 +18356,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-sim/src/state_checker.rs"
@@ -18390,7 +18430,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash/src/tests/tool_intent_ingress.rs"
@@ -18422,7 +18462,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
+note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/observations.rs"
@@ -18682,7 +18722,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "ADR 0132 has no replay; the harness's LocalTestCx implemented the deleted controller trait. Replay freedom is NR-1..4 (planned:NR-1)"
+note = "ADR 0132 has no replay; the harness's LocalTestCx implemented the deleted controller trait. Replay freedom is NR-1..4 (planned:NR-1) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core-execution/src/runtime/turn_control/determinism_tests.rs"
@@ -18906,7 +18946,7 @@ laws = [
 disposition = "replaced-by:planned:WAKE1"
 status = "deleted"
 owed = "a send or cancel against an absent or deleted session wakes no session actor and creates nothing; one send to a live session wakes it once"
-note = "it counted wakes through the backend engine's session work (EffectEngine::session_work), deleted in I0; wakes are Backend::wake_session (L3s, FIG-5196); only the laws listed were deleted, the file's other tests stay"
+note = "it counted wakes through the backend engine's session work (EffectEngine::session_work), deleted in I0; wakes are Backend::wake_session (L3s, FIG-5196); only the laws listed were deleted, the file's other tests stay FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-plugin-mcp/src/naming_cell_tests.rs"
@@ -18957,22 +18997,21 @@ laws = [
 disposition = "replaced-by:planned:INTENT1"
 status = "deleted"
 owed = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
-note = "every law ran over IntentReplayController, a replaying RuntimeEffectController double; ADR 0132 replays nothing, and intents become L4's StoreLocalEffect (S4)"
+note = "every law ran over IntentReplayController, a replaying RuntimeEffectController double; ADR 0132 replays nothing, and intents become L4's StoreLocalEffect (S4) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/effect/executor/process_local.rs"
 test = "a_local_signal_redelivered_after_its_wait_advances_resolves_only_its_admitted_wait"
 area = "processes"
 needs = ["process"]
-class = "replace"
+class = "delete"
 lane = "I0"
 laws = [
   "a signal redelivered after its process's wait advanced resolves only the wait its first append selected (FIG-4298)",
 ]
-disposition = "replaced-by:planned:SIGNAL1"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "signals reach a process engine's advance as events in mailbox order per sender, and a redelivered signal is one event: it never resolves a later wait"
-note = "the law observed resolutions through SignalResolutions, an AwaitEventResolver double; signal waits become events to advance (S6)"
+note = "the law observed resolutions through SignalResolutions, an AwaitEventResolver double; signal waits become events to advance (S6) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/fig790_tests.rs"
@@ -19305,37 +19344,35 @@ laws = [
 disposition = "replaced-by:planned:INTENT1"
 status = "deleted"
 owed = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
-note = "every law redelivered onto a fresh KeyJournalController (an EffectHost double) to model a fresh effect journal"
+note = "every law redelivered onto a fresh KeyJournalController (an EffectHost double) to model a fresh effect journal FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash/src/tests/tool_intent_ingress/replay_after_advance.rs"
 test = "*"
 area = "tool-intents"
 needs = ["process"]
-class = "replace"
+class = "delete"
 lane = "I0"
 laws = [
   "a trigger, start, signal or cancel redelivered after its delivery, process or session was pruned or deleted answers the recorded outcome",
 ]
-disposition = "replaced-by:planned:INTENT1"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
-note = "every law redelivered onto a fresh KeyJournalController (an EffectHost double)"
+note = "every law redelivered onto a fresh KeyJournalController (an EffectHost double) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash/src/tests/tool_intent_ingress/reclaimed_emission.rs"
 test = "*"
 area = "tool-intents"
 needs = ["process"]
-class = "replace"
+class = "delete"
 lane = "I0"
 laws = [
   "a redelivered trigger emission never writes a reclaimed occurrence or delivery back, on SQLite memory, SQLite file and PostgreSQL (FIG-4513)",
 ]
-disposition = "replaced-by:planned:INTENT1"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
-note = "the law stopped the first delivery with StopAfterBind, an EffectLayer over a LayeredEffectHost (both deleted)"
+note = "the law stopped the first delivery with StopAfterBind, an EffectLayer over a LayeredEffectHost (both deleted) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash/src/tests/tool_intent_ingress/engine_owned.rs"
@@ -19508,7 +19545,7 @@ laws = [
 disposition = "replaced-by:crates/lash-sim/src/oracles/tests/contract_checks.rs::scenario_contract_oracles_emit_one_named_verdict_per_contract"
 status = "deleted"
 owed = "each scenario contract oracle emits exactly one verdict named for its contract"
-note = "FIG-5307 restored the law from 5a64db23e0^ with its fixtures (fixtures_and_interleaving.rs): every contract fixture replays on the durable engine (the agent.durable_input_suspension_resolution fixture since FIG-5337), and agent.started_process_subagent_spawn is agent.started_process_child_spawn since FIG-5296"
+note = "FIG-5307 restored the law from 5a64db23e0^ with its fixtures (fixtures_and_interleaving.rs): every contract fixture replays on the durable engine (the agent.durable_input_suspension_resolution fixture since FIG-5337), and agent.started_process_subagent_spawn is agent.started_process_child_spawn since FIG-5296 FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-sim/src/oracles/tests/contract_checks.rs"
@@ -19826,15 +19863,14 @@ path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
 test = "high_traffic_trigger_waits_for_terminal_delivery"
 area = "lash-perf"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "high_traffic_trigger_waits_for_terminal_delivery",
 ]
-disposition = "replaced-by:crates/lash-perf/src/runtime_perf/report_phase_tests.rs::high_traffic_trigger_waits_for_terminal_delivery"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a high-traffic trigger waits for terminal delivery"
-note = "FIG-5342: active; the durable trigger API emits occurrences and the process API awaits terminal delivery"
+note = "FIG-5342: active; the durable trigger API emits occurrences and the process API awaits terminal delivery FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/report_phase_tests.rs"
@@ -19856,7 +19892,7 @@ path = "runbooks/workbench-cron-schedule/runbook.md"
 test = "*"
 area = "runbook"
 needs = ["turn", "process"]
-class = "replace"
+class = "delete"
 lane = "L9h"
 laws = [
   "a chat turn registers one cron.Schedule",
@@ -19865,10 +19901,9 @@ laws = [
   "re-enabling resumes ticks without a second subscription",
   "a deleted schedule stays silent",
 ]
-disposition = "replaced-by:planned:CRON1"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a recurring schedule registered from a Workbench chat turn fires one turn per tick; disable, re-enable and delete take effect at the next boundary (judged runbook)"
-note = "FIG-5190 follow-up (5a64db23e0) deleted the runbook: every phase read the Restate cron object and its trace spans. FIG-5348 landed the planned law CRON1 on the in-process workbench harness; FIG-5394 deleted lash's cron driver, and the workbench's own timer ticks the schedule"
+note = "FIG-5190 follow-up (5a64db23e0) deleted the runbook: every phase read the Restate cron object and its trace spans. FIG-5348 landed the planned law CRON1 on the in-process workbench harness; FIG-5394 deleted lash's cron driver, and the workbench's own timer ticks the schedule FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "runbooks/process-operations/runbook.md"
@@ -19892,7 +19927,7 @@ laws = [
 disposition = "covered-by:crates/lash-durable-test/tests/process_actor_laws.rs"
 status = "deleted"
 owed = "an operator can inspect and act on the process-operations surface on a multi-node PostgreSQL and S3 deployment, and every outcome stays truthful in durable state across a node kill (judged runbook)"
-note = "FIG-5311: the runbook, its compose file and its Restate worker binaries are deleted (5a64db23e0, FIG-5190); each operator verb is proved by a durable law. Typed wake discard and redrive: process_actor_laws.rs::an_opaque_advance_failure_parks_the_process_and_a_redrive_runs_it_on and crates/lash-core-execution/src/runtime/actor/process_laws.rs::p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count. Retarget: crates/lash-conformance/src/conformance/process_registry.rs::wake_subscription_is_indexed_and_retargetable. Visibility and wake-turn policy: crates/lash-core-execution/tests/store_backed/kernel/session/process_handles.rs::process_handle_operations_share_one_authority_rule and crates/lash-core-execution/src/runtime/process/tests.rs::process_wake_turn_cause_preserves_process_origin. Worker crash recovery: crates/lash-durable-test/tests/process_crash_proof.rs::a_process_cut_at_every_label_runs_no_step_before_its_state_commits. Process-id reuse: process_actor_laws.rs::a_start_under_a_pruned_processs_key_is_a_new_process_with_its_own_lifecycle. Retention: process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended. Start-key idempotency: crates/lash-conformance/src/conformance/process_registry/registration.rs::a_start_key_reports_created_then_existing_and_is_trusted. Process event cursors: crates/lash-conformance/src/conformance/process_change_horizon.rs::process_change_cursor_below_tombstone_compaction_horizon_is_refused. Plugin state: crates/lash-durable-test/tests/plugin_state_storage_laws.rs::an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_cut. FIG-1293 migrated-tool atomicity: crates/lash-durable-test/tests/declared_start_crash_laws.rs::public_migrated_tools_redrive_to_literal_outcomes; the Workbench process replacement it ran through is deleted with the retired product hosts (f3eda494c9)"
+note = "FIG-5311: the runbook, its compose file and its Restate worker binaries are deleted (5a64db23e0, FIG-5190); each operator verb is proved by a durable law. Typed wake discard and redrive: process_actor_laws.rs::an_opaque_advance_failure_parks_the_process_and_a_redrive_runs_it_on and crates/lash-core-execution/src/runtime/actor/process_laws.rs::p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count. Retarget: crates/lash-conformance/src/conformance/process_registry.rs::wake_subscription_is_indexed_and_retargetable. Visibility and wake-turn policy: crates/lash-core-execution/tests/store_backed/kernel/session/process_handles.rs::process_handle_operations_share_one_authority_rule and crates/lash-core-execution/src/runtime/process/tests.rs::process_wake_turn_cause_preserves_process_origin. Worker crash recovery: crates/lash-durable-test/tests/process_crash_proof.rs::a_process_cut_at_every_label_runs_no_step_before_its_state_commits. Process-id reuse: process_actor_laws.rs::a_start_under_a_pruned_processs_key_is_a_new_process_with_its_own_lifecycle. Retention: process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended. Start-key idempotency: crates/lash-conformance/src/conformance/process_registry/registration.rs::a_start_key_reports_created_then_existing_and_is_trusted. Process event cursors: crates/lash-conformance/src/conformance/process_change_horizon.rs::process_change_cursor_below_tombstone_compaction_horizon_is_refused. Plugin state: crates/lash-durable-test/tests/plugin_state_storage_laws.rs::an_unchanged_namespace_is_never_rewritten_and_changes_survive_every_cut. FIG-1293 migrated-tool atomicity: crates/lash-durable-test/tests/declared_start_crash_laws.rs::public_migrated_tools_redrive_to_literal_outcomes; the Workbench process replacement it ran through is deleted with the retired product hosts (f3eda494c9) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "runbooks/session-operator/runbook.md"
@@ -20081,9 +20116,9 @@ laws = [
   "forgotten redelivery runs; a later fence still suppresses",
   "refuse an implicit cutoff or a non-operator",
 ]
-disposition = "covered-by:row:examples/agent-workbench/src/main_sections/tests/trigger_retention.rs"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5190 follow-up deleted the runbook: its only evidence was the trigger_retention.rs companion on the Restate double, deleted with its own row whose four laws are these four phases."
+note = "FIG-5190 follow-up deleted the runbook: its only evidence was the trigger_retention.rs companion on the Restate double, deleted with its own row whose four laws are these four phases. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-sim/src/replay.rs"
@@ -21109,7 +21144,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row"
+note = "L3 (FIG-5172) deleted the journal-era turn-cancel closure: a turn cancel is a first-winner request row the session actor finalizes (turn.cancel), and a turn's terminal is its run row FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/session_close.rs"
@@ -21729,7 +21764,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the journaled signal wait is gone; signal order is crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the journaled signal wait is gone; signal order is crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/argument_admission_testing.rs"
@@ -21873,9 +21908,9 @@ lane = "L7b"
 laws = [
   "a_segment_from_another_build_refuses_and_lands_on_the_drain_list",
 ]
-disposition = "covered-by:crates/lash/src/preflight/tests.rs::a_wake_from_another_build_refuses_and_lands_on_the_drain_list"
+disposition = "covered-by:crates/lash/src/preflight/tests.rs::a_state_from_another_build_refuses_and_lands_on_the_drain_list"
 status = "deleted"
-note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the drain law runs over the pending-wake surface"
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the drain law runs over the pending-wake surface FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "crates/lash-sqlite-store/src/preflight/tests.rs"
@@ -22418,15 +22453,14 @@ path = "crates/lash-conformance/src/conformance/runtime_persistence/reopen_and_c
 test = "queued_wake_delivery_is_source_key_idempotent_and_admitted_once"
 area = "reopen-and-commit"
 needs = ["turn"]
-class = "replace"
+class = "delete"
 lane = "L9c"
 laws = [
   "queued_wake_delivery_is_source_key_idempotent_and_admitted_once",
 ]
-disposition = "replaced-by:planned:L3S-TURN"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a queued wake is idempotent by source key and admitted once"
-note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/runtime_persistence/reopen_and_commit.rs"
@@ -22668,7 +22702,7 @@ laws = [
 disposition = "replaced-by:planned:L3S-TURN"
 status = "deleted"
 owed = "queued work joins a run within its membership limit and session, groups by delivery policy, process wakes batch by default, and a run's queue completion and its commit stamp are atomic"
-note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/runtime_persistence/queue_redrive.rs"
@@ -22993,16 +23027,15 @@ path = "crates/lash-sim/src/runner/trigger_delivery/tests.rs"
 test = "*"
 area = "triggers"
 needs = ["process"]
-class = "replace"
+class = "delete"
 lane = "L9f"
 laws = [
   "sqlite_generated_trigger_delivery_is_bound_and_settled",
   "postgres_generated_trigger_delivery_is_bound_and_settled",
 ]
-disposition = "replaced-by:planned:TS1"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a generated trigger delivery starts one process bound to its delivery, with nothing left for a relay to settle"
-note = "FIG-5175 deleted the TriggerDelivery relay: a delivery is bound to its process in the trigger.start commit, so there is no obligation to settle; TS1 cuts that commit on every dialect"
+note = "FIG-5175 deleted the TriggerDelivery relay: a delivery is bound to its process in the trigger.start commit, so there is no obligation to settle; TS1 cuts that commit on every dialect FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/runtime/process_start.rs"
@@ -23038,28 +23071,28 @@ path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
 test = "update_after_reservation_leaves_the_reserved_delivery_capture_intact"
 area = "triggers"
 needs = ["process"]
-class = "semantic"
+class = "delete"
 lane = "L9d"
 laws = [
   "an update after an occurrence started leaves its delivery's captured contract intact",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5175 ported it as crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::a_held_occurrence_answers_the_capture_it_started_against_and_asks_no_route"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 ported it as crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::a_held_occurrence_answers_the_capture_it_started_against_and_asks_no_route FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
 test = "a_recovered_delivery_retries_an_unavailable_route_and_refuses_a_revoked_one"
 area = "triggers"
 needs = ["process"]
-class = "semantic"
+class = "delete"
 lane = "L9d"
 laws = [
   "an unavailable route is retried and a revoked route refuses its delivery",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5175 ported it as crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery: nothing commits before the route admits, so a retry is a fresh emission, not a recovery"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 ported it as crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery: nothing commits before the route admits, so a retry is a fresh emission, not a recovery FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs"
@@ -23071,9 +23104,9 @@ lane = "L9d"
 laws = [
   "a_redriven_delivery_whose_start_registered_never_asks_a_revoked_route",
 ]
-disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::a_held_occurrence_answers_the_capture_it_started_against_and_asks_no_route"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5175: there is no redrive of a delivery; a held occurrence's emission answers its started process and asks no route"
+note = "FIG-5175: there is no redrive of a delivery; a held occurrence's emission answers its started process and asks no route FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/process_trigger_retention/delivery_starts.rs"
@@ -23088,55 +23121,53 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5175 deleted the delivery's separate start and its pin: both are rows of the trigger.start commit"
+note = "FIG-5175 deleted the delivery's separate start and its pin: both are rows of the trigger.start commit FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
 test = "*"
 area = "triggers"
 needs = ["process"]
-class = "semantic"
+class = "delete"
 lane = "L9g"
 laws = [
   "trigger_capture_route_and_compaction_refusal_matrix",
   "trigger_occurrence_redelivery_after_reclaim",
   "trigger_redelivery_after_forget_starts_again",
 ]
-disposition = "port"
-status = "ported"
-note = "FIG-5175 records its occurrences through the trigger.start commit; the relay's laws have rows of their own"
+disposition = "subject-deleted"
+status = "deleted"
+note = "FIG-5175 records its occurrences through the trigger.start commit; the relay's laws have rows of their own FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
 test = "trigger_delivery_recovery"
 area = "triggers"
 needs = ["process"]
-class = "replace"
+class = "delete"
 lane = "L9g"
 laws = [
   "trigger_delivery_recovery",
   "a_reserved_delivery_recovers_through_its_obligation_into_one_bound_process",
 ]
-disposition = "replaced-by:planned:TS1"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a reserved delivery ends with exactly one bound process"
-note = "FIG-5175: no reserve/start window is left to recover; TS1 cuts the one commit that writes both"
+note = "FIG-5175: no reserve/start window is left to recover; TS1 cuts the one commit that writes both FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
 test = "trigger_delivery_pinned_recovery"
 area = "triggers"
 needs = ["process"]
-class = "replace"
+class = "delete"
 lane = "L9g"
 laws = [
   "trigger_delivery_pinned_recovery",
   "a_completed_child_whose_bind_was_lost_is_bound_not_started_again",
 ]
-disposition = "replaced-by:planned:TS1"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a delivery whose child ran is never started again"
-note = "FIG-5175: no bind can be lost after its child runs; the child and its binding commit together"
+note = "FIG-5175: no bind can be lost after its child runs; the child and its binding commit together FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
@@ -23150,7 +23181,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5175 deleted trigger delivery pins"
+note = "FIG-5175 deleted trigger delivery pins FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
@@ -23164,7 +23195,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5175 deleted the delivery's separate start: no start runs after its delivery is bound or gone"
+note = "FIG-5175 deleted the delivery's separate start: no start runs after its delivery is bound or gone FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
@@ -23177,9 +23208,9 @@ laws = [
   "trigger_delivery_refusal",
   "captured_delivery_refusals",
 ]
-disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5175: a delivery the route or engine refuses is refused in the emission, before anything commits; no due pass stalls it"
+note = "FIG-5175: a delivery the route or engine refuses is refused in the emission, before anything commits; no due pass stalls it FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/process_trigger_retention.rs"
@@ -23191,9 +23222,9 @@ lane = "L9g"
 laws = [
   "unregistered_delivery_is_offered_to_the_recovery_sweep",
 ]
-disposition = "replaced-by:planned:TS1"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5175: no delivery is reserved unbound, so the recovery sweep's window is gone; the matrix's other laws stay"
+note = "FIG-5175: no delivery is reserved unbound, so the recovery sweep's window is gone; the matrix's other laws stay FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/obligation_relay.rs"
@@ -23207,7 +23238,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "subject was subject was the ingress obligation, which producers no longer arm: an input wakes the session actor in its own transaction; only the laws listed were deleted, the file's other tests stay"
+note = "subject was subject was the ingress obligation, which producers no longer arm: an input wakes the session actor in its own transaction; only the laws listed were deleted, the file's other tests stay FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/run_answers_its_rows.rs"
@@ -23223,7 +23254,7 @@ laws = [
 disposition = "replaced-by:planned:L3S-TURN"
 status = "deleted"
 owed = "a row a checkpoint admitted to one run is answered only by that run, across a worker death at its settling commit"
-note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit"
+note = "deleted by L3s (FIG-5196): its setup needed the store run admission or the legacy final commit, both deleted; the domain law is re-proved on the session actor turn commit FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/runtime_persistence_state_machine.rs"
@@ -23493,7 +23524,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "subject was subject was the ingress obligation and its relay, which no producer arms: an input wakes the session actor in its own transaction"
+note = "subject was subject was the ingress obligation and its relay, which no producer arms: an input wakes the session actor in its own transaction FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-sim/src/obligation_bounds.rs"
@@ -23655,7 +23686,7 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-conformance/src/conformance/session_mail.rs::a_producer_commits_its_row_and_its_wake_together"
 status = "deleted"
-note = "subject was two store run admissions racing under one shift fence; the mail drain binds rows under the session actor's epoch; only the laws listed were deleted, the file's other tests stay"
+note = "subject was two store run admissions racing under one shift fence; the mail drain binds rows under the session actor's epoch; only the laws listed were deleted, the file's other tests stay FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/storage_fixes.rs"
@@ -24583,9 +24614,9 @@ laws = [
   "bound_trigger_duplicate_after_child_prune_returns_original_process",
   "trigger_emission_held_across_a_bind_and_prune_returns_the_bound_process",
 ]
-disposition = "covered-by:planned:INTENT1"
+disposition = "subject-deleted"
 status = "deleted"
-note = "deleted by L9g (FIG-5185): its subject is an emission admission decision journaled by a fresh invocation and served to its replay; a trigger delivery is a store-local effect of its tool outcome, realized once in the settle transaction"
+note = "deleted by L9g (FIG-5185): its subject is an emission admission decision journaled by a fresh invocation and served to its replay; a trigger delivery is a store-local effect of its tool outcome, realized once in the settle transaction FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
@@ -24667,9 +24698,9 @@ lane = "L9g"
 laws = [
   "lash_conformance::bound_trigger_duplicate_tests!",
 ]
-disposition = "covered-by:row:crates/lash-conformance/src/conformance/bound_trigger_duplicate.rs"
+disposition = "subject-deleted"
 status = "deleted"
-note = "deleted by L9g (FIG-5185); see its row"
+note = "deleted by L9g (FIG-5185); see its row FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/conformance/suite.rs"
@@ -24836,9 +24867,9 @@ lane = "L9g"
 laws = [
   "lash_conformance::bound_trigger_duplicate_tests!",
 ]
-disposition = "covered-by:row:crates/lash-conformance/src/conformance/bound_trigger_duplicate.rs"
+disposition = "subject-deleted"
 status = "deleted"
-note = "deleted by L9g (FIG-5185); see its row"
+note = "deleted by L9g (FIG-5185); see its row FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-postgres-store/tests/conformance.rs"
@@ -24951,7 +24982,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "L6 (FIG-5175) deleted the process wake outbox (lash_process_wake_deliveries) and the PG wake-source lock this law raced"
+note = "L6 (FIG-5175) deleted the process wake outbox (lash_process_wake_deliveries) and the PG wake-source lock this law raced FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/obligation_relay.rs"
@@ -24978,9 +25009,9 @@ lane = "L1b"
 laws = [
   "trigger_delivery_cannot_settle_without_binding",
 ]
-disposition = "covered-by:planned:TS1"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5175 deleted the delivery's obligation columns; process_id is NOT NULL, and TS1 checks every delivery's process"
+note = "FIG-5175 deleted the delivery's obligation columns; process_id is NOT NULL, and TS1 checks every delivery's process FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/process_registry/terminal_publication.rs"
@@ -25663,7 +25694,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5210: unit tests of the deleted law harness's own activation budget (run_with_activation_budget), not tool laws. The new rendezvous waits with no clock; a serial group hangs and the law's watchdog fails it naming the leaves that never started"
+note = "FIG-5210: unit tests of the deleted law harness's own activation budget (run_with_activation_budget), not tool laws. The new rendezvous waits with no clock; a serial group hangs and the law's watchdog fails it naming the leaves that never started FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/tool_call_identity/admission.rs"
@@ -25734,15 +25765,14 @@ path = "crates/lash-conformance/src/conformance/tool_intent_runtime.rs"
 test = "*"
 area = "processes"
 needs = ["turn", "process"]
-class = "replace"
+class = "delete"
 lane = "L9t"
 laws = [
   "public_signal_intent_wakes_parked_process",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes.rs::public_signal_intent_wakes_parked_process"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "a tool's public signal intent wakes the parked process it names, through send()"
-note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18 FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/migrated_tools_redrive.rs"
@@ -25859,10 +25889,10 @@ lane = "L9t"
 laws = [
   "declared_start_early_terminal_resolves_before_wait",
 ]
-disposition = "replaced-by:crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome"
+disposition = "replaced-by:crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome"
 status = "deleted"
 owed = "declared start early terminal resolves before wait, through send()"
-note = "the order is no longer reachable: a declared start's registration commits in the fenced round.outcome transaction that records the call's park and pins its terminal wait (FIG-5223), so a child cannot end before its parent parks on it. The FIG-5223 law cuts that transaction at every label and finds the start committed only with its outcome; FIG-5216 deleted its own early-terminal law with the order"
+note = "the order is no longer reachable: a declared start's registration commits in the fenced round.outcome transaction that records the call's park and pins its terminal wait (FIG-5223), so a child cannot end before its parent parks on it. The FIG-5223 law cuts that transaction at every label and finds the start committed only with its outcome; FIG-5216 deleted its own early-terminal law with the order FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/declared_start.rs"
@@ -26178,9 +26208,9 @@ needs = ["process"]
 class = "delete"
 lane = "L9d"
 laws = ["an_unavailable_route_records_nothing_and_a_revoked_one_refuses_its_delivery"]
-disposition = "covered-by:crates/lash-core-execution/tests/store_backed/kernel/triggers/router.rs::an_unavailable_route_records_nothing_before_a_successful_retry"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5236 deletes the old contract that a refused delivery has no row or retry receipt; an_unavailable_route_records_nothing_before_a_successful_retry preserves transient retry; a_held_occurrence_keeps_its_revoked_route_refusal and held_emissions_preserve_refusals_on_sqlite_memory pin durable refusals."
+note = "FIG-5236 deletes the old contract that a refused delivery has no row or retry receipt; an_unavailable_route_records_nothing_before_a_successful_retry preserves transient retry; a_held_occurrence_keeps_its_revoked_route_refusal and held_emissions_preserve_refusals_on_sqlite_memory pin durable refusals. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-core-execution/src/triggers/store_support.rs"
@@ -26190,9 +26220,9 @@ needs = ["process"]
 class = "delete"
 lane = "L9d"
 laws = ["delivery_rows_decode_through_one_rule"]
-disposition = "covered-by:crates/lash-durable-test/tests/trigger_start_proof.rs::held_emissions_preserve_refusals_on_sqlite_memory"
+disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5236 replaces the always-bound decoder API with a typed disposition; production store laws now prove receipt decoding through emission and held reads."
+note = "FIG-5236 replaces the always-bound decoder API with a typed disposition; production store laws now prove receipt decoding through emission and held reads. FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/session_graph_append.rs"
@@ -26269,7 +26299,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5223 deleted the signal sequence projection these laws pinned: a tool's signal is a store-local effect staged by its realization and appended by the round.outcome commit that records the call, so no attempt reads a sequence before its outcome commits and a realized signal answers the signal it sent. That the signal is delivered exactly when its outcome commits is crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome; only these laws of the file are listed, the rest stay"
+note = "FIG-5223 deleted the signal sequence projection these laws pinned: a tool's signal is a store-local effect staged by its realization and appended by the round.outcome commit that records the call, so no attempt reads a sequence before its outcome commits and a realized signal answers the signal it sent. That the signal is delivered exactly when its outcome commits is crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome; only these laws of the file are listed, the rest stay FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/typescript_cells.rs"

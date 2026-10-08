@@ -33,14 +33,6 @@ through `lash::durable::DurableBackendBuilder`, which I0 (FIG-5194) assembles;
 until then a world that runs a turn stops at the builder. A failed run records
 its full history.
 
-Generated trigger boundaries register the subscription's engine process in
-the world's process registry under the reservation's stable start key; it
-owes its engine start, which the boundary leaves to the deployment. Each
-boundary binds its process before reporting success, which delivers the
-trigger-delivery obligation. A replay binds the same process. These boundaries
-model trigger routing; the runtime relay's engine-start recovery and typed
-refusals are separate SQLite and PostgreSQL conformance laws.
-
 Count-based runs partition deterministically with `--shard <i>/<n>`: shard
 `i/n` owns every seed index where `index % n == i - 1`, so the union of all
 shards covers the configured seed space exactly once. The summary records
@@ -120,7 +112,7 @@ bound, not a discovered runtime invariant violation.
   paired-, and repeat-run evidence for its bounded composition oracle.
 - Generated traces are produced by `lash-sim.generated-workload.v11`, a
   deterministic state-machine generator over sessions, provider scripts,
-  queued ingress, cancellation, triggers, observer reconnects, backend
+  queued ingress, cancellation, observer reconnects, backend
   failure choices, provider mutations, atomic tools, exec-code, durable
   effects under crash and redrive, retries, and duplicates.
 - Generated traces include scheduler/completion evidence, a named

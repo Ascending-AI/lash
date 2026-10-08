@@ -152,10 +152,6 @@ impl crate::StoreSet for StoreLawStores {
         Self::no_second_substrate("process registry")
     }
 
-    fn trigger_store(&self) -> Arc<dyn crate::TriggerStore> {
-        Self::no_second_substrate("trigger store")
-    }
-
     fn tool_material_store(&self) -> Arc<dyn crate::store::ToolMaterialStore> {
         Self::no_second_substrate("tool material store")
     }

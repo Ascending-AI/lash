@@ -25,7 +25,7 @@ use lash_core::{
     AttachmentId, BlobRef, Clock, DeliveryPolicy, DeploymentStore, EffectAddress, ExecutionScope,
     ForkSessionRequest, HydratedSessionCheckpoint, PendingTurnInputDraft, PluginNamespaceState,
     PluginState, ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority,
-    QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
+    RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
     SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord, SessionMeta,
     SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, StoreError,
     TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress, TurnInputStateKind,
@@ -732,25 +732,6 @@ fn checkpoint_from_spec(
     }
 }
 
-/// The admittable turn work the generated sequences enqueue: one durable
-/// process wake with a fixed `(process, sequence)` source, so a repeated
-/// enqueue in one sequence is the same idempotent source on every backend.
-fn admission_observability_wake(session_id: &SessionId) -> lash_core::runtime::ProcessWakeDelivery {
-    let process_id = || lash_core::runtime::ProcessId::fixture("differential-process");
-    lash_core::runtime::ProcessWakeDelivery {
-        version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        target_session_id: session_id.clone(),
-        process_id: process_id(),
-        sequence: 1,
-        event_type: "process.wake".to_string(),
-        process_caused_by: None,
-        authority: lash_core::runtime::QueuedWorkAuthority::default(),
-        input: "exercise queued-work admission state".to_string(),
-        created_at_ms: 1,
-        trace_cause: Default::default(),
-    }
-}
-
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
@@ -779,7 +760,6 @@ type QueuedWorkBatchRow = (
     i64,
     String,
     Option<String>,
-    String,
     String,
     String,
     Option<String>,
@@ -1106,9 +1086,12 @@ impl BackendRunner {
             StoreOperation::EnqueueAdmittableQueuedWork => self
                 .store()
                 .enqueue_queued_work(
-                    lash_core::runtime::process_wake_batch_draft_with_delivery_policy(
-                        admission_observability_wake(&self.session_id),
+                    QueuedWorkBatchDraft::new(
+                        &self.session_id,
                         DeliveryPolicy::AfterCurrentTurnCommit,
+                        lash_core::facade_support::SessionCommand::RefreshToolCatalog {
+                            reason: "cross-backend admission observability".to_string(),
+                        },
                     )
                     .with_merge_key("cross-backend-admission-observability"),
                 )

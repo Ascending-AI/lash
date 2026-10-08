@@ -11,11 +11,8 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
             executed_registration("filter-target")
                 .with_process_provenance(
                     ProcessProvenance::session(SessionScope::new("filter-origin")).with_caused_by(
-                        Some(crate::CausalRef::TriggerOccurrence {
-                            occurrence_id: "indexed-occurrence-target".to_string(),
-                            subscription_id: Some("indexed-subscription-target".to_string()),
-                            subscription_incarnation: None,
-                            subscription_revision: None,
+                        Some(CausalRef::Process {
+                            process_id: crate::ProcessId::fixture("filter-cause"),
                         }),
                     ),
                 )
@@ -56,11 +53,9 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
             &process_id,
             WaitState {
                 since_ms: record.created_at_ms,
-                kind: WaitKind::Signal {
-                    name: "ready".to_string(),
-                    event_type: "signal.ready".to_string(),
-                    key: "filter-target:signal.ready:1".to_string(),
-                    ordinal: 1,
+                kind: crate::WaitKind::Call {
+                    call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+                    tool_id: lash_sansio::ToolId::new("process_wait"),
                 },
             },
             Vec::new(),
@@ -84,8 +79,6 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
             cancel_pending_before_ms: None,
             identity_kind: Some("indexed-filter-kind".to_string()),
             identity_label: Some("filter-label".to_string()),
-            caused_by_occurrence_id: Some("indexed-occurrence-target".to_string()),
-            caused_by_subscription_id: Some("indexed-subscription-target".to_string()),
             created_at_start_ms: Some(record.created_at_ms),
             created_at_end_ms: Some(record.created_at_ms.saturating_add(1)),
             retired_since_ms: None,

@@ -40,11 +40,9 @@ pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
             &process_id,
             crate::WaitState {
                 since_ms: 10_020,
-                kind: crate::WaitKind::Signal {
-                    name: "ready".to_string(),
-                    event_type: "signal.ready".to_string(),
-                    key: lash_core::runtime::process_signal_wait_key(&process_id, "ready", 1),
-                    ordinal: 1,
+                kind: crate::WaitKind::Call {
+                    call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+                    tool_id: lash_sansio::ToolId::new("process_wait"),
                 },
             },
             Vec::new(),
@@ -75,7 +73,7 @@ pub async fn lifecycle_event_timestamps_follow_the_registry_clock(
     assert_eq!(
         events
             .iter()
-            .map(|event| (event.event_type.as_str(), event.occurred_at))
+            .map(|event| (event.fact.event_type(), event.occurred_at))
             .collect::<Vec<_>>(),
         vec![
             ("process.first_started", 10_010),
@@ -254,11 +252,9 @@ pub(super) async fn a_resume_event_cannot_return_an_ended_process_to_running(
 
     let wait = crate::WaitState {
         since_ms: 1,
-        kind: crate::WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: format!("{process_id}:signal.ready:1"),
-            ordinal: 1,
+        kind: crate::WaitKind::Call {
+            call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+            tool_id: lash_sansio::ToolId::new("process_wait"),
         },
     };
     let error = registry

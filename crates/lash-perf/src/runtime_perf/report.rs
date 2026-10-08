@@ -917,7 +917,7 @@ mod tests {
         assert_eq!(
             report_json["summary"][0]["correctness_coverage_ids"],
             serde_json::json!([
-                "runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint"
+                "runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"
             ])
         );
         assert_eq!(
@@ -971,7 +971,7 @@ mod tests {
                     "scenario": "turn_checkpoint",
                     "scenario_harness": "Runtime Scenario",
                     "correctness_coverage_ids": [
-                        "runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint"
+                        "runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"
                     ]
                 },
                 {
@@ -1230,38 +1230,6 @@ mod tests {
                 "missing required phase {expected}"
             );
         }
-    }
-
-    #[test]
-    fn rlm_trigger_mail_pipeline_has_specific_guard_budgets_and_phases() {
-        let phases = required_phases(RuntimePerfScenario::RlmTriggerMailPipeline);
-        for expected in [
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.store_module_artifact",
-            "rlm_lashlang.execute",
-            "trigger.occurrence_to_delivery",
-        ] {
-            assert!(
-                phases.contains(&expected),
-                "missing required phase {expected}"
-            );
-        }
-        assert!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline) <= 500_000_000.0
-        );
-        assert!(
-            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmTriggerMailPipeline)
-                <= 50_000_000.0
-        );
-        let total_budget_ms = wall_clock_budget_ms(RuntimePerfScenario::RlmTriggerMailPipeline);
-        assert!(total_budget_ms.is_finite() && total_budget_ms > 0.0);
-        assert!(
-            phase_wall_clock_budget_ms(
-                RuntimePerfScenario::RlmTriggerMailPipeline,
-                "trigger.occurrence_to_delivery",
-            )
-            .is_some_and(|budget_ms| budget_ms > 0.0 && budget_ms < total_budget_ms)
-        );
     }
 
     #[test]

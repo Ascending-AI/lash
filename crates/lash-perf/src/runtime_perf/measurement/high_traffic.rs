@@ -452,7 +452,7 @@ async fn run_high_traffic_step(
 }
 
 async fn run_high_traffic_operation(
-    core: &lash::LashCore,
+    _core: &lash::LashCore,
     session: &lash::LashSession,
     ordinal: usize,
     kind: HighTrafficOperationKind,
@@ -483,27 +483,7 @@ async fn run_high_traffic_operation(
     } else {
         run_high_traffic_direct_turn(session, ordinal, kind).await?
     };
-    if kind == HighTrafficOperationKind::Trigger {
-        let request = lash_core::TriggerOccurrenceRequest::new(
-            super::super::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
-            lash_core::facade_support::empty_trigger_source_key(
-                super::super::providers::BENCHMARK_MAIL_RECEIVED_SOURCE_TYPE,
-            )?,
-            serde_json::json!({ "account": "test", "title": "runtime perf benchmark ok", "text": "load" }),
-            format!("load:{}:{ordinal}", session.session_id()),
-        ).with_source(serde_json::json!({}));
-        let emitted = core.triggers().emit(request, core.effect_host()).await?;
-        anyhow::ensure!(
-            !emitted.deliveries.is_empty(),
-            "load trigger emitted no delivery"
-        );
-        for delivery in emitted.deliveries {
-            let process_id = delivery
-                .process_id()
-                .ok_or_else(|| anyhow::anyhow!("load trigger refused: {:?}", delivery.outcome))?;
-            core.processes().await_output(process_id).await?;
-        }
-    }
+
     let latency_ms = elapsed_ms(operation_started);
     let pre_phase_dispatch_ms = probe.first_phase_delay_ms(operation_started);
     let mut phase_profile = probe.take_completed();
@@ -687,14 +667,8 @@ mod high_traffic_tests {
 
     #[test]
     fn mix_parser_selects_each_weighted_kind_deterministically() {
-        let config = HighTrafficConfig::parse(
-            4,
-            0,
-            "plain=1,tool=1,queued=1,child=1,wake=1,trigger=1",
-            "4,8",
-            1.25,
-        )
-        .expect("valid mix");
+        let config = HighTrafficConfig::parse(4, 0, "plain=1,tool=1,queued=1,child=1", "4,8", 1.25)
+            .expect("valid mix");
         assert_eq!(
             (0..6)
                 .map(|ordinal| config.operation_kind(ordinal))

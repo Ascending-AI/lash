@@ -167,59 +167,6 @@ pub(super) fn standard_max_turns_after_tool_result_fact(
     )
 }
 
-pub(super) fn trigger_then_provider_fact(
-    events: &[DeliveredBoundary],
-    fact: &'static str,
-) -> Result<ScenarioContractGeneratedFact, String> {
-    let Some((trigger, provider)) = events
-        .iter()
-        .filter(|event| {
-            event.kind == BoundaryKind::Trigger
-                && event
-                    .observed
-                    .get("trigger_delivered")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && event
-                    .observed
-                    .get("started_process")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && event
-                    .observed
-                    .get("occurrence_id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| id.starts_with("trigger:"))
-        })
-        .find_map(|trigger| {
-            successful_provider_events(events)
-                .into_iter()
-                .filter(|provider| {
-                    provider.actor_alias == trigger.actor_alias
-                        && provider.sequence > trigger.sequence
-                })
-                .min_by_key(|provider| provider.sequence)
-                .map(|provider| (trigger, provider))
-        })
-    else {
-        return Err(format!(
-            "trigger/provider semantic fact `{fact}` did not find a generated trigger followed by same-actor provider completion"
-        ));
-    };
-    generated_fact(
-        fact,
-        "trigger delivery records occurrence/reservation data and later same-actor provider completion",
-        vec![trigger, provider],
-        json!({
-            "trigger_boundary": trigger.boundary_id,
-            "provider_boundary": provider.boundary_id,
-            "actor": trigger.actor_alias,
-            "occurrence_id": trigger.observed.get("occurrence_id").cloned().unwrap_or(Value::Null),
-            "reservation_count": trigger.observed.get("reservation_count").cloned().unwrap_or(Value::Null),
-        }),
-    )
-}
-
 pub(super) fn exec_semantic_fact(
     events: &[DeliveredBoundary],
     fact: &'static str,
@@ -570,39 +517,6 @@ pub(super) fn cancellation_terminalizes_pending_input(events: &[DeliveredBoundar
         })
 }
 
-pub(super) fn trigger_wakeup_route_semantics(events: &[DeliveredBoundary]) -> bool {
-    events
-        .iter()
-        .filter(|event| event.kind == BoundaryKind::Trigger)
-        .any(|event| {
-            let payload_source_key = event.payload.get("source_key").and_then(Value::as_str);
-            event
-                .observed
-                .get("trigger_delivered")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-                && event
-                    .observed
-                    .get("started_process")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && event.observed.get("session").and_then(Value::as_str)
-                    == Some(event.actor_alias.as_str())
-                && event
-                    .observed
-                    .get("occurrence_id")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| id.starts_with("trigger:"))
-                && event
-                    .observed
-                    .get("reservation_count")
-                    .and_then(Value::as_u64)
-                    .is_some_and(|count| count > 0)
-                && payload_source_key.is_some()
-                && event.observed.get("source_key").and_then(Value::as_str) == payload_source_key
-        })
-}
-
 pub(crate) fn backend_fault_classification_semantics(events: &[DeliveredBoundary]) -> bool {
     let mut by_session_operation: BTreeMap<(String, String), Vec<&DeliveredBoundary>> =
         BTreeMap::new();
@@ -941,23 +855,6 @@ pub(super) fn provider_dropped_terminal_event_classified(events: &[DeliveredBoun
                 .iter()
                 .all(|provider| providers.contains(*provider))
         })
-}
-
-pub(super) fn trigger_delivery_runtime_observed(events: &[DeliveredBoundary]) -> bool {
-    events.iter().any(|event| {
-        event.kind == BoundaryKind::Trigger
-            && event
-                .observed
-                .get("occurrence_id")
-                .and_then(Value::as_str)
-                .is_some_and(|id| id.starts_with("trigger:"))
-            && event
-                .observed
-                .get("reservation_count")
-                .and_then(Value::as_u64)
-                .unwrap_or(0)
-                > 0
-    })
 }
 
 pub(super) fn provider_turn_exchange_counts_are_indexed(summary: &AbstractWorldView) -> bool {

@@ -91,14 +91,12 @@ fn summary() -> Vec<ProcessEventAppendRequest> {
     ]
 }
 
-fn signal_wait(id: &ProcessId) -> crate::WaitState {
+fn call_wait(_id: &ProcessId) -> crate::WaitState {
     crate::WaitState {
         since_ms: 1,
-        kind: crate::WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: format!("{id}:signal.ready:1"),
-            ordinal: 1,
+        kind: crate::WaitKind::Call {
+            call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+            tool_id: lash_sansio::ToolId::new("process_wait"),
         },
     }
 }
@@ -140,7 +138,13 @@ async fn folded(
         .await
         .expect("read the process log")
         .into_iter()
-        .map(|event| (event.event_type, event.sequence, event.payload))
+        .map(|event| {
+            (
+                event.fact.event_type().to_owned(),
+                event.sequence,
+                event.fact.payload(),
+            )
+        })
         .collect();
     let record = registry
         .get_process(id)
@@ -258,7 +262,9 @@ pub async fn a_process_event_batch_is_one_commit(registry: Arc<dyn ProcessRegist
     // A refusal mid-batch commits nothing: a fresh occurrence ahead of a
     // payload that conflicts with the one already under its key.
     let mut conflicting = occurrence("node:b", 1, "batch-law:b:1");
-    conflicting.payload["outcome_class"] = serde_json::json!("cancelled");
+    if let lash_core::ProcessLifecycleFact::EffectOutcome(occurrence) = &mut conflicting.fact {
+        occurrence.outcome_class = lash_core::ProcessEffectOutcomeClass::Cancelled;
+    }
     let refused = registry
         .append_events(
             &batched,
@@ -297,7 +303,7 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
     let waiting = registry
         .set_process_wait_with_authority(
             &id,
-            signal_wait(&id),
+            call_wait(&id),
             vec![
                 occurrence("node:a", 1, "boundary-law:a:1"),
                 occurrence("node:a", 2, "boundary-law:a:2"),
@@ -328,7 +334,7 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
     registry
         .set_process_wait_with_authority(
             &id,
-            signal_wait(&id),
+            call_wait(&id),
             vec![occurrence("node:a", 1, "boundary-law:a:1")],
             &authority,
         )
@@ -367,11 +373,13 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
 
     // A refused prelude refuses its boundary: neither is written.
     let mut conflicting = occurrence("node:b", 1, "boundary-law:b:1");
-    conflicting.payload["outcome_class"] = serde_json::json!("failure");
+    if let lash_core::ProcessLifecycleFact::EffectOutcome(occurrence) = &mut conflicting.fact {
+        occurrence.outcome_class = lash_core::ProcessEffectOutcomeClass::Failure;
+    }
     let before = folded(&registry, &id).await;
     let clock = change_clock(&registry).await;
     registry
-        .set_process_wait_with_authority(&id, signal_wait(&id), vec![conflicting], &authority)
+        .set_process_wait_with_authority(&id, call_wait(&id), vec![conflicting], &authority)
         .await
         .expect_err("the conflicting prelude refuses the enter");
     assert_eq!(

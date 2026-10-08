@@ -390,10 +390,6 @@ fn provider_host() -> anyhow::Result<lashlang::LashlangHostEnvironment> {
         ),
         ("start", process_tool_definition(ProcessControlTool::Start)),
         ("await", process_tool_definition(ProcessControlTool::Await)),
-        (
-            "signal",
-            process_tool_definition(ProcessControlTool::Signal),
-        ),
     ] {
         let contract = definition.contract();
         catalog.add_module_operation_contract(
@@ -479,7 +475,7 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
                     .expect("the cell supplies the child definition's source");
                 let child = lash_typescript::link(source, &host)
                     .unwrap_or_else(|error| panic!("{error:?}\n{source}"));
-                let process = child
+                let _process = child
                     .artifact
                     .ir()
                     .declarations
@@ -492,12 +488,6 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
                         }
                     })
                     .expect("child body is a durable module definition");
-                assert!(
-                    process
-                        .signals
-                        .iter()
-                        .any(|signal| signal.name.as_str() == "resume")
-                );
             }
             witnessed.insert("cell");
             if !plan.tool_batches.is_empty() {
@@ -505,9 +495,6 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
             }
             if !plan.child_processes.is_empty() {
                 witnessed.insert("process");
-            }
-            if plan.child_processes.iter().any(|p| p.parked) {
-                witnessed.insert("delayed-signal");
             }
         } else {
             panic!("every primary turn needs an RLM cell");
@@ -532,20 +519,10 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
                     _ => None,
                 })
                 .collect();
-            let [body] = bodies.as_slice() else {
+            let [_body] = bodies.as_slice() else {
                 panic!("a host start links exactly one durable body");
             };
-            assert_eq!(
-                body.signals
-                    .iter()
-                    .any(|signal| signal.name.as_str() == "resume"),
-                process.waits_for_signal()
-            );
-            witnessed.insert(if process.waits_for_signal() {
-                "host-waiting"
-            } else {
-                "host"
-            });
+            witnessed.insert("host");
         }
         for queued in &plan.queued_inputs {
             let response = generator.queued_response(&plan, queued).unwrap();
@@ -568,7 +545,6 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
         process = generator.plan(0, process.operation.ordinal + 1).unwrap();
     }
     let mut child = process.child_processes[0].clone();
-    child.parked = true;
     child.await_result = true;
     worst.child_processes = vec![child; 8];
     let mut attachment = generator.plan(0, 0).unwrap();
@@ -588,27 +564,10 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
             format!("<typescript>\n{source}\n</typescript>")
         );
     }
-    let cron = generator.cron_setup_response().unwrap();
-    assert_eq!(cron.operation_id, "provider/cron");
-    assert!(cron.text.contains("provider/cron/0"));
-    assert!(cron.text.contains(&format!(
-        "provider/cron/{}",
-        workload.spec().cron.subscriptions - 1
-    )));
-    assert_eq!(generator.cron_tick_key(3, 7), "provider/cron/3/tick/7");
     assert_eq!(
         witnessed,
         BTreeSet::from([
-            "cell",
-            "tools",
-            "process",
-            "delayed-signal",
-            "plain",
-            "host",
-            "host-waiting",
-            "queued",
-            "padded",
-            "overflow"
+            "cell", "tools", "process", "plain", "host", "queued", "padded", "overflow"
         ])
     );
     let mut counts = CallCounts::default();
@@ -625,7 +584,7 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
         (1, 1, 2)
     );
     eprintln!(
-        "provider fixtures: 300 responses and identical retries; plain, tools, durable body, await and delayed signal parse"
+        "provider fixtures: 300 responses and identical retries; plain, tools, durable body, await parse"
     );
 }
 
@@ -693,11 +652,9 @@ fn mix_fixture_covers_all_distributions_overlaps_and_auxiliary_rates() {
             share("parallel", u64::from(plan.parallel_tools), 1);
         }
         for p in &plan.child_processes {
-            share("park", u64::from(p.parked), 1);
             share("await", u64::from(p.await_result), 1);
         }
         for p in &plan.host_processes {
-            share("signal", u64::from(p.signal), 1);
             share("process_cancel", u64::from(p.cancel), 1);
         }
         share("queued", plan.queued_inputs.len() as u64, 1);
@@ -708,8 +665,6 @@ fn mix_fixture_covers_all_distributions_overlaps_and_auxiliary_rates() {
         for (name, count) in [
             ("llm", plan.auxiliary_llm_requests),
             ("host", plan.host_processes.len() as u32),
-            ("occurrences", plan.external_occurrences),
-            ("trigger_edits", plan.trigger_edits),
             ("promotion_reads", plan.promotion_reads),
         ] {
             share(name, u64::from(count), 1);
@@ -865,16 +820,10 @@ fn smoke_workload_covers_every_durable_operation_class_in_its_first_turns() {
                 !plan.tool_batches.is_empty() && !plan.parallel_tools,
             );
             hit("child-process", !plan.child_processes.is_empty());
-            hit(
-                "child-parked",
-                plan.child_processes.iter().any(|process| process.parked),
-            );
+
             for process in &plan.host_processes {
                 hit("host-process", true);
-                hit(
-                    "host-signalled",
-                    process.waits_for_signal() && !process.cancel,
-                );
+
                 hit("host-cancelled", process.cancel);
             }
             hit("attachment", !plan.attachments.is_empty());

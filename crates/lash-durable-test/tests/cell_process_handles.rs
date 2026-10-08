@@ -4,7 +4,7 @@
 //!
 //! An RLM turn's cell creates and starts TypeScript processes; the core's
 //! node runs each process's body on the production process steps, and the
-//! cell signals, awaits and inspects them through their handles.
+//! cell awaits and inspects them through their handles.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -96,56 +96,6 @@ async fn processes(world: &World) -> Vec<lash_core::ProcessRecord> {
         .expect("the registry lists its processes")
 }
 
-/// A signal a cell sends crosses the protocol and the process engine: the
-/// process the cell started parks on `waitSignal`, the cell's signal
-/// resolves it with its payload, and the process's terminal is that payload.
-/// The start records the turn that started it.
-async fn typescript_signal_round_trip_crosses_protocol_and_process_engine(tier: Tier) {
-    let inspector = Arc::new(Inspector::default());
-    let Some(world) = world(tier, &inspector).await else {
-        return;
-    };
-    let cell = served::cell(
-        "const worker = await processes.create({\n\
-           dialect: \"typescript\",\n\
-           source: 'const worker = async () => await waitSignal(\"ready\");'\n\
-         });\n\
-         const handle = await processes.start({ definition: worker });\n\
-         await processes.signal({ handle: handle, name: \"ready\", payload: { ok: true } });\n\
-         finish(await handle);",
-    );
-    let output = world
-        .run("signal-round-trip", served::spec(64), vec![cell])
-        .await;
-    served::assert_answered("the turn that signals its process", &output);
-    assert_eq!(
-        output.final_value(),
-        Some(&serde_json::json!({ "ok": true })),
-        "the process's terminal is the payload the cell signalled"
-    );
-    let records = processes(&world).await;
-    let [record] = records.as_slice() else {
-        panic!("the cell started exactly one process: {records:#?}");
-    };
-    assert!(record.is_terminal(), "the process ended: {record:#?}");
-    let starter = record
-        .ancestry
-        .starter()
-        .expect("a cell's start records its starter");
-    assert_eq!(
-        (starter.storage_kind(), starter.enclosing_session()),
-        (
-            "turn",
-            Some(lash_core::ScopeId::session(
-                lash::SessionId::try_from("signal-round-trip".to_owned()).expect("a session id")
-            ))
-        ),
-        "the start records the turn that started it: {:?}",
-        record.ancestry
-    );
-    world.shutdown().await;
-}
-
 /// A process handle a cell bound in one turn is still the process in the
 /// session's next turn: that turn's cell awaits it and reads its terminal.
 async fn typescript_restored_process_handle_await_crosses_turn_boundary(tier: Tier) {
@@ -228,7 +178,6 @@ async fn typescript_cell_reads_process_handle_id_and_invokes_subsequent_operatio
 }
 
 tiered_laws!(
-    typescript_signal_round_trip_crosses_protocol_and_process_engine,
     typescript_restored_process_handle_await_crosses_turn_boundary,
     typescript_cell_reads_process_handle_id_and_invokes_subsequent_operation,
 );

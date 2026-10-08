@@ -216,7 +216,7 @@ if (counter > 0) {
 }
 const worker = await processes.create({
   dialect: "typescript",
-  source: 'const worker = async () => await waitSignal("ready");'
+  source: 'const worker = async () => { await sleep(60000); return null; };'
 });
 const handle = await processes.start({ definition: worker });
 const later = reader() + answer;

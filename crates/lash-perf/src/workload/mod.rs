@@ -19,7 +19,7 @@ pub use payload::{
 };
 pub use provider::{CallCounts, CallKind, ProviderChunk, ProviderResponse};
 pub use spec::{
-    Attachments, Collection, Cron, Faults, GeneratorVersion, Inventory, Observation, Processes,
+    Attachments, Collection, Faults, GeneratorVersion, Inventory, Observation, Processes,
     Provenance, Provider, Queued, Tools, WorkloadSpec,
 };
 

@@ -509,7 +509,7 @@ pub(super) async fn selected_observer_intents(
         assert_eq!(
             events
                 .iter()
-                .filter(|event| event.event_type == "process.observer_added")
+                .filter(|event| event.fact.event_type() == "process.observer_added")
                 .count(),
             1
         );
@@ -517,7 +517,7 @@ pub(super) async fn selected_observer_intents(
         // selector that can attach or redirect a live edge.
         let mut historical = events
             .iter()
-            .find(|event| event.event_type == "process.observer_added")
+            .find(|event| event.fact.event_type() == "process.observer_added")
             .expect("observer audit event")
             .clone();
         historical.payload["by"] = serde_json::json!({"kind": "fork_inheritance"});

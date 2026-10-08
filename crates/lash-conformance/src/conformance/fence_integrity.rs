@@ -9,7 +9,6 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FenceIntegrityTarget {
     SessionHeadRevision { session_id: SessionId },
-    TriggerRevision { subscription_id: String },
 }
 
 /// Raw observation used to prove a refused operation made no mutation.
@@ -30,7 +29,6 @@ pub trait FenceIntegrityInjector: Send + Sync {
 
 pub struct FenceIntegrityHandles {
     pub runtime: Arc<dyn crate::RuntimeStore>,
-    pub triggers: Arc<dyn crate::TriggerStore>,
     pub injector: Arc<dyn FenceIntegrityInjector>,
 }
 
@@ -40,7 +38,6 @@ where
     Fut: Future<Output = FenceIntegrityHandles>,
 {
     negative_session_head_revision(make("fence-negative-head").await).await;
-    exhausted_trigger_revision(make("fence-exhausted-trigger").await).await;
 }
 
 fn assert_corrupt(
@@ -103,84 +100,5 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
         .await
         .expect_err("negative session-head revision must refuse");
     assert_corrupt(error, "SessionHeadMeta", "head_revision", -1);
-    assert_eq!(handles.injector.observe_raw_value(&target).await, before);
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn exhausted_trigger_revision(handles: FenceIntegrityHandles) {
-    let session_id = "fence-exhausted-trigger";
-    let owner_scope = crate::TriggerOwnerScope::session(session_id);
-    let actor = crate::ProcessOriginator::session(crate::SessionScope::new(session_id));
-    let subscription_key = "fence-trigger";
-    let draft = crate::TriggerSubscriptionDraft::for_process(
-        subscription_key,
-        crate::ProcessExecutionEnvRef::new("fence-trigger-env"),
-        "fence.event",
-        "fence-source",
-        crate::ProcessInput::Engine {
-            kind: "fence".to_string(),
-            payload: serde_json::json!({}),
-        },
-        crate::ProcessIdentity::new("fence"),
-    );
-    let registered = handles
-        .triggers
-        .execute_command(
-            "fence-trigger-register",
-            crate::TriggerCommand::Register {
-                owner_scope: owner_scope.clone(),
-                actor: actor.clone(),
-                draft,
-            },
-        )
-        .await
-        .expect("register exhausted trigger")
-        .expect("trigger registration succeeds");
-    let crate::TriggerCommandOutcome::Mutation { receipt } = registered else {
-        panic!("trigger registration must return a mutation receipt")
-    };
-    let target = FenceIntegrityTarget::TriggerRevision {
-        subscription_id: receipt.record.subscription_id,
-    };
-    handles.injector.inject_raw_value(&target, i64::MAX).await;
-    let before = handles.injector.observe_raw_value(&target).await;
-    let error = handles
-        .triggers
-        .execute_command(
-            "fence-trigger-disable",
-            crate::TriggerCommand::Disable {
-                owner_scope,
-                actor,
-                subscription_key: subscription_key.to_string(),
-                expected_revision: i64::MAX as u64,
-            },
-        )
-        .await
-        .expect("trigger store remains operational")
-        .expect_err("exhausted trigger revision must refuse");
-    assert!(matches!(
-        error,
-        crate::TriggerOperationError::RevisionOverflow {
-            current_revision,
-            ..
-        } if current_revision == i64::MAX as u64
-    ));
-    assert_eq!(handles.injector.observe_raw_value(&target).await, before);
-
-    let plugin_error = handles
-        .triggers
-        .delete_session_subscriptions(&SessionId::from(session_id))
-        .await
-        .expect_err("trigger-store deletion must refuse an exhausted revision");
-    assert!(matches!(
-        plugin_error,
-        crate::PluginError::MonotonicCounterOverflow {
-            ref counter,
-            current,
-        } if counter == "trigger_subscription_revision" && current == i64::MAX as u64
-    ));
     assert_eq!(handles.injector.observe_raw_value(&target).await, before);
 }

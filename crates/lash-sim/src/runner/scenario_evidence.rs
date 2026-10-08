@@ -43,31 +43,6 @@ pub(super) fn trace_has_queued_cancel_race(lines: &[&TraceEventLine]) -> bool {
         })
 }
 
-pub(super) fn trace_has_trigger_wakeup_route(lines: &[&TraceEventLine]) -> bool {
-    lines
-        .iter()
-        .filter(|line| line.event.kind == BoundaryKind::Trigger)
-        .any(|line| {
-            line.event
-                .observed
-                .get("trigger_delivered")
-                .and_then(Value::as_bool)
-                == Some(true)
-                && line
-                    .event
-                    .observed
-                    .get("started_process")
-                    .and_then(Value::as_bool)
-                    == Some(true)
-                && line
-                    .event
-                    .observed
-                    .get("reservation_count")
-                    .and_then(Value::as_u64)
-                    .is_some_and(|count| count > 0)
-        })
-}
-
 pub(super) fn trace_has_durable_effect_replay(lines: &[&TraceEventLine]) -> bool {
     lines.iter().any(|line| {
         line.event.kind == BoundaryKind::DurableEffect
@@ -304,7 +279,7 @@ fn operational_cases_for_evidence(evidence: &str) -> &'static [&'static str] {
         "max_turn_stop" => &["tool-boundary", "max-turn-stop"],
         "final_value" => &["semantic-final-value", "final-value-event"],
         "exec_code" => &["exec-boundary", "rlm-lashlang-exec"],
-        "trigger" => &["triggers-wakeups", "trigger-delivery"],
+
         "durable_effect" => &["durable-effect", "crash-reopen-effect-replay"],
         "provider_mutation" => &[
             "provider-failure",
@@ -336,7 +311,7 @@ fn operational_cases_for_semantic(semantic_oracle: &str) -> &'static [&'static s
         "standard.native_tool_loop_reenters_model"
         | "standard.tool_failure_feedback_reenters_model"
         | "standard.parallel_tool_results_checkpoint_once" => &["tool-loop"],
-        "rlm.lashlang_cell_exec_continues" => &["rlm-lashlang-exec", "triggers-wakeups"],
+        "rlm.lashlang_cell_exec_continues" => &["rlm-lashlang-exec"],
         "rlm.streamed_lashlang_cell_exec_persists_trajectory" => {
             &["rlm-lashlang-exec", "scheduler-owned-provider-events"]
         }
@@ -395,7 +370,7 @@ fn scenario_transition_kind(contract: &ScenarioContractSpec) -> &'static str {
             "runtime.queued-turn-input-claim-completion-transition"
         }
         "runtime.command_only_queue_drain" => "runtime.command-only-queue-drain-transition",
-        "runtime.command_before_turn_work" => "runtime.command-before-turn-work-transition",
+
         "runtime.observation_replay_preserves_input" => {
             "runtime.observer-reconnect-preserves-input-transition"
         }
@@ -453,12 +428,12 @@ fn scenario_evidence_boundary_kind(evidence: &str) -> &'static str {
         "provider_turn" => "provider",
         "provider_event" => "provider_event",
         "tool_result" => "tool",
-        "max_turn_stop" => "trigger",
-        "final_value" => "trigger",
+        "max_turn_stop" => "contract_execution",
+        "final_value" => "contract_execution",
         "observer_convergence" | "observer_reconnect" => "observer",
         "runtime_session_graph" => "ingress/provider",
         "exec_code" => "exec_code",
-        "trigger" => "trigger",
+
         "durable_effect" => "durable_effect",
         "multi_session" => "multi_session",
         "provider_mutation" => "provider_mutation",
@@ -485,7 +460,7 @@ fn scenario_evidence_assertion(evidence: &str) -> &'static str {
         "observer_convergence" => "observer sees the generated final provider turn",
         "runtime_session_graph" => "session graph advances with generated ingress/provider turns",
         "exec_code" => "exec-code result crosses runtime effect-controller outcome DTO",
-        "trigger" => "trigger delivery carries stable trigger identity",
+
         "durable_effect" => "durable effect records first completion and replay evidence",
         "multi_session" => "trace slice contains at least two generated sessions",
         "observer_reconnect" => "observer reconnect converges to the same session state",
@@ -506,9 +481,7 @@ fn scenario_negative_fixture_for_contract(
         "runtime.queued_work_keeps_pending_input" => {
             return scenario_negative_fixture("queued_input_operational_missing");
         }
-        "runtime.command_before_turn_work" => {
-            return scenario_negative_fixture("trigger_wakeup_operational_missing");
-        }
+
         "standard.max_turns_after_tool_result" => {
             return scenario_negative_fixture("standard_max_turn_stop_missing");
         }
@@ -547,9 +520,7 @@ fn scenario_negative_fixture_for_contract(
     if has("queued_ingress") {
         return scenario_negative_fixture("queued_input_operational_missing");
     }
-    if has("trigger") {
-        return scenario_negative_fixture("trigger_wakeup_operational_missing");
-    }
+
     if has("exec_code") || contract.suite == "rlm" {
         return scenario_negative_fixture("rlm_lashlang_cell_missing_continuation");
     }
@@ -576,12 +547,7 @@ fn scenario_negative_fixture(fixture_id: &str) -> ScenarioNegativeFixture {
             expected_oracle_id: "sim.oracle.state-machine-semantic-invariants.v1",
             expected_reason_contains: "queued active-turn input",
         },
-        "trigger_wakeup_operational_missing" => ScenarioNegativeFixture {
-            fixture_id: "trigger-wakeup-operational-missing",
-            fixture_path: "crates/lash-sim/failure-fixtures/trigger-wakeup-operational-missing.json",
-            expected_oracle_id: "sim.oracle.state-machine-semantic-invariants.v1",
-            expected_reason_contains: "trigger wakeup routes",
-        },
+
         "standard_provider_error_missing_parser_matrix" => ScenarioNegativeFixture {
             fixture_id: "standard-provider-error-missing-parser-matrix",
             fixture_path: "crates/lash-sim/failure-fixtures/standard-provider-error-missing-parser-matrix.json",
@@ -778,7 +744,7 @@ fn semantic_scenario_evidence(semantic_oracle: &str) -> Vec<&'static str> {
             vec!["queued_ingress", "provider_turn"]
         }
         "runtime.command_only_queue_drain" => vec!["queued_ingress"],
-        "runtime.command_before_turn_work" => vec!["trigger", "queued_ingress"],
+
         "runtime.observation_replay_preserves_input" => vec!["observer_reconnect"],
         _ => Vec::new(),
     }
@@ -894,7 +860,7 @@ fn event_satisfies_scenario_evidence(
             event.kind == BoundaryKind::Tool && event.observed.get("runtime_tool_output").is_some()
         }
         "max_turn_stop" => {
-            event.kind == BoundaryKind::Trigger
+            event.kind == BoundaryKind::ContractExecution
                 && event
                     .observed
                     .pointer("/contract_execution/contract")
@@ -918,7 +884,7 @@ fn event_satisfies_scenario_evidence(
                     })
         }
         "final_value" => {
-            event.kind == BoundaryKind::Trigger
+            event.kind == BoundaryKind::ContractExecution
                 && event
                     .observed
                     .pointer("/contract_execution/source/kind")
@@ -942,14 +908,7 @@ fn event_satisfies_scenario_evidence(
             event.kind == BoundaryKind::ExecCode
                 && event.observed.get("runtime_effect_outcome").is_some()
         }
-        "trigger" => {
-            event.kind == BoundaryKind::Trigger
-                && event
-                    .observed
-                    .get("trigger_delivered")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-        }
+
         "durable_effect" => {
             event.kind == BoundaryKind::DurableEffect
                 && event.observed.get("runtime_effect").is_some()

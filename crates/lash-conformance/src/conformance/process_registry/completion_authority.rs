@@ -20,8 +20,8 @@ async fn completion_authority_evidence(
         .await
         .expect("read the terminal event log")
         .into_iter()
-        .find(|event| event.event_type == "process.completed")
-        .and_then(|event| event.payload.get("completion_authority").cloned())
+        .find(|event| event.fact.event_type() == "process.completed")
+        .and_then(|event| event.fact.payload().get("completion_authority").cloned())
         .expect("the terminal event records its validated authority")
 }
 
@@ -145,7 +145,9 @@ pub(super) async fn terminal_completion_replay_keeps_original_authority_and_writ
                         .complete_process_with_prelude(
                             &id,
                             proposed.clone(),
-                            vec![crate::ProcessEventAppendRequest::new(
+                            vec![call_wait_event(
+                                &id,
+                                "replay.must.not.append",
                                 "replay.must.not.append",
                                 serde_json::json!({"changed": true}),
                             )],

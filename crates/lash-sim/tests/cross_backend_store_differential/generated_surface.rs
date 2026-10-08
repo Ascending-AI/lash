@@ -11,18 +11,14 @@ use super::*;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fs;
 use std::sync::Arc;
 
 use lash_conformance::{
     StoreContractHandles, StoreContractOp, StoreContractScenario, sample_store_contract_operations,
 };
-use lash_core::{
-    AttachmentCreateMeta, AttachmentStore, MediaType, ProcessIdentity, ProcessInput,
-    ProcessOriginator, RuntimeStore, SessionScope, TriggerCommand, TriggerInputBinding,
-    TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
-};
+use lash_core::{AttachmentCreateMeta, AttachmentStore, MediaType, RuntimeStore};
 use lash_s3_store::{S3AttachmentStore, S3AttachmentStoreConfig};
 use lash_sqlite_store::{SqliteStore, SqliteStoreSet, SqliteStoreSetOptions};
 
@@ -40,42 +36,18 @@ const ALL_SURFACE_OPERATION_KINDS: &[&str] = &[
     "enter_wait",
     "clear_wait",
     "set_external_ref",
-    "signal",
     "cancel_request",
     "terminal",
     "add_observer",
     "remove_observer",
-    "retarget",
-    "claim_wake",
-    "mark_wake",
-    "discard_wake",
-    "defer_wake",
-    "enqueue_wake",
-    "consume_wake",
     "prune",
     "compact_tombstones",
-    "trigger_register",
-    "trigger_changes",
-    "trigger_snapshot",
-    "trigger_compact",
-    "trigger_disable",
-    "trigger_occurrence",
-    "trigger_occurrence_null_source",
-    "process_signal_zero",
 ];
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(tag = "surface", content = "operation", rename_all = "snake_case")]
 enum SurfaceOperation {
     StoreContract(StoreContractOp),
-    TriggerChanges,
-    TriggerSnapshot,
-    TriggerCompact,
-    TriggerRegister { key: u8 },
-    TriggerDisable { key: u8 },
-    TriggerOccurrence { key: u8 },
-    TriggerOccurrenceNullSource { key: u8 },
-    ProcessSignalZero { negative: bool },
 }
 
 impl SurfaceOperation {
@@ -87,25 +59,13 @@ impl SurfaceOperation {
                 StoreContractOp::EnterWait { .. } => "enter_wait",
                 StoreContractOp::ClearWait { .. } => "clear_wait",
                 StoreContractOp::SetExternalRef { .. } => "set_external_ref",
-                StoreContractOp::Signal { .. } => "signal",
                 StoreContractOp::CancelRequest { .. } => "cancel_request",
                 StoreContractOp::Terminal { .. } => "terminal",
                 StoreContractOp::AddObserver { .. } => "add_observer",
                 StoreContractOp::RemoveObserver { .. } => "remove_observer",
-                StoreContractOp::Retarget { .. } => "retarget",
-                StoreContractOp::EnqueueWake { .. } => "enqueue_wake",
-                StoreContractOp::ConsumeWake { .. } => "consume_wake",
                 StoreContractOp::Prune { .. } => "prune",
                 StoreContractOp::CompactTombstones { .. } => "compact_tombstones",
             },
-            Self::TriggerChanges => "trigger_changes",
-            Self::TriggerSnapshot => "trigger_snapshot",
-            Self::TriggerCompact => "trigger_compact",
-            Self::TriggerRegister { .. } => "trigger_register",
-            Self::TriggerDisable { .. } => "trigger_disable",
-            Self::TriggerOccurrence { .. } => "trigger_occurrence",
-            Self::TriggerOccurrenceNullSource { .. } => "trigger_occurrence_null_source",
-            Self::ProcessSignalZero { .. } => "process_signal_zero",
         }
     }
 }
@@ -117,217 +77,26 @@ use observation::*;
 struct SurfaceRunner {
     name: &'static str,
     scenario: StoreContractScenario,
-    process_registry: Arc<dyn lash_core::ProcessRegistry>,
-    trigger_store: Arc<dyn TriggerStore>,
-    /// The durable store an occurrence's start commits through, over the
-    /// registry's and the trigger store's database.
-    durable: Arc<dyn lash_core::DurableStore>,
-    trigger_feed_reads: Vec<serde_json::Value>,
+    /// The durable store the registry commits through.
     reader: SurfaceReader,
 }
 
 fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
-    let contract = sample_store_contract_operations(seed, OPS_PER_CASE - 12);
-    let mut operations = vec![
-        SurfaceOperation::TriggerRegister { key: 0 },
-        SurfaceOperation::TriggerOccurrence { key: 0 },
-        SurfaceOperation::TriggerChanges,
-        SurfaceOperation::TriggerSnapshot,
-        SurfaceOperation::TriggerCompact,
-    ];
-    for (index, operation) in contract.into_iter().enumerate() {
-        operations.push(SurfaceOperation::StoreContract(operation));
-        if index == 5 {
-            operations.push(SurfaceOperation::TriggerDisable { key: 0 });
-            operations.push(SurfaceOperation::TriggerChanges);
-            operations.push(SurfaceOperation::TriggerSnapshot);
-        }
-    }
-    operations
+    sample_store_contract_operations(seed, OPS_PER_CASE)
+        .into_iter()
+        .map(SurfaceOperation::StoreContract)
+        .collect()
 }
 
 impl SurfaceRunner {
-    /// Plan `request`'s occurrence, then record it as a trigger router's
-    /// start does: the occurrence, each matched delivery's process and the
-    /// delivery bound to it, in one `trigger.start` transaction.
-    async fn start_occurrence(&self, request: TriggerOccurrenceRequest) -> Result<(), String> {
-        self.trigger_store
-            .plan_occurrence(&request)
-            .await
-            .map_err(|error| error.to_string())?;
-        lash_core::testing::record_trigger_occurrence(
-            self.trigger_store.as_ref(),
-            self.process_registry.as_ref(),
-            self.durable.as_ref(),
-            request,
-        )
-        .await
-        .map(drop)
-        .map_err(|error| error.to_string())
-    }
-
     async fn apply(&mut self, operation: &SurfaceOperation) -> Result<(), String> {
         match operation {
             SurfaceOperation::StoreContract(operation) => self.scenario.apply(operation).await,
-            SurfaceOperation::TriggerChanges => {
-                let (changes, cursor) = self
-                    .trigger_store
-                    .subscriptions_changed_since(
-                        lash_core::TriggerSubscriptionChangeCursor::initial(),
-                        10,
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let mut incarnations = BTreeMap::new();
-                let changes = changes
-                    .into_iter()
-                    .map(|change| {
-                        observation::normalized_trigger_json(
-                            serde_json::json!(change),
-                            &mut incarnations,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                self.trigger_feed_reads
-                    .push(serde_json::json!({"changes": changes, "cursor": cursor}));
-                Ok(())
-            }
-            SurfaceOperation::TriggerSnapshot => {
-                let (records, cursor) = self
-                    .trigger_store
-                    .list_subscriptions_with_cursor()
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let mut incarnations = BTreeMap::new();
-                let records = records
-                    .into_iter()
-                    .map(|record| {
-                        observation::normalized_trigger_json(
-                            serde_json::json!(record),
-                            &mut incarnations,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                self.trigger_feed_reads
-                    .push(serde_json::json!({"snapshot": records, "cursor": cursor}));
-                Ok(())
-            }
-            SurfaceOperation::TriggerCompact => {
-                let removed = self
-                    .trigger_store
-                    .compact_subscription_tombstones(0)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                self.trigger_feed_reads
-                    .push(serde_json::json!({"removed": removed}));
-                Ok(())
-            }
-            SurfaceOperation::TriggerRegister { key } => {
-                let subscription_key = format!("surface-{key}");
-                let mut inputs = BTreeMap::new();
-                inputs.insert("event".to_string(), TriggerInputBinding::Event);
-                let command = TriggerCommand::Register {
-                    owner_scope: TriggerOwnerScope::session(SURFACE_SESSION),
-                    actor: ProcessOriginator::session(SessionScope::new(SURFACE_SESSION)),
-                    draft: TriggerSubscriptionDraft {
-                        source_capture: lash_core::TriggerSourceCapture::provider(
-                            ["surface", "event"],
-                            lash_core::JsonSchema::any(),
-                            "surface-provider",
-                            serde_json::json!({"account": "surface"}),
-                        ),
-                        subscription_key,
-                        env_ref: lash_core::testing::process_execution_env_fixture_ref(),
-                        wake_target: Some(SessionScope::new(SURFACE_SESSION)),
-                        name: Some("surface-worker".to_string()),
-                        source_type: "surface.event".to_string(),
-                        source_key: format!("source-{key}"),
-                        source: serde_json::json!({"source": key}),
-                        payload_schema: lash_core::JsonSchema::any(),
-                        target: ProcessInput::Engine {
-                            kind: "surface".to_string(),
-                            payload: serde_json::json!({"key": key}),
-                        }
-                        .into(),
-                        target_identity: ProcessIdentity::labelled(
-                            "surface",
-                            Some("surface-worker".to_string()),
-                        ),
-                        event_types: Vec::new(),
-                        input_template: inputs,
-                        target_label: Some("surface-worker".to_string()),
-                    },
-                };
-                self.trigger_store
-                    .execute_command(&format!("surface-register-{key}"), command)
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .map_err(|error| error.to_string())?;
-                Ok(())
-            }
-            SurfaceOperation::TriggerDisable { key } => {
-                let command = TriggerCommand::Disable {
-                    owner_scope: TriggerOwnerScope::session(SURFACE_SESSION),
-                    actor: ProcessOriginator::session(SessionScope::new(SURFACE_SESSION)),
-                    subscription_key: format!("surface-{key}"),
-                    expected_revision: 1,
-                };
-                self.trigger_store
-                    .execute_command(&format!("surface-disable-{key}"), command)
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .map_err(|error| error.to_string())?;
-                Ok(())
-            }
-            SurfaceOperation::TriggerOccurrence { key } => {
-                self.start_occurrence(
-                    TriggerOccurrenceRequest::new(
-                        "surface.event",
-                        format!("source-{key}"),
-                        serde_json::json!({"event": key}),
-                        format!("surface-occurrence-{key}"),
-                    )
-                    .with_source(serde_json::json!({"source": key}))
-                    .for_session(SURFACE_SESSION),
-                )
-                .await
-            }
-            SurfaceOperation::TriggerOccurrenceNullSource { key } => {
-                self.start_occurrence(
-                    TriggerOccurrenceRequest::new(
-                        "surface.event",
-                        format!("null-source-{key}"),
-                        serde_json::json!({"event": key}),
-                        format!("surface-null-source-occurrence-{key}"),
-                    )
-                    .with_source(serde_json::Value::Null)
-                    .for_session(SURFACE_SESSION),
-                )
-                .await
-            }
-            SurfaceOperation::ProcessSignalZero { negative } => {
-                let payload = if *negative {
-                    serde_json::json!({"value": -0.0})
-                } else {
-                    serde_json::json!({"value": 0.0})
-                };
-                self.process_registry
-                    .append_event(
-                        &self.scenario.slot_process_id(0),
-                        lash_core::ProcessEventAppendRequest::new("property.signal", payload)
-                            .with_replay_key("surface-zero-replay"),
-                    )
-                    .await
-                    .map_err(|error| error.to_string())?;
-                Ok(())
-            }
         }
     }
 
     async fn observe(&self) -> SurfaceState {
-        let mut state = self.reader.observe().await;
-        state.trigger_feed_reads = self.trigger_feed_reads.clone();
-        state
+        self.reader.observe().await
     }
 }
 
@@ -344,7 +113,7 @@ async fn reset_postgres_surface(storage: &PostgresStorage) {
     .execute(storage.pool())
     .await
     .unwrap();
-    sqlx::query("INSERT INTO lash_trigger_subscription_change_clock (singleton, current_seq, pruned_through) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, pruned_through = 0").execute(storage.pool()).await.unwrap();
+
     sqlx::query("INSERT INTO lash_process_change_clock (singleton, current_seq, tombstone_compaction_horizon) VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO UPDATE SET current_seq = 0, tombstone_compaction_horizon = 0").execute(storage.pool()).await.unwrap();
 }
 
@@ -358,7 +127,7 @@ async fn surface_runners(
     clock: Arc<dyn Clock>,
 ) -> Vec<SurfaceRunner> {
     // Two runners: SQLite file and PostgreSQL, compared on their storage
-    // surfaces only — the process registry, the trigger store and the
+    // surfaces only — the process registry and the
     // session-bound runtime store. The SQL effect engines are not storage
     // (ADR 0104); FIG-3667 and FIG-3668 delete them.
     let sqlite_runtime_root = root.join("runtime");
@@ -385,8 +154,6 @@ async fn surface_runners(
     // The two registrars mint the same ids in the same order, so the
     // generated slots name the same process on both backends.
     let (sqlite_mint, postgres_mint) = super::paired_process_id_mints();
-    // The registry and the trigger store share one database, as an
-    // occurrence's start writes both in one transaction.
     let sqlite_stores = SqliteStoreSet::open_with_options_and_clock(
         &sqlite_stores_path,
         SqliteStoreSetOptions {
@@ -400,7 +167,6 @@ async fn surface_runners(
     lash_core::testing::process_execution_env_fixture(sqlite_stores.process_env_store().as_ref())
         .await;
     let sqlite_registry = sqlite_stores.process_registry();
-    let sqlite_triggers = sqlite_stores.trigger_store();
 
     let postgres_store = Arc::new(
         storage
@@ -418,7 +184,6 @@ async fn surface_runners(
             .with_clock(Arc::clone(&clock))
             .with_process_id_mint_for_testing(postgres_mint),
     );
-    let postgres_triggers = Arc::new(storage.trigger_store().with_clock(Arc::clone(&clock)));
 
     vec![
         SurfaceRunner {
@@ -427,13 +192,8 @@ async fn surface_runners(
                 registry: sqlite_registry.clone(),
                 runtime: Arc::clone(&sqlite_runtime),
             }),
-            process_registry: sqlite_registry,
-            trigger_store: sqlite_triggers,
-            durable: Arc::new(sqlite_stores.durable_store()),
-            trigger_feed_reads: Vec::new(),
             reader: SurfaceReader::Sqlite {
                 process_path: sqlite_stores_path.clone(),
-                trigger_path: sqlite_stores_path,
             },
         },
         SurfaceRunner {
@@ -442,10 +202,6 @@ async fn surface_runners(
                 registry: postgres_registry.clone(),
                 runtime: Arc::clone(&postgres_runtime),
             }),
-            process_registry: postgres_registry,
-            trigger_store: postgres_triggers,
-            durable: Arc::new(storage.durable_store()),
-            trigger_feed_reads: Vec::new(),
             reader: SurfaceReader::Postgres {
                 pool: storage.pool().clone(),
             },
@@ -586,39 +342,6 @@ async fn generated_cross_backend_surface_differential_agrees() {
     let storage = lash_postgres_store::testing::connect(&database_url)
         .await
         .unwrap();
-    // CI seed 852 minimized to occurrence ingestion with no subscription state.
-    if let Some(divergence) = Box::pin(first_divergence(
-        &storage,
-        &[SurfaceOperation::TriggerOccurrence { key: 0 }],
-    ))
-    .await
-    {
-        panic!("seed-852 minimized trigger-occurrence regression diverged: {divergence:#?}");
-    }
-    // PR #570 seed 852 at 9eef49f32 minimized to one session-owned registration.
-    if let Some(divergence) = Box::pin(first_divergence(
-        &storage,
-        &[SurfaceOperation::TriggerRegister { key: 0 }],
-    ))
-    .await
-    {
-        panic!("seed-852 minimized trigger-register regression diverged: {divergence:#?}");
-    }
-    let canonical_conflict_material = [
-        SurfaceOperation::TriggerOccurrenceNullSource { key: 0 },
-        SurfaceOperation::TriggerOccurrenceNullSource { key: 0 },
-        SurfaceOperation::StoreContract(StoreContractOp::Register {
-            process: 0,
-            wake_target: None,
-        }),
-        SurfaceOperation::ProcessSignalZero { negative: true },
-        SurfaceOperation::ProcessSignalZero { negative: false },
-    ];
-    if let Some(divergence) =
-        Box::pin(first_divergence(&storage, &canonical_conflict_material)).await
-    {
-        panic!("canonical conflict-material differential diverged: {divergence:#?}");
-    }
     let cases = std::env::var("LASH_CROSS_BACKEND_CASES")
         .ok()
         .and_then(|value| value.parse().ok())

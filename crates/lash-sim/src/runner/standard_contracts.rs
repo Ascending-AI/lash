@@ -490,7 +490,6 @@ pub(super) fn run_standard_protocol_contract(
                     id: checkpoint_id,
                     delivery: lash_core::CheckpointDelivery {
                         committed_user_messages: Vec::new(),
-                        turn_causes: Vec::new(),
                     },
                 });
             }

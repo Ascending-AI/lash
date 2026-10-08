@@ -46,14 +46,9 @@ fn identity(session: &'static str, call: &'static str) -> crate::ToolIntentIdent
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 fn submission(identity: &crate::ToolIntentIdentity) -> crate::ToolIntentSubmissionRecord {
-    let intent = crate::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
+    let intent = crate::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
         owner: identity.owner.clone(),
-        request: crate::TriggerOccurrenceRequest::new(
-            "ui.button.pressed",
-            "tool-intent-retention-source",
-            serde_json::json!({ "call": identity.tool_call_id.as_str() }),
-            "tool-intent-retention-occurrence",
-        ),
+        process_id: crate::ProcessId::fixture("tool-intent-retention-target"),
     });
     crate::ToolIntentSubmissionRecord::new(identity.clone(), intent)
         .expect("the submission has a payload hash")
@@ -63,7 +58,7 @@ fn refused(identity: &crate::ToolIntentIdentity) -> crate::ToolIntentExecutionOu
     crate::ToolIntentExecutionOutcome::Refused {
         identity: Some(identity.clone()),
         intent_index: identity.intent_index,
-        kind: crate::ToolIntentKind::EmitTrigger,
+        kind: crate::ToolIntentKind::CancelProcess,
         refusal: crate::ToolIntentRefusalReason::ExecutionEnvMissing,
     }
 }

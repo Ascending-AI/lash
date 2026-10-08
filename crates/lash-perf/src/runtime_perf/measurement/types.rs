@@ -12,19 +12,10 @@ pub(crate) enum HighTrafficOperationKind {
     Tool,
     Queued,
     Child,
-    Wake,
-    Trigger,
 }
 
 impl HighTrafficOperationKind {
-    pub(crate) const ALL: [Self; 6] = [
-        Self::Plain,
-        Self::Tool,
-        Self::Queued,
-        Self::Child,
-        Self::Wake,
-        Self::Trigger,
-    ];
+    pub(crate) const ALL: [Self; 4] = [Self::Plain, Self::Tool, Self::Queued, Self::Child];
 
     fn as_str(self) -> &'static str {
         match self {
@@ -32,8 +23,6 @@ impl HighTrafficOperationKind {
             Self::Tool => "tool",
             Self::Queued => "queued",
             Self::Child => "child",
-            Self::Wake => "wake",
-            Self::Trigger => "trigger",
         }
     }
 }

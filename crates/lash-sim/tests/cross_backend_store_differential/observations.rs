@@ -208,7 +208,7 @@ pub(super) struct RawDurableState {
     pub(super) queued_work: Vec<QueuedWorkObservation>,
     /// `session_runs` rows carrying terminal evidence.
     pub(super) run_terminals: Vec<RunTerminalObservation>,
-    // `process_*` and `trigger_*` are deliberately excluded: they are separate
+    // `process_*` tables are deliberately excluded: they are separate
     // subsystems with dedicated conformance suites, while this harness and its
     // operation vocabulary are scoped to one runtime session. Wait state is
     // likewise owned by the actor's waits (ADR 0132 §5).
@@ -285,7 +285,6 @@ pub(super) struct QueuedWorkObservation {
     ordinal: usize,
     source_key: Option<String>,
     delivery_policy: DeliveryPolicy,
-    kind: QueuedWorkKind,
     authority: QueuedWorkAuthority,
     merge_key: Option<String>,
     payload: serde_json::Value,
@@ -311,7 +310,6 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     _batch_id,
                     source_key,
                     delivery_policy,
-                    work_kind,
                     authority_json,
                     merge_key,
                     admitted_run,
@@ -324,8 +322,6 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     source_key,
                     delivery_policy: DeliveryPolicy::from_wire_str(&delivery_policy)
                         .expect("decode queued-work delivery policy"),
-                    kind: QueuedWorkKind::from_wire_str(&work_kind)
-                        .expect("decode queued-work kind"),
                     authority: serde_json::from_str(&authority_json)
                         .expect("decode queued-work authority"),
                     merge_key,

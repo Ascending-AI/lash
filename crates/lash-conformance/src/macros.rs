@@ -130,7 +130,6 @@ macro_rules! runtime_persistence_tests {
             (concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing, "concurrent-queued-work-source-key"),
             (decorated_queued_work_source_key_replay_reports_absorbed, "decorated-queued-work-source-key"),
             (pending_session_work_ordering_agrees_across_ingress_families, "pending-work-ordering"),
-            (host_cancelled_wake_is_not_redelivered, "root"),
             (delete_then_enqueue_never_reuses_ingress_sequences, "root"),
             (pending_turn_inputs_source_keys_order_cancel_and_cross_session, "root"),
             (pending_turn_input_duplicate_input_id, "root"),
@@ -257,17 +256,11 @@ macro_rules! process_registry_tests {
                 (registration_and_observers_are_atomic, "registration-observers"),
                 (observer_events_are_auditable_and_transfer_is_atomic, "observer-audit-transfer"),
                 (generic_append_rejects_reserved_edge_audit_events, "reserved-edge-events"),
-                (canonical_process_event_payload_replay, "canonical-event-replay"),
                 (a_process_event_batch_is_one_commit, "process-event-batch"),
                 (a_boundary_commits_its_prelude_in_its_own_transaction, "process-event-batch-boundary"),
-                (count_events_through_counts_every_event_at_any_top_bound, "count-events-through-top-bound"),
                 (releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity, "release-event-prefix"),
-                (signal_admission_retains_its_identity_and_selected_wait, "signal-admission"),
-                (raw_signal_appends_are_refused, "raw-signal-refusal"),
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
-                (wake_subscription_is_indexed_and_retargetable, "wake-subscription"),
                 (lifecycle_status_and_outcome_fold, "lifecycle-fold"),
-                (producer_terminal_status_must_match_materialized_outcome, "terminal-status-outcome"),
                 (list_filters_match_extracted_and_json_fields, "list-filters"),
                 (process_registry_pagination, "pagination"),
                 (non_terminal_process_pages_visit_every_row_across_the_page_bound, "bounded-pagination"),
@@ -279,7 +272,6 @@ macro_rules! process_registry_tests {
                 (process_change_feed_never_misses_concurrent_terminal_writers, "concurrent-terminal-feed"),
                 (session_delete_preserves_process_bytes, "session-delete-bytes"),
                 (record_fold_and_retention_hold_for_every_registry_writer, "registry-writer-fold-retention"),
-                (signals_refuse_undeclared_invalid_and_terminal_sends, "signal-refusals"),
                 (work_wait_seam_covers_unknown_pruned_and_backend_owned_processes, "work-wait-matrix"),
                 (tombstones_make_pruned_processes_distinguishable, "tombstones"),
                 (a_start_key_after_prune_starts_a_new_process, "start-key-after-prune"),
@@ -291,7 +283,6 @@ macro_rules! process_registry_tests {
                 (a_start_key_reports_created_then_existing_and_is_trusted, "start-key-disposition"),
                 (a_host_start_key_is_global_and_fences_its_originator, "host-start-key-global"),
                 (a_start_key_conflict_names_no_retained_process, "start-key-conflict-content-free"),
-                (a_host_retry_with_another_wake_target_conflicts, "host-start-key-wake-target"),
                 (a_host_start_key_after_prune_starts_new_for_any_originator, "host-start-key-after-prune"),
                 (scope_replay_cancel_and_trace_ignore_environment_rebinding, "scope-environment-rebinding"),
                 (retired_process_shapes_refuse_before_registration_or_effects, "retired-process-shapes"),
@@ -621,27 +612,6 @@ macro_rules! observer_intent_tests {
     };
 }
 
-#[macro_export]
-macro_rules! process_trigger_retention_tests {
-    ($fixture:block) => {
-        $crate::process_trigger_retention_tests!(@catalogue $fixture; [
-            (trigger_capture_route_and_compaction_refusal_matrix, "trigger-capture-compaction-matrix"),
-            (trigger_occurrence_redelivery_after_reclaim, "trigger-occurrence-redelivery-after-reclaim"),
-            (trigger_redelivery_after_forget_starts_again, "trigger-redelivery-after-forget"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
-            }
-        )*
-    };
-}
-
 /// Register the host tool-intent submission ledger's retention law
 /// (FIG-1509). The fixture yields a guard and a constructor of a fresh
 /// backend with a way to reopen it.
@@ -650,28 +620,6 @@ macro_rules! tool_intent_retention_tests {
     ($fixture:block) => {
         $crate::tool_intent_retention_tests!(@catalogue $fixture; [
             (tool_intent_submissions_reclaim_only_after_owner_death, "tool-intent-reclaim"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
-            }
-        )*
-    };
-}
-
-/// Register the trigger-occurrence tombstone retention and forget laws. The
-/// fixture yields a guard and a constructor from a clock to a trigger store.
-#[macro_export]
-macro_rules! trigger_occurrence_tombstone_retention_tests {
-    ($fixture:block) => {
-        $crate::trigger_occurrence_tombstone_retention_tests!(@catalogue $fixture; [
-            (trigger_occurrence_tombstones_survive_every_reclaim, "trigger-occurrence-tombstone-retention"),
-            (trigger_tombstone_forget_has_an_exclusive_write_time_cutoff, "trigger-tombstone-forget-cutoff"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -766,77 +714,6 @@ macro_rules! tool_access_persistence_tests {
     };
 }
 
-/// Register the durable reopenable trigger-store laws.
-#[macro_export]
-macro_rules! trigger_store_reopenable_tests {
-    ($fixture:block) => {
-        $crate::trigger_store_reopenable_tests!(@catalogue $fixture; [
-            (trigger_store_reopenable, "trigger-store-reopenable"),
-            (trigger_subscription_change_cursor_law, "trigger-subscription-change-cursor"),
-            (host_scope_filters_list_cancel_and_deactivate_uniformly, "host-scope-filters"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
-            }
-        )*
-    };
-}
-
-/// Expansion machinery for trigger-retention fault laws.
-#[macro_export]
-macro_rules! __trigger_retention_fault_register {
-    ($fixture:block; $law:ident, $label:literal, retention) => {
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_fixture_guard, store, fault) = $fixture;
-            let _ = $label;
-            $crate::registration_macro_support::$law(store, fault.as_ref()).await;
-        }
-    };
-}
-
-/// Register the trigger-retention corruption and rollback laws.
-#[macro_export]
-macro_rules! trigger_retention_fault_tests {
-    ($fixture:block) => {
-        $crate::trigger_retention_fault_tests!(@catalogue $fixture; [
-            (trigger_occurrence_retention_failure_law, "trigger-occurrence-retention-failure", retention),
-            (trigger_retention_reconciliation_failure_law, "trigger-retention-reconciliation-failure", retention),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal, $mode:ident )),* $(,)?]) => {
-        $(
-            $crate::__trigger_retention_fault_register!($fixture; $law, $label, $mode);
-        )*
-    };
-}
-
-/// Register the persisted trigger-occurrence listing corruption law.
-#[macro_export]
-macro_rules! trigger_occurrence_listing_tests {
-    ($fixture:block) => {
-        $crate::trigger_occurrence_listing_tests!(@catalogue $fixture; [
-            (trigger_occurrence_listing_corruption_law, "trigger-occurrence-listing-corruption"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, store, injector) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(store, injector.as_ref()).await;
-            }
-        )*
-    };
-}
-
 /// Expansion machinery for process-prune reclamation registration.
 #[macro_export]
 macro_rules! __process_prune_reclaim_register {
@@ -924,8 +801,6 @@ macro_rules! process_start_staging_tests {
 macro_rules! start_operation_staging_tests {
     ($fixture:block) => {
         $crate::start_operation_staging_tests!(@catalogue $fixture; [
-            (a_trigger_start_keeps_its_staging_until_it_registers, "start-operation-keeps-staging"),
-            (an_abandoned_trigger_start_has_its_staging_reclaimed, "start-operation-abandoned"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

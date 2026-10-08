@@ -38,7 +38,6 @@ pub(super) enum ExtraFact {
     DurableReplay(&'static str),
     ObserverReconnect(&'static str),
     BackendRetry(&'static str),
-    TriggerThenProvider(&'static str),
     Custom(fn(&[DeliveredBoundary]) -> Result<ScenarioContractGeneratedFact, String>),
 }
 
@@ -58,7 +57,6 @@ impl ExtraFact {
             Self::DurableReplay(fact) => durable_replay_fact(events, fact),
             Self::ObserverReconnect(fact) => observer_reconnect_fact(events, fact),
             Self::BackendRetry(fact) => backend_fault_classification_fact(events, fact),
-            Self::TriggerThenProvider(fact) => trigger_then_provider_fact(events, fact),
             Self::Custom(build) => build(events),
         }
     }

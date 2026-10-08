@@ -515,7 +515,7 @@ pub(super) fn scenario_evidence_satisfied(
                 && tool_runtime_output_observed(events)
         }
         "max_turn_stop" => events.iter().any(|event| {
-            event.kind == BoundaryKind::Trigger
+            event.kind == BoundaryKind::ContractExecution
                 && event
                     .observed
                     .pointer("/contract_execution/contract")
@@ -539,7 +539,7 @@ pub(super) fn scenario_evidence_satisfied(
                     })
         }),
         "final_value" => events.iter().any(|event| {
-            event.kind == BoundaryKind::Trigger
+            event.kind == BoundaryKind::ContractExecution
                 && event
                     .observed
                     .pointer("/contract_execution/source/kind")
@@ -573,10 +573,7 @@ pub(super) fn scenario_evidence_satisfied(
                 .any(|session| !session.exec_code_outputs.is_empty())
                 && exec_runtime_outcome_observed(events)
         }
-        "trigger" => summary
-            .sessions
-            .iter()
-            .any(|session| session.trigger_count > 0),
+
         "backend_failure" => events.iter().any(|event| {
             event.kind == BoundaryKind::BackendFailure
                 && event
@@ -732,10 +729,6 @@ pub(super) fn runtime_contract_semantics(
             "command queue source keys drained",
         ),
         // A command applied before turn work still lets later provider turns run.
-        "runtime.command_before_turn_work" => assert_semantic(
-            queued_ingress_has_source_keys(events) && provider_turns_after_queue(summary),
-            "a command queued before turn work preserved later turns",
-        ),
         "runtime.observation_replay_preserves_input" => assert_semantic(
             observer_reconnect_has_matching_turn(events, summary),
             "observer reconnect replay converged to the final provider turn",

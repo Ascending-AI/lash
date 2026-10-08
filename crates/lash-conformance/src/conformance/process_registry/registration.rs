@@ -83,11 +83,10 @@ pub async fn a_start_key_reports_created_then_existing_and_is_trusted(
 }
 
 /// A registration under the host key `bytes`, originated by `session` and
-/// waking `wake`: the shape the host-key laws below vary one field of.
-fn host_keyed(bytes: &str, session: &str, wake: Option<&str>) -> ProcessRegistration {
-    let mut registration = registration("host-key")
-        .with_start_key(Some(crate::StartKey::for_host(bytes)))
-        .with_wake_session_id(wake.map(SessionId::fixture));
+/// its originator: the shape the host-key laws below vary one field of.
+fn host_keyed(bytes: &str, session: &str) -> ProcessRegistration {
+    let mut registration =
+        registration("host-key").with_start_key(Some(crate::StartKey::for_host(bytes)));
     registration.input = std::sync::Arc::new(lash_core::testing::held_engine_input(
         serde_json::json!({"report": "nightly", "secret": "input-metadata-of-a"}),
     ));
@@ -126,25 +125,25 @@ pub async fn a_host_start_key_is_global_and_fences_its_originator(
 ) {
     let bytes = "global-host-key";
     let first = registry
-        .register_process_reporting_outcome(host_keyed(bytes, "host-key-session-a", None), &[])
+        .register_process_reporting_outcome(host_keyed(bytes, "host-key-session-a"), &[])
         .await
         .expect("session A starts under the key");
     assert_eq!(first.outcome, crate::ProcessRegistrationOutcome::Created);
 
     let other_originator = registry
-        .register_process_reporting_outcome(host_keyed(bytes, "host-key-session-b", None), &[])
+        .register_process_reporting_outcome(host_keyed(bytes, "host-key-session-b"), &[])
         .await
         .expect_err("the same bytes from another originator are the same key, and fence it");
     assert_start_key_conflict(&other_originator, bytes);
 
     let repeat = registry
-        .register_process_reporting_outcome(host_keyed(bytes, "host-key-session-a", None), &[])
+        .register_process_reporting_outcome(host_keyed(bytes, "host-key-session-a"), &[])
         .await
         .expect("an identical retry from the originator is idempotent");
     assert_eq!(repeat.outcome, crate::ProcessRegistrationOutcome::Existing);
     assert_eq!(repeat.record.id, first.record.id);
 
-    let mut changed = host_keyed(bytes, "host-key-session-a", None);
+    let mut changed = host_keyed(bytes, "host-key-session-a");
     changed.input = std::sync::Arc::new(lash_core::testing::held_engine_input(
         serde_json::json!({"suite": "changed-host-content"}),
     ));
@@ -188,11 +187,11 @@ pub async fn a_host_start_key_is_global_and_fences_its_originator(
 pub async fn a_start_key_conflict_names_no_retained_process(registry: Arc<dyn ProcessRegistry>) {
     let bytes = "content-free-conflict";
     let retained = registry
-        .register_process(host_keyed(bytes, "conflict-owner-session", None))
+        .register_process(host_keyed(bytes, "conflict-owner-session"))
         .await
         .expect("the owner starts under the key");
     let error = registry
-        .register_process_reporting_outcome(host_keyed(bytes, "conflict-other-session", None), &[])
+        .register_process_reporting_outcome(host_keyed(bytes, "conflict-other-session"), &[])
         .await
         .expect_err("another originator's start under the key conflicts");
     assert_start_key_conflict(&error, bytes);
@@ -223,40 +222,6 @@ pub async fn a_start_key_conflict_names_no_retained_process(registry: Arc<dyn Pr
     }
 }
 
-/// ADR 0107 (FIG-4111): the wake target is part of the start a host key
-/// fences. A retry from the same originator naming another wake session would
-/// otherwise be told its start exists while the retained process's work
-/// lands on the first session.
-///
-/// Red on the parent commit, which never compared the wake target and
-/// answered the retry `Existing`.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_host_retry_with_another_wake_target_conflicts(registry: Arc<dyn ProcessRegistry>) {
-    let bytes = "wake-target-fence";
-    let first = registry
-        .register_process(host_keyed(bytes, "wake-owner", Some("wake-first")))
-        .await
-        .expect("start waking the first session");
-    let repeat = registry
-        .register_process_reporting_outcome(
-            host_keyed(bytes, "wake-owner", Some("wake-first")),
-            &[],
-        )
-        .await
-        .expect("an identical retry is idempotent");
-    assert_eq!(repeat.record.id, first.id);
-    for other_wake in [Some("wake-second"), None] {
-        let error = registry
-            .register_process_reporting_outcome(host_keyed(bytes, "wake-owner", other_wake), &[])
-            .await
-            .expect_err("a retry naming another wake target is refused");
-        assert_start_key_conflict(&error, bytes);
-    }
-}
-
 /// ADR 0107 (FIG-4111): once a host key's process is pruned, the key starts a
 /// new process with a new id for any originator, and the pruned process's
 /// handle refuses as no longer retained, never as the new process.
@@ -269,7 +234,7 @@ pub async fn a_host_start_key_after_prune_starts_new_for_any_originator(
 ) {
     let bytes = "global-key-after-prune";
     let first = registry
-        .register_process(host_keyed(bytes, "prune-owner-a", None))
+        .register_process(host_keyed(bytes, "prune-owner-a"))
         .await
         .expect("A starts under the key");
     registry
@@ -288,7 +253,7 @@ pub async fn a_host_start_key_after_prune_starts_new_for_any_originator(
         .expect("prune A's process");
 
     let second = registry
-        .register_process_reporting_outcome(host_keyed(bytes, "prune-other-b", None), &[])
+        .register_process_reporting_outcome(host_keyed(bytes, "prune-other-b"), &[])
         .await
         .expect("B starts under the pruned process's key");
     assert_eq!(
@@ -381,21 +346,6 @@ pub async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegi
         vec!["observer-a".to_string(), "observer-b".to_string()],
         "the retry's observers are not adopted"
     );
-
-    let wake_only = registry
-        .register_process(
-            registration("wake-without-observer")
-                .with_wake_session_id(Some(SessionId::from("wake-only-session"))),
-        )
-        .await
-        .expect("register wake-only process");
-    assert!(
-        !registry
-            .is_observer(&SessionId::from("wake-only-session"), &wake_only.id)
-            .await
-            .expect("wake target must not imply observer"),
-        "no observer edge may be minted from an embedded wake target"
-    );
 }
 
 /// FIG-3190, ADR 0107: concurrent starts under one key register one process.
@@ -403,8 +353,7 @@ pub async fn registration_and_observers_are_atomic(registry: Arc<dyn ProcessRegi
 /// [`a_start_key_reports_created_then_existing_and_is_trusted`] proves the
 /// sequential law. On PostgreSQL the key lookup and the insert are two
 /// statements under `READ COMMITTED` on two connections, so two callers
-/// presenting the same key — a redelivered trigger occurrence is exactly that
-/// — can both read "no row". SQLite serializes every writer through one write
+/// presenting the same key can both read "no row". SQLite serializes every writer through one write
 /// flow, so only PostgreSQL can lose the race.
 ///
 /// The law: however the calls interleave, exactly one registration creates the
@@ -421,12 +370,12 @@ pub async fn concurrent_starts_under_one_key_register_one_process(
     const RACERS: usize = 8;
     for (round, differing_content) in [("identical", false), ("differing", true)] {
         let key = if differing_content {
-            crate::DERIVED_START_KEYS.for_trigger_delivery(
+            crate::DERIVED_START_KEYS.for_tool_intent(&crate::derive_tool_intent_identity(
+                &crate::RuntimeOwner::Session(crate::SessionId::from("concurrent-start-key")),
                 &format!("concurrent-start-key-{round}"),
-                "concurrent-start-subscription",
-                "incarnation",
-                1,
-            )
+                &lash_core::ToolCallId::fixture("concurrent-call"),
+                0,
+            ))
         } else {
             crate::StartKey::for_host(format!("concurrent-start-key-{round}"))
         };

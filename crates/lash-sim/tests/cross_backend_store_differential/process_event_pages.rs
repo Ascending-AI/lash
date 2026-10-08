@@ -1,3 +1,16 @@
+fn page_wait(id: &lash_sansio::ProcessId, label: &str) -> lash_core::ProcessEventAppendRequest {
+    lash_core::ProcessEventAppendRequest::wait_entered(
+        id,
+        &lash_core::WaitState {
+            since_ms: 1,
+            kind: lash_core::WaitKind::Call {
+                call_id: lash_sansio::ToolCallId::fixture(label),
+                tool_id: lash_sansio::ToolId::new("page_fixture"),
+            },
+        },
+    )
+}
+
 use super::*;
 use lash_core::ProcessEventLogTestSupport as _;
 
@@ -9,25 +22,18 @@ async fn release_observations(
     registry: &dyn lash_core::ProcessRegistry,
 ) -> (lash_sansio::ProcessId, Vec<lash_core::ProcessEventRelease>) {
     let process_id = registry
-        .register_process(
-            lash_core::testing::held_engine_registration(
-                serde_json::Value::Null,
-                lash_core::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_extra_event_types([lash_core::ProcessEventType {
-                name: "release.event".to_string(),
-                payload_schema: lash_core::JsonSchema::any(),
-                semantics: lash_core::ProcessEventSemanticsSpec::default(),
-            }]),
-        )
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::Value::Null,
+            lash_core::ProcessProvenance::host(),
+            lash_core::Lifetime::Detached,
+        ))
         .await
         .expect("register release process")
         .id;
     let request = |ordinal: u64| {
-        lash_core::ProcessEventAppendRequest::new(
-            "release.event",
-            serde_json::json!({ "ordinal": ordinal, "body": "x".repeat(4096) }),
+        page_wait(
+            &process_id,
+            &format!("release-{ordinal}:{}", "x".repeat(4096)),
         )
         .with_replay_key(format!("release-event-{ordinal}"))
     };
@@ -73,7 +79,7 @@ async fn release_observations(
         .await
         .expect("replay released event");
     assert_eq!(replay.event.sequence, 1);
-    assert_eq!(replay.event.payload, request(1).payload);
+    assert_eq!(replay.event.fact.payload(), request(1).fact.payload());
     assert_eq!(replay.realization, lash_core::StoreRealization::Coalesced);
     assert_eq!(
         registry
@@ -151,16 +157,16 @@ where
         let metadata = match page.events {
             lash_core::ProcessEventPageEvents::Full(page_events) => page_events
                 .into_iter()
-                .map(|event| (event.sequence, event.event_type))
+                .map(|event| (event.sequence, event.fact.event_type()))
                 .collect::<Vec<_>>(),
             lash_core::ProcessEventPageEvents::Lite(page_events) => page_events
                 .into_iter()
-                .map(|event| (event.sequence, event.event_type))
+                .map(|event| (event.sequence, event.kind.as_str()))
                 .collect::<Vec<_>>(),
         };
         for (sequence, event_type) in metadata {
             assert_eq!(sequence, expected_sequence);
-            assert_eq!(event_type, "page.event");
+            assert_eq!(event_type, "process.waiting");
             expected_sequence += 1;
         }
         after_sequence = match page.more {
@@ -188,11 +194,6 @@ pub(super) async fn compare_bounded_process_event_pages(
             lash_core::ProcessProvenance::host(),
             lash_core::Lifetime::Detached,
         )
-        .with_extra_event_types([lash_core::ProcessEventType {
-            name: "page.event".to_string(),
-            payload_schema: lash_core::JsonSchema::any(),
-            semantics: lash_core::ProcessEventSemanticsSpec::default(),
-        }])
     };
 
     let sqlite_path = sqlite_root.join("process-event-pages.db");
@@ -220,11 +221,8 @@ pub(super) async fn compare_bounded_process_event_pages(
     let process_id = sqlite_record.id.clone();
 
     let request = || {
-        lash_core::ProcessEventAppendRequest::new(
-            "page.event",
-            serde_json::json!({"body": "payload excluded by lite projection"}),
-        )
-        .with_replay_key("page-event-1")
+        page_wait(&process_id, "payload excluded by lite projection")
+            .with_replay_key("page-event-1")
     };
     let first = sqlite
         .append_event(&process_id, request())
@@ -256,7 +254,7 @@ pub(super) async fn compare_bounded_process_event_pages(
                 .execute(rusqlite::params![
                     process_id.as_str(),
                     sequence as i64,
-                    "page.event",
+                    "process.waiting",
                     serde_json::to_string(&event).expect("encode SQLite seed event"),
                 ])
                 .expect("insert SQLite seed event");
@@ -272,7 +270,7 @@ pub(super) async fn compare_bounded_process_event_pages(
            FROM generate_series(2, $4) AS sequence",
     )
     .bind(process_id.as_str())
-    .bind("page.event")
+    .bind("process.waiting")
     .bind(serde_json::to_string(&first).expect("encode PostgreSQL seed event"))
     .bind(EVENT_COUNT as i64)
     .execute(postgres.pool())
@@ -368,18 +366,9 @@ pub(super) async fn compare_bounded_process_event_pages(
             lash_core::ProcessEffectOccurrence::new(
                 "repeated-node",
                 occurrence,
-                if is_failure {
-                    "triggers.fixture"
-                } else {
-                    "now"
-                },
+                if is_failure { "fixture.write" } else { "now" },
                 class,
-                is_failure.then(|| {
-                    lash_core::TriggerOperationError::Invalid {
-                        message: "fixture refusal".to_string(),
-                    }
-                    .failure_code()
-                }),
+                is_failure.then(|| "fixture_refused".to_string()),
                 replay_key,
                 lash_core::FleetFormat::current(),
             )
@@ -396,11 +385,9 @@ pub(super) async fn compare_bounded_process_event_pages(
     // written twice, as a redrive after a lost acknowledgement writes it.
     let wait = lash_core::WaitState {
         since_ms: 1,
-        kind: lash_core::WaitKind::Signal {
-            name: "fixture".to_string(),
-            event_type: "signal.fixture".to_string(),
-            key: format!("{effect_id}:signal.fixture:1"),
-            ordinal: 1,
+        kind: lash_core::WaitKind::Call {
+            call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+            tool_id: lash_sansio::ToolId::new("process_wait"),
         },
     };
     let terminal = lash_core::ProcessAwaitOutput::from_tool_output(
@@ -458,7 +445,13 @@ pub(super) async fn compare_bounded_process_event_pages(
                     .await
                     .expect("read the boundary log")
                     .into_iter()
-                    .map(|event| (event.event_type, event.sequence, event.payload))
+                    .map(|event| {
+                        (
+                            event.fact.event_type().to_owned(),
+                            event.sequence,
+                            event.fact.payload(),
+                        )
+                    })
                     .collect::<Vec<_>>(),
             );
         }
@@ -477,11 +470,7 @@ pub(super) async fn compare_bounded_process_event_pages(
             .expect("read effect events")
         {
             summary
-                .fold_event(
-                    &event.event_type,
-                    &event.payload,
-                    lash_core::FleetFormat::current(),
-                )
+                .fold_event(&event.fact, lash_core::FleetFormat::current())
                 .expect("fold effect event");
         }
         summaries.push(summary);

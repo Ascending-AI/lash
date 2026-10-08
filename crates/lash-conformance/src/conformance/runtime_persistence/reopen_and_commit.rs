@@ -4,7 +4,6 @@
 //! budget; every law keeps its name and its registration path.
 
 use super::*;
-use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use pretty_assertions::assert_eq;
 
 /// Metadata written through the store round-trips.
@@ -293,83 +292,6 @@ pub async fn append_receipt_reopen(factory: ReopenableRuntimeStore) {
     assert_eq!(
         replay.realized_node_timestamps,
         first.realized_node_timestamps
-    );
-}
-
-/// A process wake from `process-1` to `run` at `sequence`.
-fn run_process_wake(sequence: u64) -> ProcessWakeDelivery {
-    ProcessWakeDelivery {
-        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
-            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
-        )),
-        target_session_id: SessionId::from("root"),
-        process_id: crate::ProcessId::fixture("process-1"),
-        sequence,
-        event_type: "process.wake".to_string(),
-        process_caused_by: None,
-        authority: crate::QueuedWorkAuthority::default(),
-        input: "wake payload".to_string(),
-        created_at_ms: 1,
-        trace_cause: Default::default(),
-    }
-}
-
-/// A host cancel of a wake leaves its `cancelled` tombstone (ADR 0101 §8):
-/// an enqueue of the withdrawn `(process, seq)` answers the tombstone and
-/// never resurrects the wake; a later sequence from the same process is
-/// still admitted.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimeStore>) {
-    let session_id = SessionId::from("root");
-    let queued = store
-        .enqueue_queued_work(crate::process_wake_batch_draft(run_process_wake(7)))
-        .await
-        .expect("enqueue wake");
-    store
-        .cancel_queued_work_batch(&session_id, &queued.batch_id)
-        .await
-        .expect("host cancel of the queued wake")
-        .expect("an unadmitted wake is cancelled");
-
-    let answered = store
-        .enqueue_queued_work_with_outcome(crate::process_wake_batch_draft(run_process_wake(7)))
-        .await
-        .expect("a redelivery answers the cancelled tombstone");
-    assert!(
-        matches!(
-            &answered,
-            crate::QueuedWorkEnqueueOutcome::Existing(batch)
-                if batch.batch_id == queued.batch_id
-                    && batch.terminal.as_ref().map(|terminal| terminal.cause)
-                        == Some(lash_core::store::IngressTerminalCause::Cancelled)
-        ),
-        "the redelivery is the cancelled wake: {answered:?}"
-    );
-    assert!(
-        store
-            .list_queued_work(&session_id)
-            .await
-            .expect("list after answered redelivery")
-            .is_empty(),
-        "an answered redelivery reopens nothing"
-    );
-
-    let later = store
-        .enqueue_queued_work(crate::process_wake_batch_draft(run_process_wake(8)))
-        .await
-        .expect("a later sequence of the same process is admitted");
-    assert_eq!(
-        store
-            .list_queued_work(&session_id)
-            .await
-            .expect("list after later wake")
-            .into_iter()
-            .map(|batch| batch.batch_id)
-            .collect::<Vec<_>>(),
-        vec![later.batch_id],
     );
 }
 

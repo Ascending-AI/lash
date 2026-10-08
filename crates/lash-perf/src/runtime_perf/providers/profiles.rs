@@ -331,45 +331,7 @@ finish(first_result.value);"#,
             );
             text_profile(text)
         }
-        RuntimePerfScenario::RlmTriggerMailPipeline => {
-            let text = typescript_block(
-                r#"
-const forward_mail = async (event: mail.Received) => {
-  if (event.account == "test") {
-    await inbox.test23.send({
-      title: `[Fwd from test] ${event.title}`,
-      text: event.text
-    });
-  }
-  return true;
-};
 
-const existing = await triggers.list({
-  name: "runtime-perf-test-to-test23-forwarder",
-  enabled: true
-});
-
-let handle;
-if (existing.length > 0) {
-  handle = existing[0];
-} else {
-  handle = await triggers.register({
-    source: mail.received({}),
-    target: { definition: forward_mail },
-    inputs: (event) => ({ event: event }),
-    name: "runtime-perf-test-to-test23-forwarder"
-  });
-}
-
-const sent = await inbox.test.send({
-  title: "Hello from test",
-  text: "This is a forwarding test for runtime perf stack profiling."
-});
-
-finish("runtime perf benchmark ok");"#,
-            );
-            text_profile(text)
-        }
         RuntimePerfScenario::RlmProcessAsyncToolCompletion => {
             let text = typescript_block(
                 r#"
@@ -533,10 +495,6 @@ finish(result);"#,
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "the trigger name is a plain string produced a few lines above, so it always serializes, per the message"
-)]
 pub(super) fn high_traffic_stream_profile(request: &LlmRequest) -> BenchmarkStreamProfile {
     let kind = high_traffic_operation_kind(request);
     if kind == Some(HighTrafficOperationKind::Tool) {
@@ -555,36 +513,7 @@ finish(result.value);"#,
 finish("runtime perf benchmark ok");"#,
         ));
     }
-    if kind == Some(HighTrafficOperationKind::Wake) {
-        return text_profile(typescript_block(
-            r#"const loadWake = await processes.create({ dialect: "typescript", source: `const loadWake = async () => {
-  return await tools.benchmark_async({ value: "runtime perf benchmark ok", delay_ms: 0 });
-};` });
-const handle = await processes.start({ definition: loadWake });
-const result = await handle;
-finish(result.value);"#,
-        ));
-    }
-    if kind == Some(HighTrafficOperationKind::Trigger) {
-        let trigger_name = high_traffic_trigger_name(request);
-        let trigger_name = serde_json::to_string(&trigger_name)
-            .expect("high-traffic trigger name always serializes");
-        return text_profile(typescript_block(&format!(
-            r#"const load_forward = async (event: mail.Received) => {{
-  return event.title;
-}};
-const existing = await triggers.list({{ name: {trigger_name}, enabled: true }});
-if (existing.length == 0) {{
-  const handle = await triggers.register({{
-    source: mail.received({{}}),
-    target: {{ definition: load_forward }},
-    inputs: (event) => ({{ event: event }}),
-    name: {trigger_name}
-  }});
-}}
-finish("runtime perf benchmark ok");"#,
-        )));
-    }
+
     text_profile(typescript_block(r#"finish("runtime perf benchmark ok");"#))
 }
 
@@ -595,21 +524,6 @@ pub(super) fn high_traffic_operation_kind(
     text.rsplit_once("load-kind:")
         .and_then(|(_, suffix)| suffix.split_whitespace().next())
         .and_then(|kind| kind.parse().ok())
-}
-
-pub(super) fn high_traffic_trigger_name(request: &LlmRequest) -> String {
-    let request_text = request_text(request);
-    let session_id = request_text
-        .rsplit_once("session:")
-        .and_then(|(_, suffix)| suffix.split_whitespace().next())
-        .filter(|value| {
-            !value.is_empty()
-                && value
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
-        })
-        .unwrap_or("missing-session");
-    format!("runtime-perf-load-trigger-{session_id}")
 }
 
 pub(super) fn typescript_block(source: &str) -> String {

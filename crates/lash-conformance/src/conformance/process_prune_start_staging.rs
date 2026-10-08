@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupAuthorities, ArtifactCleanupPorts, ArtifactCleanupRelay, RetainedStart,
-    SubscriptionRevisionStanding,
 };
 
 #[expect(
@@ -210,7 +209,6 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
         session_turn_admission: None,
         executor: "conformance process start",
         starter,
-        trigger_route: None,
     };
     let (stores_a, stores_b) = (stores(&starter_a), stores(&starter_b));
     let spec = |budget| {
@@ -410,7 +408,6 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         session_turn_admission: None,
         executor: "conformance process start",
         starter: &starter_a,
-        trigger_route: None,
     };
     let stores_b = crate::ProcessStartStores {
         tracing: None,
@@ -422,7 +419,6 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
         session_turn_admission: None,
         executor: "conformance process start",
         starter: &starter_b,
-        trigger_route: None,
     };
     let spec = |budget| {
         crate::ProcessExecutionEnvSpec::new(
@@ -696,15 +692,6 @@ impl ArtifactCleanupAuthorities for KeyRecords {
                 definition_id: record.identity.definition_id,
             }))
     }
-
-    async fn subscription_revision(
-        &self,
-        revision: &crate::SubscriptionRevisionId,
-    ) -> Result<SubscriptionRevisionStanding, String> {
-        Err(format!(
-            "the law asks no subscription revision `{revision:?}`"
-        ))
-    }
 }
 
 /// The store set's cleanup ledger, where arming `start`'s `Ended` record has
@@ -851,7 +838,6 @@ pub async fn two_starts_share_one_captured_environment(
         executor: "shared environment law",
         starter: &starter,
         session_catalog: None,
-        trigger_route: None,
         session_turn_admission: None,
     };
     let mut records = Vec::new();

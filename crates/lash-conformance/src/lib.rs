@@ -1,6 +1,5 @@
 //! Backend certification laws shared by store implementations.
 
-use lash_core::JsonSchema;
 use lash_core::*;
 mod conformance;
 pub use conformance::*;
@@ -14,7 +13,7 @@ use lash_core::facade_support::*;
 use lash_core::runtime::*;
 use lash_core::store::*;
 mod macros;
-/// The laws derive tool-intent and trigger-delivery keys, and read rendered
+/// The laws derive tool-intent keys, and read rendered
 /// keys back, exactly as lash's own start paths do.
 const DERIVED_START_KEYS: lash_core::core_internal::StartKeyDerivation =
     lash_core::core_internal::StartKeyDerivation::LASH_START_PATHS;

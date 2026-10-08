@@ -175,7 +175,7 @@ impl ModelStore {
                         .and_then(Value::as_u64),
                 });
             }
-            BoundaryKind::ProviderEvent => {
+            BoundaryKind::ProviderEvent | BoundaryKind::ContractExecution => {
                 self.ensure_session(event.actor_alias.clone());
             }
             BoundaryKind::Tool => {
@@ -243,10 +243,7 @@ impl ModelStore {
                     input.state = ModelPendingInputState::Cancelled;
                 }
             }
-            BoundaryKind::Trigger => {
-                let session = self.ensure_session(boundary_session_alias(event));
-                session.trigger_count += 1;
-            }
+
             BoundaryKind::BackendFailure => {
                 let session = self.ensure_session(boundary_session_alias(event));
                 session.backend_failure_count += 1;
@@ -557,7 +554,7 @@ impl ModelStore {
                 }
                 observed
             }
-            BoundaryKind::ProviderEvent => json!({
+            BoundaryKind::ProviderEvent | BoundaryKind::ContractExecution => json!({
                 "session": event.actor_alias,
                 "provider_event_release": true,
                 "turn_boundary_id": event
@@ -764,42 +761,7 @@ impl ModelStore {
                     "cancel_outcome": outcome,
                 })
             }
-            BoundaryKind::Trigger => {
-                let session = boundary_session_alias(event);
-                let source_key = event
-                    .payload
-                    .get("source_key")
-                    .and_then(Value::as_str)
-                    .unwrap_or(&event.boundary_id)
-                    .to_string();
-                let request = lash_core::TriggerOccurrenceRequest::new(
-                    "sim.trigger",
-                    source_key.clone(),
-                    json!({
-                        "boundary_id": event.boundary_id,
-                        "session": session,
-                    }),
-                    format!("sim-trigger:{}", event.boundary_id),
-                )
-                .with_source(json!({"sim": true}));
-                let occurrence_id =
-                    lash_core::facade_support::deterministic_occurrence_id(&request);
-                let mut observed = json!({
-                    "session": session,
-                    "trigger_delivered": true,
-                    "source_key": source_key,
-                    "occurrence_id": occurrence_id,
-                    "reservation_count": 1,
-                    "started_process": event.payload.get("started_process").cloned().unwrap_or(Value::Bool(true)),
-                });
-                if let Some(execution) = event.payload.get("contract_execution") {
-                    observed
-                        .as_object_mut()
-                        .expect("trigger observed object")
-                        .insert("contract_execution".to_string(), execution.clone());
-                }
-                observed
-            }
+
             BoundaryKind::BackendFailure => {
                 let operation = event
                     .payload
@@ -918,7 +880,6 @@ struct ModelSession {
     observer_reconnects: usize,
     queued_ingress_count: usize,
     cancellation_count: usize,
-    trigger_count: usize,
     backend_failure_count: usize,
     provider_mutation_count: usize,
     durable_effect_keys: Vec<String>,
@@ -941,7 +902,6 @@ impl ModelSession {
             observer_reconnects: 0,
             queued_ingress_count: 0,
             cancellation_count: 0,
-            trigger_count: 0,
             backend_failure_count: 0,
             provider_mutation_count: 0,
             durable_effect_keys: Vec::new(),
@@ -964,7 +924,6 @@ impl ModelSession {
             observer_reconnects: self.observer_reconnects,
             queued_ingress_count: self.queued_ingress_count,
             cancellation_count: self.cancellation_count,
-            trigger_count: self.trigger_count,
             backend_failure_count: self.backend_failure_count,
             provider_mutation_count: self.provider_mutation_count,
             durable_effect_keys: self.durable_effect_keys.clone(),

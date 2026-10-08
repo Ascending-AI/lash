@@ -711,7 +711,6 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         .collect::<BTreeSet<_>>();
     for fixture_id in [
         "queued-active-turn-cancel-race",
-        "trigger-wakeup-routes-process",
         "durable-effect-crash-reopen-replay",
         "backend-fault-classification",
         "provider-protocol-terminalization",
@@ -741,7 +740,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         report
             .scenario_contracts
             .iter()
-            .any(|manifest| manifest.suite == "runtime" && manifest.contract_count == 6)
+            .any(|manifest| manifest.suite == "runtime" && manifest.contract_count == 5)
     );
     for suite in ["runtime", "standard", "rlm", "agent"] {
         assert!(
@@ -767,7 +766,6 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     for (suite, fixture_id) in [
         ("runtime", "operational-coverage-missing-cancellation"),
         ("runtime", "queued-input-operational-missing"),
-        ("runtime", "trigger-wakeup-operational-missing"),
         ("standard", "standard-provider-error-missing-parser-matrix"),
         ("rlm", "rlm-lashlang-cell-missing-continuation"),
         ("agent", "agent-parallel-join-missing-provider-session"),
@@ -785,7 +783,6 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
     for case in [
         "queueing-inputs",
         "active-turn-input-queueing",
-        "triggers-wakeups",
         "cancellation",
         "duplicate-replayed-inputs",
         "backend-retry",
@@ -925,7 +922,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         .collect::<BTreeMap<_, _>>();
     assert_eq!(
         runtime_transition_facts.len(),
-        6,
+        5,
         "every runtime scenario contract must have generated transition facts"
     );
     for (semantic_oracle, facts) in &runtime_transition_facts {
@@ -1049,154 +1046,6 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
             .iter()
             .any(|review| review["boundary_kind"] == "durable_effect")
     );
-}
-
-#[test]
-fn runtime_scenario_contracts_dispatch_to_contract_owned_facts() {
-    let line = |sequence, kind, observed| {
-        TraceEventLine::new(
-            "runtime-contract-facts",
-            1,
-            "test",
-            test_delivered(
-                sequence,
-                &format!("runtime-contract-fact:{sequence}"),
-                "session-001",
-                kind,
-                observed,
-            ),
-        )
-    };
-
-    for contract in RUNTIME_SCENARIO_CONTRACTS {
-        let (events, expected) = match contract.semantic_oracle {
-            "runtime.command_before_turn_work" => (
-                vec![
-                    line(
-                        1,
-                        BoundaryKind::Trigger,
-                        json!({
-                            "trigger_delivered": true,
-                            "started_process": true,
-                            "reservation_count": 1,
-                        }),
-                    ),
-                    line(
-                        2,
-                        BoundaryKind::QueuedIngress,
-                        json!({
-                            "source_key": "command-source",
-                            "ingress_mode": "active_turn",
-                            "input_state": "pending",
-                        }),
-                    ),
-                ],
-                vec![
-                    "trigger_routes_process_wakeup",
-                    "active_turn_input_queued_hidden",
-                ],
-            ),
-            "runtime.command_only_queue_drain" => (
-                vec![line(
-                    1,
-                    BoundaryKind::QueuedIngress,
-                    json!({"source_key": "command-source"}),
-                )],
-                vec!["command_queue_drains_queued_source_keys"],
-            ),
-            "runtime.queued_work_keeps_pending_input" => (
-                vec![line(
-                    1,
-                    BoundaryKind::QueuedIngress,
-                    json!({
-                        "source_key": "queued-source",
-                        "ingress_mode": "active_turn",
-                        "input_state": "pending",
-                        "input_id": "input-001",
-                    }),
-                )],
-                vec!["active_turn_input_queued_hidden"],
-            ),
-            "runtime.queued_turn_input_completion" => (
-                vec![
-                    line(
-                        1,
-                        BoundaryKind::QueuedIngress,
-                        json!({
-                            "source_key": "queued-source",
-                            "ingress_mode": "active_turn",
-                            "input_state": "pending",
-                        }),
-                    ),
-                    line(
-                        2,
-                        BoundaryKind::Provider,
-                        json!({"success": true, "provider_exchange_count": 1}),
-                    ),
-                ],
-                vec![
-                    "active_turn_input_queued_hidden",
-                    "queued_turn_input_followed_by_provider_completion",
-                ],
-            ),
-            "runtime.observation_replay_preserves_input" => (
-                vec![line(
-                    1,
-                    BoundaryKind::Observer,
-                    json!({
-                        "reconnected": true,
-                        "turn_index": 1,
-                        "observer_invariants": {
-                            "session_id": true,
-                            "turn_index_converged": true,
-                            "transcript_message_count_converged": true,
-                        },
-                    }),
-                )],
-                vec!["observer_reconnect_replays_original_input_state"],
-            ),
-            "runtime.checkpoint_redrive_cancel" => (
-                vec![
-                    line(
-                        1,
-                        BoundaryKind::QueuedIngress,
-                        json!({
-                            "source_key": "queued-source",
-                            "ingress_mode": "active_turn",
-                            "input_state": "pending",
-                        }),
-                    ),
-                    line(
-                        2,
-                        BoundaryKind::Cancellation,
-                        json!({"cancelled": true, "target": "queued-source"}),
-                    ),
-                ],
-                vec![
-                    "active_turn_input_queued_hidden",
-                    "cancellation_terminalized_pending_input",
-                ],
-            ),
-            semantic => panic!("missing runtime contract test fixture for {semantic}"),
-        };
-
-        let facts = scenario_transition_facts(contract, &events)
-            .expect("runtime contract should yield transition facts");
-        let actual = facts
-            .iter()
-            .map(|fact| fact.fact.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            actual, expected,
-            "unexpected facts for {}",
-            contract.test_name
-        );
-        assert!(
-            facts
-                .iter()
-                .all(|fact| fact.status == "passed" && !fact.boundary_ids.is_empty())
-        );
-    }
 }
 
 #[test]
@@ -1521,7 +1370,7 @@ fn is_scheduler_owned_runtime_completion_matches_kinds() {
         BoundaryKind::DurableEffect,
         BoundaryKind::Observer,
         BoundaryKind::Cancellation,
-        BoundaryKind::Trigger,
+        BoundaryKind::ContractExecution,
         BoundaryKind::BackendFailure,
         BoundaryKind::ProviderMutation,
     ] {
@@ -1806,4 +1655,126 @@ async fn runtime_completion_serialization_mutation_guard() {
         1,
         "delivered evidence must not show overlapping provider turns under serialized replay"
     );
+}
+
+#[test]
+fn runtime_scenario_contracts_dispatch_to_contract_owned_facts() {
+    let line = |sequence, kind, observed| {
+        TraceEventLine::new(
+            "runtime-contract-facts",
+            1,
+            "test",
+            test_delivered(
+                sequence,
+                &format!("runtime-contract-fact:{sequence}"),
+                "session-001",
+                kind,
+                observed,
+            ),
+        )
+    };
+
+    for contract in RUNTIME_SCENARIO_CONTRACTS {
+        let (events, expected) = match contract.semantic_oracle {
+            "runtime.command_only_queue_drain" => (
+                vec![line(
+                    1,
+                    BoundaryKind::QueuedIngress,
+                    json!({"source_key": "command-source"}),
+                )],
+                vec!["command_queue_drains_queued_source_keys"],
+            ),
+            "runtime.queued_work_keeps_pending_input" => (
+                vec![line(
+                    1,
+                    BoundaryKind::QueuedIngress,
+                    json!({
+                        "source_key": "queued-source",
+                        "ingress_mode": "active_turn",
+                        "input_state": "pending",
+                        "input_id": "input-001",
+                    }),
+                )],
+                vec!["active_turn_input_queued_hidden"],
+            ),
+            "runtime.queued_turn_input_completion" => (
+                vec![
+                    line(
+                        1,
+                        BoundaryKind::QueuedIngress,
+                        json!({
+                            "source_key": "queued-source",
+                            "ingress_mode": "active_turn",
+                            "input_state": "pending",
+                        }),
+                    ),
+                    line(
+                        2,
+                        BoundaryKind::Provider,
+                        json!({"success": true, "provider_exchange_count": 1}),
+                    ),
+                ],
+                vec![
+                    "active_turn_input_queued_hidden",
+                    "queued_turn_input_followed_by_provider_completion",
+                ],
+            ),
+            "runtime.observation_replay_preserves_input" => (
+                vec![line(
+                    1,
+                    BoundaryKind::Observer,
+                    json!({
+                        "reconnected": true,
+                        "turn_index": 1,
+                        "observer_invariants": {
+                            "session_id": true,
+                            "turn_index_converged": true,
+                            "transcript_message_count_converged": true,
+                        },
+                    }),
+                )],
+                vec!["observer_reconnect_replays_original_input_state"],
+            ),
+            "runtime.checkpoint_redrive_cancel" => (
+                vec![
+                    line(
+                        1,
+                        BoundaryKind::QueuedIngress,
+                        json!({
+                            "source_key": "queued-source",
+                            "ingress_mode": "active_turn",
+                            "input_state": "pending",
+                        }),
+                    ),
+                    line(
+                        2,
+                        BoundaryKind::Cancellation,
+                        json!({"cancelled": true, "target": "queued-source"}),
+                    ),
+                ],
+                vec![
+                    "active_turn_input_queued_hidden",
+                    "cancellation_terminalized_pending_input",
+                ],
+            ),
+            semantic => panic!("missing runtime contract test fixture for {semantic}"),
+        };
+
+        let facts = scenario_transition_facts(contract, &events)
+            .expect("runtime contract should yield transition facts");
+        let actual = facts
+            .iter()
+            .map(|fact| fact.fact.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual, expected,
+            "unexpected facts for {}",
+            contract.test_name
+        );
+        assert!(
+            facts
+                .iter()
+                .all(|fact| fact.status == "passed" && !fact.boundary_ids.is_empty())
+        );
+    }
 }

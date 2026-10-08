@@ -11,8 +11,7 @@
 //! or emitted under an anchor that lost.
 //!
 //! The law walks every owning row through the stores under test: a turn
-//! input, a queued process wake, a process start, a
-//! signal, a trigger occurrence and a host-submitted tool intent.
+//! input, a process start and a host-submitted tool intent.
 
 use crate::ActorContext;
 use std::sync::Arc;
@@ -58,8 +57,7 @@ const FIRST_ANCHOR: u8 = 0xa1;
 const SECOND_ANCHOR: u8 = 0xa2;
 
 /// Law P2: the first admission's cause and anchor are retained across
-/// retried inputs, queued wakes, process starts, signals, trigger
-/// occurrences and host tool intents, without changing a business hash, key
+/// retried inputs, process starts and host tool intents, without changing a business hash, key
 /// or typed conflict, and a retained read yields no emission permit.
 pub async fn first_admission_wins_without_changing_business_identity(
     prefix: &str,
@@ -73,10 +71,7 @@ pub async fn first_admission_wins_without_changing_business_identity(
         session_id,
     };
     a_retried_input_keeps_its_first_cause(&parts).await;
-    a_redelivered_wake_keeps_its_first_cause(&parts).await;
     a_retried_start_keeps_its_first_scope(prefix, &stores).await;
-    a_redelivered_signal_keeps_its_first_cause(prefix, &stores).await;
-    a_redelivered_occurrence_keeps_its_first_scope(prefix, &stores).await;
     a_resubmitted_intent_keeps_its_first_scope(&parts, &stores).await;
 }
 
@@ -187,52 +182,6 @@ async fn a_retried_input_keeps_its_first_cause(parts: &TraceParts) {
     clippy::panic,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn a_redelivered_wake_keeps_its_first_cause(parts: &TraceParts) {
-    let wake = |cause| {
-        super::process_wake_work(
-            &parts.session_id,
-            "trace-wake",
-            1,
-            "the process woke the session",
-            crate::DeliveryPolicy::EarliestSafeBoundary,
-        )
-        .with_trace_cause(cause)
-    };
-    assert_eq!(
-        wake(linked(FIRST))
-            .submission_digest()
-            .expect("the wake has a digest"),
-        wake(TraceCause::Root)
-            .submission_digest()
-            .expect("the wake has a digest"),
-        "the cause is no part of the wake's submission"
-    );
-    let first = parts
-        .store
-        .enqueue_queued_work_with_outcome(wake(linked(FIRST)))
-        .await
-        .expect("the first delivery");
-    let crate::QueuedWorkEnqueueOutcome::Inserted(inserted) = first else {
-        panic!("the first delivery inserts the wake: {first:?}");
-    };
-    assert_eq!(inserted.trace_cause, linked(FIRST));
-    let again = parts
-        .store
-        .enqueue_queued_work_with_outcome(wake(linked(SECOND)))
-        .await
-        .expect("a redelivery under another context is absorbed");
-    let crate::QueuedWorkEnqueueOutcome::Existing(existing) = again else {
-        panic!("a redelivery is absorbed: {again:?}");
-    };
-    assert_eq!(existing.batch_id, inserted.batch_id);
-    assert_eq!(existing.trace_cause, linked(FIRST));
-}
-
-#[expect(
-    clippy::expect_used,
-    clippy::panic,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn crate::StoreSet>) {
     let registry = stores.process_registry();
     let key = crate::StartKey::for_host(format!("{prefix}-trace-start"));
@@ -299,156 +248,6 @@ async fn a_retried_start_keeps_its_first_scope(prefix: &str, stores: &Arc<dyn cr
 
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn a_redelivered_signal_keeps_its_first_cause(
-    _prefix: &str,
-    stores: &Arc<dyn crate::StoreSet>,
-) {
-    let registry = stores.process_registry();
-    let target = registry
-        .register_process(
-            crate::ProcessRegistration::new(
-                crate::ProcessInput::Engine {
-                    kind: "trace-signal".to_string(),
-                    payload: serde_json::Value::Null,
-                },
-                crate::ProcessProvenance::host(),
-                lash_core::Lifetime::Detached,
-            )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
-            .with_extra_event_types([super::process_registry::plain_event_type("signal.ready")]),
-        )
-        .await
-        .expect("register the signal target");
-    let signal = |payload: serde_json::Value, cause| {
-        lash_core::ProcessSignal::new(
-            lash_core::ProcessSignalIdentity::new(target.id.clone(), "ready", "one")
-                .expect("a valid signal identity"),
-            payload,
-        )
-        .with_trace_cause(cause)
-    };
-    let sent = signal(serde_json::json!(1), linked(FIRST));
-    let resent = signal(serde_json::json!(1), linked(SECOND));
-    assert!(
-        sent.same_signal(&resent),
-        "the cause is no part of the signal"
-    );
-    assert_eq!(sent.identity.append_key(), resent.identity.append_key());
-
-    let first = registry
-        .append_event(&target.id, sent.append_request())
-        .await
-        .expect("the first delivery");
-    assert_eq!(first.realization, lash_core::StoreRealization::Realized);
-    assert_eq!(first.event.semantics.trace_cause, linked(FIRST));
-    let replay = registry
-        .append_event(&target.id, resent.append_request())
-        .await
-        .expect("a redelivery under another context is the same signal");
-    assert_eq!(replay.realization, lash_core::StoreRealization::Coalesced);
-    assert_eq!(replay.event.sequence, first.event.sequence);
-    assert_eq!(
-        replay.event.semantics.trace_cause,
-        linked(FIRST),
-        "a redelivery reads the first cause back"
-    );
-
-    // A changed payload under the identity is the conflict it always was.
-    let error = registry
-        .append_event(
-            &target.id,
-            signal(serde_json::json!(2), linked(FIRST)).append_request(),
-        )
-        .await
-        .expect_err("a changed signal under the same identity is refused");
-    assert!(
-        lash_core::is_durable_identity_conflict(&error),
-        "the refusal is the durable-identity conflict: {error:?}"
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn a_redelivered_occurrence_keeps_its_first_scope(
-    prefix: &str,
-    stores: &Arc<dyn crate::StoreSet>,
-) {
-    let triggers = crate::TriggerStores::of(stores.as_ref());
-    let fire = |payload: serde_json::Value, offer: TraceScopeOffer| {
-        crate::TriggerOccurrenceRequest::new(
-            "ui.button.pressed",
-            format!("{prefix}-trace-source"),
-            payload,
-            format!("{prefix}-trace-fire"),
-        )
-        .with_trace(offer)
-    };
-    let pressed = serde_json::json!({ "button": "Blue" });
-    assert_eq!(
-        lash_core::facade_support::deterministic_occurrence_id(&fire(
-            pressed.clone(),
-            offer(FIRST, FIRST_ANCHOR)
-        )),
-        lash_core::facade_support::deterministic_occurrence_id(&fire(
-            pressed.clone(),
-            TraceScopeOffer::default()
-        )),
-        "the offer is no part of the occurrence's identity"
-    );
-
-    let first = triggers
-        .record_occurrence(fire(pressed.clone(), offer(FIRST, FIRST_ANCHOR)))
-        .await
-        .expect("the first ingest");
-    assert_eq!(first.realization, lash_core::StoreRealization::Realized);
-    let scope = DurableTraceScope {
-        scope: TraceScopeId::admission(TraceScopeOwner::TriggerOccurrence {
-            occurrence_id: first.occurrence.occurrence_id.clone(),
-        }),
-        cause: linked(FIRST),
-        anchor: TraceAnchor::Context(context(FIRST_ANCHOR)),
-        started_at_ms: first.occurrence.occurred_at_ms,
-    };
-    assert_eq!(first.occurrence.trace, Some(scope.clone()));
-
-    for retry in [offer(SECOND, SECOND_ANCHOR), TraceScopeOffer::default()] {
-        let again = triggers
-            .record_occurrence(fire(pressed.clone(), retry))
-            .await
-            .expect("a redelivery under another context is the same fire");
-        assert_eq!(again.realization, lash_core::StoreRealization::Coalesced);
-        assert_eq!(again.occurrence, first.occurrence);
-        assert!(
-            TraceScopeAdmission::of(
-                scope.clone(),
-                again.realization == lash_core::StoreRealization::Realized,
-            )
-            .permit()
-            .is_none(),
-            "a redelivered fire holds no emission permit"
-        );
-    }
-
-    // A changed fire under the idempotency key is the conflict it always was.
-    let error = triggers
-        .record_occurrence(fire(
-            serde_json::json!({ "button": "Red" }),
-            offer(FIRST, FIRST_ANCHOR),
-        ))
-        .await
-        .expect_err("a changed fire under the same idempotency key is refused");
-    assert!(
-        lash_core::is_durable_identity_conflict(&error),
-        "the refusal is the durable-identity conflict: {error:?}"
-    );
-}
-
-#[expect(
-    clippy::expect_used,
     clippy::panic,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
@@ -464,22 +263,14 @@ async fn a_resubmitted_intent_keeps_its_first_scope(
         &lash_core::ToolCallId::fixture("trace-call"),
         0,
     );
-    // An emission carries a whole occurrence request: the offer beside its
-    // payload is no part of the intent's payload hash.
-    let emit = |fire: TraceScopeOffer| {
-        crate::ToolIntent::EmitTrigger(lash_core::EmitTriggerIntent {
+    let cancel = || {
+        crate::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
             owner: owner.clone(),
-            request: crate::TriggerOccurrenceRequest::new(
-                "ui.button.pressed",
-                "trace-intent-source",
-                serde_json::json!({ "button": "Blue" }),
-                "trace-intent-fire",
-            )
-            .with_trace(fire),
+            process_id: crate::ProcessId::fixture("trace-intent-target"),
         })
     };
-    let submission = |fire: TraceScopeOffer, submitted: TraceScopeOffer, at_ms: u64| {
-        crate::ToolIntentSubmissionRecord::new(identity.clone(), emit(fire))
+    let submission = |_fire: TraceScopeOffer, submitted: TraceScopeOffer, at_ms: u64| {
+        crate::ToolIntentSubmissionRecord::new(identity.clone(), cancel())
             .expect("the submission has a payload hash")
             .with_trace_offer(submitted, at_ms)
     };

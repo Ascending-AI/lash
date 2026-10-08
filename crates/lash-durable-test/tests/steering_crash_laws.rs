@@ -1,10 +1,9 @@
-//! Steering input and process wakes on the production session activation
+//! Steering input on the production session activation
 //! (FIG-5293, FIG-5294, ADR 0101 §5, ADR 0132 §4).
 //!
 //! A lash core's session holds one sent input. While its turn runs, a host
 //! sends the session a steering input addressed to that turn
-//! (`TurnInputIngress::ActiveTurn`), or a process files a wake for the
-//! session (queued turn work). The nodes are simulated (A and B) over the
+//! (`TurnInputIngress::ActiveTurn`). The nodes are simulated (A and B) over the
 //! production durable store, and the core's own turn services run the turns
 //! with a scripted model.
 //!
@@ -18,11 +17,6 @@
 //!   model call runs. The committed finish is the turn's answer, so the
 //!   terminal checkpoint withholds it; it stays session mail and runs as
 //!   the session's next run, under its own id (ADR 0101 §3, §5.1).
-//! - **A process wake** is delivered on the same path: filed during the
-//!   first round, the next work checkpoint delivers it with the steering
-//!   input, in ingress order, and its admission commits with the next phase;
-//!   filed during the last model call, it stays session mail and is the
-//!   session's next run (FIG-5294).
 //!
 //! The matrix cuts the uncut run at every labelled write, under
 //! fail-before, ack-hidden, zombie, abort and commit-then-abort, recovers on
@@ -46,13 +40,8 @@ use lash_core::facade_support::ProviderHandle;
 use lash_core::llm::types::{LlmRequest, LlmResponse, LlmStreamEvent, StreamBlockIdentity};
 use lash_core::runtime::durable::session::SessionActivation;
 use lash_core::{LlmOutputPart, ToolCall, ToolOutcome};
-use lash_core_execution::facade_support::{
-    ProcessWake, ProcessWakeDeliveryRequest, process_wake_batch_draft, process_wake_delivery,
-};
-use lash_core_execution::{
-    Backend, BackendParts, FleetFormat, NoProjectionProviders, ProcessId, StoreSet,
-};
-use lash_core_store::store::{IngressTerminalCause, RunTerminalKind};
+use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
+use lash_core_store::store::RunTerminalKind;
 use lash_durable::runner::Activation;
 use lash_durable::{ActorKey, ActorState, CommitLabel, DurableError, DurableStore, LeaseConfig};
 use lash_durable_test::{
@@ -80,9 +69,6 @@ const FINAL: &str = "steered answer";
 const ANSWER: &str = "unsteered answer";
 /// What the model answers when the work checkpoint never delivered the steer.
 const UNSTEERED: &str = "the steer never arrived";
-/// The process whose wake the session receives, and the wake's input.
-const PROCESS: &str = "p_0192a3b4c5d670008000000000000001";
-const WAKE: &str = "the background process settled";
 
 fn session() -> SessionId {
     SessionId::try_from(SESSION.to_owned()).unwrap()
@@ -114,52 +100,20 @@ enum Arrival {
     /// A steer, while the turn's last model call runs: the terminal
     /// checkpoint withholds it.
     SteerAtTerminal,
-    /// A process wake, while the first round's tool body runs: the work
-    /// checkpoint after the round delivers it.
-    WakeAtWork,
-    /// A process wake, while the turn's last model call runs: no checkpoint
-    /// of the turn is left, so it runs next.
-    WakeAfterTheLastCheckpoint,
-    /// A steer and then a process wake, both while the first round's tool
-    /// body runs: the same work checkpoint delivers both, in ingress order.
-    SteerAndWakeAtWork,
 }
 
 impl Arrival {
-    fn steers(self) -> bool {
-        matches!(
-            self,
-            Self::SteerAtWork | Self::SteerAtTerminal | Self::SteerAndWakeAtWork
-        )
-    }
-
-    fn wakes(self) -> bool {
-        matches!(
-            self,
-            Self::WakeAtWork | Self::WakeAfterTheLastCheckpoint | Self::SteerAndWakeAtWork
-        )
+    async fn send(self, core: &OnceLock<lash::LashCore>) {
+        send_steer(core).await;
     }
 
     fn at_work(self) -> bool {
-        matches!(
-            self,
-            Self::SteerAtWork | Self::WakeAtWork | Self::SteerAndWakeAtWork
-        )
+        matches!(self, Self::SteerAtWork)
     }
 
     /// What it sends, as the turn the session runs sees it.
     fn marker(self) -> &'static str {
-        if self.steers() { STEER } else { WAKE }
-    }
-
-    /// Send what arrives through `core`.
-    async fn send(self, core: &OnceLock<lash::LashCore>) {
-        if self.steers() {
-            send_steer(core).await;
-        }
-        if self.wakes() {
-            send_wake(core).await;
-        }
+        STEER
     }
 }
 
@@ -182,39 +136,6 @@ async fn send_steer(core: &OnceLock<lash::LashCore>) {
         ))
         .await
         .expect("the running turn accepts its steer");
-}
-
-/// The process's wake for the session, as its event append files it: queued
-/// turn work under the wake's source key, so a repeat is the same batch.
-fn wake() -> lash::persistence::QueuedWorkBatchDraft {
-    process_wake_batch_draft(
-        process_wake_delivery(ProcessWakeDeliveryRequest {
-            target_session_id: session(),
-            process_id: ProcessId::parse(PROCESS).expect("the process id"),
-            sequence: 1,
-            event_type: "process.settled".to_owned(),
-            process_caused_by: None,
-            authority: lash::persistence::QueuedWorkAuthority::default(),
-            wake: ProcessWake {
-                input: WAKE.to_owned(),
-            },
-            trace_cause: Default::default(),
-            occurred_at_ms: 1,
-            fleet_format: FleetFormat::current(),
-        })
-        .expect("the wake's delivery"),
-    )
-}
-
-/// File the wake through `core`'s store, which wakes the session actor in
-/// the same transaction (ADR 0132 §12).
-async fn send_wake(core: &OnceLock<lash::LashCore>) {
-    let core = core.get().expect("the core is built before its turn runs");
-    core.backend()
-        .session_store_factory()
-        .enqueue_queued_work(wake())
-        .await
-        .expect("the session accepts the wake");
 }
 
 /// `steer_round`'s body: it sends what arrives on the first round, then
@@ -303,8 +224,7 @@ fn model(
                 let rendered = serde_json::to_string(&request.messages).expect("a request encodes");
                 seen.lock_recover().push(rendered.clone());
                 // Delivered: everything that arrives reached the request.
-                let delivered = (!arrival.steers() || rendered.contains(STEER))
-                    && (!arrival.wakes() || rendered.contains(WAKE));
+                let delivered = rendered.contains(STEER);
                 let response = if arrival.at_work() {
                     if delivered && rendered.contains(SECOND_ROUND) {
                         text(&request, FINAL)
@@ -525,84 +445,6 @@ impl Steering {
         }
         violations
     }
-
-    /// The wake filed again, after the run: the session answers the batch
-    /// it already holds, open or settled, and files nothing new.
-    async fn refiled_wake(&self) -> Result<lash::persistence::QueuedWorkEnqueueOutcome, String> {
-        self.backend()
-            .session_store_factory()
-            .enqueue_queued_work_with_outcome(wake())
-            .await
-            .map_err(|error| format!("file the wake again: {error}"))
-    }
-
-    /// The run a wake that no running turn took opens: named by its batch.
-    async fn wake_run(&self) -> Option<TurnId> {
-        let refiled = self.refiled_wake().await.ok()?;
-        TurnId::parse(refiled.batch().batch_id.as_str()).ok()
-    }
-
-    /// The wake was filed once and delivered by a committed turn, and no
-    /// request of the session saw it twice. `delivered` is where the
-    /// scenario says it arrives: a request of the running turn after its
-    /// first round, or only a request after the first run's answer.
-    fn wake_laws(
-        arrival: Arrival,
-        seen: &[String],
-        refiled: &lash::persistence::QueuedWorkEnqueueOutcome,
-    ) -> Vec<String> {
-        let mut violations = Vec::new();
-        if arrival.at_work() {
-            if let Some(unwoken) = seen
-                .iter()
-                .find(|request| request.contains(FIRST_ROUND) && !request.contains(WAKE))
-            {
-                violations.push(format!(
-                    "the work checkpoint did not deliver the wake to the next request: {unwoken}"
-                ));
-            }
-        } else if let Some(extended) = seen
-            .iter()
-            .find(|request| request.contains(WAKE) && !request.contains(ANSWER))
-        {
-            violations.push(format!(
-                "a wake after the last checkpoint reached its turn: {extended}"
-            ));
-        }
-        if !seen.iter().any(|request| request.contains(WAKE)) {
-            violations.push("the wake never reached a request".to_owned());
-        }
-        if let Some(twice) = seen
-            .iter()
-            .find(|request| request.matches(WAKE).count() > 1)
-        {
-            violations.push(format!("a request holds the wake twice: {twice}"));
-        }
-        // Delivered with the steer, the wake follows it: the steer was sent
-        // first.
-        if arrival.steers()
-            && arrival.wakes()
-            && let Some(reordered) = seen.iter().find(|request| {
-                matches!(
-                    (request.find(STEER), request.find(WAKE)),
-                    (Some(steer), Some(wake)) if wake < steer
-                )
-            })
-        {
-            violations.push(format!(
-                "the wake was delivered ahead of the earlier steer: {reordered}"
-            ));
-        }
-        match refiled {
-            lash::persistence::QueuedWorkEnqueueOutcome::Existing(wake)
-                if wake.terminal.as_ref().map(|terminal| terminal.cause)
-                    == Some(IngressTerminalCause::Delivered) => {}
-            other => violations.push(format!(
-                "the wake was not filed once and delivered: {other:?}"
-            )),
-        }
-        violations
-    }
 }
 
 #[async_trait::async_trait]
@@ -678,13 +520,6 @@ impl Scenario for Steering {
 
         let runs = match self.arrival {
             arrival if arrival.at_work() => vec![run()],
-            Arrival::WakeAfterTheLastCheckpoint => match self.wake_run().await {
-                Some(wake_run) => vec![run(), wake_run],
-                None => {
-                    violations.push("the session holds no wake".to_owned());
-                    vec![run()]
-                }
-            },
             _ => vec![run(), steer_run()],
         };
         for answered in &runs {
@@ -702,18 +537,12 @@ impl Scenario for Steering {
             ));
         }
 
-        if self.arrival.steers() {
+        {
             match self.steer_evidence().await {
                 Ok(evidence) if self.arrival.at_work() => {
                     violations.extend(Self::checkpoint_laws(&seen, &evidence));
                 }
                 Ok(evidence) => violations.extend(Self::terminal_laws(&seen, &evidence)),
-                Err(error) => violations.push(error),
-            }
-        }
-        if self.arrival.wakes() {
-            match self.refiled_wake().await {
-                Ok(refiled) => violations.extend(Self::wake_laws(self.arrival, &seen, &refiled)),
                 Err(error) => violations.push(error),
             }
         }
@@ -894,49 +723,4 @@ async fn a_withheld_steer_killed_at_every_label_runs_once_next_on_postgres() {
         return;
     };
     prove(Arrival::SteerAtTerminal, Dialect::Postgres, Some(url)).await;
-}
-
-/// The uncut run: a process wake filed during the first round reaches the
-/// model's next request, delivered by the running turn: no run of its own
-/// follows (FIG-5294).
-#[tokio::test]
-async fn a_process_wake_filed_during_a_round_is_delivered_at_the_next_work_checkpoint() {
-    uncut(Arrival::WakeAtWork).await;
-}
-
-/// The uncut run: a process wake filed during the turn's last model call
-/// finds no checkpoint left; it stays session mail and is the next run.
-#[tokio::test]
-async fn a_process_wake_after_the_last_work_checkpoint_runs_next() {
-    uncut(Arrival::WakeAfterTheLastCheckpoint).await;
-}
-
-/// The uncut run: a steer and then a process wake, both sent during the
-/// first round, reach the model's next request together, in ingress order.
-#[tokio::test]
-async fn a_steer_and_a_process_wake_are_delivered_at_one_work_checkpoint_in_ingress_order() {
-    uncut(Arrival::SteerAndWakeAtWork).await;
-}
-
-/// On SQLite in memory: a process wake delivered at a work checkpoint,
-/// killed at every label, is delivered exactly once.
-#[tokio::test]
-async fn a_wake_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_memory() {
-    prove(Arrival::WakeAtWork, Dialect::SqliteMemory, None).await;
-}
-
-/// On a SQLite file.
-#[tokio::test]
-async fn a_wake_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_sqlite_file() {
-    prove(Arrival::WakeAtWork, Dialect::SqliteFile, None).await;
-}
-
-/// On PostgreSQL.
-#[tokio::test]
-async fn a_wake_at_a_work_checkpoint_killed_at_every_label_is_delivered_once_on_postgres() {
-    let Some(url) = dialect::postgres_url() else {
-        eprintln!("skipping: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    prove(Arrival::WakeAtWork, Dialect::Postgres, Some(url)).await;
 }

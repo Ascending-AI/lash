@@ -110,8 +110,6 @@ pub const SCENARIO_MINI_AGENT_PARALLEL_JOIN_ORACLE: crate::trace::OracleId<'stat
     );
 pub const TOOL_BOUNDARY_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.tool-boundary-observed.v1");
-pub const TRIGGER_ORACLE: crate::trace::OracleId<'static> =
-    crate::trace::OracleId::real("sim.oracle.trigger-delivery-observed.v1");
 pub const GENERATED_SUSPEND_RESUME_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::real("sim.oracle.generated-suspend-resume.v1");
 pub const GENERATED_FINAL_VALUE_ORACLE: crate::trace::OracleId<'static> =
@@ -177,7 +175,6 @@ pub use runtime_observation::{
     provider_transport_mutation_classified, provider_turn_interleaving_depth,
     queued_ingress_observed, runtime_graph_acyclic, runtime_session_graph_contract,
     runtime_single_active_agent_frame, runtime_usage_monotonic, tool_boundary_observed,
-    trigger_delivery_observed,
 };
 pub(crate) use semantic_laws::backend_fault_classification_semantics;
 use semantic_laws::*;
@@ -312,7 +309,6 @@ pub fn walk_generated_trace_oracles<S, V>(
         queued_ingress_observed(summary, events)
     );
     battery!(CANCELLATION_ORACLE, cancellation_observed(summary, events));
-    battery!(TRIGGER_ORACLE, trigger_delivery_observed(summary, events));
     battery!(
         OBSERVER_RECONNECT_ORACLE,
         observer_reconnect_observed(summary, events)

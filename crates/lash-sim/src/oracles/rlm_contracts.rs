@@ -163,13 +163,10 @@ pub(super) const RLM_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
         assertion: "exec result tool control frame switch terminalizes as a concrete AgentFrameSwitch outcome",
         check: check_rlm_exec_tool_control_frame_switch_terminal,
         extras_before: &[],
-        extras_after: &[
-            ExtraFact::Exec {
-                fact: "rlm_exec_tool_control_frame_switch_terminal",
-                requirement: ExecFactRequirement::RuntimeOutcome,
-            },
-            ExtraFact::TriggerThenProvider("rlm_exec_tool_control_frame_switch_trigger"),
-        ],
+        extras_after: &[ExtraFact::Exec {
+            fact: "rlm_exec_tool_control_frame_switch_terminal",
+            requirement: ExecFactRequirement::RuntimeOutcome,
+        }],
     },
     ContractFactSpec {
         spec: contract_spec(
@@ -1025,7 +1022,7 @@ pub(super) fn proxy_fact_kind(fact: &ScenarioContractGeneratedFact) -> Option<&'
     if fact.observed.get("semantic_proof_boundary").is_some()
         || fact.observed.get("semantic_proof").is_some()
     {
-        return Some("semantic-proof-only trigger");
+        return Some("semantic-proof-only contract boundary");
     }
     if fact.fact == "generated_transition_evidence_present"
         || fact

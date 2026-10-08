@@ -17,15 +17,13 @@ use crate::crash_matrix::invariants;
 use crate::crash_matrix::world::{SOAK, World};
 
 /// The workloads every epoch runs together.
-pub const CASES: [Case; 8] = [
+pub const CASES: [Case; 6] = [
     Case::Turn,
     Case::Round,
     Case::Cancel,
     Case::Cell,
     Case::Process,
-    Case::Signal,
     Case::Close,
-    Case::Trigger,
 ];
 
 /// A new wave of every workload starts every this many steps, so faults

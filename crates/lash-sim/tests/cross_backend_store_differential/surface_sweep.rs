@@ -766,11 +766,7 @@ impl BackendRunner {
                         policy: lash_core::testing::queued_work_admission_policy(1),
                     })
                     .await?;
-                format!(
-                    "inputs={} queued={}",
-                    admission.inputs.is_some(),
-                    admission.queued.is_some()
-                )
+                format!("inputs={}", admission.inputs.is_some())
             }
             SurfaceMethod::QueuedWorkBatchCompletion => {
                 let completed = store

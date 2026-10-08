@@ -61,6 +61,33 @@ async fn world(
     workers: lash::rlm::WorkerService,
     sink: &Arc<RecordingSink>,
 ) -> Option<World> {
+    world_with_tools(tier, workers, sink, Arc::new(Fetch)).await
+}
+
+/// A fixture tool whose contract is visible when a process captures its tools.
+struct ListedFetch;
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for ListedFetch {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![web_fetch::fetch_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        lash_core::ToolProvider::resolve_contract(&Fetch, name)
+    }
+
+    async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        lash_core::ToolProvider::execute(&Fetch, call).await
+    }
+}
+
+async fn world_with_tools(
+    tier: Tier,
+    workers: lash::rlm::WorkerService,
+    sink: &Arc<RecordingSink>,
+    tools: Arc<dyn lash_core::ToolProvider>,
+) -> Option<World> {
     let sink = Arc::clone(sink);
     World::new(tier, move |backend| {
         lash::LashCore::rlm_builder(
@@ -72,7 +99,7 @@ async fn world(
                 lash_core::lifetime::session_or_starter,
             ),
         ))
-        .tools(Arc::new(Fetch))
+        .tools(tools)
         .trace_sink(sink)
     })
     .await
@@ -148,19 +175,19 @@ const worker = await processes.create({ dialect: "typescript", source: `
 const worker = async (limit: number) => {
   const box = { value: 0 };
   for (const step of [1, 2]) {
-    await processes.emit({ value: step });
+    await sleep(step);
     if (step > limit) {
-      await processes.emit({ value: "worker-never" });
+      await sleep("worker-never".length);
     } else {
       box.value = step;
     }
   }
   if (box.value > 0) box.value += 1;
   const doubled = [1, 2].map((item) => item * 2);
-  /** @label Labelled emit */
-  await processes.emit({ value: doubled });
+  /** @label Labelled sleep */
+  await sleep(doubled.length);
   const inner = await processes.create({ dialect: "typescript",
-    source: 'const inner = async () => { for (const round of [1]) { await processes.emit({ value: round }); await processes.emit({ value: "inner" }); } return 1; };'
+    source: 'const inner = async () => { for (const round of [1]) { await sleep(round); await sleep("inner".length); } return 1; };'
   });
   const nested = await processes.start({ definition: inner });
   return box.value;
@@ -623,9 +650,14 @@ map_laws_on!(
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn durable_language_trace_continues_once_across_quiet_points() {
     let sink = Arc::new(RecordingSink::default());
-    let world = world(Tier::SqliteMemory, sim::untimed_workers(), &sink)
-        .await
-        .expect("SQLite memory is available");
+    let world = world_with_tools(
+        Tier::SqliteMemory,
+        sim::untimed_workers(),
+        &sink,
+        Arc::new(ListedFetch),
+    )
+    .await
+    .expect("SQLite memory is available");
     let output = world
         .run(
             "trace-quiet-points",
@@ -633,7 +665,7 @@ async fn durable_language_trace_continues_once_across_quiet_points() {
             vec![served::cell(
                 r#"
 const definition = await processes.create({ dialect: "typescript",
-  source: 'const worker = async () => { for (const value of [1, 2]) { await processes.emit({ value }); await sleep(100); } return 42; };'
+  source: 'const worker = async () => { for (const value of [1, 2]) { await web.fetch({ url: value }); await sleep(100); } return 42; };'
 });
 const handle = await processes.start({ definition });
 const result = await handle;

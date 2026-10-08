@@ -304,18 +304,10 @@ fn store_trait_surface_is_fully_gated() {
         }
     }
 
-    for method in [
-        "turns_changed_since",
-        "subscriptions_changed_since",
-        "list_subscriptions_with_cursor",
-        "compact_subscription_tombstones",
-        "plan_occurrence",
-    ] {
-        if harness_drives(&sources, method) {
-            covered += 1;
-        } else {
-            missing.push(format!("TriggerStore::{method}"));
-        }
+    if harness_drives(&sources, "turns_changed_since") {
+        covered += 1;
+    } else {
+        missing.push("TurnChangeFeed::turns_changed_since".to_string());
     }
 
     // The attachment blob store's method names (`put`, `get`, `list`, ...) are
@@ -351,7 +343,7 @@ fn store_trait_surface_is_fully_gated() {
     // A floor, not a pin: covering more methods must never fail the gate, but
     // silently dropping drivers until the inventory is a token sample must.
     assert!(
-        covered >= 39,
+        covered >= 35,
         "the differential executes only {covered} fallible store-trait methods; \
          the inventory has been narrowed"
     );

@@ -31,7 +31,7 @@ pub enum Coverage {
 }
 
 /// Every catalog label and how the matrix covers it.
-pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
+pub const COVERAGE: [(CommitLabel, Coverage); 46] = [
     (CommitLabel::CLAIM, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::HEARTBEAT, Coverage::Cases(&[Case::Turn])),
     (CommitLabel::REAP, Coverage::Cases(&[Case::CellKilled])),
@@ -116,11 +116,11 @@ pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
     (CommitLabel::STEP_OUTCOME, Coverage::Cases(&[Case::Process])),
     (
         CommitLabel::PROCESS_CANCEL,
-        Coverage::Cases(&[Case::Signal]),
+        Coverage::Cases(&[Case::Cancel]),
     ),
     (
         CommitLabel::PROCESS_TERMINAL,
-        Coverage::Cases(&[Case::Process, Case::Signal]),
+        Coverage::Cases(&[Case::Process]),
     ),
     (
         CommitLabel::CASCADE_BATCH,
@@ -152,10 +152,6 @@ pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
         Coverage::Cases(&[Case::Close]),
     ),
     (
-        CommitLabel::SESSION_CLOSE_TRIGGERS,
-        Coverage::Cases(&[Case::Close]),
-    ),
-    (
         CommitLabel::SESSION_CLOSE_ARTIFACTS,
         Coverage::Cases(&[Case::Close]),
     ),
@@ -167,11 +163,7 @@ pub const COVERAGE: [(CommitLabel, Coverage); 48] = [
         CommitLabel::MAIL_SESSION,
         Coverage::Cases(&[Case::Cancel, Case::Close]),
     ),
-    (CommitLabel::MAIL_PROCESS, Coverage::Cases(&[Case::Signal])),
-    (
-        CommitLabel::TRIGGER_START,
-        Coverage::Cases(&[Case::Trigger]),
-    ),
+    (CommitLabel::MAIL_PROCESS, Coverage::Cases(&[Case::Cancel])),
     (CommitLabel::DRAIN_RELEASE, Coverage::Cases(&[Case::Drain])),
 ];
 

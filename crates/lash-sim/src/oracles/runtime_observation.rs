@@ -186,23 +186,6 @@ pub fn cancellation_observed(
     )
 }
 
-pub fn trigger_delivery_observed(
-    summary: &AbstractWorldView,
-    events: &[DeliveredBoundary],
-) -> OracleVerdict {
-    coverage_invariant_verdict(
-        TRIGGER_ORACLE,
-        summary
-            .sessions
-            .iter()
-            .any(|session| session.trigger_count > 0),
-        "no trigger boundary was observed",
-        trigger_delivery_runtime_observed(events),
-        "trigger boundary was observed but it did not route through a runtime trigger DTO with a stable source identity",
-        "generated workload delivered a trigger boundary routed through a runtime trigger DTO with stable source identity",
-    )
-}
-
 pub fn observer_reconnect_observed(
     summary: &AbstractWorldView,
     events: &[DeliveredBoundary],

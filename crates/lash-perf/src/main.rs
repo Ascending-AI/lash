@@ -88,10 +88,7 @@ struct Args {
     runtime_perf_load_arrival_rate: u64,
 
     /// Weighted high-traffic turn mix as comma-separated `kind=weight` pairs
-    #[arg(
-        long,
-        default_value = "plain=1,tool=1,queued=1,child=1,wake=1,trigger=1"
-    )]
+    #[arg(long, default_value = "plain=1,tool=1,queued=1,child=1")]
     runtime_perf_load_mix: String,
 
     /// Comma-separated populations for high-traffic knee-search scenarios

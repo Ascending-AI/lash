@@ -39,7 +39,9 @@ pub async fn later_segment_recovery_refuses_without_terminal_mutation(
             .complete_process_with_prelude(
                 &id,
                 settled_success(serde_json::json!("stale")),
-                vec![ProcessEventAppendRequest::new(
+                vec![call_wait_event(
+                    &id,
+                    "process.effect_summary",
                     "process.effect_summary",
                     serde_json::json!({"stale":true}),
                 )],
@@ -225,11 +227,9 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
         .expect("serialize events");
         let wait = WaitState {
             since_ms: 1,
-            kind: WaitKind::Signal {
-                name: "ready".into(),
-                event_type: "signal.ready".into(),
-                key: "stale-wait".into(),
-                ordinal: 1,
+            kind: crate::WaitKind::Call {
+                call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+                tool_id: lash_sansio::ToolId::new("process_wait"),
             },
         };
         let terminal =
@@ -246,7 +246,9 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
             registry
                 .append_event_with_authority(
                     &id,
-                    ProcessEventAppendRequest::new(
+                    call_wait_event(
+                        &id,
+                        "process.progress",
                         "process.progress",
                         serde_json::json!({"stale":true}),
                     ),

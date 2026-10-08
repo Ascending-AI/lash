@@ -117,41 +117,5 @@ pub(super) async fn assert_model_agreement(
             ));
         }
     }
-    let queued = handles
-        .runtime
-        .list_queued_work(&SessionId::from("prop-runtime-session"))
-        .await
-        .map_err(|error| error.to_string())?;
-    let mut actual_live =
-        BTreeMap::<(SessionId, ProcessId), BTreeMap<u64, ExpectedQueuedWake>>::new();
-    for batch in queued {
-        let kind = batch.kind();
-        if let QueuedWorkPayload::ProcessWake { wake } = batch.payload {
-            actual_live
-                .entry((batch.session_id.clone(), wake.process_id.clone()))
-                .or_default()
-                .insert(
-                    wake.sequence,
-                    ExpectedQueuedWake {
-                        wake: *wake,
-                        delivery_policy: batch.delivery_policy,
-                        kind,
-                        authority: batch.authority.clone(),
-                        merge_key: batch.merge_key.clone(),
-                    },
-                );
-        }
-    }
-    let expected_live = model
-        .live_wakes
-        .iter()
-        .filter(|(_, wakes)| !wakes.is_empty())
-        .map(|(key, wakes)| (key.clone(), wakes.clone()))
-        .collect::<BTreeMap<_, _>>();
-    if actual_live != expected_live {
-        return Err(format!(
-            "Enqueued-wake high-water safety: live wake payload/batch state differs; actual={actual_live:?}, expected={expected_live:?}"
-        ));
-    }
     Ok(())
 }

@@ -178,41 +178,6 @@ impl Generator<'_> {
         })
     }
 
-    /// The cell that registers every cron schedule of the run as a trigger
-    /// subscription whose target body marks each emission it runs for.
-    pub fn cron_setup_response(&self) -> Result<ProviderResponse> {
-        let mut source = String::from(
-            "const on_tick=async(event: load.cron.Tick)=>{return await tools.mark({key:event.schedule+\"/tick/\"+event.tick});};\n",
-        );
-        let schedules = (0..u64::from(self.workload().spec().cron.subscriptions))
-            .map(|subscription| self.cron_schedule(subscription))
-            .collect::<Vec<_>>();
-        for schedule in &schedules {
-            let schedule = serde_json::to_string(schedule)?;
-            source.push_str(&format!(
-                "await triggers.register({{source:load.cron.tick({{schedule:{schedule}}}),target:{{definition:on_tick}},inputs:(event)=>({{event:event}}),name:{schedule}}});\n"
-            ));
-        }
-        source.push_str(&format!(
-            "finish({{synthetic:true,operation:{},schedules:{}}});",
-            serde_json::to_string(&self.cron_setup_key())?,
-            serde_json::to_string(&schedules)?
-        ));
-        let text = format!("<typescript>\n{source}\n</typescript>");
-        Ok(ProviderResponse {
-            operation_id: self.cron_setup_key(),
-            retryable: false,
-            chunks: stream_chunks(&text, 1, 1)?,
-            text,
-            cell_source: Some(source),
-        })
-    }
-
-    /// The key of the turn that registers the run's cron schedules.
-    pub fn cron_setup_key(&self) -> String {
-        format!("{}/cron", self.run())
-    }
-
     /// Plain completions belong to independently keyed auxiliary LLM requests.
     pub fn llm_response(&self, request: &LlmRequestPlan, attempt: u32) -> Result<ProviderResponse> {
         ensure!(attempt > 0, "attempts start at one");
@@ -236,12 +201,11 @@ impl Generator<'_> {
         })
     }
 
-    /// The module a host start links: a durable `body` process taking the
-    /// start's key. A body that waits for its `resume` signal ends with the
-    /// signal's payload beside the key; any other body ends with the key.
+    /// The module a host start links. Cancellation plans retain active work
+    /// with an explicit benchmark delay.
     pub fn process_body(&self, process: &ProcessPlan) -> String {
-        if process.waits_for_signal() {
-            "const body = async (key) => { const resumed = await waitSignal(\"resume\"); return { key: key, resumed: resumed }; };\nfinish(null);".into()
+        if process.cancel {
+            "const body = async (key) => { await sleep(60000); return { key: key, synthetic: true }; };\nfinish(null);".into()
         } else {
             "const body = async (key) => { return { key: key, synthetic: true }; };\nfinish(null);"
                 .into()
@@ -312,26 +276,9 @@ fn cell_source(plan: &TurnPlan, word: &str) -> Result<String> {
     if !plan.child_processes.is_empty() {
         // One named handle per child: a cell keeps process handles in
         // variables, never in lists.
-        code.push_str("const child=await processes.create({dialect:\"typescript\",source:'const child=async(parked,key)=>{if(parked){const resumed=await waitSignal(\"resume\");await tools.mark({key:key});return resumed;}await tools.mark({key:key});return {synthetic:true};};'});\n");
-        for (index, process) in plan.child_processes.iter().enumerate() {
-            code.push_str(&format!(
-                "const h{index}=await processes.start({{definition:child,args:{{parked:{},key:op+\"/child/{index}\"}}}});\n",
-                process.parked
-            ));
-        }
-        if plan.child_processes.iter().any(|process| process.parked) {
-            let delay = plan
-                .child_processes
-                .iter()
-                .map(|p| p.wake_delay_ms)
-                .max()
-                .unwrap_or(0);
-            code.push_str(&format!("await sleep({delay});\n"));
-            for (index, process) in plan.child_processes.iter().enumerate() {
-                if process.parked {
-                    code.push_str(&format!("await processes.signal({{handle:h{index},name:\"resume\",payload:{{synthetic:true}}}});\n"));
-                }
-            }
+        code.push_str("const child=await processes.create({dialect:\"typescript\",source:'const child=async(key)=>{await tools.mark({key:key});return {synthetic:true};};'});\n");
+        for index in 0..plan.child_processes.len() {
+            code.push_str(&format!("const h{index}=await processes.start({{definition:child,args:{{key:op+\"/child/{index}\"}}}});\n"));
         }
         for (index, process) in plan.child_processes.iter().enumerate() {
             if process.await_result {

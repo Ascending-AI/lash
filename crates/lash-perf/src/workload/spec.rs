@@ -42,10 +42,6 @@ pub struct WorkloadSpec {
     #[schemars(range(min = 0))]
     pub host_process_starts_per_turn: f64,
     #[schemars(range(min = 0))]
-    pub external_occurrences_per_turn: f64,
-    #[schemars(range(min = 0))]
-    pub trigger_edits_per_turn: f64,
-    #[schemars(range(min = 0))]
     pub promotion_reads_per_turn: f64,
     #[schemars(schema_with = "bytes_schema")]
     pub prompt_bytes: Distribution,
@@ -61,7 +57,6 @@ pub struct WorkloadSpec {
     pub processes: Processes,
     pub attachments: Attachments,
     pub queued: Queued,
-    pub cron: Cron,
     #[schemars(range(min = 0, max = 1))]
     pub turn_cancel_share: f64,
     #[schemars(range(min = 0))]
@@ -105,12 +100,6 @@ pub struct Processes {
     #[schemars(range(min = 0, max = 1))]
     pub await_share: f64,
     #[schemars(range(min = 0, max = 1))]
-    pub signal_share: f64,
-    #[schemars(range(min = 0, max = 1))]
-    pub park_share: f64,
-    #[schemars(range(min = 1))]
-    pub wake_delay_ms: u32,
-    #[schemars(range(min = 0, max = 1))]
     pub cancel_share: f64,
 }
 
@@ -141,17 +130,6 @@ pub struct Queued {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub struct Cron {
-    #[schemars(range(min = 1))]
-    pub subscriptions: u32,
-    #[schemars(range(min = 1))]
-    pub cadence_s: u32,
-    #[schemars(regex(pattern = "^seeded_phase$"))]
-    pub jitter: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
 pub struct Observation {
     #[schemars(range(min = 1))]
     pub streams_per_turn: u32,
@@ -167,8 +145,6 @@ pub struct Observation {
     pub projector_poll_s: u32,
     #[schemars(range(min = 1))]
     pub projector_idle_s: u32,
-    #[schemars(range(min = 1))]
-    pub subscription_reconcile_s: u32,
     #[schemars(range(min = 1))]
     pub process_prune_s: u32,
 }

@@ -51,15 +51,13 @@ macro_rules! crash_matrix {
 crash_matrix! {
     a_turn_cut_at_every_label_commits_once => Turn;
     a_tool_round_cut_at_every_label_runs_no_once_body_twice => Round;
-    a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome => Effects;
+    a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome => Effects;
     a_turn_cancel_cut_at_every_label_ends_the_turn_once => Cancel;
     a_code_cell_cut_at_every_label_resumes_from_its_snapshot => Cell;
     a_code_cell_killed_in_its_body_cut_at_every_label_settles_interrupted => CellKilled;
     a_process_cut_at_every_label_resolves_waits_and_cascades_once => Process;
-    a_process_signalled_and_cancelled_cut_at_every_label_ends_once => Signal;
     a_session_close_cut_at_every_label_ends_at_its_tombstone => Close;
     a_session_command_cut_at_every_label_settles_once => Command;
-    a_trigger_occurrence_cut_at_every_label_starts_each_delivery_once => Trigger;
     a_drained_node_cut_at_every_label_releases_its_actors_to_the_next_once => Drain;
     a_turn_s_prompt_sections_cut_at_every_label_commit_with_each_call_s_admission => Prompt;
     a_compaction_s_summary_cut_at_every_label_sends_its_admitted_body => Compaction;
@@ -164,9 +162,9 @@ async fn a_stale_epoch_session_command_commits_nothing() {
 }
 
 /// A stale owner's or a zombie's `round.outcome` commit, carrying a tool's
-/// process start and signal, commits nothing: the new owner settles both
-/// `Once` calls `Interrupted`, and neither the process nor the signal
-/// exists without its outcome (the case's laws).
+/// process start, commits nothing: the new owner settles the
+/// `Once` call `Interrupted`, and the process cannot exist without its
+/// outcome (the case's laws).
 #[tokio::test]
 async fn a_stale_owner_s_tool_outcome_with_a_process_start_commits_nothing() {
     for seed in 0..2 {
@@ -249,10 +247,8 @@ crash_matrix_on_postgres! {
     the_crash_matrix_holds_on_postgres_for_a_code_cell => Cell;
     the_crash_matrix_holds_on_postgres_for_a_killed_code_cell => CellKilled;
     the_crash_matrix_holds_on_postgres_for_a_process => Process;
-    the_crash_matrix_holds_on_postgres_for_a_signalled_process => Signal;
     the_crash_matrix_holds_on_postgres_for_a_session_close => Close;
     the_crash_matrix_holds_on_postgres_for_a_session_command => Command;
-    the_crash_matrix_holds_on_postgres_for_a_trigger_occurrence => Trigger;
     the_crash_matrix_holds_on_postgres_for_a_drained_node => Drain;
     the_crash_matrix_holds_on_postgres_for_a_prompt_composition => Prompt;
     the_crash_matrix_holds_on_postgres_for_a_compaction_s_summary => Compaction;

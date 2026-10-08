@@ -38,7 +38,7 @@ membership and can overlap. Auxiliary operation counts use their own streams:
 integer rate plus a Bernoulli draw for the fractional part. They do not consume
 primary membership. Exponential arrival gaps model each actor's open-loop
 Poisson clock. The runner must accumulate scheduled times without waiting for
-acceptance or completion. History prefill and cron phases have separate streams.
+acceptance or completion. History prefill has a separate stream.
 Rotation, compaction, cancellation, deletion, queued input and observation
 settings remain explicit in plans or the validated workload.
 
@@ -59,7 +59,7 @@ configured session population.
 
 `provider_response` creates a TypeScript cell for every primary turn, including
 turns without tools or processes. Cells contain tool batches and durable process
-definitions, starts, awaits and delayed signals. Opening and closing delimiters
+definitions, starts and awaits. Opening and closing delimiters
 occupy their own lines, as the RLM scanner requires. `llm_request` and
 `llm_response` supply separately keyed auxiliary requests with independently
 sampled prompt sizes, output sizes, latency and retry decisions. Their responses
@@ -68,9 +68,7 @@ A cell names its operation key, puts its turn's blobs through `tools.attach`,
 passes each synthetic tool call its key, result size and callback delay, and
 starts children that call `tools.mark` with their key once they have run; it
 finishes with `{synthetic: true, operation}`. `queued_response` answers a queued
-input with a cell finishing on the input's key, and `cron_setup_response`
-registers every cron schedule as a `load.cron.tick` subscription whose target
-marks each emission. `tool_result` and `attachment` regenerate a call's result
+input with a cell finishing on the input's key. `tool_result` and `attachment` regenerate a call's result
 and a blob from their keys, so the tools that return them and the witness that
 checks them agree without sharing state.
 When the cell fits, its decoded response body, including cell framing and
@@ -80,13 +78,12 @@ and their final deadline equals the sampled total latency. Only the first
 attempt is retryable when selected; successful response content and operation
 identity remain the same. Fresh calls, replayed effects and retries have separate
 counters. `process_body` is the module a host start links: one durable `body`
-process taking its key, which waits for `resume` when the plan parks, signals or
-cancels it.
+process taking its key. Cancellation plans use an explicit 60-second sleep so cancellation meets active work.
 
 `smoke-v1.json` is figments-v1 with a four-session population and raised shares
 (each override's provenance names it). Its first `SMOKE_TURNS_PER_SESSION` (6)
 ordinals of every session cover every durable operation class: parallel and
-serial tools, parked children, signalled and cancelled host starts, attachments
+serial tools, child processes, cancelled host starts, attachments
 shared by an actor pair, active and idle queued inputs and their cancels, turn
 cancels, deletes, rotations and retryable first attempts. The fixture test
 checks that coverage. Its fault phase is also shortened for the fault

@@ -429,7 +429,6 @@ mod tests {
                 observer_reconnects: 0,
                 queued_ingress_count: 0,
                 cancellation_count: 0,
-                trigger_count: 0,
                 backend_failure_count: 0,
                 provider_mutation_count: 0,
                 durable_effect_keys: Vec::new(),

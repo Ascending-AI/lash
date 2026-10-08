@@ -400,99 +400,6 @@ async fn process_tool_call_limit_staged_calls(tier: Tier) {
     world.shutdown().await;
 }
 
-/// Run a turn of session `name` whose cell starts one process from `source`
-/// and awaits it; the process's terminal and the trigger subscriptions the
-/// store holds once it ended.
-async fn run_trigger_process(
-    world: &World,
-    name: &str,
-    source: &str,
-) -> (
-    lash_core::ProcessAwaitOutput,
-    Vec<lash_core::TriggerSubscriptionRecord>,
-) {
-    let cell = served::cell(&format!(
-        "const body = await processes.create({{ dialect: \"typescript\", source: `{source}` }});\n\
-         const held = await processes.start({{ definition: body }});\n\
-         finish(await held);"
-    ));
-    let output = world.run(name, served::spec(64), vec![cell]).await;
-    served::assert_answered("the turn that awaits the trigger process", &output);
-    let processes = world
-        .backend
-        .process_registry()
-        .list_processes(&lash_core::ProcessListFilter {
-            status: lash_core::ProcessStatusFilter::Any,
-            ..lash_core::ProcessListFilter::default()
-        })
-        .await
-        .expect("the registry lists its processes");
-    let [process] = processes.as_slice() else {
-        panic!("the cell started one process: {processes:#?}");
-    };
-    let terminal = process
-        .outcome()
-        .unwrap_or_else(|| panic!("the process ended: {process:#?}"));
-    let subscriptions = world
-        .backend
-        .trigger_store()
-        .list_subscriptions(lash_core::TriggerSubscriptionFilter::default())
-        .await
-        .expect("the trigger store lists its subscriptions");
-    (terminal, subscriptions)
-}
-
-/// A process body's `triggers.list` runs through the trigger command handler
-/// as a step of its process: the process answers the empty registry, and
-/// listing installs nothing.
-async fn process_body_uses_trigger_command_handler(tier: Tier) {
-    let witness = Arc::new(Witness::default());
-    let Some(world) = world(tier, &witness).await else {
-        return;
-    };
-    let (terminal, subscriptions) = run_trigger_process(
-        &world,
-        "process-trigger-list",
-        "const registrar = async () => await triggers.list({});",
-    )
-    .await;
-    assert_eq!(
-        terminal,
-        lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-            serde_json::json!([])
-        )),
-        "the process answers the trigger registry it listed"
-    );
-    assert!(subscriptions.is_empty(), "{subscriptions:#?}");
-    world.shutdown().await;
-}
-
-/// A helper local to a process body reaches the trigger command handler as
-/// the body itself does.
-async fn process_local_helper_reaches_trigger_command_handler(tier: Tier) {
-    let witness = Arc::new(Witness::default());
-    let Some(world) = world(tier, &witness).await else {
-        return;
-    };
-    let (terminal, subscriptions) = run_trigger_process(
-        &world,
-        "process-trigger-helper",
-        "const registrar = async () => {\n  \
-           const listRegistrations = () => triggers.list({});\n  \
-           return await listRegistrations();\n};",
-    )
-    .await;
-    assert_eq!(
-        terminal,
-        lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
-            serde_json::json!([])
-        )),
-        "the helper's listing is the process's answer"
-    );
-    assert!(subscriptions.is_empty(), "{subscriptions:#?}");
-    world.shutdown().await;
-}
-
 /// A TypeScript process body reads the clock and the random source through
 /// the runtime: `new Date().toISOString()`, `Date.now()` and `Math.random()`
 /// answer real values and the process completes (FIG-3079, ported by FIG-5307
@@ -550,7 +457,5 @@ tiered_laws!(
     tool_call_limit_counts_what_a_process_holds,
     process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it,
     process_tool_call_limit_staged_calls,
-    process_body_uses_trigger_command_handler,
-    process_local_helper_reaches_trigger_command_handler,
     typescript_process_body_resolves_journaled_clock_and_randomness,
 );

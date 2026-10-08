@@ -67,7 +67,7 @@ tags = ["hermetic-postgres"]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
 # All remaining tiered laws and frame crash proofs also have PG legs (FIG-5380).
-targets = ["vertical_crash_proof", "turn_phases", "trigger_start_proof", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity", "session_send", "after_turn_crash_laws", "steering_crash_laws", "committed_turns", "plugin_state_storage_laws", "config_change_observer_laws", "cell_process_handles", "standard_turn_outcomes", "tool_surface_laws", "recorded_behaviour_laws", "attachment_referrer_laws", "frame_switch_laws", "turn_trace_scope_laws", "process_lifecycle_events", "context_budget_warning", "first_party_tools", "frame_switch_crash_proof", "one_slot_process_await", "open_session_commands", "pressure_frame_crash_proof", "rlm_execution_maps", "rlm_session_globals", "turn_execution_state", "turn_terminal_refusals", "worker_crashes", "live_stream_takeover", "live_fault_park", "deleted_session_crash_laws", "turn_callback_crash_laws"]
+targets = ["vertical_crash_proof", "turn_phases", "drain_by_release", "tool_batches", "tool_call_identity", "tool_crash_laws", "tool_group_pool_width", "cell_restore_laws", "core_node_processes", "declared_start", "declared_start_crash_laws", "process_tool_calls", "process_tool_call_crash_laws", "tool_activity", "session_send", "after_turn_crash_laws", "steering_crash_laws", "committed_turns", "plugin_state_storage_laws", "config_change_observer_laws", "cell_process_handles", "standard_turn_outcomes", "tool_surface_laws", "recorded_behaviour_laws", "attachment_referrer_laws", "frame_switch_laws", "turn_trace_scope_laws", "process_lifecycle_events", "context_budget_warning", "first_party_tools", "frame_switch_crash_proof", "one_slot_process_await", "open_session_commands", "pressure_frame_crash_proof", "rlm_execution_maps", "rlm_session_globals", "turn_execution_state", "turn_terminal_refusals", "worker_crashes", "live_stream_takeover", "live_fault_park", "deleted_session_crash_laws", "turn_callback_crash_laws"]
 tags = ["hermetic-postgres"]
 
 # The declared-start crash laws (FIG-5216) are five matrices and two single
@@ -88,7 +88,7 @@ timeout = "long"
 [[rule]]
 packages = ["lash-internal-durable-test"]
 kinds = ["test"]
-targets = ["cell_restore_laws", "child_turn_crash_proof", "declared_start_crash_laws", "drain_by_release", "frame_switch_crash_proof", "plugin_state_storage_laws", "pressure_frame_crash_proof", "process_crash_proof", "process_step_crash_proof", "process_tool_call_crash_laws", "round_crash_matrix", "tool_crash_laws", "tool_group_pool_width", "trigger_start_proof", "turn_phases", "turn_round_crash_matrix", "vertical_crash_proof"]
+targets = ["cell_restore_laws", "child_turn_crash_proof", "declared_start_crash_laws", "drain_by_release", "frame_switch_crash_proof", "plugin_state_storage_laws", "pressure_frame_crash_proof", "process_crash_proof", "process_step_crash_proof", "process_tool_call_crash_laws", "round_crash_matrix", "tool_crash_laws", "tool_group_pool_width", "turn_phases", "turn_round_crash_matrix", "vertical_crash_proof"]
 serial = true
 
 [[rule]]
@@ -468,13 +468,6 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["cross_backend_store_differential"]
 compile_data = ["//crates/lash-core-store:package_files"]
 
-# The gate scans every first-party Rust source, runbooks and examples included.
-[[rule]]
-packages = ["lash-sim"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["signal_replay_key_constructor"]
-compile_data = ["//:workspace_rust_sources"]
-
 # The workbench unit test shells out to Node for its browser-projection case.
 # Its interpreter is a pinned Buck2 input, including on feature-lane variants.
 [[rule]]
@@ -537,7 +530,6 @@ service_floor = { memory_kb = 1048576, packages = ["lash-internal-postgres-store
 "//crates/lash-durable-test:round_crash_matrix__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:tool_crash_laws__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:tool_group_pool_width__test" = { cpu_count = 4, memory_kb = 524288 }
-"//crates/lash-durable-test:trigger_start_proof__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:turn_phases__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:turn_round_crash_matrix__test" = { cpu_count = 4, memory_kb = 524288 }
 "//crates/lash-durable-test:vertical_crash_proof__test" = { cpu_count = 4, memory_kb = 524288 }

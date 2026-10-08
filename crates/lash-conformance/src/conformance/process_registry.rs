@@ -4,7 +4,6 @@ use lash_sansio::ProcessId;
 mod cancellation;
 mod completion_authority;
 mod consumer_holds;
-mod event_count;
 mod event_paging;
 mod event_release;
 mod event_replay;
@@ -16,33 +15,10 @@ pub use lifecycle::lifecycle_event_timestamps_follow_the_registry_clock;
 mod observer_transfer;
 mod parent_end;
 mod registration;
-mod signal_admission;
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance fixture uses valid signal identities"
-)]
-fn signal_request(
-    process_id: &ProcessId,
-    name: &str,
-    signal_id: &str,
-    payload: serde_json::Value,
-) -> ProcessEventAppendRequest {
-    lash_core::ProcessSignal::new(
-        lash_core::ProcessSignalIdentity::new(process_id.clone(), name, signal_id)
-            .expect("valid fixture signal identity"),
-        payload,
-    )
-    .append_request()
-}
-
-pub async fn raw_signal_appends_are_refused(registry: Arc<dyn ProcessRegistry>) {
-    signal_admission::raw_signal_appends_are_refused(registry).await;
-}
 pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 pub use observer_transfer::a_failed_observer_transfer_leaves_no_partial_mutation;
 pub use registration::{
-    a_host_retry_with_another_wake_target_conflicts,
     a_host_start_key_after_prune_starts_new_for_any_originator,
     a_host_start_key_is_global_and_fences_its_originator,
     a_start_key_after_prune_starts_a_new_process, a_start_key_conflict_names_no_retained_process,
@@ -55,7 +31,7 @@ pub mod status_filters;
 use super::process_references::{ProcessCountConservation, assert_process_count_conservation};
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
-use crate::{PluginError, ProcessRecord, ProjectionWatermark, TestProcessRegistryWriteExt};
+use crate::{PluginError, ProcessRecord, ProjectionWatermark};
 use pretty_assertions::assert_eq;
 
 fn settled_success(value: serde_json::Value) -> ProcessAwaitOutput {
@@ -94,27 +70,11 @@ pub async fn process_registry_cancellation_reopen_contract(handles: ReopenablePr
     Box::pin(cancellation::contract(handles.open, handles.reopen)).await;
 }
 
-pub async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
-    event_replay::canonical_process_event_payload_replay(registry).await;
-}
-
-pub async fn count_events_through_counts_every_event_at_any_top_bound(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    event_count::count_events_through_counts_every_event_at_any_top_bound(registry).await;
-}
-
 pub async fn releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     event_release::releasing_an_event_prefix_keeps_sequences_ordinals_and_replay_identity(registry)
         .await;
-}
-
-pub async fn signal_admission_retains_its_identity_and_selected_wait(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    signal_admission::signal_admission_retains_its_identity_and_selected_wait(registry).await;
 }
 
 pub async fn long_cancellation_requester_replay_is_backend_safe(
@@ -404,7 +364,6 @@ pub async fn process_prune_batch_tombstones(registry: Arc<dyn ProcessRegistry>) 
         .expect("prune three terminal processes in one batch");
     assert_eq!(report.pruned_processes, 3);
     assert_eq!(report.pruned_events, 3);
-    assert_eq!(report.pruned_trigger_deliveries, 0);
 
     let mut cursor = projection_cursor;
     let mut sequences = Vec::new();
@@ -493,28 +452,6 @@ pub(super) fn executed_registration(id: &str) -> ProcessRegistration {
             Some(id),
         ),
     ))
-}
-
-pub(super) fn wake_event_type(name: &str) -> ProcessEventType {
-    ProcessEventType {
-        name: name.to_string(),
-        payload_schema: JsonSchema::any(),
-        semantics: ProcessEventSemanticsSpec {
-            wake: Some(ProcessWakeSpec {
-                when: Some(ProcessValueSelector::Present("/wake_input".to_string())),
-                input: ProcessValueSelector::Pointer("/wake_input".to_string()),
-            }),
-            ..ProcessEventSemanticsSpec::default()
-        },
-    }
-}
-
-pub(super) fn plain_event_type(name: &str) -> ProcessEventType {
-    ProcessEventType {
-        name: name.to_string(),
-        payload_schema: JsonSchema::any(),
-        semantics: ProcessEventSemanticsSpec::default(),
-    }
 }
 
 #[expect(
@@ -624,7 +561,7 @@ pub async fn record_fold_and_retention_hold_for_every_registry_writer(
     ));
     assert_eq!(
         registry
-            .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(terminal_cursor), None)
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(terminal_cursor))
             .await
             .expect("retain unseen deletions"),
         0
@@ -635,7 +572,7 @@ pub async fn record_fold_and_retention_hold_for_every_registry_writer(
         .expect("project deletions");
     assert_eq!(
         registry
-            .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor), None)
+            .compact_process_tombstones(u64::MAX, ProjectionWatermark::UpTo(deletion_cursor))
             .await
             .expect("compact projected deletions"),
         5
@@ -1016,8 +953,7 @@ async fn refolded_process_record_matches_stored_projection(
                 ProcessProvenance::host(),
                 lash_core::Lifetime::Detached,
             )
-            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref()))
-            .with_extra_event_types([plain_event_type("signal.ready")]),
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
         )
         .await
         .expect("register refold process");
@@ -1045,11 +981,9 @@ async fn refolded_process_record_matches_stored_projection(
     assert_refold_matches_stored_projection(&reader, &base, process_id, "first start").await;
     let wait = WaitState {
         since_ms: base.created_at_ms,
-        kind: WaitKind::Signal {
-            name: "ready".to_string(),
-            event_type: "signal.ready".to_string(),
-            key: lash_core::runtime::process_signal_wait_key(process_id, "ready", 1),
-            ordinal: 1,
+        kind: crate::WaitKind::Call {
+            call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+            tool_id: lash_sansio::ToolId::new("process_wait"),
         },
     };
     writer
@@ -1075,30 +1009,30 @@ async fn refolded_process_record_matches_stored_projection(
         .await
         .expect("set refold external reference");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "external ref set").await;
-    let signal = signal_request(
+    let entered_wait = call_wait_event(
         process_id,
         "ready",
         "1",
-        serde_json::json!({"signal": "ready"}),
+        serde_json::json!({"call": "ready"}),
     );
-    let first_signal = writer
-        .append_event(process_id, signal.clone())
+    let first_wait = writer
+        .append_event(process_id, entered_wait.clone())
         .await
-        .expect("append refold signal");
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "signal appended").await;
-    let replayed_signal = writer
-        .append_event(process_id, signal)
+        .expect("append refold wait");
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "wait appended").await;
+    let replayed_wait = writer
+        .append_event(process_id, entered_wait)
         .await
-        .expect("replay refold signal");
+        .expect("replay refold wait");
     assert_eq!(
-        replayed_signal.event.sequence, first_signal.event.sequence,
+        replayed_wait.event.sequence, first_wait.event.sequence,
         "a replayed duplicate must not add another event to the fold"
     );
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "signal replayed").await;
+    assert_refold_matches_stored_projection(&reader, &base, process_id, "wait replayed").await;
     writer
         .append_event_with_authority(
             process_id,
-            signal_request(
+            call_wait_event(
                 process_id,
                 "ready",
                 "authorized",
@@ -1113,13 +1047,13 @@ async fn refolded_process_record_matches_stored_projection(
         .append_events(
             process_id,
             vec![
-                signal_request(
+                call_wait_event(
                     process_id,
                     "ready",
                     "batch-first",
                     serde_json::json!("batch first"),
                 ),
-                signal_request(
+                call_wait_event(
                     process_id,
                     "ready",
                     "batch-second",
@@ -1174,21 +1108,6 @@ async fn refolded_process_record_matches_stored_projection(
         .await
         .expect("remove refold observer");
     assert_refold_matches_stored_projection(&reader, &base, process_id, "observer removed").await;
-    writer
-        .retarget_subscription(process_id, Some("refold-wake"))
-        .await
-        .expect("retarget wake subscription");
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "wake retarget").await;
-    writer
-        .request_process_cancel(
-            process_id,
-            crate::CancelOrigin::OperatorRequested,
-            "refold-operator".to_string(),
-            None,
-        )
-        .await
-        .expect("record cancellation");
-    assert_refold_matches_stored_projection(&reader, &base, process_id, "cancel requested").await;
     let faults = Arc::new(crate::testing::ProcessRegistryFaults::new(writer.clone()));
     let watched = lash_core::facade_support::watch_process_registry(faults.clone());
     let sink = Arc::new(RefoldSink::default());
@@ -1203,7 +1122,7 @@ async fn refolded_process_record_matches_stored_projection(
             .registry()
             .append_event(
                 process_id,
-                signal_request(process_id, "ready", "failed", serde_json::json!("failed"))
+                call_wait_event(process_id, "ready", "failed", serde_json::json!("failed"))
             )
             .await
             .is_err()
@@ -1227,7 +1146,7 @@ async fn refolded_process_record_matches_stored_projection(
         .registry()
         .append_event(
             process_id,
-            signal_request(
+            call_wait_event(
                 process_id,
                 "ready",
                 "committed",
@@ -1242,7 +1161,7 @@ async fn refolded_process_record_matches_stored_projection(
         .complete_process_with_prelude(
             process_id,
             settled_success(serde_json::json!({"refolded": true})),
-            vec![signal_request(
+            vec![call_wait_event(
                 process_id,
                 "ready",
                 "terminal-prelude",
@@ -1287,75 +1206,6 @@ async fn assert_refold_matches_stored_projection(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn producer_terminal_status_must_match_materialized_outcome(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    let record = registry
-        .register_process(
-            registration("producer-terminal-outcome-mismatch").with_extra_event_types([
-                ProcessEventType {
-                    name: "producer.failed".to_string(),
-                    payload_schema: JsonSchema::any(),
-                    semantics: ProcessEventSemanticsSpec {
-                        terminal: Some(crate::ProcessTerminalSpec {
-                            status: crate::TerminalProcessStatus::Failed,
-                            await_output: Some(ProcessValueSelector::Pointer("/out".to_string())),
-                        }),
-                        ..ProcessEventSemanticsSpec::default()
-                    },
-                },
-            ]),
-        )
-        .await
-        .expect("register producer terminal event");
-    let process_id = record.id.clone();
-    let before = serde_json::to_vec(&record).expect("serialize producer before rejected append");
-    let error = registry
-        .append_event(
-            &process_id,
-            ProcessEventAppendRequest::new(
-                "producer.failed",
-                serde_json::json!({
-                    "out": crate::ProcessAwaitOutput::from_tool_output(
-                        crate::ToolCallOutput::success(serde_json::json!(1)),
-                    )
-                }),
-            )
-            .with_replay_key(format!("{process_id}:producer.failed")),
-        )
-        .await
-        .expect_err("declared terminal status must match the selected structured outcome");
-    assert!(matches!(
-        error,
-        crate::PluginError::ProcessTerminalOutcomeMismatch {
-            declared_status: ProcessStatus::Failed,
-            outcome_status: Some(ProcessStatus::Completed),
-        }
-    ));
-    let after = registry
-        .get_process(&process_id)
-        .await
-        .expect("read producer after rejected append")
-        .expect("producer remains");
-    assert_eq!(
-        serde_json::to_vec(&after).expect("serialize producer after rejected append"),
-        before,
-        "rejected core terminal semantics must not mutate the producer record"
-    );
-    assert!(
-        registry
-            .full_event_window(&process_id, 0)
-            .await
-            .expect("read events after rejected append")
-            .is_empty(),
-        "rejected core terminal semantics must not append an event"
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn ProcessRegistry>) {
     let process_id = registry
         .register_process(registration("reserved-edge-audit"))
@@ -1364,12 +1214,11 @@ pub async fn generic_append_rejects_reserved_edge_audit_events(registry: Arc<dyn
         .id;
     let by = crate::ProcessObserverBy::host("generic-append");
     let requests = [
-        ProcessEventAppendRequest::observer_added(&process_id, "observer", &by),
-        ProcessEventAppendRequest::observer_removed(&process_id, "observer", &by),
-        ProcessEventAppendRequest::subscription_retargeted(&process_id, Some("target")),
+        ProcessEventAppendRequest::observer_added(&process_id, &SessionId::from("observer"), &by),
+        ProcessEventAppendRequest::observer_removed(&process_id, &SessionId::from("observer"), &by),
     ];
     for request in requests {
-        let event_type = request.event_type.clone();
+        let event_type = request.fact.event_type().to_owned();
         assert!(
             matches!(
                 registry.append_event(&process_id, request).await,
@@ -1443,11 +1292,9 @@ pub async fn waiting_processes_remain_in_the_non_terminal_scan(registry: Arc<dyn
             &process_id,
             WaitState {
                 since_ms: record.created_at_ms,
-                kind: WaitKind::Signal {
-                    name: "resume".to_string(),
-                    event_type: "signal.resume".to_string(),
-                    key: format!("{process_id}:signal.resume:1"),
-                    ordinal: 1,
+                kind: crate::WaitKind::Call {
+                    call_id: lash_sansio::ToolCallId::fixture("process-wait-law"),
+                    tool_id: lash_sansio::ToolId::new("process_wait"),
                 },
             },
             Vec::new(),
@@ -1548,7 +1395,7 @@ pub async fn observer_events_are_auditable_and_transfer_is_atomic(
         .await
         .expect("observer audit log")
         .into_iter()
-        .map(|event| event.event_type)
+        .map(|event| event.fact.event_type().to_owned())
         .collect::<Vec<_>>();
     assert!(
         event_types
@@ -1559,59 +1406,6 @@ pub async fn observer_events_are_auditable_and_transfer_is_atomic(
         event_types
             .iter()
             .any(|kind| kind == "process.observer_removed")
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn wake_subscription_is_indexed_and_retargetable(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = registry
-        .register_process(
-            registration("wake-retarget")
-                .with_extra_event_types([wake_event_type("producer.wake")])
-                .with_wake_session_id(Some(SessionId::from("wake-old"))),
-        )
-        .await
-        .expect("register wake process")
-        .id;
-    registry
-        .append_event(
-            &process_id,
-            ProcessEventAppendRequest::new(
-                "producer.wake",
-                serde_json::json!({"wake_input": "old"}),
-            ),
-        )
-        .await
-        .expect("append old-target wake");
-    assert_eq!(
-        registry
-            .wake_target(&process_id)
-            .await
-            .expect("read the wake target its start recorded"),
-        Some(SessionId::from("wake-old"))
-    );
-    registry
-        .retarget_subscription(&process_id, Some("wake-new"))
-        .await
-        .expect("retarget wake subscription");
-    assert_eq!(
-        registry
-            .wake_target(&process_id)
-            .await
-            .expect("read the retargeted wake target"),
-        Some(SessionId::from("wake-new"))
-    );
-
-    assert!(
-        registry
-            .full_event_window(&process_id, 0)
-            .await
-            .expect("retarget audit log")
-            .iter()
-            .any(|event| event.event_type == "process.subscription_retargeted")
     );
 }
 
@@ -1645,8 +1439,7 @@ pub async fn lifecycle_status_and_outcome_fold(registry: Arc<dyn ProcessRegistry
 pub async fn session_delete_preserves_process_bytes(registry: Arc<dyn ProcessRegistry>) {
     let process_id = registry
         .register_process_with_observers(
-            registration("session-delete-bytes")
-                .with_wake_session_id(Some(SessionId::from("deleted-session"))),
+            registration("session-delete-bytes"),
             &[SessionId::from("deleted-session")],
         )
         .await
@@ -1772,7 +1565,7 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
         registry
             .append_event(
                 &process_id,
-                signal_request(&process_id, "after-prune", "1", serde_json::Value::Null),
+                call_wait_event(&process_id, "after-prune", "1", serde_json::Value::Null),
             )
             .await,
         Err(crate::PluginError::ProcessNoLongerRetained { .. })
@@ -1812,7 +1605,6 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
             .compact_process_tombstones(
                 u64::MAX,
                 crate::ProjectionWatermark::UpTo(projection_cursor),
-                None,
             )
             .await
             .expect("compact behind projector"),
@@ -1832,7 +1624,6 @@ pub async fn tombstones_make_pruned_processes_distinguishable(registry: Arc<dyn 
             .compact_process_tombstones(
                 u64::MAX,
                 crate::ProjectionWatermark::UpTo(deletion_cursor),
-                None,
             )
             .await
             .expect("compact after projector catches up")
@@ -1869,8 +1660,7 @@ pub async fn process_registry_reopen_conformance(handles: ReopenableProcessRegis
     let process_id = handles
         .open
         .register_process_with_observers(
-            registration("observer-reopen")
-                .with_wake_session_id(Some(SessionId::from("wake-reopen"))),
+            registration("observer-reopen"),
             &[SessionId::from("observer-reopen")],
         )
         .await
@@ -1910,119 +1700,6 @@ impl crate::ProcessEventSink for RefoldSink {
             .unwrap_or_else(|error| error.into_inner())
             .push(event.clone());
     }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance fixture establishes each result"
-)]
-pub async fn signals_refuse_undeclared_invalid_and_terminal_sends(
-    registry: Arc<dyn ProcessRegistry>,
-) {
-    let base = registry
-        .register_process(
-            registration("signal-refusal-matrix").with_extra_event_types([ProcessEventType {
-                name: "signal.ready".to_string(),
-                payload_schema: JsonSchema::admit(serde_json::json!({"type":"integer"}))
-                    .expect("valid declared payload schema"),
-                semantics: Default::default(),
-            }]),
-        )
-        .await
-        .expect("register typed signal");
-    for (name, payload, reason) in [
-        ("missing", serde_json::json!(1), "undeclared"),
-        ("ready", serde_json::json!("invalid"), "invalid"),
-    ] {
-        let error = registry
-            .append_event(&base.id, signal_request(&base.id, name, "refused", payload))
-            .await
-            .expect_err("signal refused");
-        assert!(
-            if name == "ready" {
-                matches!(&error, PluginError::ValueMismatch { source, .. }
-                    if source.instance_path.is_empty() && source.message.contains("integer"))
-            } else {
-                matches!(&error, PluginError::Session(message) if message.contains(reason))
-            },
-            "{error:?}"
-        );
-        assert_eq!(
-            registry
-                .get_process(&base.id)
-                .await
-                .expect("unchanged record"),
-            Some(base.clone())
-        );
-        assert!(
-            registry
-                .full_event_window(&base.id, 0)
-                .await
-                .expect("unchanged log")
-                .is_empty()
-        );
-    }
-    let request = signal_request(&base.id, "ready", "1", serde_json::json!(7));
-    let first = registry
-        .append_event(&base.id, request.clone())
-        .await
-        .expect("valid signal");
-    registry
-        .complete_process(
-            &base.id,
-            settled_success(serde_json::json!("done")),
-            ProcessCompletionAuthority::workflow_key(&base.id),
-        )
-        .await
-        .expect("terminal writer");
-    let terminal = registry
-        .get_process(&base.id)
-        .await
-        .expect("terminal record");
-    let events = registry
-        .full_event_window(&base.id, 0)
-        .await
-        .expect("terminal log");
-    assert_eq!(
-        serde_json::to_value(
-            registry
-                .append_event(&base.id, request)
-                .await
-                .expect("recorded signal replays after terminal")
-                .event
-        )
-        .expect("serialize replay"),
-        serde_json::to_value(first.event).expect("serialize original")
-    );
-    assert!(matches!(
-        registry
-            .append_event(
-                &base.id,
-                signal_request(&base.id, "ready", "2", serde_json::json!(8))
-            )
-            .await,
-        Err(PluginError::ProcessAlreadyTerminal {
-            status: ProcessStatus::Completed,
-            ..
-        })
-    ));
-    assert_eq!(
-        registry
-            .get_process(&base.id)
-            .await
-            .expect("terminal preimage preserved"),
-        terminal
-    );
-    assert_eq!(
-        serde_json::to_value(
-            registry
-                .full_event_window(&base.id, 0)
-                .await
-                .expect("terminal log preserved")
-        )
-        .expect("serialize log"),
-        serde_json::to_value(events).expect("serialize preimage")
-    );
 }
 
 struct ReattachingWorkPort {

@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use lash_core_execution::{
     AttachmentStore, Clock, DeploymentStore, ModuleArtifactStore, ProcessExecutionEnvStore,
-    ProcessRegistry, StoreBindingId, StoreSet, TriggerStore,
+    ProcessRegistry, StoreBindingId, StoreSet,
 };
 use lash_durable::domain::{
     DomainWrite, ExecKey, OwnerKey, ParkEventRow, ParkEventSeq, ProcessActorRow, RunRecordRow,
@@ -462,10 +462,6 @@ impl StoreSet for RecordingStores {
 
     fn process_registry(&self) -> Arc<dyn ProcessRegistry> {
         self.inner.process_registry()
-    }
-
-    fn trigger_store(&self) -> Arc<dyn TriggerStore> {
-        self.inner.trigger_store()
     }
 
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
