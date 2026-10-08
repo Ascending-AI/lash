@@ -493,6 +493,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-sim:cross_backend_store_differential__test": {"cpu_count": 4, "memory_kb": 262144},
     "//crates/lash-sim:lash-sim__bin__unit_test": {"cpu_count": 4, "memory_kb": 262144},
     "//crates/lash-sim:lash-sim__unit_test": {"cpu_count": 4, "memory_kb": 3670016},
+    "//crates/lash-sim:logical_turn__test": {"cpu_count": 4, "memory_kb": 524288},
     "//crates/lash-sim:signal_replay_key_constructor__test": {"cpu_count": 4, "memory_kb": 262144},
     "//crates/lash-sim:stack_policy__test": {"cpu_count": 4, "memory_kb": 262144},
     "//crates/lash-sqlite-store:conformance__test": {"cpu_count": 3, "memory_kb": 1048576},

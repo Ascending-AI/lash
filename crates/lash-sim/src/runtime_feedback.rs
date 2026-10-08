@@ -1,6 +1,8 @@
 //! Request-boundary witnesses for initial instructions and positional feedback.
+use lash::rlm::RlmSendBuilderExt;
 use lash_core::llm::types::{LlmMessage, LlmRequest, LlmRole};
 use lash_core::provider::CacheRetention;
+use lash_sansio::sync::MutexExt;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -304,6 +306,134 @@ fn runtime_feedback_host_instruction_role_controls_all_openai_wires() {
         if matches!(wire, Wire::Chat) {
             assert_eq!(messages[0], ("developer".into(), "I".into()));
         }
+    }
+}
+
+async fn captured_output_limit_retry() -> Vec<LlmRequest> {
+    use std::collections::VecDeque;
+
+    let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let responses = Arc::new(tokio::sync::Mutex::new(VecDeque::from([
+        "partial output before truncation".to_string(),
+        "<typescript>\nfinish(42);\n</typescript>".to_string(),
+    ])));
+    let provider = lash_core::testing::TestProvider::builder()
+        .kind("cache-regression-rlm")
+        .complete({
+            let captures = Arc::clone(&captures);
+            move |request| {
+                let captures = Arc::clone(&captures);
+                let responses = Arc::clone(&responses);
+                async move {
+                    captures.lock_recover().push(request);
+                    let text = responses
+                        .lock()
+                        .await
+                        .pop_front()
+                        .expect("RLM response script");
+                    let terminal_reason = if text == "partial output before truncation" {
+                        lash_core::LlmTerminalReason::OutputLimit
+                    } else {
+                        lash_core::LlmTerminalReason::Stop
+                    };
+                    Ok(lash_core::LlmResponse {
+                        terminal_reason,
+                        parts: vec![lash_core::LlmOutputPart::Text {
+                            text,
+                            response_meta: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..lash_core::LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    let engine = crate::backend::SimEngine::new(0x5eed_7003)
+        .await
+        .expect("sim engine");
+    let backend = engine.backend();
+    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        &backend,
+    );
+    let core = lash::LashCore::rlm_builder(backend, factory)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .serve_test_llm_profile(
+            provider,
+            lash_core::LlmProfileMetadata::builder("cache-regression-model")
+                .context_window_tokens(200_000)
+                .build()
+                .expect("cache regression model"),
+        )
+        .build(crate::sim_process_owner())
+        .expect("RLM cache regression core");
+    let session =
+        crate::open_created_session("cache-regression-model", &core, "cache-regression-session")
+            .await
+            .expect("RLM cache regression session");
+    engine
+        .run_turn(
+            &session,
+            "cache-regression-turn",
+            Arc::new(crate::backend::DiscardedTurnActivity),
+            Arc::new(|session: &lash::LashSession| {
+                session
+                    .send(lash::TurnInput::text("increment a bound value twice"))
+                    .require_finish()
+            }),
+        )
+        .await
+        .expect("RLM cache regression handler")
+        .expect("RLM cache regression turn");
+
+    captures.lock_recover().clone()
+}
+
+#[tokio::test]
+async fn runtime_feedback_real_rlm_output_limit_retry_reaches_provider_wires() {
+    let requests = captured_output_limit_retry().await;
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].instructions.is_some());
+    assert_eq!(requests[0].instructions, requests[1].instructions);
+    let second = &requests[1];
+    let feedback_index = second.messages.iter().position(|message| message.role == LlmRole::System && message.blocks.iter().any(|block| matches!(block, lash_core::llm::types::LlmContentBlock::Text { text, .. } if text.contains("Your answer was cut off by the output limit")))).expect("real finish.rs retry feedback");
+    assert_eq!(second.messages[feedback_index - 1].role, LlmRole::Assistant);
+    for wire in [
+        Wire::Responses,
+        Wire::Codex,
+        Wire::Chat,
+        Wire::AnthropicNative,
+        Wire::AnthropicFallback,
+        Wire::Gemini,
+        Wire::CodeAssist,
+    ] {
+        let body = wire.body(second);
+        wire.assert_instructions(&body, second.instructions.as_deref());
+        let messages = flattened(wire.messages(&body));
+        let partial = messages
+            .iter()
+            .position(|(_, text)| text.contains("partial output before truncation"))
+            .expect("assistant partial at provider boundary");
+        let feedback = messages
+            .iter()
+            .position(|(_, text)| text.contains("Your answer was cut off by the output limit"))
+            .expect("retry at provider boundary");
+        assert!(partial < feedback, "{wire:?}");
+        assert!(
+            !second
+                .instructions
+                .as_deref()
+                .unwrap()
+                .contains("Your answer was cut off by the output limit")
+        );
     }
 }
 

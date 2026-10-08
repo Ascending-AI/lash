@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 206,
+  "cargo_target_count": 207,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -43281,7 +43281,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 267,
+  "generated_label_count": 268,
   "packages": [
     {
       "declared_features": [
@@ -46089,6 +46089,15 @@
           "tags": []
         },
         {
+          "build_label": "//crates/lash-sim:logical_turn__test",
+          "cargo": "logical_turn",
+          "check_label": "//crates/lash-sim:logical_turn__test[check]",
+          "clippy_label": "//crates/lash-sim:logical_turn__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-sim:logical_turn__test",
+          "tags": []
+        },
+        {
           "build_label": "//crates/lash-sim:signal_replay_key_constructor__test",
           "cargo": "signal_replay_key_constructor",
           "check_label": "//crates/lash-sim:signal_replay_key_constructor__test[check]",
@@ -48029,6 +48038,7 @@
     "//crates/lash-sim:cross_backend_store_differential__test": 300,
     "//crates/lash-sim:lash-sim__bin__unit_test": 300,
     "//crates/lash-sim:lash-sim__unit_test": 900,
+    "//crates/lash-sim:logical_turn__test": 300,
     "//crates/lash-sim:signal_replay_key_constructor__test": 300,
     "//crates/lash-sim:stack_policy__test": 300,
     "//crates/lash-sqlite-store:conformance__test": 300,
@@ -48437,6 +48447,7 @@
     "//crates/lash-sim:lash-sim__bin",
     "//crates/lash-sim:lash-sim__bin__unit_test",
     "//crates/lash-sim:lash-sim__unit_test",
+    "//crates/lash-sim:logical_turn__test",
     "//crates/lash-sim:signal_replay_key_constructor__test",
     "//crates/lash-sim:stack_policy__test",
     "//crates/lash-sqlite-store:conformance__test",
@@ -48741,6 +48752,7 @@
     "//crates/lash-sim:lash-sim__bin[check]",
     "//crates/lash-sim:lash-sim__bin__unit_test[check]",
     "//crates/lash-sim:lash-sim__unit_test[check]",
+    "//crates/lash-sim:logical_turn__test[check]",
     "//crates/lash-sim:signal_replay_key_constructor__test[check]",
     "//crates/lash-sim:stack_policy__test[check]",
     "//crates/lash-sqlite-store:conformance__test[check]",
@@ -49022,6 +49034,7 @@
     "//crates/lash-sim:lash-sim__bin__clippy[clippy.txt]",
     "//crates/lash-sim:lash-sim__bin__unit_test__clippy[clippy.txt]",
     "//crates/lash-sim:lash-sim__unit_test__clippy[clippy.txt]",
+    "//crates/lash-sim:logical_turn__test__clippy[clippy.txt]",
     "//crates/lash-sim:signal_replay_key_constructor__test__clippy[clippy.txt]",
     "//crates/lash-sim:stack_policy__test__clippy[clippy.txt]",
     "//crates/lash-sqlite-store:conformance__test__clippy[clippy.txt]",
@@ -49290,6 +49303,7 @@
     "//crates/lash-sim:lash-sim__bin",
     "//crates/lash-sim:lash-sim__bin__unit_test",
     "//crates/lash-sim:lash-sim__unit_test",
+    "//crates/lash-sim:logical_turn__test",
     "//crates/lash-sim:signal_replay_key_constructor__test",
     "//crates/lash-sim:stack_policy__test",
     "//crates/lash-sqlite-store:conformance__test",
@@ -49559,6 +49573,7 @@
     "//crates/lash-sim:lash-sim__bin",
     "//crates/lash-sim:lash-sim__bin__unit_test",
     "//crates/lash-sim:lash-sim__unit_test",
+    "//crates/lash-sim:logical_turn__test",
     "//crates/lash-sim:signal_replay_key_constructor__test",
     "//crates/lash-sim:stack_policy__test",
     "//crates/lash-sqlite-store:conformance__test",
@@ -49763,6 +49778,7 @@
     "//crates/lash-sim:crash_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
     "//crates/lash-sim:lash-sim__bin__unit_test",
+    "//crates/lash-sim:logical_turn__test",
     "//crates/lash-sim:signal_replay_key_constructor__test",
     "//crates/lash-sim:stack_policy__test",
     "//crates/lash-sqlite-store:conformance__test",
@@ -49902,6 +49918,7 @@
     "//crates/lash-sim:crash_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
     "//crates/lash-sim:lash-sim__bin__unit_test",
+    "//crates/lash-sim:logical_turn__test",
     "//crates/lash-sim:signal_replay_key_constructor__test",
     "//crates/lash-sim:stack_policy__test",
     "//crates/lash-sqlite-store:conformance__test",
@@ -50064,6 +50081,7 @@
     "//crates/lash-sim:crash_matrix__test",
     "//crates/lash-sim:cross_backend_store_differential__test",
     "//crates/lash-sim:lash-sim__bin__unit_test",
+    "//crates/lash-sim:logical_turn__test",
     "//crates/lash-sim:signal_replay_key_constructor__test",
     "//crates/lash-sim:stack_policy__test",
     "//crates/lash-sqlite-store:conformance__test",
@@ -50419,6 +50437,7 @@
     "//crates/lash-sim:cross_backend_store_differential__test",
     "//crates/lash-sim:lash-sim__bin__unit_test",
     "//crates/lash-sim:lash-sim__unit_test",
+    "//crates/lash-sim:logical_turn__test",
     "//crates/lash-sim:signal_replay_key_constructor__test",
     "//crates/lash-sim:stack_policy__test",
     "//crates/lash-sqlite-store:conformance__test",
@@ -50591,6 +50610,7 @@
     "//crates/lash-sim:cross_backend_store_differential__test",
     "//crates/lash-sim:lash-sim__bin__unit_test",
     "//crates/lash-sim:lash-sim__unit_test",
+    "//crates/lash-sim:logical_turn__test",
     "//crates/lash-sim:signal_replay_key_constructor__test",
     "//crates/lash-sim:stack_policy__test",
     "//crates/lash-sqlite-store:conformance__test",

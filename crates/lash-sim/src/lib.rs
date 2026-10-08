@@ -11,6 +11,8 @@ mod oracle_coverage_tests;
 #[cfg(test)]
 mod recorded_reality;
 #[cfg(test)]
+mod request_snapshot;
+#[cfg(test)]
 mod session_mail_matrix;
 #[cfg(test)]
 mod tool_call_replay;
