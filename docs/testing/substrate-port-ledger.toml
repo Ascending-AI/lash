@@ -3141,7 +3141,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5308: -> crates/lash-durable-test/tests/one_slot_process_await.rs, written whole and ignored on FIG-5329 (a retryable host fault from a cell's tool attempt reaches the cell as a program defect and is never retried)."
+note = "FIG-5308: -> crates/lash-durable-test/tests/one_slot_process_await.rs::saturated_process_create_retries_without_recording_a_tool_refusal on a served core (sqlite_memory, sqlite_file, postgres); un-ignored by FIG-5329, which attempts a retryable host fault of a tool attempt again."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/output_retention.rs"

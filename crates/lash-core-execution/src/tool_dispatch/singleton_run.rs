@@ -216,6 +216,11 @@ pub enum SingletonBodyOutcome {
     Cancelled {
         evidence: Option<String>,
     },
+    /// The attempt ended in a retryable attempt fault of its host
+    /// ([`RuntimeEffectControllerError::is_attempt_fault`]): it took no
+    /// effect and answers nothing, so it is attempted again, never handed to
+    /// the caller as the call's result (FIG-5329).
+    Faulted(Box<RuntimeEffectControllerError>),
     /// The body parked on its completion wait: its pending completion, the
     /// launch receipt of the start it declared to resolve it, and that
     /// start's store-local effect, which commits with the park.

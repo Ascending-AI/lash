@@ -669,6 +669,11 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
         }
 
         match outcome {
+            // A retryable attempt fault took no effect: the attempt runs
+            // again, and nothing of it reaches the enclosing execution.
+            crate::ToolAttemptOutcome::HostFailed(error) if error.is_attempt_fault() => {
+                Ok(SingletonBodyOutcome::Faulted(error))
+            }
             crate::ToolAttemptOutcome::HostFailed(error) => {
                 self.context.record_nested_effect_error(*error.clone());
                 Err(error.to_string())

@@ -111,12 +111,18 @@ pub enum AttemptEnd {
         /// That start's store-local effect: it commits with the park.
         store_local: Vec<StoreLocalEffect>,
     },
+    /// The attempt ended in a retryable attempt fault of its host: it took
+    /// no effect and nothing of it is decided, answered or recorded. The
+    /// same attempt runs again.
+    Faulted(Box<crate::RuntimeEffectControllerError>),
 }
 
 /// What one execution of the body left.
 enum Executed {
     /// A captured answer.
     Captured(SingletonCapture),
+    /// A retryable attempt fault.
+    Faulted(Box<crate::RuntimeEffectControllerError>),
     /// The body parked.
     Parked {
         completion: Box<crate::PendingCompletion>,
@@ -350,6 +356,7 @@ impl<'a> AdmittedToolCall<'a> {
             Selection::Execute => {
                 let capture = match self.execute(ordinal).await? {
                     Executed::Captured(capture) => capture,
+                    Executed::Faulted(fault) => return Ok(AttemptEnd::Faulted(fault)),
                     Executed::Parked {
                         completion,
                         launch,
@@ -450,6 +457,7 @@ impl<'a> AdmittedToolCall<'a> {
             SingletonBodyOutcome::Cancelled { evidence } => {
                 SingletonCapture::Cancelled { evidence }
             }
+            SingletonBodyOutcome::Faulted(fault) => return Ok(Executed::Faulted(fault)),
             SingletonBodyOutcome::Pending {
                 completion,
                 launch,

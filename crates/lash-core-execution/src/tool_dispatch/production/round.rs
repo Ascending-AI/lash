@@ -29,6 +29,9 @@ pub(super) enum MemberEnd {
     Cancelled,
     /// The body parked on its completion wait.
     Parked(ParkedCall),
+    /// The attempt ended in a retryable attempt fault: it took no effect,
+    /// and [`member_body`] runs it again.
+    Faulted(Box<crate::RuntimeEffectControllerError>),
 }
 
 /// A parked call as its `Waiting` outcome records it: its pending
@@ -148,8 +151,9 @@ pub(super) fn member_output(owner: &crate::EffectOpener, end: MemberEnd) -> Sett
                 evidence: AvailableEvidence::default(),
             };
         }
-        // A park is answered by `parked_output`.
-        MemberEnd::Parked(_) => return SettledOutput::Interrupted,
+        // A park is answered by `parked_output`, and a fault is attempted
+        // again by `member_body`.
+        MemberEnd::Parked(_) | MemberEnd::Faulted(_) => return SettledOutput::Interrupted,
         MemberEnd::Final(completed) => (completed, None),
         MemberEnd::Retry {
             failure,
@@ -277,6 +281,7 @@ impl ProductionToolHandlers<'_> {
                 }),
                 store_local,
             ),
+            AttemptEnd::Faulted(fault) => (MemberEnd::Faulted(fault), Vec::new()),
         })
     }
 }
@@ -301,6 +306,19 @@ fn retry_failure(
             |captured| captured.output,
         );
     answered(call, output)
+}
+
+/// The pause before a faulted attempt runs again, after `faults` earlier
+/// faults of it: doubling from 10 ms to at most one second, spent from the
+/// call's one limit.
+fn attempt_fault_backoff(faults: u32) -> std::time::Duration {
+    const FIRST_MS: u64 = 10;
+    const MAX_MS: u64 = 1_000;
+    std::time::Duration::from_millis(
+        FIRST_MS
+            .saturating_mul(1_u64.checked_shl(faults).unwrap_or(u64::MAX))
+            .min(MAX_MS),
+    )
 }
 
 /// The body of `execution`, an attempt of the member `call` invoked as
@@ -334,29 +352,63 @@ pub(super) fn member_body(
             let Some(ordinal) = ordinal else {
                 return SettledOutput::Interrupted.into();
             };
-            // Each attempt owns its handlers: an inline body stops on the
-            // member's cancel, which its owner fires on a turn cancel.
-            let mut handlers =
-                ProductionToolHandlers::new(context.with_cancellation_token(token.clone()), None)
-                    .with_completion_key(key);
-            handlers.traces_call = traces_call;
-            let handlers = Arc::new(handlers);
-            let (end, store_local) = handlers
-                .member_attempt(&owner, &call, invocation, ordinal, may_retry, &token)
-                .await
-                .unwrap_or_else(|error| {
-                    (
-                        MemberEnd::Final(answered(
-                            &call,
-                            ToolCallOutput::failure(crate::ToolFailure::runtime(
-                                crate::ToolFailureClass::Internal,
-                                "tool_run_fault",
-                                error.to_string(),
-                            )),
-                        )),
-                        Vec::new(),
+            let mut faults = 0_u32;
+            let (end, store_local) = loop {
+                // Each attempt owns its handlers: an inline body stops on the
+                // member's cancel, which its owner fires on a turn cancel.
+                let mut handlers = ProductionToolHandlers::new(
+                    context.clone().with_cancellation_token(token.clone()),
+                    None,
+                )
+                .with_completion_key(key.clone());
+                handlers.traces_call = traces_call;
+                let handlers = Arc::new(handlers);
+                match handlers
+                    .member_attempt(
+                        &owner,
+                        &call,
+                        invocation.clone(),
+                        ordinal,
+                        may_retry,
+                        &token,
                     )
-                });
+                    .await
+                {
+                    // A retryable attempt fault took no effect and is never
+                    // the call's answer: the same attempt runs again,
+                    // uncounted and unrecorded, until it answers or the
+                    // call's limit or cancel stops it (FIG-5329). A crash
+                    // meanwhile recovers its started row as any other.
+                    Ok((MemberEnd::Faulted(fault), _)) => {
+                        tracing::debug!(
+                            call_id = %call.call_id,
+                            faults,
+                            error = %fault,
+                            "tool attempt faulted; attempting it again"
+                        );
+                        context
+                            .dispatch()
+                            .clock
+                            .sleep(attempt_fault_backoff(faults))
+                            .await;
+                        faults = faults.saturating_add(1);
+                    }
+                    Ok(ended) => break ended,
+                    Err(error) => {
+                        break (
+                            MemberEnd::Final(answered(
+                                &call,
+                                ToolCallOutput::failure(crate::ToolFailure::runtime(
+                                    crate::ToolFailureClass::Internal,
+                                    "tool_run_fault",
+                                    error.to_string(),
+                                )),
+                            )),
+                            Vec::new(),
+                        );
+                    }
+                }
+            };
             let mut result = match end {
                 MemberEnd::Parked(parked) => parked_output(&call, &owner, &execution, &parked),
                 end => member_output(&owner, end).into(),

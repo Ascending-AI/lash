@@ -240,29 +240,7 @@ async fn saturated_process_create_retries_without_recording_a_tool_refusal(tier:
     world.shutdown().await;
 }
 
-tiered_laws!(one_slot_cell_that_starts_and_awaits_a_process_completes);
-
-/// The saturation law on each tier. Ignored: the durable engine hands the
-/// retryable fault to the cell as the call's failed result (FIG-5329).
-macro_rules! saturation_on {
-    ($($module:ident, $tier:ident);+ $(;)?) => {
-        $(
-            mod $module {
-                #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-                #[ignore = "FIG-5329: a retryable host fault from a cell's tool attempt is shown to the cell as its failed result, never attempted again"]
-                async fn saturated_process_create_retries_without_recording_a_tool_refusal() {
-                    super::saturated_process_create_retries_without_recording_a_tool_refusal(
-                        super::served::Tier::$tier,
-                    )
-                    .await;
-                }
-            }
-        )+
-    };
-}
-
-saturation_on!(
-    saturation_sqlite_memory, SqliteMemory;
-    saturation_sqlite_file, SqliteFile;
-    saturation_postgres, Postgres;
+tiered_laws!(
+    one_slot_cell_that_starts_and_awaits_a_process_completes,
+    saturated_process_create_retries_without_recording_a_tool_refusal,
 );
