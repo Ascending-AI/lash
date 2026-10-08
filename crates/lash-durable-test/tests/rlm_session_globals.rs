@@ -281,4 +281,88 @@ finish({ answer: answer, counter: counter, n: box.n, later: later, fetched: fetc
     world.shutdown().await;
 }
 
-tiered_laws!(session_globals_survive_cells_and_reload_and_private_slots_never_do);
+/// The durable head's execution state of the session [`SESSION`].
+async fn durable_execution_state(
+    world: &World,
+) -> Option<lash_core::plugin::HydratedExecutionState> {
+    let view = lash_core_execution::store::SessionStore::new(
+        world.backend.stores().session_store_factory(),
+        lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"),
+    )
+    .expect("the session's store");
+    lash_core_execution::store::load_session_window_state(
+        &view,
+        lash_core_execution::store::WindowSelector::Current,
+    )
+    .await
+    .expect("load the durable head")
+    .expect("the session is persisted")
+    .state
+    .execution_state_hydration()
+    .expect("hydrate the durable execution state")
+}
+
+/// FIG-2521 (h): a message-only host append between turns leaves the
+/// committed execution and the durable head's execution untouched, and the
+/// next turn reads the committed global.
+async fn rlm_message_append_keeps_the_committed_execution(tier: Tier) {
+    let Some(world) = World::new(tier, builder).await else {
+        return;
+    };
+    world.session(SESSION, served::spec(64)).await;
+    let first = run_cell(
+        &world,
+        "fig2521-establish",
+        "let accumulated = \"COMMITTED\";\nfinish(accumulated);",
+    )
+    .await;
+    served::assert_answered("the establishing turn", &first);
+    let before = durable_execution_state(&world)
+        .await
+        .expect("the establishing turn committed an execution root");
+
+    let appended = world
+        .core
+        .session(lash::SessionId::try_from(SESSION.to_owned()).expect("a session id"))
+        .open()
+        .await
+        .expect("the session opens")
+        .admin()
+        .state()
+        .append_session_nodes(lash_core::AppendSessionNodesRequest {
+            operation_id: "fig2521-message".to_owned(),
+            requires_ancestor_node_id: None,
+            nodes: vec![lash_core::SessionAppendNode::message(
+                lash_core::PluginMessage::text(lash_core::MessageRole::User, "message only")
+                    .with_id("fig2521-message"),
+            )],
+        })
+        .await
+        .expect("the message append settles");
+    assert!(
+        matches!(
+            appended,
+            lash_core::AppendSessionNodesOutcome::Appended { .. }
+        ),
+        "{appended:?}"
+    );
+    assert_eq!(
+        durable_execution_state(&world).await.as_ref(),
+        Some(&before),
+        "a message-only append leaves the durable execution as committed"
+    );
+
+    let after = run_cell(&world, "fig2521-after-message", "finish(accumulated);").await;
+    served::assert_answered("the turn after the append", &after);
+    assert_eq!(
+        after.final_value(),
+        Some(&serde_json::json!("COMMITTED")),
+        "the next turn reads the committed global"
+    );
+    world.shutdown().await;
+}
+
+tiered_laws!(
+    session_globals_survive_cells_and_reload_and_private_slots_never_do,
+    rlm_message_append_keeps_the_committed_execution,
+);

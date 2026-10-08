@@ -2168,6 +2168,7 @@ dependencies = [
  "lash-internal-durable",
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
+ "lash-internal-llm-tools",
  "lash-internal-plugin-standard-compaction",
  "lash-internal-postgres-store",
  "lash-internal-sansio",

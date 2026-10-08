@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 53,
-  "cargo_target_count": 200,
+  "cargo_target_count": 201,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -43281,7 +43281,7 @@
       "//crates/lashlang:lashlang__unit_test__fv_fc3b3750"
     ]
   },
-  "generated_label_count": 261,
+  "generated_label_count": 262,
   "packages": [
     {
       "declared_features": [
@@ -43897,6 +43897,7 @@
         "lash-internal-durable",
         "lash-internal-lashlang",
         "lash-internal-lashlang-runtime",
+        "lash-internal-llm-tools",
         "lash-internal-plugin-standard-compaction",
         "lash-internal-postgres-store",
         "lash-internal-sansio",
@@ -44065,6 +44066,15 @@
           "tags": [
             "hermetic-postgres"
           ]
+        },
+        {
+          "build_label": "//crates/lash-durable-test:first_party_tools__test",
+          "cargo": "first_party_tools",
+          "check_label": "//crates/lash-durable-test:first_party_tools__test[check]",
+          "clippy_label": "//crates/lash-durable-test:first_party_tools__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//crates/lash-durable-test:first_party_tools__test",
+          "tags": []
         },
         {
           "build_label": "//crates/lash-durable-test:format_fixtures__test",
@@ -47796,6 +47806,7 @@
     "//crates/lash-durable-test:declared_start__test": 300,
     "//crates/lash-durable-test:declared_start_crash_laws__test": 900,
     "//crates/lash-durable-test:drain_by_release__test": 300,
+    "//crates/lash-durable-test:first_party_tools__test": 300,
     "//crates/lash-durable-test:format_fixtures__test": 300,
     "//crates/lash-durable-test:frame_switch_crash_proof__test": 300,
     "//crates/lash-durable-test:frame_switch_laws__test": 300,
@@ -48235,6 +48246,7 @@
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
+    "//crates/lash-durable-test:first_party_tools__test",
     "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
@@ -48512,6 +48524,7 @@
     "//crates/lash-durable-test:declared_start__test[check]",
     "//crates/lash-durable-test:declared_start_crash_laws__test[check]",
     "//crates/lash-durable-test:drain_by_release__test[check]",
+    "//crates/lash-durable-test:first_party_tools__test[check]",
     "//crates/lash-durable-test:format_fixtures__test[check]",
     "//crates/lash-durable-test:frame_switch_crash_proof__test[check]",
     "//crates/lash-durable-test:frame_switch_laws__test[check]",
@@ -48809,6 +48822,7 @@
     "//crates/lash-durable-test:declared_start__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:declared_start_crash_laws__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:drain_by_release__test__clippy[clippy.txt]",
+    "//crates/lash-durable-test:first_party_tools__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:format_fixtures__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:frame_switch_crash_proof__test__clippy[clippy.txt]",
     "//crates/lash-durable-test:frame_switch_laws__test__clippy[clippy.txt]",
@@ -49071,6 +49085,7 @@
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
+    "//crates/lash-durable-test:first_party_tools__test",
     "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
@@ -49333,6 +49348,7 @@
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
+    "//crates/lash-durable-test:first_party_tools__test",
     "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
@@ -49579,6 +49595,7 @@
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
+    "//crates/lash-durable-test:first_party_tools__test",
     "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
@@ -49717,6 +49734,7 @@
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
+    "//crates/lash-durable-test:first_party_tools__test",
     "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
@@ -49868,6 +49886,7 @@
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
+    "//crates/lash-durable-test:first_party_tools__test",
     "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
@@ -50227,6 +50246,7 @@
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
+    "//crates/lash-durable-test:first_party_tools__test",
     "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",
@@ -50386,6 +50406,7 @@
     "//crates/lash-durable-test:declared_start__test",
     "//crates/lash-durable-test:declared_start_crash_laws__test",
     "//crates/lash-durable-test:drain_by_release__test",
+    "//crates/lash-durable-test:first_party_tools__test",
     "//crates/lash-durable-test:format_fixtures__test",
     "//crates/lash-durable-test:frame_switch_crash_proof__test",
     "//crates/lash-durable-test:frame_switch_laws__test",

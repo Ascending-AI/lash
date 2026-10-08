@@ -3,9 +3,14 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
-use lash::mcp::{McpPluginFactory, McpServerConfig, McpStdioTransport};
+use lash::direct::LlmOutputPart;
+use lash::mcp::{McpPluginFactory, McpServerConfig, McpServerHealth, McpStdioTransport};
 use lash::plugins::PluginFactory;
+use lash::provider::LlmResponse;
+use lash_postgres_store::{PostgresStorage, PostgresStoreSet, testing::IsolatedDatabase};
 
 /// The session's prompt sections composed for a turn call that offers every
 /// tool of `catalog` natively (ADR 0133).
@@ -201,4 +206,456 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
         .shutdown()
         .await
         .expect("reopened peer shutdown");
+}
+
+/// A server's instructions render once per module on every prompt surface a
+/// session offers its tools on, from the recorded catalog alone.
+#[tokio::test]
+#[expect(
+    clippy::expect_used,
+    reason = "integration fixture setup and assertions"
+)]
+async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
+    const INSTRUCTIONS: &str = "Authenticate with login before searching. Follow every nextCursor.";
+    let initialize = serde_json::json!({
+        "jsonrpc":"2.0", "id":0, "result": {
+            "protocolVersion":"2025-11-25", "capabilities":{"tools":{}},
+            "serverInfo":{"name":"instructions-peer","version":"1"},
+            "instructions": INSTRUCTIONS
+        }
+    });
+    let tools = serde_json::json!({"jsonrpc":"2.0", "id":1, "result":{"tools":[
+        {"name":"login", "description":"Authenticate", "inputSchema":{"type":"object"}},
+        {"name":"search", "description":"Search records", "inputSchema":{"type":"object"}}
+    ]}});
+    let factory = Arc::new(McpPluginFactory::new(BTreeMap::from([(
+        "records".to_string(),
+        McpServerConfig::stdio(McpStdioTransport::new("sh", vec![
+            "-c".to_string(),
+            "read -r _; printf '%s\\n' \"$INITIALIZE\"; read -r _; read -r _; printf '%s\\n' \"$TOOLS\"; cat >/dev/null".to_string()
+        ]).with_env([("INITIALIZE", initialize.to_string()), ("TOOLS", tools.to_string())]))
+    )])).await.expect("instruction peer connects"));
+    assert_eq!(factory.pool().advertised_tools().len(), 2);
+    let backend = crate::support::sqlite_memory_store_backend().await;
+    let mut observations = Vec::new();
+    for surface in ["standard", "cell", "native"] {
+        let (protocol, protocol_id): (Arc<dyn PluginFactory>, &str) = if surface == "standard" {
+            (
+                Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
+                lash_protocol_standard::STANDARD_PROTOCOL_PLUGIN_ID,
+            )
+        } else {
+            (
+                Arc::new(
+                    lash_protocol_rlm::RlmProtocolPluginFactory::new(
+                        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                            .channel(if surface == "cell" {
+                                lash_protocol_rlm::RlmChannel::Cell
+                            } else {
+                                lash_protocol_rlm::RlmChannel::NativeTool
+                            })
+                            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
+                                1000,
+                            ))
+                            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(1))
+                            .build(),
+                        Arc::new(lash_protocol_rlm::TypescriptDialect),
+                        &backend,
+                    )
+                    .with_process_lifecycle(false),
+                ),
+                lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID,
+            )
+        };
+        let host = lash_core::facade_support::PluginHost::new(vec![protocol, factory.clone()]);
+        let plugin_config = host
+            .resolve_creation_plugin_config(
+                Some(protocol_id),
+                &lash_core::PluginOptions::default(),
+                &lash_core::store::plugin_writers::PluginAdmission::default(),
+            )
+            .expect("the creation config resolves");
+        let session = host
+            .build_session(lash_core::plugin::PluginSessionRequest::creation(
+                surface,
+                lash_core::plugin::SessionAuthorityContext {
+                    plugin_config: lash_core::AdmittedPluginConfig::new(plugin_config, 0),
+                    ..Default::default()
+                },
+            ))
+            .expect("prompt session");
+        let catalog = session.resolved_tool_catalog().expect("captured catalog");
+        // The recorded catalog is sufficient to rebuild the prompt without
+        // consulting the peer.
+        let recorded = serde_json::to_vec(catalog.as_ref()).expect("record catalog");
+        let catalog: lash_core::ToolCatalog =
+            serde_json::from_slice(&recorded).expect("restore catalog");
+        let prompt = turn_prompt(&session, &catalog).await;
+        observations.push((surface, prompt.matches(INSTRUCTIONS).count()));
+    }
+    factory.shutdown().await.expect("peer shutdown");
+    assert_eq!(observations, [("standard", 1), ("cell", 1), ("native", 1)]);
+}
+
+const PEER: &str = r#"
+import json, os, sys, threading, time
+lock = threading.Lock()
+started = threading.Event()
+pending = []
+root = os.environ['FIXTURE_ROOT']
+
+def send(message):
+    with lock:
+        sys.stdout.write(json.dumps(message, separators=(',', ':')))
+        sys.stdout.flush()
+        sys.stdout.write('\n')
+        sys.stdout.flush()
+
+def reply_lists():
+    while not os.path.exists(root + '/release'):
+        time.sleep(0.001)
+    while True:
+        with lock:
+            replies = pending[:]
+            pending.clear()
+        for request_id, index in replies:
+            send({'jsonrpc':'2.0', 'id':request_id, 'result':{'tools':[
+                {'name':'work-' + str(index), 'inputSchema':{'type':'object'}}]}})
+        time.sleep(0.001)
+threading.Thread(target=reply_lists, daemon=True).start()
+
+def storm(request_id):
+    notification = json.dumps({'jsonrpc':'2.0', 'method':'notifications/tools/list_changed'}, separators=(',', ':')) + '\n'
+    with lock:
+        sys.stdout.write(notification * 100000)
+        sys.stdout.flush()
+    started.wait()
+    send({'jsonrpc':'2.0', 'id':request_id, 'result':{'content':[{'type':'text','text':'storm sent'}]}})
+
+lists = 0
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get('method')
+    if method == 'initialize':
+        send({'jsonrpc':'2.0', 'id':message['id'], 'result':{
+            'protocolVersion':'2025-11-25', 'capabilities':{'tools':{'listChanged':True}},
+            'serverInfo':{'name':'catalog-turn-peer','version':'1'}}})
+    elif method == 'tools/list':
+        lists += 1
+        with open(root + '/lists', 'w') as trace:
+            trace.write(str(lists))
+        if lists == 1:
+            send({'jsonrpc':'2.0', 'id':message['id'], 'result':{'tools':[
+                {'name':'storm', 'inputSchema':{'type':'object'}}]}})
+        else:
+            with lock:
+                pending.append((message['id'], lists))
+            started.set()
+    elif method == 'tools/call':
+        if os.environ.get('FAILURE_LAW') == 'true':
+            if message['params'].get('arguments', {}).get('attachment'):
+                send({'jsonrpc':'2.0', 'id':message['id'], 'result':{'content':[
+                    {'type':'image', 'data':'YWJj', 'mimeType':'image/png'}]}})
+            else:
+                send({'jsonrpc':'2.0', 'id':message['id'], 'error':{
+                    'code':-32602, 'message':'bad field', 'data':{'field':'query'}}})
+        else:
+            threading.Thread(target=storm, args=(message['id'],), daemon=True).start()
+    elif method == 'ping':
+        send({'jsonrpc':'2.0', 'id':message['id'], 'result':{}})
+"#;
+
+#[derive(Clone, Copy)]
+enum Store {
+    SqliteMemory,
+    SqliteFile,
+    Postgres,
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "integration fixture setup and assertions"
+)]
+async fn make_stores(
+    store: Store,
+    root: &std::path::Path,
+    storage: Option<&PostgresStorage>,
+) -> Arc<dyn lash_core::StoreSet> {
+    match store {
+        Store::SqliteMemory => Arc::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("SQLite memory"),
+        ),
+        Store::SqliteFile => Arc::new(
+            lash_sqlite_store::SqliteStoreSet::open(root.join("stores.db"))
+                .await
+                .expect("SQLite file"),
+        ),
+        Store::Postgres => Arc::new(PostgresStoreSet::new(
+            storage.expect("PostgreSQL storage"),
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                root.join("attachments"),
+            )),
+        )),
+    }
+}
+
+/// One turn on the durable engine over `store` whose model calls the MCP
+/// peer's `storm` tool. The storm floods `tools/list_changed` while the
+/// discovery it triggers stalls, and the turn still completes. Under the
+/// `failure_law`, the peer answers a JSON-RPC error and an attachment past
+/// the size limit, each recorded as its typed failure.
+#[expect(
+    clippy::expect_used,
+    reason = "integration fixture setup and assertions"
+)]
+async fn turn_witness(store: Store, failure_law: bool) {
+    let root = tempfile::tempdir().expect("fixture directory");
+    let database = if matches!(store, Store::Postgres) {
+        let url = std::env::var("LASH_POSTGRES_DATABASE_URL").expect("managed PostgreSQL gate URL");
+        Some(IsolatedDatabase::create(&url).await)
+    } else {
+        None
+    };
+    let storage = if let Some(database) = &database {
+        Some(
+            lash_postgres_store::testing::connect(database.url())
+                .await
+                .expect("PostgreSQL storage"),
+        )
+    } else {
+        None
+    };
+    let backend =
+        lash_conformance::backend_over(make_stores(store, root.path(), storage.as_ref()).await);
+    let factory = Arc::new(
+        McpPluginFactory::new(BTreeMap::from([(
+            "catalog".to_string(),
+            McpServerConfig::stdio(
+                McpStdioTransport::new(
+                    "python3",
+                    vec!["-u".to_string(), "-c".to_string(), PEER.to_string()],
+                )
+                .with_env([
+                    ("FIXTURE_ROOT", root.path().display().to_string()),
+                    ("FAILURE_LAW", failure_law.to_string()),
+                ]),
+            )
+            .with_timeouts(
+                Duration::from_secs(600),
+                Duration::from_secs(600),
+                Duration::from_secs(900),
+            ),
+        )]))
+        .await
+        .expect("MCP peer"),
+    );
+    assert!(
+        matches!(
+            factory.server_statuses()[0].health,
+            McpServerHealth::Connected { .. }
+        ),
+        "{:?}",
+        factory.server_statuses()
+    );
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = Arc::clone(&calls);
+    let name = lash::mcp::mcp_tool_names("catalog", &["storm"])["storm"].clone();
+    let provider = lash_core::testing::TestProvider::builder()
+        .complete(move |_| {
+            let call = observed.fetch_add(1, Ordering::SeqCst);
+            let extra = if failure_law && call == 0 {
+                Some(LlmOutputPart::ToolCall {
+                    call_id: "attachment-1".to_string(),
+                    tool_name: name.clone(),
+                    input_json: "{\"attachment\":true}".to_string(),
+                    replay: None,
+                })
+            } else {
+                None
+            };
+            let part = match call {
+                0 => LlmOutputPart::ToolCall {
+                    call_id: "storm-1".to_string(),
+                    tool_name: name.clone(),
+                    input_json: "{}".to_string(),
+                    replay: None,
+                },
+                1 => LlmOutputPart::Text {
+                    text: "storm done".to_string(),
+                    response_meta: None,
+                },
+                other => panic!("unexpected model call {other}"),
+            };
+            async move {
+                Ok(LlmResponse {
+                    parts: std::iter::once(part).chain(extra).collect(),
+                    ..Default::default()
+                })
+            }
+        })
+        .build()
+        .into_handle();
+    let core = lash::LashCore::standard_builder(backend)
+        .llm_profiles(std::sync::Arc::new(
+            lash::LlmProfileRegistry::new()
+                .register(
+                    "catalog-fixture",
+                    lash::RegisteredLlmProfile::new(
+                        lash::LlmProfileMetadata::builder("catalog-fixture")
+                            .context_window_tokens(16_000)
+                            .build()
+                            .expect("model"),
+                        provider,
+                    ),
+                )
+                .expect("register the test model"),
+        ))
+        .max_attachment_bytes(failure_law.then_some(1))
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+        .plugin(factory.clone())
+        .build(lash::persistence::LeaseOwnerIdentity::opaque(
+            "mcp-catalog",
+            uuid::Uuid::new_v4().to_string(),
+        ))
+        .expect("core");
+    let session = crate::created_session(&core, "catalog-fixture", "catalog-storm")
+        .await
+        .durable()
+        .await
+        .expect("session");
+    let output = tokio::time::timeout(
+        Duration::from_secs(600),
+        session
+            .send(lash::TurnInput::text("Run the catalog storm"))
+            .output(),
+    )
+    .await
+    .expect("turn deadline")
+    .expect("turn completes during stalled discovery");
+    assert_eq!(
+        output.result.tool_calls.len(),
+        if failure_law { 2 } else { 1 },
+        "{:?}",
+        output.result.tool_calls
+    );
+    if failure_law {
+        let persisted = session
+            .read()
+            .await
+            .expect("durable read")
+            .expect("persisted session");
+        assert_eq!(persisted.turn_index(), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        factory.shutdown().await.expect("MCP shutdown");
+        for (record, class, code, kind) in output
+            .result
+            .tool_calls
+            .iter()
+            .zip([
+                (
+                    lash::tools::ToolFailureClass::InvalidRequest,
+                    "mcp_json_rpc_error",
+                    "json_rpc",
+                ),
+                (
+                    lash::tools::ToolFailureClass::ResourceLimit,
+                    "mcp_attachment_store",
+                    "attachment_store",
+                ),
+            ])
+            .rev()
+            .map(|(record, (class, code, kind))| (record, class, code, kind))
+        {
+            let lash::tools::ToolCallOutcome::Failure(error) = &record.output.outcome else {
+                panic!("expected typed failure: {record:?}");
+            };
+            assert_eq!(error.class, class);
+            assert_eq!(error.code, code);
+            assert_eq!(error.suggested_delay_ms, None);
+            let raw = error.raw.as_ref().expect("typed cause").to_json_value();
+            assert_eq!(raw["kind"], kind);
+            if kind == "json_rpc" {
+                assert_eq!(raw["error"]["code"], -32602);
+                assert_eq!(raw["error"]["data"], serde_json::json!({"field":"query"}));
+            } else {
+                assert_eq!(
+                    raw["cause"],
+                    serde_json::json!({"kind":"size_limit_exceeded", "byte_len":3, "max_bytes":1})
+                );
+            }
+            let replayed: lash::tools::ToolCallOutput = serde_json::from_slice(
+                &serde_json::to_vec(&record.output).expect("recorded output"),
+            )
+            .expect("replayed output");
+            assert_eq!(replayed.outcome, record.output.outcome);
+        }
+        drop(session);
+        core.shutdown().await.expect("the core shuts down");
+        drop(database);
+        return;
+    }
+    assert_eq!(output.result.assistant_message(), Some("storm done"));
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("lists")).expect("discovery trace"),
+        "2",
+        "storm keeps exactly one stalled discovery"
+    );
+    std::fs::write(root.path().join("release"), "release").expect("release catalog");
+    tokio::time::timeout(Duration::from_secs(600), async {
+        while !factory
+            .pool()
+            .advertised_tools()
+            .iter()
+            .any(|tool| tool.name().contains("__work_"))
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("valid refresh publication");
+    let reopened = core
+        .session(lash::SessionId::parse("catalog-storm").expect("nonblank host identity"))
+        .open()
+        .await
+        .expect("reopen committed session");
+    assert!(reopened.read_view().chronological_projection().into_entries().iter().any(|entry| {
+        matches!(&entry.payload, lash::persistence::ChronologicalPayload::Message(message) if lash::message_text(message).contains("storm done"))
+    }), "the completed turn survives a store reload");
+    factory.shutdown().await.expect("MCP shutdown");
+    drop(session);
+    drop(reopened);
+    core.shutdown().await.expect("the core shuts down");
+    drop(database);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn catalog_storm_sqlite_memory_turn_witness() {
+    turn_witness(Store::SqliteMemory, false).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn catalog_storm_sqlite_file_turn_witness() {
+    turn_witness(Store::SqliteFile, false).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+async fn catalog_storm_postgres_turn_witness() {
+    turn_witness(Store::Postgres, false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mcp_law_turn_failures_sqlite_memory() {
+    turn_witness(Store::SqliteMemory, true).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn mcp_law_turn_failures_sqlite_file() {
+    turn_witness(Store::SqliteFile, true).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "requires PostgreSQL; run with --include-ignored inside a pg16 gate"]
+async fn mcp_law_turn_failures_postgres() {
+    turn_witness(Store::Postgres, true).await;
 }

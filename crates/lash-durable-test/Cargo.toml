@@ -33,6 +33,7 @@ lash-core = { workspace = true }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-lashlang-runtime = { workspace = true }
+lash-llm-tools = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
