@@ -31,7 +31,7 @@ finish(result);
 
 pub(super) async fn agent_durable_input_suspension_resolution_execution()
 -> Result<Value, FixedScriptRunnerError> {
-    let result = facade_agent_durable_input_execution().await?;
+    let result = facade_agent_durable_input_execution(std::time::Duration::ZERO).await?;
     Ok(result)
 }
 
