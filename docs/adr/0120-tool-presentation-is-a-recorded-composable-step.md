@@ -24,9 +24,7 @@ each step by callback key and owning plugin revision. `presenter: null` with
 `steps: []` is an explicit empty plan. An owed derivation resolves every
 identity before invoking any callback. Missing keys or revisions park with
 `PluginExecutionRefusal`; installed substitutes never replace recorded work. Every step receives
-the prior `PresentedToolReturn` (the `ModelToolReturn`, and the display a host
-shows of the call, which never reaches the model: ADR 0129, FIG-5290), the
-settlement and its projection context.
+the prior `ModelToolReturn`, the settlement and its projection context.
 A retryable optional-step error aborts the uncommitted presentation derivation
 and is never model-visible text. Other optional-step errors become fallback
 text, and the chain continues.

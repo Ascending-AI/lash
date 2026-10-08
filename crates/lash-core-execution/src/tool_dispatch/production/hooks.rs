@@ -82,7 +82,6 @@ impl ProductionToolHandlers<'_> {
                         control: None,
                         view: value.view,
                         projection_value: value.projection_value,
-                        display: value.display,
                     };
                     let captured = if winner.as_ref() == Some(&reply.callback) {
                         self.capture_output(

@@ -6526,16 +6526,6 @@
     "RemoteProcessToolCallOutput": {
       "properties": {
         "control": true,
-        "display": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ToolDisplay"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "outcome": {
           "$ref": "#/$defs/RemoteProcessToolCallOutcome"
         },
@@ -7605,16 +7595,6 @@
           "anyOf": [
             {
               "$ref": "#/$defs/RemoteToolControlProjection"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "display": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ToolDisplay"
             },
             {
               "type": "null"
@@ -9719,24 +9699,8 @@
       "type": "object"
     },
     "RowTool": {
-      "description": "Display-only tool facts carried by committed nodes, without execution\nstate: the call's identity when it has one, its operation and status,\nand the display its tool or a presentation step declared (FIG-5290).",
+      "description": "Display-only tool facts carried by committed nodes, without execution state.",
       "properties": {
-        "call_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "display": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ToolDisplay"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "operation": {
           "type": "string"
         },
@@ -11590,88 +11554,6 @@
           "type": "object"
         }
       ]
-    },
-    "ToolDisplay": {
-      "additionalProperties": false,
-      "description": "A tool call's host-facing display: an argument summary, a result summary,\nand its citations and links, in order.",
-      "properties": {
-        "arguments": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "links": {
-          "items": {
-            "$ref": "#/$defs/ToolDisplayLink"
-          },
-          "type": "array"
-        },
-        "result": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "truncated": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ToolDisplayTruncation"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Set when the presentation boundary cut this display to its cap."
-        }
-      },
-      "type": "object"
-    },
-    "ToolDisplayLink": {
-      "additionalProperties": false,
-      "description": "One citation or link of a display. The fields keep the names of\n[`crate::ToolViewBlock::ResourceLink`].",
-      "properties": {
-        "description": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "title": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "uri": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "uri"
-      ],
-      "type": "object"
-    },
-    "ToolDisplayTruncation": {
-      "additionalProperties": false,
-      "description": "How large a cut display was, and the cap it was cut to.",
-      "properties": {
-        "limit_bytes": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "original_bytes": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "original_bytes",
-        "limit_bytes"
-      ],
-      "type": "object"
     },
     "ToolFailureCause": {
       "oneOf": [

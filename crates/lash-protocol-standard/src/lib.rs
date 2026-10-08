@@ -854,7 +854,6 @@ fn refused_tool_call_completion(
         args,
         output,
         model_return,
-        display: None,
         intent_outcomes: Vec::new(),
         replay,
     }
@@ -1071,14 +1070,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             }
             let mut parts: Vec<Part> = completed
                 .into_iter()
-                .map(|outcome| {
-                    tool_result_part(
-                        outcome.call_id,
-                        outcome.model_return,
-                        outcome.output.status(),
-                        outcome.display,
-                    )
-                })
+                .map(|outcome| tool_result_part(outcome.call_id, outcome.model_return))
                 .collect();
             let message_id =
                 standard_message_id(ctx.turn_id(), ctx.protocol_iteration(), "refused_tools");
@@ -1125,12 +1117,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 });
             }
 
-            result_parts.push(tool_result_part(
-                outcome.call_id,
-                outcome.model_return,
-                outcome.output.status(),
-                outcome.display,
-            ));
+            result_parts.push(tool_result_part(outcome.call_id, outcome.model_return));
         }
 
         if !result_parts.is_empty() {
@@ -1202,14 +1189,10 @@ fn standard_message_id(turn_id: &TurnId, protocol_iteration: usize, purpose: &st
 /// The one transcript part answering a tool call: the model return's text
 /// and attachment blocks in the tool value's order, under the call's id.
 /// Empty text blocks carry nothing and are dropped; a call whose return is
-/// empty is still answered, so the transcript stays resume-safe. The call's
-/// status and display ride beside the blocks for its transcript row; no
-/// provider block is made from them.
+/// empty is still answered, so the transcript stays resume-safe.
 fn tool_result_part(
     call_id: lash_core::ToolCallId,
     model_return: lash_core::facade_support::ModelToolReturn,
-    status: lash_core::facade_support::ToolCallStatus,
-    display: Option<lash_core::ToolDisplay>,
 ) -> Part {
     let content = model_return
         .parts
@@ -1221,14 +1204,7 @@ fn tool_result_part(
             )
         })
         .collect();
-    Part::tool_result(
-        String::new(),
-        content,
-        call_id,
-        model_return.tool_name,
-        status,
-        display,
-    )
+    Part::tool_result(String::new(), content, call_id, model_return.tool_name)
 }
 
 fn conversation_event(message: Message) -> SessionHistoryRecord {

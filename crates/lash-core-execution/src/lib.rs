@@ -214,7 +214,6 @@ pub mod facade_support {
     pub use crate::plugin::PluginSpecFactory;
     pub use crate::plugin::PluginTask;
     pub use crate::plugin::PluginTraceEmitter;
-    pub use crate::plugin::PresentedToolReturn;
     pub use crate::plugin::SessionConfigChangedContext;
     pub use crate::plugin::SessionHandle;
     pub use crate::plugin::SessionLifecycleService;
@@ -497,15 +496,14 @@ pub use lash_sansio::{
     ObservedProcessFailure, OmittedToolCalls, OutcomeShape, OutputRetentionPolicy, OutputValue,
     Part, PartKind, PluginMessage, PluginRuntimeEvent, ProjectionMode, ProviderAttemptLimits,
     RegistrationRefused, RetainedOutput, SchemaAdmissionError, SchemaContract, SchemaDialect,
-    SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TOOL_DISPLAY_LIMIT_BYTES,
-    TextProjectionMetadata, TokenUsage, TokenUsageOverflow, ToolAdmissionRefusal,
-    ToolArgumentProjectionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
-    ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolContract,
-    ToolControl, ToolDeclaration, ToolDefinition, ToolDiscovery, ToolDisplay, ToolDisplayLink,
-    ToolDisplayTruncation, ToolFailure, ToolFailureCause, ToolFailureClass, ToolFailureSource,
-    ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule, ToolOutputContract,
-    ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
-    ValueMismatch,
+    SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode, TextProjectionMetadata,
+    TokenUsage, TokenUsageOverflow, ToolAdmissionRefusal, ToolArgumentProjectionPolicy,
+    ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCancellation, ToolCatalog,
+    ToolCatalogBuildError, ToolCatalogEntry, ToolContract, ToolControl, ToolDeclaration,
+    ToolDefinition, ToolDiscovery, ToolFailure, ToolFailureCause, ToolFailureClass,
+    ToolFailureSource, ToolId, ToolIntentIdentity, ToolIntentKind, ToolManifest, ToolModule,
+    ToolOutputContract, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId,
+    TurnOutputSource, ValueMismatch,
 };
 pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionLlmProfile};
 /// Project a successful tool control into its terminal turn outcome.

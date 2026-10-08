@@ -295,7 +295,6 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
             control,
             view,
             projection_value,
-            display,
         } = value;
         let outcome = match outcome {
             lash_core::ToolCallOutcome::Success(value) => RemoteProcessToolCallOutcome::Success(
@@ -363,7 +362,6 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
                 .transpose()?,
             view,
             projection_value,
-            display: display.map(Box::new),
         })
     }
 }
@@ -377,7 +375,6 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
             control,
             view,
             projection_value,
-            display,
         } = value;
         let outcome = match outcome {
             RemoteProcessToolCallOutcome::Success(value) => lash_core::ToolCallOutcome::Success(
@@ -441,7 +438,6 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
             control: decode_remote_tool_control(control, "RemoteProcessAwaitOutput")?,
             view,
             projection_value,
-            display: display.map(|display| *display),
         })
     }
 }

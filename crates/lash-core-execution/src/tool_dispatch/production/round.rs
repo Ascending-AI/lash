@@ -64,7 +64,6 @@ pub(super) fn answered(
         tool_name: call.tool_name.clone(),
         args: call.args.clone(),
         model_return: crate::ModelToolReturn::from_output(call.tool_name.clone(), &output),
-        display: None,
         output,
         intent_outcomes: Vec::new(),
         replay: call.replay.clone(),
@@ -452,10 +451,7 @@ pub(super) async fn present_resolved(
         )
         .await
     {
-        Ok(presentation) => {
-            completed.model_return = presentation.model_return;
-            completed.display = presentation.display;
-        }
+        Ok(presentation) => completed.model_return = presentation.model_return,
         // A presentation that faults leaves the call nothing to show, as a
         // body's does.
         Err(error) => {

@@ -61,7 +61,6 @@ fn wrapper(call_id: &str, members: &[&str]) -> PendingToolCall {
 
 fn answered(slot: &PendingToolCall, output: ToolCallOutput) -> CompletedToolCall {
     CompletedToolCall {
-        display: None,
         call_id: slot.call_id.clone(),
         provider_call_id: slot.provider_call_id.clone(),
         tool_name: slot.tool_name.clone(),

@@ -1,7 +1,6 @@
 use super::*;
 use lash::messages::{MessageOrigin, TurnOutputSource};
 use lash::persistence::SessionNodeProjection as _;
-use lash::transcript::TranscriptRowKind;
 
 const MODEL: &str = "standard-transcript-law";
 
@@ -148,72 +147,6 @@ async fn every_standard_message_names_its_turn() {
             message.id
         );
     }
-}
-
-/// ADR 0129: the store's total row fold retains commit order and carries
-/// the same turn on all rows, with reasoning on its owning call/reply row.
-#[tokio::test]
-async fn standard_rows_carry_provenance_in_commit_order() {
-    let (view, turn_id) = two_round_turn().await;
-    let transcript = view.transcript().expect("project committed nodes");
-    assert_eq!(
-        transcript.rows().len(),
-        view.session_graph().nodes.len(),
-        "every committed node contributes a row, including suppressions"
-    );
-    let rows: Vec<_> = transcript.visible().collect();
-    assert_eq!(
-        rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
-        [
-            TranscriptRowKind::User,
-            TranscriptRowKind::ToolCall,
-            TranscriptRowKind::ToolCall,
-            TranscriptRowKind::ToolCall,
-            TranscriptRowKind::ToolCall,
-            TranscriptRowKind::ToolCall,
-            TranscriptRowKind::AssistantReply,
-        ]
-    );
-    for row in &rows {
-        assert_eq!(row.provenance.turn_id.as_ref(), Some(&turn_id), "{row:?}");
-    }
-    let statuses: Vec<Vec<&str>> = rows
-        .iter()
-        .map(|row| {
-            row.content
-                .tools
-                .iter()
-                .map(|tool| tool.status.as_str())
-                .collect()
-        })
-        .collect();
-    assert_eq!(
-        statuses,
-        [
-            vec![],
-            vec!["requested"],
-            vec!["success"],
-            vec!["requested", "requested"],
-            vec!["failure"],
-            vec!["success"],
-            vec![]
-        ]
-    );
-    for (call_row, call_index, result_row) in [(1, 0, 2), (3, 0, 4), (3, 1, 5)] {
-        assert_eq!(
-            rows[call_row].content.tools[call_index].call_id,
-            rows[result_row].content.tools[0].call_id,
-            "call precedes its own result"
-        );
-    }
-    for (index, round) in [(1, 0), (3, 1), (6, 2)] {
-        assert_eq!(
-            rows[index].content.reasoning,
-            [format!("Reasoning for round {round}.")]
-        );
-    }
-    assert!(rows[6].provenance.is_turn_reply);
-    assert_eq!(rows[6].content.text, "Both rounds finished.");
 }
 
 /// ADR 0129: the shared production renderer harness preserves the prose,

@@ -1473,13 +1473,10 @@ mod attachment_notice_order_tests {
     async fn attachment_notice_follows_a_step_that_replaces_the_model_parts() {
         let step: super::super::ToolPresentationStep = Arc::new(|input| {
             Box::pin(async move {
-                Ok(super::super::PresentedToolReturn {
-                    model_return: crate::ModelToolReturn::text(
-                        input.context.tool_name,
-                        "replacement".to_string(),
-                    ),
-                    display: input.previous.display,
-                })
+                Ok(crate::ModelToolReturn::text(
+                    input.context.tool_name,
+                    "replacement".to_string(),
+                ))
             })
         });
         let host = crate::testing::test_plugin_host(vec![Arc::new(

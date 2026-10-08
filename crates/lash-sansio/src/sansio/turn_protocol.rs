@@ -41,11 +41,6 @@ pub struct CompletedToolCall<I = ()> {
     pub args: Value,
     pub output: ToolCallOutput,
     pub model_return: ModelToolReturn,
-    /// What a host shows of the call, as its presentation recorded it
-    /// (FIG-5290). It is committed with the call's result and never
-    /// rendered to a model.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display: Option<crate::ToolDisplay>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub intent_outcomes: Vec<I>,
     /// See [`PendingToolCall::replay`].

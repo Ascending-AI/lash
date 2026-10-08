@@ -23,10 +23,6 @@ pub struct ToolCallOutput {
     /// Optional display projection for a successful result; `outcome` remains the code value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projection_value: Option<Value>,
-    /// What a host shows of the call (FIG-5290): committed with its
-    /// transcript record, never rendered to a model.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display: Option<crate::ToolDisplay>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -146,7 +142,6 @@ impl ToolCallOutput {
             control: None,
             view: None,
             projection_value: None,
-            display: None,
         }
     }
 
@@ -156,7 +151,6 @@ impl ToolCallOutput {
             control: None,
             view: None,
             projection_value: None,
-            display: None,
         }
     }
 
@@ -166,7 +160,6 @@ impl ToolCallOutput {
             control: None,
             view: None,
             projection_value: None,
-            display: None,
         }
     }
 
@@ -182,12 +175,6 @@ impl ToolCallOutput {
 
     pub fn with_projection_value(mut self, value: Value) -> Self {
         self.projection_value = Some(value);
-        self
-    }
-
-    /// Declare what a host shows of this call; a model never sees it.
-    pub fn with_display(mut self, display: crate::ToolDisplay) -> Self {
-        self.display = Some(display);
         self
     }
 
@@ -283,17 +270,6 @@ pub enum ToolCallStatus {
     Success,
     Failure,
     Cancelled,
-}
-
-impl ToolCallStatus {
-    /// The status's wire spelling.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Success => "success",
-            Self::Failure => "failure",
-            Self::Cancelled => "cancelled",
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

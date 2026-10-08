@@ -82,14 +82,12 @@ impl TranscriptRowProjectorPlugin for RlmTranscriptProjector {
                         .calls
                         .into_iter()
                         .map(|call| RowTool {
-                            call_id: call.call_id,
                             operation: call.operation,
                             status: match call.outcome {
                                 lash_rlm_types::RlmExecutedCallOutcome::Ok => "success",
                                 lash_rlm_types::RlmExecutedCallOutcome::Err => "failure",
                             }
                             .into(),
-                            display: call.display,
                         })
                         .collect();
                     TranscriptProjectionOutcome::Render {

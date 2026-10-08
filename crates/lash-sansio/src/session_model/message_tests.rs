@@ -53,8 +53,6 @@ fn a_result_appended_to_cached_history_keeps_its_original_provider_correlation()
             vec![ModelToolReturnPart::text("resolved")],
             call_id,
             "lookup".into(),
-            crate::ToolCallStatus::Success,
-            None,
         )]),
         origin: None,
         reply_marker: None,
@@ -272,8 +270,6 @@ fn render_structured_prompt_preserves_tool_protocol_and_user_images() {
                 vec![crate::ModelToolReturnPart::text("ok")],
                 crate::ToolCallId::fixture("tc1"),
                 "read_file".to_string(),
-                crate::ToolCallStatus::Success,
-                None,
             )]
             .into(),
             origin: None,
@@ -332,8 +328,6 @@ fn render_structured_prompt_preserves_empty_tool_results() {
                 Vec::new(),
                 crate::ToolCallId::fixture("ask_1"),
                 "ask".to_string(),
-                crate::ToolCallStatus::Success,
-                None,
             )]
             .into(),
             origin: None,
@@ -486,8 +480,6 @@ fn prompt_resume_safety_accepts_completed_tool_history() {
                 vec![crate::ModelToolReturnPart::text("ok")],
                 crate::ToolCallId::fixture("tc1"),
                 "read_file".to_string(),
-                crate::ToolCallStatus::Success,
-                None,
             )]
             .into(),
             origin: None,
@@ -627,8 +619,6 @@ fn fig1123_only_committed_turn_inputs_start_genuine_user_segments() {
                 vec![crate::ModelToolReturnPart::text("synthetic")],
                 crate::ToolCallId::fixture("synthetic"),
                 "tool".to_string(),
-                crate::ToolCallStatus::Success,
-                None,
             )]
             .into(),
             origin: Some(MessageOrigin::Plugin {
@@ -750,8 +740,6 @@ fn tool_result_attachments_are_counted_and_distinctly_identified() {
         ],
         crate::ToolCallId::fixture("call-1"),
         "shot".into(),
-        crate::ToolCallStatus::Success,
-        None,
     );
     assert_eq!(
         result.identified_attachment_sources(),

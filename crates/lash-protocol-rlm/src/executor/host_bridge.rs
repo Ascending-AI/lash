@@ -173,7 +173,6 @@ impl<'run> HostBridge<'run> {
         operation: String,
         outcome: lash_core::ExecutedCallOutcome,
         host_record: Option<lash_core::ToolCallRecord>,
-        display: Option<lash_core::ToolDisplay>,
     ) -> Result<(), ExecutionHostError> {
         // This ledger records dispatches only. Resolution, argument, and other
         // pre-dispatch failures deliberately produce no `Calls:` entry because
@@ -184,7 +183,6 @@ impl<'run> HostBridge<'run> {
                 operation,
                 outcome,
                 host_record,
-                display,
             },
         ));
         Ok(())
@@ -202,19 +200,9 @@ impl<'run> HostBridge<'run> {
         } else {
             lash_core::ExecutedCallOutcome::Err
         };
-        let display = reply
-            .completed
-            .as_ref()
-            .and_then(|completed| completed.display.clone());
         let (result, host_record) = self.consume_reply(reply, replay_key);
         if let Some(host_record) = host_record {
-            self.record_executed_call(
-                index,
-                operation.to_string(),
-                outcome,
-                Some(host_record),
-                display,
-            )?;
+            self.record_executed_call(index, operation.to_string(), outcome, Some(host_record))?;
         }
         result
     }

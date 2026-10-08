@@ -734,7 +734,6 @@ fn completed_checkpoint_tool(index: usize, call: PendingToolCall) -> CompletedTo
         })),
     };
     CompletedToolCall {
-        display: None,
         call_id: call.call_id.clone(),
         provider_call_id: call.provider_call_id.clone(),
         tool_name: call.tool_name.clone(),

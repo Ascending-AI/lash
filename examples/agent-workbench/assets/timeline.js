@@ -349,9 +349,7 @@ function cleanArgs(args) {
 }
 
 function compactToolPayload(event) {
-  if (event?.kind === "durable_summary") {
-    return event.display ? { status: event.status, display: event.display } : { status: event.status };
-  }
+  if (event?.kind === "durable_summary") return { status: event.status };
   const succeeded = toolSucceeded(event);
   const running = toolRunning(event);
   return {
@@ -393,31 +391,7 @@ function createToolView() {
   head.append(name, badge, timing);
   const summary = el("div", "tool-summary");
   node.append(head, summary);
-  return { node, name, badge, timing, summary, display: null, payload: null, signature: "" };
-}
-
-/* What the call's tool declared for a reader (its committed display): the
-   argument summary and the citations and links. The result summary is the
-   row's summary line. */
-function toolDisplayNode(display) {
-  const node = el("div", "tool-display");
-  if (display.arguments) node.appendChild(el("div", "tool-arguments", display.arguments));
-  const links = display.links || [];
-  if (links.length) {
-    const list = el("div", "tool-links");
-    for (const link of links) {
-      const anchor = el("a", "tool-link", link.title || link.uri);
-      anchor.href = link.uri;
-      anchor.target = "_blank";
-      anchor.rel = "noopener noreferrer";
-      if (link.title) anchor.dataset.title = link.title;
-      if (link.description) anchor.title = link.description;
-      list.appendChild(anchor);
-    }
-    node.appendChild(list);
-  }
-  if (display.truncated) node.appendChild(el("div", "tool-truncated", "display shortened"));
-  return node;
+  return { node, name, badge, timing, summary, payload: null, signature: "" };
 }
 
 function patchToolView(view, event) {
@@ -437,25 +411,16 @@ function patchToolView(view, event) {
   view.node.className = "tool" + (running ? " pending" : (ok ? "" : " fail"));
   view.name.textContent = durable ? event.operation : displayToolName(event.name);
   view.badge.textContent = running ? "running" : (ok ? "completed" : "failed");
-  const display = durable ? event.display : null;
   view.timing.textContent = durable
-    ? (display ? "committed" : "durable outcome only")
+    ? "durable outcome only"
     : running
     ? "in progress"
     : `${ok ? "ok" : "failed"} in ${event.duration_ms || 0}ms`;
-  view.summary.textContent = display
-    ? display.result || `Tool ${ok ? "completed" : "failed"}`
-    : durable
+  view.summary.textContent = durable
     ? `Tool ${ok ? "completed" : "failed"} · arguments, result, duration, and call identity unavailable after reload`
     : running
     ? "Tool running"
     : (ok ? summarizeToolResult(event.name, toolResult(event)) : "Tool failed");
-  view.summary.dataset.declared = display?.result ? "result" : "";
-  const displayNode = display ? toolDisplayNode(display) : null;
-  if (view.display) view.display.remove();
-  if (displayNode && view.payload) view.node.insertBefore(displayNode, view.payload);
-  else if (displayNode) view.node.appendChild(displayNode);
-  view.display = displayNode;
   const payload = payloadDisclosure(
     "JSON payload",
     JSON.stringify(compactToolPayload(event), null, 2),
@@ -956,25 +921,13 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
         const text = committed ? committed.row.content.text : product?.message.text || "";
         const at = committed ? committed.row.timestamp : product?.message.at;
         const attachments = committed ? committedAttachments(committed.row.content) : product?.message.attachments || [];
-        /* A committed tool call whose tool declared a display shows it; one
-           that declared none keeps its text alone. */
-        const tools = committed ? (committed.row.content.tools || []).filter(tool => tool.display) : [];
-        const signature = JSON.stringify([text, at, attachments, tools]);
+        const signature = JSON.stringify([text, at, attachments]);
         if (signature === view.signature) return;
         view.signature = signature;
         view.body.replaceChildren();
         view.gallery = null;
         view.gallerySignature = "";
         fillEventLane(view.node, view.body, "event", text, at);
-        if (tools.length) {
-          const box = el("div", "code-tools");
-          for (const tool of tools) {
-            const toolView = createToolView();
-            patchToolView(toolView, { kind: "durable_summary", ...tool });
-            box.appendChild(toolView.node);
-          }
-          view.body.appendChild(box);
-        }
         patchAttachments(view, attachments);
       }
     },

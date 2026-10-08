@@ -1,13 +1,12 @@
 use crate::ProcessId;
 use crate::ToolCallId;
-use crate::ToolDisplay;
 use crate::TurnId;
 use crate::append_vec::AppendVec;
 use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay,
     ProviderReplayMeta, ResponseTextMeta,
 };
-use crate::tool_output::{ModelToolReturnPart, ToolCallStatus, tool_result_text};
+use crate::tool_output::{ModelToolReturnPart, tool_result_text};
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::{Arc, OnceLock};
@@ -261,15 +260,12 @@ pub enum Part {
     /// blocks in the order the tool's value produced them. A call is
     /// answered by exactly one result part, whatever its value holds. It
     /// pairs with its call by `call_id`; an adapter answers the provider
-    /// with the paired call's correlation. `status` and `display` are the
-    /// call's transcript row (FIG-5290): no model rendering reads them.
+    /// with the paired call's correlation.
     ToolResult {
         id: String,
         content: Vec<ModelToolReturnPart>,
         call_id: ToolCallId,
         tool_name: String,
-        status: ToolCallStatus,
-        display: Option<ToolDisplay>,
     },
     /// Chain-of-thought / reasoning item captured from providers that
     /// expose a reasoning channel. `content` holds the human-readable
@@ -333,10 +329,6 @@ struct FlatPart {
     reasoning_meta: Option<ProviderReasoningReplay>,
     #[serde(default)]
     response_meta: Option<ResponseTextMeta>,
-    #[serde(default)]
-    status: Option<ToolCallStatus>,
-    #[serde(default)]
-    display: Option<ToolDisplay>,
 }
 
 impl FlatPart {
@@ -381,8 +373,6 @@ impl FlatPart {
                 self.response_meta.is_some(),
                 matches!(self.kind, Text | Prose),
             ),
-            ("status", self.status.is_some(), self.kind == ToolResult),
-            ("display", self.display.is_some(), self.kind == ToolResult),
         ];
         tainted
             .into_iter()
@@ -454,8 +444,6 @@ impl FlatPart {
                     content: self.blocks.ok_or_else(|| missing("missing:blocks"))?,
                     call_id,
                     tool_name,
-                    status: self.status.ok_or_else(|| missing("missing:status"))?,
-                    display: self.display,
                 }
             }
             PartKind::Reasoning => Part::Reasoning {
@@ -493,10 +481,6 @@ struct FlatPartRef<'a> {
     reasoning_meta: Option<&'a ProviderReasoningReplay>,
     #[serde(skip_serializing_if = "Option::is_none")]
     response_meta: Option<&'a ResponseTextMeta>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    status: Option<ToolCallStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    display: Option<&'a ToolDisplay>,
 }
 
 impl serde::Serialize for Part {
@@ -513,8 +497,6 @@ impl serde::Serialize for Part {
             tool_replay: self.tool_replay(),
             reasoning_meta: self.reasoning_meta(),
             response_meta: self.response_meta(),
-            status: self.tool_status(),
-            display: self.tool_display(),
         }
         .serialize(serializer)
     }
@@ -652,8 +634,6 @@ impl Part {
                 content: vec![ModelToolReturnPart::text(content)],
                 call_id: ToolCallId::fixture("base"),
                 tool_name: String::new(),
-                status: ToolCallStatus::Success,
-                display: None,
             },
             PartKind::Reasoning => Self::Reasoning {
                 id,
@@ -881,24 +861,6 @@ impl Part {
         }
     }
 
-    /// How the call a tool result answers settled; `Some` only for tool
-    /// results. Display-only: no model rendering reads it.
-    pub fn tool_status(&self) -> Option<ToolCallStatus> {
-        match self {
-            Self::ToolResult { status, .. } => Some(*status),
-            _ => None,
-        }
-    }
-
-    /// What a host shows of the call a tool result answers, when its tool
-    /// or a presentation step declared one. Never rendered to a model.
-    pub fn tool_display(&self) -> Option<&ToolDisplay> {
-        match self {
-            Self::ToolResult { display, .. } => display.as_ref(),
-            _ => None,
-        }
-    }
-
     /// Provider replay token on a tool call; `Some` only for tool-call
     /// parts that carry one.
     pub fn tool_replay(&self) -> Option<&ProviderReplayMeta> {
@@ -987,23 +949,18 @@ impl Part {
     }
 
     /// The one result answering `call_id`, carrying the tool's text and
-    /// attachment blocks in order, and the call's `status` and `display`
-    /// for its transcript row.
+    /// attachment blocks in order.
     pub fn tool_result(
         id: String,
         content: Vec<ModelToolReturnPart>,
         call_id: ToolCallId,
         tool_name: String,
-        status: ToolCallStatus,
-        display: Option<ToolDisplay>,
     ) -> Self {
         Self::ToolResult {
             id,
             content,
             call_id,
             tool_name,
-            status,
-            display,
         }
     }
 

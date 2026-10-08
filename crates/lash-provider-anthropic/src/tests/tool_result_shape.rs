@@ -33,8 +33,6 @@ fn transcript(content: Vec<ModelToolReturnPart>) -> Vec<Message> {
                 content,
                 lash_core::ToolCallId::fixture("call_1"),
                 "shot".into(),
-                lash_sansio::ToolCallStatus::Success,
-                None,
             )]),
             origin: None,
             reply_marker: None,

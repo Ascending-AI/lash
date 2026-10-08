@@ -842,7 +842,6 @@ fn rlm_exec_response_with_tool_calls(
     let calls = tool_calls
         .into_iter()
         .map(|host_record| lash_core::ExecutedCall {
-            display: None,
             operation: format!("tools.{}", host_record.tool),
             outcome: if host_record.output.is_success() {
                 lash_core::ExecutedCallOutcome::Ok

@@ -140,7 +140,7 @@ impl ProductionToolHandlers<'_> {
             .get(call_id)
             .cloned()
             .ok_or_else(|| encoding(format!("call {call_id} has no admitted preparation")))?;
-        let (output, model_return, display, intent_outcomes) = match end {
+        let (output, model_return, intent_outcomes) = match end {
             // An isolated final presents the descriptor of the process it
             // started; no ordinary body produced an output.
             CallEnd::Final {
@@ -153,7 +153,7 @@ impl ProductionToolHandlers<'_> {
                 );
                 let model_return =
                     crate::ModelToolReturn::from_output(prepared.call.tool_name.clone(), &output);
-                (output, model_return, None, Vec::new())
+                (output, model_return, Vec::new())
             }
             CallEnd::Final {
                 capture,
@@ -183,19 +183,14 @@ impl ProductionToolHandlers<'_> {
                     .iter()
                     .map(|outcome| crate::ModelToolReturnPart::text(outcome.model_addendum())),
                 );
-                (
-                    output,
-                    model_return,
-                    presented.presentation.display,
-                    presented.intent_outcomes,
-                )
+                (output, model_return, presented.intent_outcomes)
             }
             CallEnd::Withheld { decision, cause } => {
                 let output = super::observations::terminal_output(decision, cause.as_ref(), None)
                     .map_err(encoding)?;
                 let model_return =
                     crate::ModelToolReturn::from_output(prepared.call.tool_name.clone(), &output);
-                (output, model_return, None, Vec::new())
+                (output, model_return, Vec::new())
             }
         };
         Ok(crate::sansio::CompletedToolCall {
@@ -205,7 +200,6 @@ impl ProductionToolHandlers<'_> {
             args: prepared.call.args,
             output,
             model_return,
-            display,
             intent_outcomes,
             replay: prepared.call.replay,
         })

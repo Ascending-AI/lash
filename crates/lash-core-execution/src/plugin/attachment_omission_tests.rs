@@ -67,8 +67,6 @@ fn history() -> Vec<Message> {
                 ],
                 call,
                 "look".into(),
-                lash_sansio::ToolCallStatus::Success,
-                None,
             )],
         ),
         message(

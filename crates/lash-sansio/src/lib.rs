@@ -33,7 +33,6 @@ mod tool_call_id;
 pub mod tool_catalog;
 pub mod tool_contract;
 mod tool_declaration;
-mod tool_display;
 mod tool_intents;
 pub mod tool_output;
 pub mod turn;
@@ -200,9 +199,6 @@ pub use tool_contract::{
 };
 pub use tool_declaration::{
     DeclarationRefusal, OutcomeShape, ToolAdmissionRefusal, ToolDeclaration,
-};
-pub use tool_display::{
-    TOOL_DISPLAY_LIMIT_BYTES, ToolDisplay, ToolDisplayLink, ToolDisplayTruncation,
 };
 pub use tool_output::{
     AttachmentMaterializationNotice, AttachmentMaterializationReason,

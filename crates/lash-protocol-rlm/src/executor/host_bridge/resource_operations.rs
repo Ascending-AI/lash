@@ -391,17 +391,12 @@ impl HostBridge<'_> {
                 lash_core::ExecutedCallOutcome::Err
             }
         };
-        let display = reply
-            .completed
-            .as_ref()
-            .and_then(|completed| completed.display.clone());
         let (result, host_record) = self.consume_reply(reply, replay_key);
         self.record_executed_call(
             dispatched.execution_index,
             dispatched.call.source_operation.clone(),
             outcome,
             host_record,
-            display,
         )
         .and(result)
     }
@@ -420,7 +415,6 @@ impl HostBridge<'_> {
             dispatched.execution_index,
             dispatched.call.source_operation.clone(),
             outcome,
-            None,
             None,
         )
         .and(result)

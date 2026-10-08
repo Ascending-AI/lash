@@ -13,21 +13,6 @@ function block(asset, begin, end) {
 const attachmentOf = attachment => ({attachment_id: attachment.id, retrieve_url: `/api/attachments/${encodeURIComponent(attachment.id)}`});
 const galleryOf = node => (node.querySelector('.message-attachments')?.children || [])
   .map(link => ({attachment_id: link.dataset.attachmentId, retrieve_url: link.href}));
-/* A tool's declared display as a reader sees it; `null` when it declared
-   none. */
-const displayOf = tool => {
-  const display = tool.querySelector('.tool-display');
-  if (!display) return null;
-  const summary = tool.querySelector('.tool-summary');
-  return {arguments: display.querySelector('.tool-arguments')?.textContent ?? null,
-    result: summary.dataset.declared === 'result' ? summary.textContent : null,
-    links: (display.querySelector('.tool-links')?.children || []).map(link => ({uri: link.href, title: link.dataset.title ?? null})),
-    truncated: Boolean(display.querySelector('.tool-truncated'))};
-};
-const expectedDisplay = display => display ? {arguments: display.arguments ?? null, result: display.result ?? null,
-  links: (display.links || []).map(link => ({uri: link.uri, title: link.title ?? null})), truncated: Boolean(display.truncated)} : null;
-const displayedTools = node => node.querySelectorAll('.tool').filter(tool => tool.querySelector('.tool-display'))
-  .map(tool => ({operation: tool.querySelector('strong').textContent, display: displayOf(tool)}));
 const prose = text => String(text ?? '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
   .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
 
@@ -43,17 +28,16 @@ function observe(node) {
       failed: node.classList.contains('fail'),
       attachments: galleryOf(node),
       tools: tools.filter(tool => !tool.classList.contains('omitted'))
-        .map(tool => ({operation: tool.querySelector('strong').textContent, status: JSON.parse(tool.querySelector('pre').textContent).status,
-          display: displayOf(tool)})),
+        .map(tool => ({operation: tool.querySelector('strong').textContent, status: JSON.parse(tool.querySelector('pre').textContent).status})),
       tools_omitted: tools.filter(tool => tool.classList.contains('omitted')).length ? Number(tools.at(-1).textContent.split(' ')[0]) : 0,
     }};
   }
   if (node.classList.contains('event')) {
     const title = node.querySelector('.event-title')?.textContent || '';
     const detail = node.querySelector('.msg-body').children.find(child => child.classList.contains('payload'))?.querySelector('pre').textContent;
-    return {kind: 'message', value: {text: prose(detail ? `${title}\n${detail}` : title), attachments: galleryOf(node), tools: displayedTools(node)}};
+    return {kind: 'message', value: {text: prose(detail ? `${title}\n${detail}` : title), attachments: galleryOf(node)}};
   }
-  return {kind: 'message', value: {text: prose(node.querySelector('.msg-text').textContent), attachments: galleryOf(node), tools: displayedTools(node)}};
+  return {kind: 'message', value: {text: prose(node.querySelector('.msg-text').textContent), attachments: galleryOf(node)}};
 }
 
 // The production timeline module runs unchanged over a tree DOM; what it
@@ -91,13 +75,10 @@ export function verifyTranscriptSurface(surface, asset, rows, displayOrder = row
     if (row.kind === 'code_block') {
       expected.push({kind: 'code', value: {label: content.language || 'code', code: content.code || '',
         output: [content.output, content.error].filter(Boolean).join('\n'), failed: Boolean(content.error),
-        attachments: content.attachments.map(attachmentOf),
-        tools: content.tools.map(tool => ({operation: tool.operation, status: tool.status, display: expectedDisplay(tool.display)})),
-        tools_omitted: content.tools_omitted}});
+        attachments: content.attachments.map(attachmentOf), tools: content.tools, tools_omitted: content.tools_omitted}});
       expectedIds.push(row.row_id);
     } else if (row.kind !== 'reasoning') {
-      expected.push({kind: 'message', value: {text: prose(content.text), attachments: content.attachments.map(attachmentOf),
-        tools: content.tools.filter(tool => tool.display).map(tool => ({operation: tool.operation, display: expectedDisplay(tool.display)}))}});
+      expected.push({kind: 'message', value: {text: prose(content.text), attachments: content.attachments.map(attachmentOf)}});
       expectedIds.push(row.row_id);
     }
   }
@@ -121,12 +102,6 @@ export function allKindRecords() {
       attachments: kind === 'attachment' ? [{id:'sha256:one'}, {id:'sha256:two'}] : [],
       language: kind === 'code_block' ? 'typescript' : null, code: kind === 'code_block' ? 'print(1)' : null,
       output: kind === 'code_block' ? '1' : null, success: kind === 'code_block' ? true : null, error: null,
-      tools: kind === 'code_block' ? [{call_id: null, operation:'board.move', status:'ok', display: null},
-          {call_id: 'tc_search', operation:'web.search', status:'success', display: {arguments: 'lash durable sessions',
-            result: '2 results', links: [{uri: 'https://example.test/a', title: 'A'}, {uri: 'https://example.test/b'}]}}]
-        : kind === 'tool_call' ? [{call_id: 'tc_fetch', operation: 'fetch', status: 'success',
-          display: {arguments: 'https://example.test/page', result: 'HTTP 200', truncated: {original_bytes: 20000, limit_bytes: 16384}}}]
-        : [],
-      tools_omitted: kind === 'code_block' ? 3 : 0},
+      tools: kind === 'code_block' ? [{operation:'board.move', status:'ok'}] : [], tools_omitted: kind === 'code_block' ? 3 : 0},
   }));
 }

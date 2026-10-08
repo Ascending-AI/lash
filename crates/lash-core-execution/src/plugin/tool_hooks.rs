@@ -122,8 +122,6 @@ pub struct ToolResultCandidate {
     pub outcome: crate::ToolCallOutcome,
     pub view: Option<crate::ToolView>,
     pub projection_value: Option<serde_json::Value>,
-    /// What a host shows of the call; never rendered to a model.
-    pub display: Option<crate::ToolDisplay>,
 }
 
 impl ToolResultCandidate {
@@ -133,14 +131,12 @@ impl ToolResultCandidate {
             control,
             view,
             projection_value,
-            display,
         } = output;
         (
             Self {
                 outcome,
                 view,
                 projection_value,
-                display,
             },
             control,
         )
@@ -152,7 +148,6 @@ impl ToolResultCandidate {
             control,
             view: self.view,
             projection_value: self.projection_value,
-            display: self.display,
         }
     }
 }
@@ -187,7 +182,6 @@ pub struct CachedToolSuccess {
     pub value: crate::ToolValue,
     pub view: Option<crate::ToolView>,
     pub projection_value: Option<serde_json::Value>,
-    pub display: Option<crate::ToolDisplay>,
 }
 
 impl CachedToolSuccess {
@@ -196,7 +190,6 @@ impl CachedToolSuccess {
             value,
             view: None,
             projection_value: None,
-            display: None,
         }
     }
 
@@ -205,7 +198,6 @@ impl CachedToolSuccess {
             outcome: crate::ToolCallOutcome::Success(self.value),
             view: self.view,
             projection_value: self.projection_value,
-            display: self.display,
         }
     }
 }

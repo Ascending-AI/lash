@@ -686,14 +686,9 @@ fn executed_call_ledger(records: &[lash_core::ExecutedCall]) -> (Vec<RlmExecuted
     let calls = records
         .iter()
         .skip(omitted)
-        .map(|call| RlmExecutedCall {
+        .map(|call| lash_core::ExecutedCallRecord {
             operation: call.operation.clone(),
             outcome: call.outcome,
-            call_id: call
-                .host_record
-                .as_ref()
-                .map(|record| record.call_id.clone()),
-            display: call.display.clone(),
         })
         .collect();
     (calls, omitted)
@@ -747,7 +742,6 @@ fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
         control,
         view: None,
         projection_value: None,
-        display: None,
     }
 }
 

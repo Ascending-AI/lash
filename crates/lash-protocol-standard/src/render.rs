@@ -2,9 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
-use lash_core::facade_support::{
-    ModelToolReturn, ModelToolReturnPart, PresentedToolReturn, ToolPresentationInput,
-};
+use lash_core::facade_support::{ModelToolReturn, ModelToolReturnPart, ToolPresentationInput};
 use lash_core::{
     RecordedRender, RuntimeErrorCode, ToolCallOutcome, ToolCallOutput, ToolId, ToolViewBlock,
 };
@@ -431,17 +429,8 @@ fn head_tail(
 pub async fn present(
     input: ToolPresentationInput,
     renderer: &ToolOutputRendererSlot,
-) -> Result<PresentedToolReturn, lash_core::RuntimeEffectControllerError> {
-    // The renderer shapes the model-facing return only; the display the
-    // tool declared passes through untouched.
-    let PresentedToolReturn {
-        model_return,
-        display,
-    } = input.previous;
-    Ok(PresentedToolReturn {
-        model_return: render_present(model_return, &input.context, renderer).await?,
-        display,
-    })
+) -> Result<ModelToolReturn, lash_core::RuntimeEffectControllerError> {
+    render_present(input.previous, &input.context, renderer).await
 }
 
 async fn render_present(

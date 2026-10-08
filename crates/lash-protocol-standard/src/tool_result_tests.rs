@@ -89,12 +89,7 @@ fn committed_tool_results_agree_with_the_resume_safety_check() {
         .cloned()
         .zip(labels)
         .map(|(model_return, label)| {
-            tool_result_part(
-                lash_core::ToolCallId::fixture(label),
-                model_return,
-                lash_core::facade_support::ToolCallStatus::Success,
-                None,
-            )
+            tool_result_part(lash_core::ToolCallId::fixture(label), model_return)
         })
         .collect();
     let transcript = vec![

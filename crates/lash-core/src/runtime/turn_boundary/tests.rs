@@ -340,8 +340,6 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
             content,
             crate::ToolCallId::fixture(call_id),
             "shot".to_string(),
-            lash_sansio::ToolCallStatus::Success,
-            None,
         )]),
         origin: None,
         reply_marker: None,

@@ -19,23 +19,12 @@ pub struct ToolPresentationFacts {
     pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
 }
 
-/// What a presentation step answers: the model-facing return, and beside
-/// it what a host shows of the call (FIG-5290). The display is journaled
-/// with the presentation and committed with the call's transcript record;
-/// it never reaches a model. A step may replace or clear it.
-#[derive(Clone, Debug, PartialEq)]
-pub struct PresentedToolReturn {
-    pub model_return: crate::ModelToolReturn,
-    pub display: Option<crate::ToolDisplay>,
-}
-
 /// One presentation step folds the previous return with recorded declaration facts.
 /// Retaining bytes goes through the journaled artifact port.
 pub struct ToolPresentationInput {
-    /// What the chain has produced so far: `ModelToolReturn::from_output`
-    /// and the tool's own display before the first step, then each prior
-    /// step's answer.
-    pub previous: PresentedToolReturn,
+    /// The return the chain has produced so far — `ModelToolReturn::from_output`
+    /// before the first step, then each prior step's answer.
+    pub previous: crate::ModelToolReturn,
     /// Read-only evidence of the declarations realized before presentation.
     pub facts: Arc<ToolPresentationFacts>,
     pub context: ToolResultProjectionContext,
@@ -46,7 +35,7 @@ pub struct ToolPresentationInput {
 /// Only sequential before/after-turn, checkpoint and after-tool result checks
 /// may propose commands; their publication belongs to the Run coordinator.
 pub type ToolPresentationStep =
-    Arc<dyn Fn(ToolPresentationInput) -> PluginFuture<PresentedToolReturn> + Send + Sync>;
+    Arc<dyn Fn(ToolPresentationInput) -> PluginFuture<crate::ModelToolReturn> + Send + Sync>;
 pub type ToolPresentationPresenter = Arc<
     dyn Fn(
             ToolPresentationInput,
@@ -54,7 +43,7 @@ pub type ToolPresentationPresenter = Arc<
             Box<
                 dyn Future<
                         Output = Result<
-                            PresentedToolReturn,
+                            crate::ModelToolReturn,
                             crate::runtime::effect::RuntimeEffectControllerError,
                         >,
                     > + Send,

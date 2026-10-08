@@ -108,8 +108,6 @@ pub struct RemoteProcessToolCallOutput {
     pub view: Option<lash_sansio::ToolView>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projection_value: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display: Option<Box<lash_sansio::ToolDisplay>>,
 }
 
 impl RemoteProcessToolCallOutput {
