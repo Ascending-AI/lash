@@ -659,3 +659,270 @@ async fn mcp_law_turn_failures_sqlite_file() {
 async fn mcp_law_turn_failures_postgres() {
     turn_witness(Store::Postgres, true).await;
 }
+
+/// D-DEFAULTS2 / FIG-5494: optional MCP lifecycle choices survive host JSON.
+#[test]
+fn mcp_lifecycle_choices_are_preserved_in_host_json() {
+    for reconnect in [
+        serde_json::json!("disabled"),
+        serde_json::json!({"finite": 2}),
+        serde_json::json!("unlimited"),
+    ] {
+        let authored = serde_json::json!({
+            "transport": "stdio", "command": "srv",
+            "startup_timeout_ms": 41,
+            "call_timeout_ms": 17, "call_max_total_timeout_ms": 53,
+            "reset_call_timeout_on_progress": false,
+            "timeout_disconnect_policy": "consecutive_timeouts",
+            "liveness_probe_timeout_ms": 7,
+            "consecutive_timeouts_before_disconnect": 2,
+            "liveness_probe_interval_ms": 11,
+            "reconnect_initial_backoff_ms": 3, "reconnect_max_backoff_ms": 13,
+            "reconnect_max_attempts": reconnect,
+            "graceful_period_ms": 19, "post_kill_wait_ms": 23,
+            "scheduling_margin_ms": 29, "child_exit_poll_interval_ms": 2
+        });
+        let config: McpServerConfig = serde_json::from_value(authored.clone())
+            .expect("explicit reconnect modes are admitted");
+        assert_eq!(serde_json::to_value(config).expect("host JSON"), authored);
+    }
+    for reconnect in [serde_json::json!(0), serde_json::json!({"finite": 0})] {
+        assert!(
+            serde_json::from_value::<McpServerConfig>(serde_json::json!({
+                "transport":"stdio", "command":"srv", "reconnect_max_attempts":reconnect
+            }))
+            .is_err(),
+            "overloaded zero is not a 1.0 reconnect choice"
+        );
+    }
+    let omitted: McpServerConfig = serde_json::from_value(serde_json::json!({
+        "transport":"stdio", "command":"srv"
+    }))
+    .expect("lifecycle choices stay optional");
+    assert_eq!(
+        omitted,
+        McpServerConfig::stdio(McpStdioTransport::new("srv", vec![]))
+    );
+}
+
+const LIFECYCLE_PEER: &str = r#"
+import json, os, signal, sys, threading, time
+if os.environ['MODE'] == 'shutdown':
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with open(os.environ['STARTS'], 'a') as f:
+    f.write('start\n')
+def send(m):
+    print(json.dumps(m), flush=True)
+for line in sys.stdin:
+    m = json.loads(line)
+    method = m.get('method')
+    if method == 'initialize' and os.environ['MODE'] != 'startup':
+        send({'jsonrpc':'2.0','id':m['id'],'result':{
+            'protocolVersion':'2025-11-25','capabilities':{'tools':{}},
+            'serverInfo':{'name':'lifecycle','version':'1'}}})
+    elif method == 'tools/list':
+        send({'jsonrpc':'2.0','id':m['id'],'result':{'tools':[
+            {'name':'work','inputSchema':{'type':'object'}}]}})
+    elif method == 'tools/call' and os.environ['MODE'] == 'progress':
+        token = m['params']['_meta']['progressToken']
+        def progress(token):
+            for i in range(100):
+                send({'jsonrpc':'2.0','method':'notifications/progress',
+                    'params':{'progressToken':token,'progress':i}})
+                time.sleep(0.005)
+        threading.Thread(target=progress, args=(token,), daemon=True).start()
+if os.environ['MODE'] == 'shutdown':
+    while True:
+        time.sleep(1)
+
+"#;
+
+/// D-DEFAULTS2: facade call/probe choices govern actual attempts and bindings.
+#[tokio::test]
+async fn mcp_call_policy_controls_attempts_and_recorded_bindings() {
+    use lash::mcp::{
+        McpCallPolicy, McpConnectionPool, McpShutdownPolicy, ReconnectAttempts,
+        TimeoutDisconnectPolicy,
+    };
+    for (mode, disconnect) in [
+        ("silent", TimeoutDisconnectPolicy::Never),
+        ("progress", TimeoutDisconnectPolicy::Never),
+        ("silent", TimeoutDisconnectPolicy::PingProbe),
+    ] {
+        let root = tempfile::tempdir().expect("fixture");
+        let policy = McpCallPolicy {
+            call_timeout_ms: 20,
+            call_max_total_timeout_ms: 70,
+            timeout_disconnect_policy: disconnect,
+            liveness_probe_timeout_ms: 30,
+            reconnect_max_attempts: ReconnectAttempts::Disabled,
+            ..McpCallPolicy::standard()
+        };
+        let mut config = McpServerConfig::stdio(
+            McpStdioTransport::new(
+                "python3",
+                vec!["-u".into(), "-c".into(), LIFECYCLE_PEER.into()],
+            )
+            .with_env([
+                ("MODE", mode.to_string()),
+                ("STARTS", root.path().join("starts").display().to_string()),
+            ]),
+        );
+        config.call_policy = policy.clone();
+        config.shutdown_policy = McpShutdownPolicy {
+            graceful_period: Duration::from_millis(5),
+            post_kill_wait: Duration::from_millis(7),
+            scheduling_margin: Duration::from_millis(11),
+            child_exit_poll_interval: Duration::from_millis(2),
+        };
+        assert_eq!(
+            config.shutdown_policy.total_bound(),
+            Duration::from_millis(30)
+        );
+        let pool = McpConnectionPool::connect(BTreeMap::from([("policy".into(), config)]))
+            .await
+            .expect("connect");
+        let tools = pool.advertised_tools();
+        let tool = tools.first().expect("imported tool");
+        let binding = &tool.manifest.bindings["lash.mcp"];
+        assert_eq!(
+            binding["call_policy"],
+            serde_json::to_value(policy).expect("resolved policy")
+        );
+        let restored: lash::tools::ToolManifest =
+            serde_json::from_slice(&serde_json::to_vec(&tool.manifest).expect("record binding"))
+                .expect("cold decode of recorded manifest");
+        assert_eq!(restored.bindings["lash.mcp"], *binding);
+        let result = pool
+            .call_tool(
+                tool.name(),
+                &serde_json::json!({}),
+                &lash::testing::mock_attempt_context(),
+            )
+            .await;
+        let output = result.as_done_output().expect("inline attempt");
+        let lash::tools::ToolCallOutcome::Failure(failure) = &output.outcome else {
+            panic!("silent tool must time out: {output:?}");
+        };
+        let raw = failure.raw.as_ref().expect("typed timeout").to_json_value();
+        if disconnect == TimeoutDisconnectPolicy::PingProbe {
+            assert_eq!(
+                raw["cause"],
+                serde_json::json!({"kind":"timeout", "timeout_ms":30})
+            );
+            assert_eq!(failure.suggested_delay_ms, None);
+            assert!(failure.message.contains("automatic reconnect is disabled"));
+        } else {
+            assert_eq!(raw["timeout_ms"], if mode == "progress" { 70 } else { 20 });
+            assert_eq!(raw["deadline"], mode == "progress");
+        }
+        pool.shutdown_all().await;
+    }
+}
+
+/// FIG-5494: disabled reconnect remains disabled across keepalive ticks.
+/// D-DEFAULTS2: a non-default facade startup deadline reaches the handshake.
+#[tokio::test]
+async fn mcp_disabled_reconnect_survives_startup_timeout_and_keepalive() {
+    use lash::mcp::{McpCallPolicy, McpConnectionPool, McpShutdownPolicy, ReconnectAttempts};
+    let root = tempfile::tempdir().expect("fixture");
+    let mut config = McpServerConfig::stdio(
+        McpStdioTransport::new(
+            "python3",
+            vec!["-u".into(), "-c".into(), LIFECYCLE_PEER.into()],
+        )
+        .with_env([
+            ("MODE", "startup".to_string()),
+            ("STARTS", root.path().join("starts").display().to_string()),
+        ]),
+    )
+    .with_timeouts(
+        Duration::from_millis(500),
+        Duration::from_millis(20),
+        Duration::from_millis(70),
+    );
+    config.call_policy = McpCallPolicy {
+        call_timeout_ms: 20,
+        call_max_total_timeout_ms: 70,
+        reconnect_max_attempts: ReconnectAttempts::Disabled,
+        reconnect_initial_backoff_ms: 1,
+        reconnect_max_backoff_ms: 1,
+        liveness_probe_interval_ms: 5,
+        ..McpCallPolicy::standard()
+    };
+    config.shutdown_policy = McpShutdownPolicy {
+        graceful_period: Duration::from_millis(5),
+        post_kill_wait: Duration::from_millis(5),
+        scheduling_margin: Duration::from_millis(20),
+        ..McpShutdownPolicy::standard()
+    };
+    let pool = McpConnectionPool::connect(BTreeMap::from([("startup".into(), config)]))
+        .await
+        .expect("valid configuration keeps the failed entry");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let status = &pool.server_statuses()[0];
+    assert!(
+        matches!(status.health, McpServerHealth::Disconnected { .. }),
+        "{status:?}"
+    );
+    assert!(
+        status
+            .health
+            .error()
+            .expect("startup fault")
+            .contains("500ms")
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("starts")).expect("starts"),
+        "start\n"
+    );
+    pool.shutdown_all().await;
+}
+
+/// D-DEFAULTS2 / FIG-5494: facade shutdown timing reaches forced cleanup,
+/// including child-exit polling on a host runtime without a signal driver.
+#[cfg(target_os = "linux")]
+#[test]
+fn mcp_shutdown_policy_controls_forced_child_cleanup() {
+    use lash::mcp::{McpConnectionPool, McpShutdownPolicy};
+    let root = tempfile::tempdir().expect("fixture");
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .expect("host runtime without a signal driver");
+    runtime.block_on(async {
+        let policy = McpShutdownPolicy {
+            graceful_period: Duration::from_millis(20),
+            post_kill_wait: Duration::from_millis(30),
+            scheduling_margin: Duration::from_secs(1),
+            child_exit_poll_interval: Duration::from_millis(2),
+        };
+        let config = McpServerConfig::stdio(
+            McpStdioTransport::new(
+                "python3",
+                vec!["-u".into(), "-c".into(), LIFECYCLE_PEER.into()],
+            )
+            .with_env([
+                ("MODE", "shutdown".to_string()),
+                ("STARTS", root.path().join("starts").display().to_string()),
+            ]),
+        )
+        .with_shutdown_policy(policy);
+        let pool = McpConnectionPool::connect(BTreeMap::from([("cleanup".into(), config)]))
+            .await
+            .expect("connect");
+        assert!(pool.server_statuses()[0].health.is_connected());
+        let started = tokio::time::Instant::now();
+        tokio::time::timeout(
+            policy.total_bound() + Duration::from_secs(5),
+            pool.shutdown_all(),
+        )
+        .await
+        .expect("configured cleanup completes");
+        assert!(
+            started.elapsed() >= policy.graceful_period + policy.post_kill_wait,
+            "the server ignores EOF and SIGTERM, so both configured stages must elapse"
+        );
+        assert!(pool.server_statuses().is_empty());
+    });
+}

@@ -55,7 +55,7 @@ use lash_tool_support::ToolDefinitionBindingExt;
 use crate::call_failure::{McpCallFailure, McpServiceFailure};
 #[cfg(test)]
 use crate::config::McpCallPolicy;
-use crate::config::{McpServerConfig, McpShutdownPolicy, TimeoutDisconnectPolicy};
+use crate::config::{McpServerConfig, TimeoutDisconnectPolicy};
 #[cfg(test)]
 use crate::config::{McpStdioTransport, McpTransport};
 use crate::error::McpError;
@@ -67,22 +67,6 @@ use crate::service_lifecycle::equal_jitter;
 #[cfg(test)]
 use lash_core::{ToolFailureClass, ToolFailureSource};
 use lifecycle_actor::{LifecycleActor, LifecycleCommand};
-
-/// Scheduling margin added to each entry's configured shutdown durations.
-const ENTRY_SHUTDOWN_SCHEDULING_MARGIN: Duration = Duration::from_secs(1);
-
-/// One entry's complete explicit-shutdown budget is its configured graceful
-/// period, the post-terminate wait, the post-kill wait, and this scheduling
-/// margin.
-///
-/// All entry actors are joined concurrently, so `shutdown_all()` takes roughly
-/// one configured bound rather than `entries` times that bound.
-fn entry_shutdown_total_bound(policy: &McpShutdownPolicy) -> Duration {
-    policy
-        .graceful_period
-        .saturating_add(policy.post_kill_wait.saturating_mul(2))
-        .saturating_add(ENTRY_SHUTDOWN_SCHEDULING_MARGIN)
-}
 
 /// Shared, per-core connection pool. Wrapped in `Arc` and cloned into each
 /// session plugin instance.
@@ -151,6 +135,10 @@ pub enum McpServerHealth {
     Reconnecting {
         last_error: Option<McpServerFault>,
     },
+    /// Disconnected with automatic reconnect explicitly disabled.
+    Disconnected {
+        last_error: Option<McpServerFault>,
+    },
     Exhausted {
         attempts: u64,
         last_error: Option<McpServerFault>,
@@ -174,9 +162,9 @@ impl McpServerHealth {
         match self {
             Self::Connecting => None,
             Self::Connected { catalog_error } => catalog_error.as_ref(),
-            Self::Reconnecting { last_error } | Self::Exhausted { last_error, .. } => {
-                last_error.as_ref()
-            }
+            Self::Reconnecting { last_error }
+            | Self::Disconnected { last_error }
+            | Self::Exhausted { last_error, .. } => last_error.as_ref(),
             Self::ShuttingDown { reason } => reason.as_ref(),
         }
     }
@@ -321,7 +309,7 @@ impl McpConnectionPool {
 
     /// Every server is tried eagerly in parallel so tools are available immediately when
     /// servers are up, but a connection failure never aborts construction: the entry stays
-    /// registered and reconnects in the background.
+    /// registered and follows its configured reconnect mode.
     /// Only configuration errors (a misconfigured server, not an outage) fail the build.
     /// The host must call [`McpConnectionPool::shutdown_all`] to fully reap stdio children;
     /// dropping the returned pool kills but deliberately does not wait.
@@ -358,7 +346,7 @@ impl McpConnectionPool {
                 tracing::warn!(
                     server = %name,
                     error = %err,
-                    "MCP server unavailable at startup; retrying in the background"
+                    "MCP server unavailable at startup; configured reconnect policy applies"
                 );
             }
         }))
@@ -367,7 +355,7 @@ impl McpConnectionPool {
     }
 
     /// Like initial pool construction, attach registers the entry before an eager connection
-    /// attempt and keeps retrying startup outages in the background.
+    /// attempt and follows the configured reconnect mode after startup outages.
     /// Only configuration and pool lifecycle errors fail the attach.
     pub async fn attach(
         self: &Arc<Self>,
@@ -415,7 +403,7 @@ impl McpConnectionPool {
             tracing::warn!(
                 server = %server_name,
                 error = %err,
-                "MCP server unavailable during attach; retrying in the background"
+                "MCP server unavailable during attach; configured reconnect policy applies"
             );
         }
         Ok(())
@@ -1033,6 +1021,7 @@ impl McpEntry {
                         cause: McpServiceFailure::from(err),
                         after_ms: self.config.reconnect_initial_backoff().as_millis() as u64,
                         shutting_down: self.is_shutting_down(),
+                        reconnect_attempts: self.config.reconnect_max_attempts(),
                     }
                     .into()
                 }
@@ -1057,6 +1046,7 @@ impl McpEntry {
                     cause: McpServiceFailure::ConsecutiveTimeouts { count },
                     after_ms: self.config.reconnect_initial_backoff().as_millis() as u64,
                     shutting_down: self.is_shutting_down(),
+                    reconnect_attempts: self.config.reconnect_max_attempts(),
                 }
                 .into()
             }
@@ -1124,7 +1114,7 @@ impl McpEntry {
         let Some(mut handle) = handle else {
             return;
         };
-        let shutdown_bound = entry_shutdown_total_bound(self.config.shutdown_policy());
+        let shutdown_bound = self.config.shutdown_policy().total_bound();
         let mut abort_on_drop = AbortOnDrop::new(handle.abort_handle());
         match timeout(shutdown_bound, &mut handle).await {
             Ok(Ok(())) => {}

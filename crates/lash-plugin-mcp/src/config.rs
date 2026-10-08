@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -15,6 +16,51 @@ const DEFAULT_RECONNECT_INITIAL_BACKOFF_MS: u64 = 500;
 const DEFAULT_RECONNECT_MAX_BACKOFF_MS: u64 = 30_000;
 const DEFAULT_GRACEFUL_PERIOD: Duration = Duration::from_secs(3);
 const DEFAULT_POST_KILL_WAIT: Duration = Duration::from_secs(1);
+const DEFAULT_SCHEDULING_MARGIN: Duration = Duration::from_secs(1);
+const DEFAULT_CHILD_EXIT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+/// Automatic reconnect admission after a failed startup or lost connection.
+///
+/// Host JSON uses `"disabled"`, `{"finite": n}` (n > 0), or `"unlimited"`.
+/// The resolved mode is also recorded in each imported tool's binding.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReconnectAttempts {
+    /// Never reconnect automatically, including on background keepalive ticks.
+    Disabled,
+    /// Pause after this many consecutive failed reconnects. A successful
+    /// connection resets the count. Enabled keepalive re-arms a spent budget.
+    Finite(NonZeroU64),
+    /// Keep reconnecting until shutdown, using the configured backoff.
+    #[default]
+    Unlimited,
+}
+
+impl ReconnectAttempts {
+    pub(crate) fn allows(self, attempts: u64) -> bool {
+        match self {
+            Self::Disabled => false,
+            Self::Finite(limit) => attempts < limit.get(),
+            Self::Unlimited => true,
+        }
+    }
+}
+
+fn default_scheduling_margin() -> Duration {
+    DEFAULT_SCHEDULING_MARGIN
+}
+
+fn default_child_exit_poll_interval() -> Duration {
+    DEFAULT_CHILD_EXIT_POLL_INTERVAL
+}
+
+fn is_default_scheduling_margin(value: &Duration) -> bool {
+    *value == DEFAULT_SCHEDULING_MARGIN
+}
+
+fn is_default_child_exit_poll_interval(value: &Duration) -> bool {
+    *value == DEFAULT_CHILD_EXIT_POLL_INTERVAL
+}
 
 /// How an idle tool-call timeout affects the MCP connection.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -176,14 +222,51 @@ pub struct McpShutdownPolicy {
         skip_serializing_if = "is_default_post_kill_wait"
     )]
     pub post_kill_wait: Duration,
+    /// Extra time for actor scheduling beyond graceful close and both forced
+    /// termination stages. Zero is allowed; it can truncate cleanup under load.
+    #[serde(
+        rename = "scheduling_margin_ms",
+        default = "default_scheduling_margin",
+        with = "duration_millis_serde",
+        skip_serializing_if = "is_default_scheduling_margin"
+    )]
+    pub scheduling_margin: Duration,
+    /// Polling cadence for child exits when a signal stream is unavailable.
+    /// Must be at least one millisecond in host JSON.
+    #[serde(
+        rename = "child_exit_poll_interval_ms",
+        default = "default_child_exit_poll_interval",
+        with = "duration_millis_serde",
+        skip_serializing_if = "is_default_child_exit_poll_interval"
+    )]
+    pub child_exit_poll_interval: Duration,
 }
 
 impl Default for McpShutdownPolicy {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl McpShutdownPolicy {
+    /// Standard preset: 3 s graceful close, 1 s for each forced-termination
+    /// stage, 1 s scheduling margin, and 10 ms child-exit polling without a
+    /// signal stream. These preserve historical behavior; no workload
+    /// measurement establishes them as universal choices.
+    pub fn standard() -> Self {
         Self {
             graceful_period: default_graceful_period(),
             post_kill_wait: default_post_kill_wait(),
+            scheduling_margin: default_scheduling_margin(),
+            child_exit_poll_interval: default_child_exit_poll_interval(),
         }
+    }
+    /// Total per-server explicit shutdown deadline. Actors shut down
+    /// concurrently: graceful close, two forced stages, and scheduling margin.
+    pub fn total_bound(&self) -> Duration {
+        self.graceful_period
+            .saturating_add(self.post_kill_wait.saturating_mul(2))
+            .saturating_add(self.scheduling_margin)
     }
 }
 
@@ -243,17 +326,25 @@ pub struct McpCallPolicy {
         skip_serializing_if = "is_default_reconnect_max_backoff_ms"
     )]
     pub reconnect_max_backoff_ms: u64,
-    /// Maximum reconnect attempts before pausing; zero retries indefinitely.
-    ///
-    /// When interval keepalive is enabled, it re-arms an exhausted reconnect
-    /// loop. With keepalive disabled, a bounded-attempts server stays down
-    /// until it is attached again.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub reconnect_max_attempts: u64,
+    /// Automatic reconnect mode. Omission selects the standard unlimited
+    /// preset; serialization always records the resolved mode explicitly.
+    #[serde(default)]
+    pub reconnect_max_attempts: ReconnectAttempts,
 }
 
 impl Default for McpCallPolicy {
     fn default() -> Self {
+        Self::standard()
+    }
+}
+
+impl McpCallPolicy {
+    /// Standard preset: 60 s idle timeout, 600 s total cap, progress resets
+    /// idle time, ping-probe disconnect with a 5 s probe deadline, a threshold
+    /// of 3 consecutive timeouts, keepalive off, 500 ms initial / 30 s maximum
+    /// reconnect backoff, and unlimited reconnects. These preserve historical
+    /// behavior; no workload measurement establishes universal values.
+    pub fn standard() -> Self {
         Self {
             call_timeout_ms: default_call_timeout_ms(),
             call_max_total_timeout_ms: default_call_max_total_timeout_ms(),
@@ -265,7 +356,7 @@ impl Default for McpCallPolicy {
             liveness_probe_interval_ms: 0,
             reconnect_initial_backoff_ms: default_reconnect_initial_backoff_ms(),
             reconnect_max_backoff_ms: default_reconnect_max_backoff_ms(),
-            reconnect_max_attempts: 0,
+            reconnect_max_attempts: ReconnectAttempts::Unlimited,
         }
     }
 }
@@ -404,8 +495,16 @@ impl McpStreamableHttpTransport {
 }
 
 impl McpServerConfig {
-    /// Constructor for a server with the given transport and default policy.
+    /// Constructor using the documented [`Self::standard`] lifecycle preset.
     pub fn new(transport: McpTransport) -> Self {
+        Self::standard(transport)
+    }
+
+    /// Standard preset: 10 s startup/discovery timeout plus
+    /// [`McpCallPolicy::standard`] and [`McpShutdownPolicy::standard`].
+    /// The startup value preserves historical behavior, without workload
+    /// measurements establishing a universal choice. All fields are mutable.
+    pub fn standard(transport: McpTransport) -> Self {
         Self {
             startup_timeout_ms: default_startup_timeout_ms(),
             call_policy: McpCallPolicy::default(),
@@ -477,7 +576,7 @@ impl McpServerConfig {
         self.call_policy().reconnect_max_backoff()
     }
 
-    pub(crate) fn reconnect_max_attempts(&self) -> u64 {
+    pub(crate) fn reconnect_max_attempts(&self) -> ReconnectAttempts {
         self.call_policy().reconnect_max_attempts
     }
 
@@ -504,6 +603,11 @@ impl McpServerConfig {
         if server_name.contains("__") {
             return Err(McpError::Config(format!(
                 "MCP server `{server_name}` cannot contain `__`"
+            )));
+        }
+        if self.shutdown_policy.child_exit_poll_interval < Duration::from_millis(1) {
+            return Err(McpError::Config(format!(
+                "MCP server `{server_name}` child_exit_poll_interval_ms must be at least one millisecond"
             )));
         }
         let policy = self.call_policy();

@@ -286,7 +286,7 @@ impl ChildExits {
         Self::Polled
     }
 
-    async fn recv(&mut self) {
+    async fn recv(&mut self, poll_interval: Duration) {
         match self {
             #[cfg(unix)]
             Self::Signal(signal) => {
@@ -295,7 +295,7 @@ impl ChildExits {
                     std::future::pending::<()>().await;
                 }
             }
-            Self::Polled => tokio::time::sleep(Duration::from_millis(10)).await,
+            Self::Polled => tokio::time::sleep(poll_interval).await,
         }
     }
 }
@@ -411,6 +411,7 @@ impl StdioChildGuard {
         mut self,
         graceful_period: Duration,
         post_kill_wait: Duration,
+        child_exit_poll_interval: Duration,
     ) -> std::io::Result<()> {
         self.explicit_abandonment = true;
         let mut exits = ChildExits::subscribe();
@@ -420,7 +421,10 @@ impl StdioChildGuard {
             pid: self.pid,
             deadline,
         });
-        if self.exited_by(&mut exits, deadline).await? {
+        if self
+            .exited_by(&mut exits, deadline, child_exit_poll_interval)
+            .await?
+        {
             return Ok(());
         }
 
@@ -433,7 +437,10 @@ impl StdioChildGuard {
             pid: self.pid,
             deadline: term_deadline,
         });
-        if self.exited_by(&mut exits, term_deadline).await? {
+        if self
+            .exited_by(&mut exits, term_deadline, child_exit_poll_interval)
+            .await?
+        {
             return Ok(());
         }
 
@@ -444,7 +451,10 @@ impl StdioChildGuard {
             pid: self.pid,
             deadline: reap_deadline,
         });
-        if self.exited_by(&mut exits, reap_deadline).await? {
+        if self
+            .exited_by(&mut exits, reap_deadline, child_exit_poll_interval)
+            .await?
+        {
             return Ok(());
         }
         let kill_context = [term_error, kill_error]
@@ -468,6 +478,7 @@ impl StdioChildGuard {
         &mut self,
         exits: &mut ChildExits,
         deadline: Instant,
+        poll_interval: Duration,
     ) -> std::io::Result<bool> {
         let expiry = tokio::time::sleep_until(deadline);
         tokio::pin!(expiry);
@@ -480,7 +491,7 @@ impl StdioChildGuard {
             }
             tokio::select! {
                 biased;
-                () = exits.recv() => {}
+                () = exits.recv(poll_interval) => {}
                 () = &mut expiry => return Ok(false),
             }
         }
@@ -630,7 +641,11 @@ mod tests {
         assert_ne!(grandchild, pid);
 
         guard
-            .reap_after_graceful_close(Duration::from_millis(50), Duration::from_millis(200))
+            .reap_after_graceful_close(
+                Duration::from_millis(50),
+                Duration::from_millis(200),
+                Duration::from_millis(2),
+            )
             .await
             .expect("group kill reaps the fixture server");
 

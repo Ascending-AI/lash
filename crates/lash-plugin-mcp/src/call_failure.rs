@@ -45,6 +45,7 @@ pub(crate) enum McpCallFailure {
         cause: McpServiceFailure,
         after_ms: u64,
         shutting_down: bool,
+        reconnect_attempts: crate::ReconnectAttempts,
     },
     CallTimeout {
         server: String,
@@ -166,6 +167,10 @@ impl std::fmt::Display for McpCallFailure {
                         .map(super::pool::McpServerFault::message)
                         .unwrap_or_else(|| "unknown connection error".into())
                 ),
+                McpServerHealth::Disconnected { .. } => write!(
+                    f,
+                    "MCP server `{server}` is disconnected; automatic reconnect is disabled"
+                ),
                 McpServerHealth::ShuttingDown { .. } => write!(
                     f,
                     "MCP server `{server}` is unavailable because its pool entry is shutting down"
@@ -187,12 +192,15 @@ impl std::fmt::Display for McpCallFailure {
                 server,
                 cause,
                 shutting_down,
+                reconnect_attempts,
                 ..
             } => write!(
                 f,
                 "MCP server `{server}` connection lost: {cause:?}; {}",
                 if *shutting_down {
                     "pool entry is shutting down"
+                } else if *reconnect_attempts == crate::ReconnectAttempts::Disabled {
+                    "automatic reconnect is disabled"
                 } else {
                     "reconnecting in the background"
                 }
@@ -257,7 +265,9 @@ impl From<McpCallFailure> for ToolFailure {
             } => {
                 let (code, suggested_delay_ms) = match health {
                     McpServerHealth::Exhausted { .. } => ("mcp_reconnect_exhausted", None),
-                    McpServerHealth::ShuttingDown { .. } => ("mcp_server_unavailable", None),
+                    McpServerHealth::ShuttingDown { .. } | McpServerHealth::Disconnected { .. } => {
+                        ("mcp_server_unavailable", None)
+                    }
                     McpServerHealth::Connecting
                     | McpServerHealth::Connected { .. }
                     | McpServerHealth::Reconnecting { .. } => {
@@ -269,6 +279,7 @@ impl From<McpCallFailure> for ToolFailure {
             F::ConnectionLost {
                 after_ms,
                 shutting_down,
+                reconnect_attempts,
                 ..
             } => (
                 C::Unavailable,
@@ -278,7 +289,7 @@ impl From<McpCallFailure> for ToolFailure {
                     "mcp_connection_lost"
                 },
                 S::Plugin,
-                if *shutting_down {
+                if *shutting_down || *reconnect_attempts == crate::ReconnectAttempts::Disabled {
                     None
                 } else {
                     Some(*after_ms)

@@ -61,7 +61,7 @@ mod stdio_transport;
 
 pub use config::{
     McpCallPolicy, McpServerConfig, McpShutdownPolicy, McpStdioTransport,
-    McpStreamableHttpTransport, McpTransport, TimeoutDisconnectPolicy,
+    McpStreamableHttpTransport, McpTransport, ReconnectAttempts, TimeoutDisconnectPolicy,
 };
 pub use error::McpError;
 pub use host::{

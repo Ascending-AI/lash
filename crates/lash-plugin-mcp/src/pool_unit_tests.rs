@@ -96,6 +96,9 @@ fn imported_mcp_tools_declare_the_fixed_result_envelope() {
         McpServerHealth::Reconnecting {
             last_error: Some(fault.clone()),
         },
+        McpServerHealth::Disconnected {
+            last_error: Some(fault.clone()),
+        },
         McpServerHealth::Exhausted {
             attempts: 3,
             last_error: Some(fault.clone()),

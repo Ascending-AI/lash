@@ -395,9 +395,9 @@ impl LifecycleActor {
                         ConnectionExit::Shutdown => return,
                         ConnectionExit::Disconnected => self.schedule_reconnect(),
                         ConnectionExit::Failed => {
-                            let max_attempts = self.entry.upgrade()
-                                .map_or(0, |entry| entry.config.reconnect_max_attempts());
-                            if max_attempts != 0 && self.reconnect_attempts >= max_attempts {
+                            let attempts = self.entry.upgrade()
+                                .map_or(crate::ReconnectAttempts::Disabled, |entry| entry.config.reconnect_max_attempts());
+                            if !attempts.allows(self.reconnect_attempts) {
                                 self.record_exhaustion();
                             } else {
                                 self.schedule_reconnect();
@@ -936,11 +936,25 @@ impl LifecycleActor {
     }
 
     fn schedule_reconnect(&mut self) {
-        if self
-            .entry
-            .upgrade()
-            .is_some_and(|entry| entry.is_shutting_down())
+        let Some(entry) = self.entry.upgrade() else {
+            return;
+        };
+        if entry.is_shutting_down() {
+            return;
+        }
+        if entry.config.reconnect_max_attempts() == crate::ReconnectAttempts::Disabled {
+            self.set_health(McpServerHealth::Disconnected {
+                last_error: self.health_error(),
+            });
+            tracing::info!(server = %entry.server_name, "MCP automatic reconnect is disabled");
+            return;
+        }
+        if !entry
+            .config
+            .reconnect_max_attempts()
+            .allows(self.reconnect_attempts)
         {
+            self.record_exhaustion();
             return;
         }
         let jittered = self
@@ -978,10 +992,11 @@ impl LifecycleActor {
     fn rearm_exhausted_reconnect(&mut self) {
         if self.reconnect_at.is_none()
             && self.entry.upgrade().is_some_and(|entry| {
-                matches!(
-                    *entry.health.read_recover(),
-                    McpServerHealth::Exhausted { .. }
-                )
+                entry.config.reconnect_max_attempts() != crate::ReconnectAttempts::Disabled
+                    && matches!(
+                        *entry.health.read_recover(),
+                        McpServerHealth::Exhausted { .. }
+                    )
             })
         {
             self.reconnect_attempts = 0;
@@ -1145,7 +1160,7 @@ impl Drop for LifecycleActor {
             return;
         }
         let pid = self.active_pid.load(Ordering::SeqCst);
-        let bound = super::entry_shutdown_total_bound(&self.shutdown_policy);
+        let bound = self.shutdown_policy.total_bound();
         let reason = if std::thread::panicking() {
             "MCP lifecycle actor terminated with JoinError: actor panicked".to_string()
         } else if pid == 0 {
@@ -1185,6 +1200,7 @@ async fn reap_child(
         .reap_after_graceful_close(
             shutdown_policy.graceful_period,
             shutdown_policy.post_kill_wait,
+            shutdown_policy.child_exit_poll_interval,
         )
         .await
     {

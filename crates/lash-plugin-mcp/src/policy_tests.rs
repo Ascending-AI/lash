@@ -17,6 +17,7 @@ use serde_json::json;
 use tokio::time::Instant;
 
 use super::*;
+use crate::{McpShutdownPolicy, ReconnectAttempts};
 
 #[path = "policy_script.rs"]
 mod scripted;
@@ -82,7 +83,7 @@ struct MockOptions {
     probe_interval_ms: u64,
     reconnect_initial_ms: u64,
     reconnect_max_ms: Option<u64>,
-    reconnect_max_attempts: u64,
+    reconnect_max_attempts: ReconnectAttempts,
     startup_timeout_ms: u64,
 }
 
@@ -100,7 +101,9 @@ impl Default for MockOptions {
             probe_interval_ms: 0,
             reconnect_initial_ms: 5_000,
             reconnect_max_ms: None,
-            reconnect_max_attempts: 1,
+            reconnect_max_attempts: ReconnectAttempts::Finite(
+                std::num::NonZeroU64::new(1).unwrap(),
+            ),
             startup_timeout_ms: 1_000,
         }
     }
@@ -439,7 +442,9 @@ async fn silent_tool_and_failed_ping_disconnects_and_runs_one_reconnect_cycle() 
             call_timeout_ms: 50,
             policy: TimeoutDisconnectPolicy::PingProbe,
             reconnect_initial_ms: 10,
-            reconnect_max_attempts: 1,
+            reconnect_max_attempts: ReconnectAttempts::Finite(
+                std::num::NonZeroU64::new(1).unwrap(),
+            ),
             ..MockOptions::default()
         },
     )
@@ -711,7 +716,9 @@ async fn successful_respawn_resets_reconnect_attempt_budget_but_not_generation()
             MockOptions {
                 behavior: "reset_attempts_after_success",
                 reconnect_initial_ms: 10,
-                reconnect_max_attempts: 2,
+                reconnect_max_attempts: ReconnectAttempts::Finite(
+                    std::num::NonZeroU64::new(2).unwrap(),
+                ),
                 ..MockOptions::default()
             },
         ),
@@ -844,7 +851,9 @@ async fn keepalive_rearms_an_exhausted_reconnect_loop() {
                 behavior: "fail_twice_then_success",
                 probe_interval_ms: 25,
                 reconnect_initial_ms: 10,
-                reconnect_max_attempts: 1,
+                reconnect_max_attempts: ReconnectAttempts::Finite(
+                    std::num::NonZeroU64::new(1).unwrap(),
+                ),
                 ..MockOptions::default()
             },
         ),
@@ -1295,6 +1304,8 @@ async fn shutdown_policy_shortens_shutdown_all_budget() {
     let shutdown_policy = McpShutdownPolicy {
         graceful_period: Duration::from_millis(50),
         post_kill_wait: Duration::from_millis(50),
+        scheduling_margin: Duration::from_millis(20),
+        ..McpShutdownPolicy::standard()
     };
     let entry = McpEntry::new(
         "mock".to_string(),
@@ -1310,7 +1321,7 @@ async fn shutdown_policy_shortens_shutdown_all_budget() {
     assert!(futures_util::poll!(shutdown.as_mut()).is_pending());
     assert_eq!(lifecycle.wedged().await, 424_242);
     clock
-        .elapses(shutdown.as_mut(), started, Duration::from_millis(1_150))
+        .elapses(shutdown.as_mut(), started, Duration::from_millis(170))
         .await;
     assert_eq!(pool.entries.read_recover().len(), 0);
     let fault = entry.health.read_recover().clone();
@@ -1321,7 +1332,7 @@ async fn shutdown_policy_shortens_shutdown_all_budget() {
         panic!("expected a shutdown fault, got {fault:?}");
     };
     assert!(
-        reason.contains("within the 1.15s per-entry total shutdown deadline"),
+        reason.contains("within the 170ms per-entry total shutdown deadline"),
         "unexpected shortened shutdown reason: {reason}"
     );
 }

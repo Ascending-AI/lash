@@ -60,6 +60,7 @@ impl McpConnectionPool {
                 cause: McpServiceFailure::TransportClosed,
                 after_ms: entry.config.reconnect_initial_backoff().as_millis() as u64,
                 shutting_down: entry.is_shutting_down(),
+                reconnect_attempts: entry.config.reconnect_max_attempts(),
             }
             .into();
         }
@@ -168,6 +169,7 @@ impl McpConnectionPool {
                         cause,
                         after_ms: entry.config.reconnect_initial_backoff().as_millis() as u64,
                         shutting_down: entry.is_shutting_down(),
+                        reconnect_attempts: entry.config.reconnect_max_attempts(),
                     }
                     .into()
                 }
