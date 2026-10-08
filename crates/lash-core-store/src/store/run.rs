@@ -552,8 +552,8 @@ pub struct UnfinishedRun {
 /// What a session run's admission took: the one stored form of
 /// `session_runs.admission_json`, written by the session actor's mail drain
 /// and read by every host reader (FIG-5221). A turn run takes its inputs or
-/// one turn batch; a command or operation run takes the one open batch its
-/// commit applies.
+/// one turn batch, and retains the trace scope its admission proposed; a
+/// command or operation run takes the one open batch its commit applies.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "run", rename_all = "snake_case")]
 pub enum RunAdmissionRecord {
@@ -561,6 +561,13 @@ pub enum RunAdmissionRecord {
     Turn {
         /// The rows the turn executes, bound to its run.
         took: AdmittedTurnRows,
+        /// The turn's trace scope, retained by the `turn.admit` commit that
+        /// writes this record, before its candidate is selected (FIG-5395).
+        /// While the turn is admitted, its admission's export is owed: the
+        /// owner that starts the turn reconciles it. `None` when the
+        /// admission traced nothing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace: Option<Box<lash_trace::DurableTraceScope>>,
     },
     /// One session command, applied by its commit.
     Command {
@@ -648,9 +655,11 @@ impl RunAdmissionRecord {
         match self {
             Self::Turn {
                 took: AdmittedTurnRows::Inputs { ids },
+                ..
             } => AdmittedHead::Input(ids.head().clone()),
             Self::Turn {
                 took: AdmittedTurnRows::Batch { id },
+                ..
             } => AdmittedHead::Batch(id.clone()),
             Self::Command { batch } | Self::Operation { batch } => {
                 AdmittedHead::Batch(batch.clone())
@@ -664,12 +673,35 @@ impl RunAdmissionRecord {
         matches!(self, Self::Turn { .. })
     }
 
+    /// The trace scope a turn's admission retained.
+    #[must_use]
+    pub fn trace(&self) -> Option<&lash_trace::DurableTraceScope> {
+        match self {
+            Self::Turn { trace, .. } => trace.as_deref(),
+            Self::Command { .. } | Self::Operation { .. } => None,
+        }
+    }
+
+    /// This admission retaining `scope` as its turn's trace scope; a
+    /// command or operation run retains none.
+    #[must_use]
+    pub fn with_trace(self, scope: Option<lash_trace::DurableTraceScope>) -> Self {
+        match self {
+            Self::Turn { took, .. } => Self::Turn {
+                took,
+                trace: scope.map(Box::new),
+            },
+            other => other,
+        }
+    }
+
     /// The inputs the run took, in admission order.
     #[must_use]
     pub fn input_ids(&self) -> &[InputId] {
         match self {
             Self::Turn {
                 took: AdmittedTurnRows::Inputs { ids },
+                ..
             } => ids.as_slice(),
             _ => &[],
         }
@@ -682,10 +714,12 @@ impl RunAdmissionRecord {
         match self {
             Self::Turn {
                 took: AdmittedTurnRows::Batch { id },
+                ..
             } => vec![id.clone()],
             Self::Command { batch } | Self::Operation { batch } => vec![batch.clone()],
             Self::Turn {
                 took: AdmittedTurnRows::Inputs { .. },
+                ..
             } => Vec::new(),
         }
     }

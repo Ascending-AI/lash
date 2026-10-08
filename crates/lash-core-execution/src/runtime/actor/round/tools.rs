@@ -46,15 +46,17 @@ pub struct MemberPin {
     pub wait: Option<WaitDeadline>,
 }
 
-/// A call's trace admission, proposed with its round's admission
-/// (FIG-5382): the scope the admission record retains, which every owner
-/// of the round traces the call under, and the candidate the admission's
-/// commit settles. A successor reads the scope back from the record and
-/// proposes nothing, so the call is admitted once across a handover.
+/// A trace admission proposed with the durable admission that retains its
+/// scope: a call's with its round's (FIG-5382), a turn's with its
+/// `turn.admit` (FIG-5395). Every owner traces under the retained scope,
+/// and the admission's commit settles the candidate. A successor reads the
+/// scope back and proposes nothing, so the scope is admitted once across a
+/// handover.
 pub struct TraceProposal {
-    /// The scope the call's member carries.
+    /// The scope the admission record retains.
     pub scope: lash_trace::DurableTraceScope,
-    /// Selected once the admission commits, refused otherwise.
+    /// Selected once the admission commits, deferred to its adapter when
+    /// the commit's acknowledgement was lost, refused otherwise.
     pub candidate: Box<dyn lash_trace::TraceAdmissionCandidate>,
 }
 
@@ -73,6 +75,10 @@ pub trait RoundTools: Send + Sync {
     fn propose_trace(&self, _call: &PendingToolCall) -> Option<TraceProposal> {
         None
     }
+
+    /// Reconcile the admission of `scope`, a call's trace scope its round's
+    /// admission retained, whose export that admission owes (FIG-5395).
+    fn export_admitted(&self, _scope: &lash_trace::DurableTraceScope) {}
 
     /// What `call` is admitted as, read from the catalog at `now_ms`. Runs
     /// no hook, preparation or body.

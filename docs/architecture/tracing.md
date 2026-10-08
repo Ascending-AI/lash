@@ -38,10 +38,25 @@ result or reading a retained terminal grants neither permission.
 Product process and language graphs reconstruct through a separate observer
 on replay, without exporting another lifecycle observation.
 
-Export is best effort. A crash after commit and before emission can lose an
-observation. A body that exports before its result commits can execute again
-and export a distinct attempt. There is no telemetry outbox or exactly-once
-export guarantee. Trace delivery does not decide control flow or billing.
+An admission's export is an obligation of the durable admission that
+retains its scope (FIG-5395): a turn's `turn.admit`, a round's `model.done`,
+a cell's admission of its call. Its candidate is selected once that commit
+lands, and deferred to the adapter when the commit's acknowledgement was
+lost. An owner that dies or loses the acknowledgement first leaves the
+export owed, and the next reader of the retained admission reconciles it
+through `TraceScopeFactory::export_admitted`: the owner that starts a turn
+still admitted, the owner that resumes an unpresented round, the owner that
+builds a cell call's body. The adapter dedupes the admission's identity, its
+anchor, and a reconcile selects a deferred candidate of that anchor. The
+SDK mints every span id, so an adapter that no longer holds the candidate
+exports the admission as a span under the anchor, which names its identity.
+Each admission is therefore exported once per adapter, and at least once
+under one identity across owners.
+
+Every other export is best effort. A crash after commit and before emission
+can lose an observation. A body that exports before its result commits can
+execute again and export a distinct attempt. There is no telemetry outbox.
+Trace delivery does not decide control flow or billing.
 
 ## Integration status
 
@@ -60,9 +75,10 @@ For example, a protocol plugin reports compile/link evidence as
 instruments through its `StoreObserver`.
 
 A tool call runs in memory inside the admitted execution that makes it
-durable (ADR 0132 §5), and nothing replays it. Its start and completion
-are live observations under the call's tool trace scope: each execution
-that reaches the call observes it once. No store receipt grants tool
+durable (ADR 0132 §5), and nothing replays it. Its trace scope is
+retained by that admission, so the call is admitted once however many
+attempts or owners run it. Its start and completion are live observations
+under that scope: each execution that reaches the call observes it once. No store receipt grants tool
 transitions any more; the transition-class `lash.tool_intent.*` counters
 have no first writer until the substrate's trace lane gives them one.
 

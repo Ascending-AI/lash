@@ -35,9 +35,11 @@ pub(crate) struct ProductionToolHandlers<'run> {
     isolated: Mutex<BTreeMap<crate::ToolCallId, IsolatedToolStart>>,
     /// The key of the completion wait a round member's round pinned for it.
     completion_key: Option<crate::PinnedKey>,
-    /// Round members are traced by the round's fold, which holds their
-    /// retry ladder; standalone calls observe their own terminal.
-    traces_call: bool,
+    /// The trace scope an attempt traces its call's start and terminal
+    /// under: a cell member's, which its cell's admission retained and
+    /// selected (FIG-5395). A round member is traced by its round's fold,
+    /// which holds its retry ladder, and none is set.
+    traced_scope: Option<lash_trace::DurableTraceScope>,
 }
 
 #[derive(Default)]
@@ -144,7 +146,7 @@ impl<'run> ProductionToolHandlers<'run> {
             declarations: Mutex::default(),
             isolated: Mutex::default(),
             completion_key: None,
-            traces_call: true,
+            traced_scope: None,
         }
     }
     /// Ask an isolated call's executable provider which registered engine
@@ -951,7 +953,7 @@ impl SingletonToolHandlers for ProductionToolHandlers<'_> {
                 &presented.intent_outcomes,
             );
         }
-        if self.traces_call {
+        if self.traced_scope.is_some() {
             context.trace_tool_call_completed(&record, &[]);
         }
         context.emit_tool_call_completed_activity(call_id.as_str(), &record, 0);

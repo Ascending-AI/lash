@@ -75,6 +75,7 @@ pub async fn a_runs_namespace_rows_hold_its_bodies_and_end_with_it(
             took: AdmittedTurnRows::Batch {
                 id: lash_sansio::BatchId::from("namespace-batch"),
             },
+            trace: None,
         },
         turn_deadline: None,
     })

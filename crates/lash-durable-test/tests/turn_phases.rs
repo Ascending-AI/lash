@@ -1974,6 +1974,7 @@ async fn restore_after_the_head_moved(dialect: Dialect, postgres_url: Option<Str
             took: AdmittedTurnRows::Batch {
                 id: lash_core::BatchId::from("l3-batch"),
             },
+            trace: None,
         },
         phase: UnfinishedPhase::Model {
             pin: lash_durable::domain::ModelPin {
@@ -2103,6 +2104,7 @@ async fn admit_running_turn(
         took: AdmittedTurnRows::Inputs {
             ids: AdmittedInputIds::new(vec![first.input_id.clone()]).unwrap(),
         },
+        trace: None,
     };
     use lash_durable::domain::{DomainWrite, SessionMailWrite, TurnWrite};
     let actor = ActorKey::session(session.as_str()).unwrap();

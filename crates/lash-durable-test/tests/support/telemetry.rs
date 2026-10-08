@@ -4,10 +4,13 @@
 //!
 //! The factory mints a fresh trace for every root or linked proposal and
 //! keeps its parent's trace for an owned one, as an exporting adapter does,
-//! and records every admission a candidate was selected for: the
-//! `lash.turn.admitted` span an adapter exports for a turn's scope, and the
-//! `lash.tool.admitted` span for a tool call's. The projector records the
-//! scope every record was made under.
+//! and records every admission it exported: the `lash.turn.admitted` span
+//! an adapter exports for a turn's scope, and the `lash.tool.admitted` span
+//! for a tool call's, whether a candidate was selected for it or a reader
+//! reconciled it (FIG-5395). Like an exporting adapter, it dedupes an
+//! admission's identity, its anchor, and holds a deferred candidate until a
+//! reconcile of its anchor selects it. The projector records the scope
+//! every record was made under.
 
 #![allow(dead_code)]
 
@@ -26,8 +29,10 @@ use lash_sansio::sync::MutexExt as _;
 struct Recorded {
     /// How many candidates were proposed: each mints the next span.
     proposed: u64,
-    /// Every selected admission, with the anchor it gave its scope.
+    /// Every exported admission, with the anchor it gave its scope.
     admitted: Vec<(TraceScopeId, TraceCarrier)>,
+    /// The candidates held deferred.
+    deferred: Vec<(TraceScopeId, TraceCarrier)>,
     /// Every projected record's scope and turn.
     projected: Vec<(DurableTraceScope, Option<lash_sansio::TurnId>)>,
 }
@@ -51,8 +56,29 @@ impl TraceAdmissionCandidate for Candidate {
         if outcome == TraceCandidateOutcome::Selected {
             self.recorded
                 .lock_recover()
-                .admitted
-                .push((self.scope, self.carrier));
+                .export(self.scope, self.carrier);
+        }
+    }
+
+    fn defer(self: Box<Self>) {
+        self.recorded
+            .lock_recover()
+            .deferred
+            .push((self.scope, self.carrier));
+    }
+}
+
+impl Recorded {
+    /// Export the admission of `scope` under `carrier` unless its identity
+    /// already was: the deferred candidates of the scope are settled.
+    fn export(&mut self, scope: TraceScopeId, carrier: TraceCarrier) {
+        self.deferred.retain(|(deferred, _)| *deferred != scope);
+        if !self
+            .admitted
+            .iter()
+            .any(|(_, exported)| *exported == carrier)
+        {
+            self.admitted.push((scope, carrier));
         }
     }
 }
@@ -92,6 +118,14 @@ impl TraceScopeFactory for Telemetry {
             recorded: Arc::clone(&self.0),
         })
     }
+
+    fn export_admitted(&self, scope: &DurableTraceScope) {
+        if let TraceAnchor::Context(carrier) = &scope.anchor {
+            self.0
+                .lock_recover()
+                .export(scope.scope.clone(), carrier.clone());
+        }
+    }
 }
 
 impl TraceDomainProjector for Telemetry {
@@ -118,7 +152,7 @@ impl Telemetry {
     }
 
     /// How `session`'s first turn broke its trace scope: unless its
-    /// admission scope was selected exactly once, and every record of the
+    /// admission scope was exported exactly once, and every record of the
     /// turn carries the trace that admission started (every record of the
     /// turn's own scope, its anchor).
     pub fn first_turn_violations(&self, session: &str) -> Vec<String> {
@@ -149,7 +183,7 @@ impl Telemetry {
         let mut violations = Vec::new();
         if admitted.len() != 1 {
             violations.push(format!(
-                "turn {turn_id}'s scope must be admitted exactly once, but was selected with \
+                "turn {turn_id}'s scope must be admitted exactly once, but was admitted with \
                  {admitted:?}"
             ));
         }
@@ -178,14 +212,10 @@ impl Telemetry {
     }
 
     /// How the tool calls of `session`'s first turn broke their admission
-    /// (FIG-5382): unless each call's scope was selected a number of times
-    /// in `admissions` (the `lash.tool.admitted` span an adapter exports),
-    /// and every selection is on the trace the turn's admission started.
-    pub fn first_turn_tool_violations(
-        &self,
-        session: &str,
-        admissions: std::ops::RangeInclusive<usize>,
-    ) -> Vec<String> {
+    /// (FIG-5382, FIG-5395): unless each call's scope was admitted exactly
+    /// once (the `lash.tool.admitted` span an adapter exports), on the trace
+    /// the turn's admission started.
+    pub fn first_turn_tool_violations(&self, session: &str) -> Vec<String> {
         let recorded = self.0.lock_recover();
         let Some((turn_scope, turn_anchor)) = recorded.admitted.iter().find(|(scope, _)| {
             scope.boundary == 0
@@ -211,14 +241,14 @@ impl Telemetry {
             }
         }
         let mut violations = Vec::new();
-        if calls.is_empty() && !admissions.contains(&0) {
+        if calls.is_empty() {
             violations.push(format!("no tool call of turn {turn_id} was admitted"));
         }
         for (call_id, admitted) in calls {
-            if !admissions.contains(&admitted.len()) {
+            if admitted.len() != 1 {
                 violations.push(format!(
-                    "tool call {call_id} of turn {turn_id} must be admitted {admissions:?} \
-                     times, but was selected with {admitted:?}"
+                    "tool call {call_id} of turn {turn_id} must be admitted exactly once, but \
+                     was admitted with {admitted:?}"
                 ));
             }
             for carrier in admitted {

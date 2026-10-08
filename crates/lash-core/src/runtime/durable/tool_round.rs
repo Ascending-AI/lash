@@ -14,6 +14,12 @@
 //!   re-delivered calls must be the ones it admitted, a started `Once`
 //!   without an outcome is `Interrupted`, a started `Repeatable` reruns at
 //!   its ordinal, and nothing it recorded runs again.
+//! - **Trace admission.** Each call's trace scope is retained by the
+//!   round's admission, whose commit selects its candidate. Until the round
+//!   is presented, its admission owes each call's admission export: the
+//!   admitting owner may have lost its life or the commit's acknowledgement
+//!   first, so every owner that resumes the round reconciles it, and the
+//!   exporter dedupes its identity (FIG-5382, FIG-5395).
 //! - **Cancel.** An `Immediate` cancel the turn accepted before the round's
 //!   admission admits none of it, and one it accepts while the round runs
 //!   ends its unfinished members `Cancelled`; the turn then ends as every
@@ -127,6 +133,9 @@ pub(super) async fn run(
         Some(view) => {
             let drafts: Vec<_> = view.members().iter().map(|member| member.draft()).collect();
             round::require_admitted(&opener, run, &drafts, &calls).map_err(exec)?;
+            for scope in drafts.iter().filter_map(|draft| draft.trace()) {
+                tools.export_admitted(scope);
+            }
             RoundRunner::resumed(cx, owner.clone(), run, policies, bodies)
         }
         None => {
@@ -188,16 +197,11 @@ pub(super) async fn run(
                 }
             }
             // A commit whose acknowledgement was lost may have landed: its
-            // scopes are selected, as a successor reads them back if so.
+            // candidates are deferred, and the owner that resumes the round
+            // reconciles their admissions if so.
             let committed = cx.commit(tx, CommitLabel::MODEL_DONE).await;
-            let outcome = match &committed {
-                Ok(_) | Err(DurableError::AckLost { .. }) => {
-                    lash_trace::TraceCandidateOutcome::Selected
-                }
-                Err(_) => lash_trace::TraceCandidateOutcome::Refused,
-            };
             for candidate in candidates {
-                candidate.settle(outcome);
+                super::session::settle_trace_admission(candidate, &committed);
             }
             committed?;
             drive.run_changes_committed(&written);

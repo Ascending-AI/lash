@@ -27,8 +27,8 @@ impl ProductionToolHandlers<'_> {
         let context = self
             .context
             .with_tool_observation_attribution(&prepared.input.attribution);
-        if self.traces_call {
-            context.trace_tool_call_started(start, self.context.dispatch().clock.timestamp_ms())?;
+        if let Some(scope) = &self.traced_scope {
+            context.trace_tool_call_admitted(start, scope.clone());
         }
         context.emit_tool_call_started(
             call.call_id.as_str(),

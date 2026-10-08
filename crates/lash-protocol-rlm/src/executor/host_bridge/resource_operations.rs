@@ -290,8 +290,14 @@ impl HostBridge<'_> {
                 let draft =
                     lash_vm_broker::MemberDraft::pinned(member.id().clone(), request, &opener, pin)
                         .map_err(|fault| fault.0)?;
+                // The cell's admission retains the call's trace scope, which
+                // every attempt and every owner traces it under (FIG-5395).
+                let trace = self.members.propose_trace(&member, now_ms);
                 self.members.register(member);
-                Ok(draft)
+                Ok(lash_vm_broker::MemberDraft {
+                    draft: draft.draft.with_trace(trace),
+                    ..draft
+                })
             })
             .collect()
     }

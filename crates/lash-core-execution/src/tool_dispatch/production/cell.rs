@@ -9,6 +9,13 @@
 //! snapshot keeps for as long as the call is open, so any owner builds its
 //! body again. The cell is answered from the call's committed outcome alone
 //! ([`CellMembers::reply`]).
+//!
+//! A tool call's trace scope is retained by the cell's admission of it
+//! ([`CellMembers::propose_trace`]), and every attempt traces the call
+//! under it: the call is admitted once, not once per attempt. Its candidate
+//! is selected when the call's first body is built, which only an admitted
+//! call's is; an owner without the candidate reconciles the admission's
+//! export instead, which the exporter dedupes (FIG-5395).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -214,7 +221,8 @@ impl CellTools {
         catalog_policies(&self.context)
     }
 
-    /// The body of `execution`, an attempt of `call`.
+    /// The body of `execution`, an attempt of `call`, traced under the
+    /// scope its admission retained.
     #[must_use]
     pub(crate) fn body(&self, call: &CellCall, execution: &AdmittedExecution) -> MemberBody {
         member_body(
@@ -224,7 +232,7 @@ impl CellTools {
             call.invocation(),
             execution,
             &self.policies(),
-            true,
+            execution.draft().trace().cloned(),
         )
     }
 
@@ -289,6 +297,9 @@ pub struct CellMembers {
     tools: CellTools,
     host: Arc<dyn CellHostCalls>,
     calls: Mutex<BTreeMap<crate::ToolCallId, CellMember>>,
+    /// The trace candidates of the tool calls this owner proposed, until
+    /// their admission is known to have committed.
+    candidates: Mutex<BTreeMap<crate::ToolCallId, Box<dyn lash_trace::TraceAdmissionCandidate>>>,
 }
 
 impl CellMembers {
@@ -314,7 +325,55 @@ impl CellMembers {
             tools: CellTools { context, owner },
             host,
             calls: Mutex::default(),
+            candidates: Mutex::default(),
         })
+    }
+
+    /// Propose the trace admission of `member`, a tool call, requested at
+    /// `now_ms`: the scope the cell's admission of it retains. The candidate
+    /// is held until the call's first body is built. `None` for a host call,
+    /// or without tracing.
+    pub fn propose_trace(
+        &self,
+        member: &CellMember,
+        now_ms: u64,
+    ) -> Option<lash_trace::DurableTraceScope> {
+        let CellMember::Tool(call) = member else {
+            return None;
+        };
+        let proposal = self
+            .tools
+            .context
+            .propose_tool_trace(&call.id, now_ms)
+            .unwrap_or_else(|error| {
+                self.tools.context.record_nested_effect_error(error);
+                None
+            })?;
+        // A call proposed again replaces its earlier candidate, whose
+        // admission never committed.
+        if let Some(earlier) = self
+            .candidates
+            .lock_recover()
+            .insert(call.id.clone(), proposal.candidate)
+        {
+            earlier.settle(lash_trace::TraceCandidateOutcome::Refused);
+        }
+        Some(proposal.scope)
+    }
+
+    /// `execution`'s admission committed, as its body is being built:
+    /// select the candidate this owner proposed for its call, or reconcile
+    /// the admission's export when another owner proposed it.
+    fn admitted(&self, execution: &AdmittedExecution) {
+        let candidate = self.candidates.lock_recover().remove(execution.call());
+        match candidate {
+            Some(candidate) => candidate.settle(lash_trace::TraceCandidateOutcome::Selected),
+            None => {
+                if let Some(scope) = execution.draft().trace() {
+                    self.tools.context.export_tool_trace_admission(scope);
+                }
+            }
+        }
     }
 
     /// Know `member`, admitted or open, so its body can be built.
@@ -371,7 +430,10 @@ fn unknown_member() -> MemberBody {
 impl MemberBodies for CellMembers {
     fn body(&self, execution: &AdmittedExecution) -> MemberBody {
         match self.member(execution) {
-            Some(CellMember::Tool(call)) => self.tools.body(&call, execution),
+            Some(CellMember::Tool(call)) => {
+                self.admitted(execution);
+                self.tools.body(&call, execution)
+            }
             Some(CellMember::Host(call)) => {
                 let host = Arc::clone(&self.host);
                 let owner = self.tools.owner.clone();
@@ -454,5 +516,17 @@ impl MemberBodies for CellMembers {
             .dispatch()
             .plugins
             .run_changes_committed(written);
+    }
+}
+
+/// A candidate still held when the cell's owner lets its members go was
+/// proposed for an admission whose fate this owner cannot tell: its adapter
+/// holds it until a reconcile selects it or another candidate of its call
+/// wins.
+impl Drop for CellMembers {
+    fn drop(&mut self) {
+        for candidate in std::mem::take(&mut *self.candidates.lock_recover()).into_values() {
+            candidate.defer();
+        }
     }
 }

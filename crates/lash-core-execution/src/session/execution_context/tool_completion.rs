@@ -80,6 +80,15 @@ impl RuntimeExecutionContext<'_> {
         }))
     }
 
+    /// Reconcile the admission of `scope`, a call's trace scope its
+    /// admission retained, whose export that admission owes: the exporter
+    /// dedupes its identity (FIG-5395).
+    pub(crate) fn export_tool_trace_admission(&self, scope: &lash_trace::DurableTraceScope) {
+        if let Some(tracing) = &self.tracing {
+            tracing.runtime.scopes().export_admitted(scope);
+        }
+    }
+
     /// Observe the start of a call under `scope`, the trace scope its
     /// admission selected: retained by its round's admission, it is read
     /// back by every owner of the round and admitted by none (FIG-5382).

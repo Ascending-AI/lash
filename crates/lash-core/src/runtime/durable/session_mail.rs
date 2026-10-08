@@ -149,6 +149,7 @@ pub async fn drain_session_mail(
                 took: AdmittedTurnRows::Inputs {
                     ids: composed_inputs(cx, tx, &session, inputs, batching).await?,
                 },
+                trace: None,
             },
         }),
         None => None,
@@ -256,6 +257,7 @@ fn admission(mailbox: &SessionMailbox) -> Result<Option<Head>, SessionMailError>
                 took: AdmittedTurnRows::Batch {
                     id: batch.batch.clone(),
                 },
+                trace: None,
             },
         })
     };

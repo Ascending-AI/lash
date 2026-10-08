@@ -198,7 +198,7 @@ async fn resumed_turn_keeps_its_trace_scope(tier: Tier, resume: Resume) {
         }
     }
     let mut violations = telemetry.first_turn_violations(&name);
-    violations.extend(telemetry.first_turn_tool_violations(&name, 1..=1));
+    violations.extend(telemetry.first_turn_tool_violations(&name));
     world.shutdown().await;
     assert!(
         violations.is_empty(),

@@ -175,6 +175,10 @@ impl SessionRuntimes for CoreRuntimes {
     fn execution_budgets(&self) -> ExecutionBudgets {
         self.0.env.core.control.execution_budgets.clone()
     }
+
+    fn tracing(&self) -> &lash_core::runtime::TraceRuntime {
+        &self.0.env.core.tracing
+    }
 }
 
 /// What the core's node serves.

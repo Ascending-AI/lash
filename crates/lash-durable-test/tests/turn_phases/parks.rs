@@ -166,6 +166,7 @@ impl Activation for PoisonFirst {
                     took: AdmittedTurnRows::Batch {
                         id: lash_core::BatchId::from("poisoned-batch"),
                     },
+                    trace: None,
                 },
                 turn_deadline: None,
             }));

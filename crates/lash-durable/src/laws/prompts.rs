@@ -73,6 +73,7 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
                         "second-batch"
                     }),
                 },
+                trace: None,
             },
             turn_deadline: None,
         })

@@ -77,6 +77,7 @@ async fn a_model_start_commit_stays_within_its_round_trip_budget() {
             took: AdmittedTurnRows::Batch {
                 id: lash_sansio::BatchId::from("round-trips-batch"),
             },
+            trace: None,
         },
         turn_deadline: None,
     }));

@@ -38,6 +38,10 @@ pub trait SessionRuntimes: Send + Sync {
 
     /// The budgets the deployment's turns run under.
     fn execution_budgets(&self) -> ExecutionBudgets;
+
+    /// The trace runtime the deployment's turns are admitted and traced
+    /// under.
+    fn tracing(&self) -> &crate::trace::TraceRuntime;
 }
 
 /// [`TurnServices`] over a deployment's [`SessionRuntimes`].
@@ -140,9 +144,10 @@ impl RuntimeTurnServices {
     }
 
     /// Open `row`'s session and prepare its turn under the turn's own scope
-    /// of `cx`. A resumed turn passes what its checkpoint recorded, which
-    /// preparation serves: its before-turn decisions instead of running the
-    /// callbacks again, and its trace scope instead of a new admission.
+    /// of `cx`, and the trace scope its admission retained. A resumed turn
+    /// passes what its checkpoint recorded, which preparation serves: its
+    /// before-turn decisions instead of running the callbacks again, and its
+    /// trace scope.
     async fn prepare(
         &self,
         cx: &ActorContext,
@@ -163,8 +168,16 @@ impl RuntimeTurnServices {
         // The run starts from the head the runtime opened at: what it
         // changes from here is what its phases record (FIG-5301).
         runtime.services.plugins.begin_run();
+        let admitted_trace = row.admission.trace().cloned();
         let turn = runtime
-            .prepare_durable_turn(&controller, &row.run, admissions, recorded, &observer)
+            .prepare_durable_turn(
+                &controller,
+                &row.run,
+                admissions,
+                recorded,
+                admitted_trace,
+                &observer,
+            )
             .await?;
         // The turn's commit settles its inputs and queued work from the
         // driver once it finishes: those its run took, the inputs with the
@@ -250,6 +263,31 @@ impl TurnServices for RuntimeTurnServices {
 
     fn input_batching(&self) -> &dyn InputBatching {
         self
+    }
+
+    fn propose_turn_trace(
+        &self,
+        cx: &ActorContext,
+        run: &TurnId,
+    ) -> Option<lash_core_execution::runtime::actor::round::TraceProposal> {
+        let session = SessionId::parse(cx.actor().id()).ok()?;
+        let tracing = self.runtimes.tracing();
+        let scope = lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
+            session_id: session,
+            turn_id: run.clone(),
+        });
+        // A session's turn is its own root: nothing parents its admission.
+        let cause = lash_trace::TraceCause::Root;
+        let candidate = tracing.scopes().propose(&scope, &cause);
+        Some(lash_core_execution::runtime::actor::round::TraceProposal {
+            scope: lash_trace::DurableTraceScope {
+                scope,
+                cause,
+                anchor: candidate.anchor(),
+                started_at_ms: tracing.clock().timestamp_ms(),
+            },
+            candidate,
+        })
     }
 
     async fn announce_head(&self, cx: &ActorContext, session: &SessionId) {

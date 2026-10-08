@@ -47,13 +47,14 @@
 //!   execution, never by an upload: once the turn ended and the cleanup
 //!   relay ran, the answered blob is held by the session alone and survives
 //!   a sweep, and the other has no referrer and is swept.
-//! - **Trace scope (FIG-5363):** a step of one native call cut at its
-//!   `model.done` or `round.outcome` resumes from its checkpoint under the
-//!   trace scope its admission retained: its scope is admitted once, and
-//!   every record of the turn carries that admission's trace. Its call's
-//!   scope is admitted once too, on that trace, by its round's admission
-//!   (FIG-5382), and at most once when the owner was killed after that
-//!   admission committed, before it learned so.
+//! - **Trace scope (FIG-5363, FIG-5395):** a step of one native call cut
+//!   at its `turn.admit`, its first phase commit or any later one resumes
+//!   under the trace scope its admission retained: its scope is admitted
+//!   exactly once, and every record of the turn carries that admission's
+//!   trace. Its call's scope is admitted exactly once too, on that trace,
+//!   by its round's admission (FIG-5382), also when the owner was killed
+//!   after that admission committed, before it learned so. A code cell's
+//!   call is admitted exactly once in the same way, by its cell's admission.
 //! - The turn committed once and ended, and a zombie's writes after its reap
 //!   are refused.
 
@@ -101,6 +102,8 @@ const PROBE: &str = "crash_probe";
 const ACTIVITY: &str = "activity";
 /// The label of the [`Turn::Trace`] call.
 const TRACE: &str = "trace";
+/// The label of the [`Turn::CellTrace`] call.
+const CELL_TRACE: &str = "cell-trace";
 /// The plugin whose namespace the state scenarios change.
 const STATE_PLUGIN: &str = "crash-state-law";
 /// The plugin's tool that sets the namespace's key to its entry's value.
@@ -160,14 +163,26 @@ enum Turn {
     /// One step of one native call, the core served with a recording
     /// telemetry adapter (FIG-5363).
     Trace,
+    /// One cell of one probe call, the core served with a recording
+    /// telemetry adapter (FIG-5395).
+    CellTrace,
 }
 
 impl Turn {
     fn code(self) -> bool {
         matches!(
             self,
-            Self::LimitCell | Self::CellIdentity | Self::StateCell | Self::StatePairCell
+            Self::LimitCell
+                | Self::CellIdentity
+                | Self::StateCell
+                | Self::StatePairCell
+                | Self::CellTrace
         )
+    }
+
+    /// Whether the core is served with the recording telemetry adapter.
+    fn traced(self) -> bool {
+        matches!(self, Self::Trace | Self::CellTrace)
     }
 
     fn script(self) -> Vec<LlmResponse> {
@@ -224,6 +239,7 @@ impl Turn {
                 PROBE,
                 serde_json::json!({ "label": TRACE }),
             )])],
+            Self::CellTrace => vec![served::cell(&format!("await {};", call(CELL_TRACE)))],
             Self::State => vec![served::response(vec![served::call(
                 "call-state",
                 STATE_SET,
@@ -270,6 +286,7 @@ impl Turn {
             Self::Activity => (vec![ACTIVITY.to_owned()], Vec::new()),
             Self::Put => (vec![PUT.to_owned()], Vec::new()),
             Self::Trace => (vec![TRACE.to_owned()], Vec::new()),
+            Self::CellTrace => (vec![CELL_TRACE.to_owned()], Vec::new()),
             Self::State => (vec!["T".to_owned()], Vec::new()),
             Self::StateCell => (vec!["C".to_owned()], Vec::new()),
             Self::StatePair | Self::StatePairCell => {
@@ -304,7 +321,8 @@ impl Turn {
             | Self::StatePair
             | Self::StateCell
             | Self::StatePairCell
-            | Self::Trace => return None,
+            | Self::Trace
+            | Self::CellTrace => return None,
         };
         let exceeded = lash::ToolCallLimitExceeded {
             scope: lash::ToolCallLimitScope::Cell,
@@ -336,7 +354,8 @@ impl Turn {
             | Self::StatePair
             | Self::StateCell
             | Self::StatePairCell
-            | Self::Trace => 64,
+            | Self::Trace
+            | Self::CellTrace => 64,
         }
     }
 }
@@ -629,7 +648,8 @@ struct Crash {
     /// worker calls hold.
     clock: Mutex<Option<Arc<SimClock>>>,
     core: Mutex<Option<lash::LashCore>>,
-    /// The telemetry adapter the core of [`Turn::Trace`] is served with.
+    /// The telemetry adapter the core of a [`Turn::traced`] turn is served
+    /// with.
     telemetry: telemetry::Telemetry,
     /// The host's session and its send, which [`Turn::Activity`] follows.
     host: Mutex<Option<(lash::DurableSession, lash::SendHandle)>>,
@@ -700,7 +720,7 @@ impl Crash {
                 } else {
                     builder
                 };
-                let builder = if self.turn == Turn::Trace {
+                let builder = if self.turn.traced() {
                     builder.trace_runtime(self.telemetry.runtime())
                 } else {
                     builder
@@ -796,24 +816,9 @@ impl Crash {
         if self.turn == Turn::Put {
             violations.extend(self.put_laws().await);
         }
-        if self.turn == Turn::Trace {
+        if self.turn.traced() {
             violations.extend(self.telemetry.first_turn_violations(SESSION));
-            // An owner killed once the round's admission committed, before
-            // it learned so, selects none of its calls' scopes, and its
-            // successor reads them back: the call is admitted at most once.
-            let admissions = match cut {
-                Some(cut)
-                    if cut.point.label == CommitLabel::MODEL_DONE
-                        && cut.fault == Fault::CommitThenAbort =>
-                {
-                    0..=1
-                }
-                _ => 1..=1,
-            };
-            violations.extend(
-                self.telemetry
-                    .first_turn_tool_violations(SESSION, admissions),
-            );
+            violations.extend(self.telemetry.first_turn_tool_violations(SESSION));
         }
         if let Some(cut) = cut {
             violations.extend(zombie_laws(cut, &trace));
@@ -1792,21 +1797,32 @@ async fn a_turns_puts_are_held_by_its_execution_across_a_crash(tier: Tier) {
     prove(Turn::Put, tier).await;
 }
 
-/// A turn cut at a phase commit after its first, under every fault, and
-/// resumed from its checkpoint on the other node reads back the trace scope
-/// its admission retained: its scope is admitted once, and every record of
-/// the turn carries that admission's trace (FIG-5363), and its call's
-/// scope, admitted with its round, is admitted once on that trace, or at
-/// most once when its owner was killed after the round's admission
-/// committed (FIG-5382). A cut before the first phase commit leaves no checkpoint to
-/// resume from.
-async fn a_turn_cut_at_a_phase_commit_resumes_under_its_trace_scope(tier: Tier) {
+/// A turn cut at its admission, at its first phase commit or at a later
+/// one, under every fault, and resumed on the other node reads back the
+/// trace scope its admission retained: its scope is admitted exactly once,
+/// and every record of the turn carries that admission's trace (FIG-5363,
+/// FIG-5395). Its call's scope, admitted with its round, is admitted
+/// exactly once on that trace, also when its owner was killed after the
+/// round's admission committed, before it learned so (FIG-5382, FIG-5395).
+async fn a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash(tier: Tier) {
     prove_at(
         Turn::Trace,
         tier,
-        &[CommitLabel::MODEL_DONE, CommitLabel::ROUND_OUTCOME],
+        &[
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
+        ],
     )
     .await;
+}
+
+/// A code cell's call, cut anywhere, is admitted exactly once, on its
+/// turn's trace: its cell's admission retains its scope, which every
+/// attempt and every later owner reads back (FIG-5395).
+async fn a_cells_call_trace_admission_is_exported_once_across_a_crash(tier: Tier) {
+    prove(Turn::CellTrace, tier).await;
 }
 
 /// A tool's plugin-state change cut at its `round.outcome`, before or after
@@ -1948,7 +1964,8 @@ tiered_laws!(
     tool_call_limit_refuses_the_same_call_across_a_crash,
     tool_call_limit_refuses_the_same_call_across_a_crash_in_a_cell,
     code_cells_keep_identity_and_distinguish_fresh_calls_across_a_kill,
-    a_turn_cut_at_a_phase_commit_resumes_under_its_trace_scope,
+    a_turns_and_its_calls_trace_admissions_are_exported_once_across_a_crash,
+    a_cells_call_trace_admission_is_exported_once_across_a_crash,
 );
 
 /// The attachment put crash law on every store tier (FIG-5400).

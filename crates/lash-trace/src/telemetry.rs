@@ -903,7 +903,9 @@ impl TraceCandidateOutcome {
 ///
 /// It lives only inside the admission call: never across a suspension, never
 /// under a store lock, and its export is never required for the admission to
-/// commit.
+/// commit. The admission that retains its scope is the obligation to export
+/// it: a reader of a retained admission whose export may be owed reconciles
+/// it with [`TraceScopeFactory::export_admitted`].
 pub trait TraceAdmissionCandidate: Send {
     /// The anchor this candidate would give the scope.
     fn anchor(&self) -> TraceAnchor;
@@ -912,6 +914,16 @@ pub trait TraceAdmissionCandidate: Send {
     /// admitted name; the others keep the attempt name and record the
     /// outcome.
     fn settle(self: Box<Self>, outcome: TraceCandidateOutcome);
+
+    /// Hands the candidate to its adapter when its admission may have
+    /// committed but its owner cannot tell (the commit's acknowledgement was
+    /// lost). The adapter selects it when a reader reconciles its anchor's
+    /// admission ([`TraceScopeFactory::export_admitted`]), and refuses it
+    /// once another candidate of its scope is selected. Without an adapter
+    /// that holds candidates, it is refused now.
+    fn defer(self: Box<Self>) {
+        self.settle(TraceCandidateOutcome::Refused);
+    }
 }
 
 /// A short host operation. Its carrier names this call, never a durable owner.
@@ -943,6 +955,14 @@ pub trait TraceScopeFactory: Send + Sync {
     /// Starts an admission candidate for `scope` under `cause`.
     fn propose(&self, scope: &TraceScopeId, cause: &TraceCause)
     -> Box<dyn TraceAdmissionCandidate>;
+
+    /// Exports the admission of `scope`, retained by a durable admission
+    /// whose owner may not have exported it (it lost its life or the
+    /// commit's acknowledgement first): the admission under the identity of
+    /// its anchor. A reader that owes the admission's export reconciles it
+    /// here; the adapter dedupes the identity, so an admission its candidate
+    /// or an earlier reconcile already exported is exported no more.
+    fn export_admitted(&self, _scope: &DurableTraceScope) {}
 }
 
 /// The factory of a runtime with no telemetry adapter: every scope is

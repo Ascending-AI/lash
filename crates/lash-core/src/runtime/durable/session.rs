@@ -122,6 +122,32 @@ pub trait TurnServices: Send + Sync {
     /// committed it have lost the commit's acknowledgement or its life
     /// before it published the commit. Commits nothing.
     async fn announce_head(&self, _cx: &ActorContext, _session: &SessionId) {}
+
+    /// Propose the trace admission of `run`, the turn `cx` admits: the
+    /// scope its `turn.admit` commit retains, and the candidate that commit
+    /// settles (FIG-5395). `None` when the services trace nothing.
+    fn propose_turn_trace(
+        &self,
+        _cx: &ActorContext,
+        _run: &TurnId,
+    ) -> Option<lash_core_execution::runtime::actor::round::TraceProposal> {
+        None
+    }
+}
+
+/// Settle `candidate`, the trace admission a commit retains, on that
+/// commit's result: selected once it landed, deferred to its adapter when
+/// its acknowledgement was lost (a reader of the retained admission then
+/// reconciles it), and refused when nothing landed (FIG-5395).
+pub(super) fn settle_trace_admission<T>(
+    candidate: Box<dyn lash_trace::TraceAdmissionCandidate>,
+    committed: &Result<T, DurableError>,
+) {
+    match committed {
+        Ok(_) => candidate.settle(lash_trace::TraceCandidateOutcome::Selected),
+        Err(DurableError::AckLost { .. }) => candidate.defer(),
+        Err(_) => candidate.settle(lash_trace::TraceCandidateOutcome::Refused),
+    }
 }
 
 /// One turn an owner runs: its machine and the in-memory work around it. The
@@ -487,12 +513,29 @@ impl SessionActivation {
             let drain = drain_session_mail(cx, &mut tx, self.services.input_batching()).await?;
             return match drain.admit {
                 Some(admitted) if admitted.admission.is_turn() => {
+                    // The turn's trace scope is retained by its admission,
+                    // and its candidate is selected once that commits: a
+                    // pass that starts the turn reads the scope back
+                    // (FIG-5395).
+                    let (trace, candidate) = self
+                        .services
+                        .propose_turn_trace(cx, &admitted.run)
+                        .map(|proposal| (Some(proposal.scope), Some(proposal.candidate)))
+                        .unwrap_or_default();
+                    let admitted = AdmittedInputs {
+                        admission: admitted.admission.with_trace(trace),
+                        ..admitted
+                    };
                     admit_turn(cx, &mut tx, admitted).await?;
                     // The turn's rows are this build's session state:
                     // from now only a node that decodes it claims the
                     // session.
                     tx.stamp_formats(cx.backend().formats().session().clone());
-                    cx.commit(tx, CommitLabel::TURN_ADMIT).await?;
+                    let committed = cx.commit(tx, CommitLabel::TURN_ADMIT).await;
+                    if let Some(candidate) = candidate {
+                        settle_trace_admission(candidate, &committed);
+                    }
+                    committed?;
                     Ok(Pass::Again)
                 }
                 // A command run binds nothing: the commit that applies it
@@ -830,8 +873,9 @@ pub struct PhaseCheckpoint {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub before_turn: Vec<crate::plugin::RecordedTurnContribution>,
     /// The trace scope the turn's admission retained
-    /// ([`TurnDrive::trace_scope`]), which a resume's admission reads back
-    /// instead of proposing another (FIG-5363).
+    /// ([`TurnDrive::trace_scope`]), which a resume reads back (FIG-5363);
+    /// before the first phase commit, the turn's admission record holds it
+    /// (FIG-5395).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace: Option<lash_trace::DurableTraceScope>,
 }

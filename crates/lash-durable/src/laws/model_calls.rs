@@ -63,6 +63,7 @@ pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore)
             took: AdmittedTurnRows::Batch {
                 id: lash_sansio::BatchId::from("counted-batch"),
             },
+            trace: None,
         },
         turn_deadline: None,
     })

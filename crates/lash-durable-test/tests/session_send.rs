@@ -509,6 +509,7 @@ async fn admit_composed_inputs(
             took: AdmittedTurnRows::Inputs {
                 ids: AdmittedInputIds::new(inputs).unwrap(),
             },
+            trace: None,
         },
         turn_deadline: None,
     }));

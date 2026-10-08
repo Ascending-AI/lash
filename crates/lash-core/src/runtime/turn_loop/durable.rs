@@ -14,9 +14,9 @@ pub(in crate::runtime) struct DurableTurn {
     /// What the before-turn callbacks decided: run for a fresh turn, served
     /// from the checkpoint for a resumed one. Every phase commits them.
     pub(in crate::runtime) before_turn: Vec<crate::plugin::RecordedTurnContribution>,
-    /// The trace scope the turn's admission retained: proposed for a fresh
-    /// turn, read back from the checkpoint for a resumed one. Every phase
-    /// commits it.
+    /// The trace scope the turn's admission retained: read back from its
+    /// admission record for a fresh turn, from the checkpoint for a resumed
+    /// one. Every phase commits it.
     pub(in crate::runtime) trace_scope: lash_trace::DurableTraceScope,
     /// Why the admitted input did not normalize: the turn ends at once,
     /// `InvalidInput`, without calling the model.
@@ -32,10 +32,11 @@ impl LashRuntime {
     /// head, apply the before-turn decisions and the attachment-omission
     /// policies, and build the driver that answers the turn's effects under
     /// `controller`, the turn's own claimed context. `admissions` are the
-    /// rows the run took. A fresh turn runs its before-turn callbacks and
-    /// proposes its trace admission; a resumed one passes what its
-    /// checkpoint recorded as `recorded`: no callback runs, and its admission
-    /// reads the retained trace scope back (FIG-5363).
+    /// rows the run took. A fresh turn runs its before-turn callbacks under
+    /// `admitted_trace`, the trace scope its `turn.admit` retained, whose
+    /// export it owes; a resumed one passes what its checkpoint recorded as
+    /// `recorded`: no callback runs, and it reads the retained trace scope
+    /// back (FIG-5363, FIG-5395). No preparation proposes an admission.
     #[expect(
         clippy::expect_used,
         reason = "the runtime session is installed for the whole preparation"
@@ -46,6 +47,7 @@ impl LashRuntime {
         run: &TurnId,
         mut admissions: LogicalTurnAdmissions,
         recorded: Option<crate::runtime::durable::session::RecordedPreparation>,
+        admitted_trace: Option<lash_trace::DurableTraceScope>,
         observer: &TurnObserver,
     ) -> Result<DurableTurn, RuntimeError> {
         // An admission never mixes run specs, so the head input's spec is the
@@ -66,26 +68,34 @@ impl LashRuntime {
             &admissions,
             self.tool_restore_report.take(),
         );
-        let (recorded_before_turn, retained_trace) = match recorded {
-            Some(recorded) => (Some(recorded.before_turn), recorded.trace),
-            None => (None, None),
+        let (recorded_before_turn, retained_trace, export_owed) = match recorded {
+            Some(recorded) => (Some(recorded.before_turn), recorded.trace, false),
+            None => (None, admitted_trace, true),
         };
-        let turn_context = crate::TurnContext::default();
-        let turn_boundary = self
-            .host
-            .core
-            .tracing
-            .record_boundary(
-                controller,
-                format!("trace:turn:{run}:started"),
+        let tracing = &self.host.core.tracing;
+        // An admission that traced nothing leaves the turn untraced.
+        let retained_trace = retained_trace.unwrap_or_else(|| {
+            lash_trace::TraceScopeOffer::default().into_scope(
                 lash_trace::TraceScopeId::admission(lash_trace::TraceScopeOwner::Turn {
                     session_id: self.state.session_id.clone(),
                     turn_id: run.clone(),
                 }),
-                controller.trace_scope().map_or(
-                    lash_trace::TraceCause::Root,
-                    lash_trace::DurableTraceScope::parent_cause,
-                ),
+                tracing.clock().timestamp_ms(),
+            )
+        });
+        // A turn still admitted owes its admission's export: the owner that
+        // committed `turn.admit` may have lost its life or the commit's
+        // acknowledgement before it selected the candidate. Its first phase
+        // commit discharges the obligation, as only an owner that started
+        // the turn here writes one (FIG-5395).
+        if export_owed {
+            tracing.scopes().export_admitted(&retained_trace);
+        }
+        let turn_context = crate::TurnContext::default();
+        let turn_boundary = tracing
+            .record_boundary(
+                controller,
+                format!("trace:turn:{run}:started"),
                 retained_trace,
                 lash_trace::TraceTransitionKind::Started,
             )

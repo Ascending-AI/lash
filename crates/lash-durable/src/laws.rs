@@ -624,6 +624,7 @@ pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
             took: AdmittedTurnRows::Batch {
                 id: lash_sansio::BatchId::from("cancelled-batch"),
             },
+            trace: None,
         },
         turn_deadline: None,
     }))

@@ -1,5 +1,6 @@
 //! Host-owned providers project permitted domain observations under retained anchors.
-use std::sync::Arc;
+use std::collections::{HashSet, VecDeque};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use opentelemetry::global::{BoxedSpan, BoxedTracer};
@@ -64,6 +65,84 @@ pub struct OtelTelemetry {
     tracer: Arc<BoxedTracer>,
     metrics: TelemetryMetrics,
     options: OtelOptions,
+    admissions: Arc<Mutex<Admissions>>,
+}
+
+/// The most admission identities an adapter remembers having exported.
+const EXPORTED_ADMISSIONS: usize = 4096;
+/// The most deferred candidates an adapter holds; past it, the oldest is
+/// refused.
+const DEFERRED_ADMISSIONS: usize = 256;
+
+/// An admission's export identity: its anchor's trace and span.
+type AdmissionIdentity = (W3cTraceId, W3cSpanId);
+
+fn identity(anchor: &TraceAnchor) -> Option<AdmissionIdentity> {
+    anchor
+        .context()
+        .map(|context| (context.trace_id(), context.span_id()))
+}
+
+/// A candidate whose admission's fate its owner could not tell.
+struct Deferred {
+    span: BoxedSpan,
+    identity: AdmissionIdentity,
+    scope: TraceScopeId,
+}
+
+/// The admissions an adapter exported, by identity, and the candidates it
+/// holds deferred.
+#[derive(Default)]
+struct Admissions {
+    exported: HashSet<AdmissionIdentity>,
+    order: VecDeque<AdmissionIdentity>,
+    deferred: VecDeque<Deferred>,
+}
+
+impl Admissions {
+    /// Records `identity` as exported; `false` when it already was.
+    fn export(&mut self, identity: AdmissionIdentity) -> bool {
+        if !self.exported.insert(identity) {
+            return false;
+        }
+        self.order.push_back(identity);
+        if self.order.len() > EXPORTED_ADMISSIONS
+            && let Some(oldest) = self.order.pop_front()
+        {
+            self.exported.remove(&oldest);
+        }
+        true
+    }
+
+    /// `identity` was selected for `scope`: its deferred candidate, if one
+    /// is held, and every other deferred candidate of `scope`, which lost.
+    fn select(
+        &mut self,
+        scope: &TraceScopeId,
+        identity: AdmissionIdentity,
+    ) -> (Option<Deferred>, Vec<Deferred>) {
+        let mut selected = None;
+        let mut lost = Vec::new();
+        for deferred in std::mem::take(&mut self.deferred) {
+            if deferred.identity == identity {
+                selected = Some(deferred);
+            } else if deferred.scope == *scope {
+                lost.push(deferred);
+            } else {
+                self.deferred.push_back(deferred);
+            }
+        }
+        (selected, lost)
+    }
+
+    /// Holds `deferred`, returning the oldest held candidate past the bound.
+    fn defer(&mut self, deferred: Deferred) -> Option<Deferred> {
+        self.deferred.push_back(deferred);
+        if self.deferred.len() > DEFERRED_ADMISSIONS {
+            return self.deferred.pop_front();
+        }
+        None
+    }
 }
 
 impl OtelTelemetry {
@@ -83,6 +162,7 @@ impl OtelTelemetry {
                 meter_provider.meter_with_scope(instrumentation_scope()),
             ),
             options,
+            admissions: Arc::default(),
         }
     }
 
@@ -91,6 +171,12 @@ impl OtelTelemetry {
     }
     pub fn options(&self) -> &OtelOptions {
         &self.options
+    }
+
+    fn admissions(&self) -> std::sync::MutexGuard<'_, Admissions> {
+        self.admissions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     fn completion(
@@ -268,8 +354,53 @@ impl TraceScopeFactory for OtelTelemetry {
         Box::new(AdmissionCandidate {
             span: Some(span),
             anchor,
-            kind: scope.kind(),
+            scope: scope.clone(),
+            admissions: Arc::clone(&self.admissions),
         })
+    }
+
+    /// A deferred candidate of the anchor is selected. Without one, the
+    /// anchor's span died with the owner that proposed it, and the SDK mints
+    /// every span's id: the admission is exported as a span under the
+    /// anchor, which names its identity.
+    fn export_admitted(&self, scope: &DurableTraceScope) {
+        let TraceAnchor::Context(anchor) = &scope.anchor else {
+            return;
+        };
+        let identity = (anchor.trace_id(), anchor.span_id());
+        let (selected, lost) = {
+            let mut admissions = self.admissions();
+            if !admissions.export(identity) {
+                return;
+            }
+            admissions.select(&scope.scope, identity)
+        };
+        let kind = scope.scope.kind();
+        for deferred in lost {
+            end_candidate(deferred.span, kind, TraceCandidateOutcome::Refused);
+        }
+        if let Some(deferred) = selected {
+            end_candidate(deferred.span, kind, TraceCandidateOutcome::Selected);
+            return;
+        }
+        let Some(context) = span_context(anchor) else {
+            return;
+        };
+        let definition = admitted(kind).definition();
+        let mut span = self
+            .tracer
+            .span_builder(definition.name)
+            .with_kind(definition.kind)
+            .with_start_time(epoch_ms(scope.started_at_ms))
+            .with_attributes([
+                A::ScopeKind.value(kind.as_str()),
+                A::AdmissionOutcome.value(TraceCandidateOutcome::Selected.as_str()),
+            ])
+            .start_with_context(
+                self.tracer.as_ref(),
+                &Context::new().with_remote_span_context(context),
+            );
+        span.end();
     }
 }
 
@@ -319,27 +450,78 @@ impl Drop for HostOperation {
 struct AdmissionCandidate {
     span: Option<BoxedSpan>,
     anchor: TraceAnchor,
-    kind: TraceScopeKind,
+    scope: TraceScopeId,
+    admissions: Arc<Mutex<Admissions>>,
 }
 impl AdmissionCandidate {
     fn finish(&mut self, outcome: TraceCandidateOutcome) {
-        if let Some(mut span) = self.span.take() {
-            if span.is_recording() {
-                span.set_attribute(A::AdmissionOutcome.value(outcome.as_str()));
-                if outcome == TraceCandidateOutcome::Selected {
-                    span.update_name(admitted(self.kind).definition().name);
-                }
-            }
-            span.end();
+        if let Some(span) = self.span.take() {
+            end_candidate(span, self.scope.kind(), outcome);
         }
     }
+}
+/// Ends a candidate's span: a selected one takes its scope's admitted name.
+fn end_candidate(mut span: BoxedSpan, kind: TraceScopeKind, outcome: TraceCandidateOutcome) {
+    if span.is_recording() {
+        span.set_attribute(A::AdmissionOutcome.value(outcome.as_str()));
+        if outcome == TraceCandidateOutcome::Selected {
+            span.update_name(admitted(kind).definition().name);
+        }
+    }
+    span.end();
 }
 impl TraceAdmissionCandidate for AdmissionCandidate {
     fn anchor(&self) -> TraceAnchor {
         self.anchor.clone()
     }
+    /// A selected candidate's identity is exported: a later reconcile of it
+    /// exports nothing, and the deferred candidates of its scope lost.
     fn settle(mut self: Box<Self>, outcome: TraceCandidateOutcome) {
+        if outcome == TraceCandidateOutcome::Selected
+            && let Some(identity) = identity(&self.anchor)
+        {
+            let lost = {
+                let mut admissions = self
+                    .admissions
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                admissions.export(identity);
+                admissions.select(&self.scope, identity).1
+            };
+            for deferred in lost {
+                end_candidate(
+                    deferred.span,
+                    self.scope.kind(),
+                    TraceCandidateOutcome::Refused,
+                );
+            }
+        }
         self.finish(outcome);
+    }
+    fn defer(mut self: Box<Self>) {
+        let Some(identity) = identity(&self.anchor) else {
+            self.finish(TraceCandidateOutcome::Refused);
+            return;
+        };
+        let Some(span) = self.span.take() else {
+            return;
+        };
+        let evicted = self
+            .admissions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .defer(Deferred {
+                span,
+                identity,
+                scope: self.scope.clone(),
+            });
+        if let Some(evicted) = evicted {
+            end_candidate(
+                evicted.span,
+                evicted.scope.kind(),
+                TraceCandidateOutcome::Refused,
+            );
+        }
     }
 }
 impl Drop for AdmissionCandidate {

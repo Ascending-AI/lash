@@ -83,6 +83,65 @@ fn context(flags: u8) -> TraceCarrier {
     .unwrap()
 }
 
+/// An admission is exported once per identity, its anchor (FIG-5395): a
+/// deferred candidate is exported as its scope's admission by the reconcile
+/// of its anchor, and loses to another candidate of its scope that is
+/// selected; a reconcile with no candidate in hand exports the admission
+/// under its anchor, whose span the SDK cannot mint again.
+#[test]
+fn reconciled_admissions_are_exported_once_by_identity() {
+    let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::default());
+    let retained = |anchor: TraceAnchor| DurableTraceScope {
+        scope: scope_id(),
+        cause: TraceCause::Root,
+        anchor,
+        started_at_ms: 1000,
+    };
+
+    let deferred = adapter.propose(&scope_id(), &TraceCause::Root);
+    let anchor = deferred.anchor();
+    deferred.defer();
+    assert!(exporter.get_finished_spans().unwrap().is_empty());
+    adapter.export_admitted(&retained(anchor.clone()));
+    adapter.export_admitted(&retained(anchor.clone()));
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 1);
+    assert_eq!(spans[0].name, "lash.turn.admitted");
+    assert_eq!(
+        spans[0].span_context.span_id().to_bytes(),
+        anchor.context().unwrap().span_id().to_bytes()
+    );
+
+    let elsewhere = context(1);
+    adapter.export_admitted(&retained(TraceAnchor::Context(elsewhere.clone())));
+    adapter.export_admitted(&retained(TraceAnchor::Context(elsewhere.clone())));
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 2);
+    assert_eq!(spans[1].name, "lash.turn.admitted");
+    assert_eq!(
+        spans[1].parent_span_id.to_bytes(),
+        elsewhere.span_id().to_bytes()
+    );
+    assert_eq!(
+        spans[1].span_context.trace_id().to_bytes(),
+        elsewhere.trace_id().to_bytes()
+    );
+
+    adapter.propose(&scope_id(), &TraceCause::Root).defer();
+    let selected = admit(&adapter, TraceCause::Root);
+    adapter.export_admitted(&selected);
+    let spans = exporter.get_finished_spans().unwrap();
+    assert_eq!(spans.len(), 4);
+    assert_eq!(spans[2].name, "lash.admission.attempt");
+    assert!(
+        spans[2]
+            .attributes
+            .contains(&A::AdmissionOutcome.value("refused"))
+    );
+    assert_eq!(spans[3].name, "lash.turn.admitted");
+}
+
 #[test]
 fn explicit_run_ignores_ambient_context() {
     let (provider, meter, exporter, _) = providers(Sampler::AlwaysOn);

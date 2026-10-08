@@ -325,7 +325,8 @@ fn attempt_fault_backoff(faults: u32) -> std::time::Duration {
 /// `invocation`, over `context`'s catalog and owned by `owner`'s run: the
 /// call's admission checks, its attempt and its decision, run in memory
 /// between its `x_start` and its `x_outcome`. `policies` are the current
-/// declarations a repeat is vetoed against.
+/// declarations a repeat is vetoed against. `traced_scope` is the scope
+/// each attempt traces the call under, when its fold does not.
 pub(super) fn member_body(
     context: &RuntimeExecutionContext<'static>,
     owner: &crate::EffectOpener,
@@ -333,7 +334,7 @@ pub(super) fn member_body(
     invocation: ToolInvocation,
     execution: &AdmittedExecution,
     policies: &PolicyView,
-    traces_call: bool,
+    traced_scope: Option<lash_trace::DurableTraceScope>,
 ) -> MemberBody {
     let context = context.clone();
     let owner = owner.clone();
@@ -361,7 +362,7 @@ pub(super) fn member_body(
                     None,
                 )
                 .with_completion_key(key.clone());
-                handlers.traces_call = traces_call;
+                handlers.traced_scope = traced_scope.clone();
                 let handlers = Arc::new(handlers);
                 match handlers
                     .member_attempt(
@@ -729,6 +730,10 @@ impl RoundTools for ProductionRoundTools {
             })
     }
 
+    fn export_admitted(&self, scope: &lash_trace::DurableTraceScope) {
+        self.context.export_tool_trace_admission(scope);
+    }
+
     fn pin(&self, call: &crate::sansio::PendingToolCall, now_ms: u64) -> MemberPin {
         let manifest = self
             .context
@@ -851,7 +856,7 @@ impl RoundTools for ProductionRoundTools {
             invocation,
             execution,
             &self.policies(),
-            false,
+            None,
         )
     }
 
