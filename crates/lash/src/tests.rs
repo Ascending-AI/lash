@@ -456,6 +456,7 @@ mod plugin_reopen;
 mod provider_attempts;
 mod replay_origin;
 mod plugin_stack;
+mod presentation_fallback;
 mod protocol_effects;
 mod recorded_execution_controls;
 mod recorded_protocol_prompt;
