@@ -192,7 +192,6 @@ async fn vm_run(
     let bounds = settings.execution_bounds;
     let host_environment = settings
         .into_surface()
-        .for_process_registry(true)
         .host_environment(&run.tool_catalog)
         .map_err(|error| error.to_string());
     if let Err(output) = validate_lashlang_process_for_run(

@@ -619,7 +619,6 @@ async fn vm_fixture() -> VmFixture {
     let environment = settings
         .clone()
         .into_surface()
-        .for_process_registry(true)
         .host_environment(&lash_core::ToolCatalog::default())
         .expect("the host environment");
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
@@ -878,7 +877,6 @@ async fn a_start_its_artifact_or_host_does_not_admit_ends_with_its_typed_refusal
     .expect("encode the settings");
     let echo_catalog = lash_core::ToolCatalog::from_tool_definitions(vec![bound_echo()]);
     let environment = crate::LashlangSurface::default()
-        .for_process_registry(true)
         .host_environment(&echo_catalog)
         .expect("the host environment");
     let echo = b::unwrap(b::receiver_call(
@@ -1170,23 +1168,6 @@ async fn an_unreadable_artifact_ends_the_process_but_a_store_outage_faults_the_s
 // ---- recorded settings (FIG-4398; ported by FIG-5310 from the deleted
 // `recorded_inheritance_tests.rs`) ----
 
-/// The fixture's settings with `abilities`, every other fact as recorded.
-fn settings_with(abilities: lashlang::LashlangAbilities) -> serde_json::Value {
-    let bounds = lashlang::ExecutionBounds::new(
-        lashlang::ExecutionBound::Unbounded,
-        lashlang::ExecutionBound::Unbounded,
-    );
-    serde_json::to_value(crate::LashlangRecordedSettings::new(
-        crate::LashlangSurface::new(
-            abilities,
-            lashlang::LashlangLanguageFeatures::default(),
-            lashlang::LashlangHostCatalog::new(),
-        ),
-        bounds,
-    ))
-    .expect("encode the settings")
-}
-
 /// A process whose row recorded no settings, or settings that do not
 /// decode, ends with a typed failure: it never runs under the running
 /// engine's own surface, and as a completed step it is never retried.
@@ -1196,7 +1177,7 @@ async fn unreadable_recorded_settings_end_the_process_typed() {
     for recorded in [
         None,
         Some(serde_json::json!("corrupt")),
-        Some(serde_json::json!({ "abilities": 7 })),
+        Some(serde_json::json!({ "language_features": 7 })),
     ] {
         let output = fixture
             .run_recorded(fixture.first(), recorded.clone())
@@ -1210,51 +1191,4 @@ async fn unreadable_recorded_settings_end_the_process_typed() {
             "{recorded:?}"
         );
     }
-}
-
-/// The abilities a process recorded at creation decide what it may do, not
-/// the running engine's wiring: an engine that allows `sleep` does not
-/// enable it for a process that recorded none, and an engine that withholds
-/// it does not take it from one that recorded it.
-#[tokio::test(flavor = "current_thread")]
-async fn recorded_sleep_is_neither_enabled_nor_withheld_by_run_wiring() {
-    let fixture = vm_fixture().await;
-    let output = fixture
-        .run_recorded(
-            fixture.first(),
-            Some(settings_with(lashlang::LashlangAbilities::default())),
-        )
-        .await;
-    let VmRunOutput::Ended { outcome } = output else {
-        panic!("a process that recorded no sleep ends, got {output:?}");
-    };
-    assert!(
-        matches!(&*outcome, lash_core::ProcessAwaitOutput::Settled { output } if !output.is_success()),
-        "{outcome:?}"
-    );
-    assert!(
-        serde_json::to_string(&*outcome)
-            .expect("encode the outcome")
-            .contains("sleep"),
-        "the refusal names the unrecorded ability: {outcome:?}"
-    );
-
-    let withholding = VmFixture {
-        engine: crate::LashlangProcessEngine::new(
-            fixture.engine.artifact_store.clone(),
-            crate::LashlangSurface::new(
-                lashlang::LashlangAbilities::default(),
-                lashlang::LashlangLanguageFeatures::default(),
-                lashlang::LashlangHostCatalog::new(),
-            ),
-        ),
-        payload: fixture.payload.clone(),
-        settings: settings_with(lashlang::LashlangAbilities::default().with_sleep()),
-    };
-    let (_, _, until_ms) = parked_sleep(withholding.run(withholding.first()).await);
-    assert_eq!(
-        until_ms,
-        NOW_MS + 5,
-        "the recorded sleep runs on an engine that withholds it"
-    );
 }

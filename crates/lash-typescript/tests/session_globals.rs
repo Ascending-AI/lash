@@ -16,11 +16,8 @@
 use std::collections::BTreeSet;
 
 fn environment(globals: [&str; 1]) -> lashlang::LashlangHostEnvironment {
-    lashlang::LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        lashlang::LashlangAbilities::default(),
-    )
-    .with_globals(globals)
+    lashlang::LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new())
+        .with_globals(globals)
 }
 
 #[test]

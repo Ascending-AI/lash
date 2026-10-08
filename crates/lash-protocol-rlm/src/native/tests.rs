@@ -20,8 +20,7 @@ pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineCo
             .build(),
         std::sync::Arc::new(crate::TypescriptDialect),
         &crate::testing::sqlite_recording_backend_blocking().clone(),
-    )
-    .with_process_lifecycle(false);
+    );
     let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
     let session = host
         .build_session(PluginSessionRequest::creation("parity", Default::default()))
@@ -77,8 +76,7 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
                 .build(),
             std::sync::Arc::new(crate::TypescriptDialect),
             &crate::testing::sqlite_recording_backend_blocking().clone(),
-        )
-        .with_process_lifecycle(false);
+        );
         lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)])
             .build_session(PluginSessionRequest::creation(
                 lash_core::SessionId::fixture(session_id),
@@ -752,8 +750,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             .build(),
         std::sync::Arc::new(crate::TypescriptDialect),
         &crate::testing::sqlite_recording_backend().await,
-    )
-    .with_process_lifecycle(false);
+    );
     let host = lash_core::facade_support::PluginHost::new(vec![Arc::new(factory)]);
     let session = host
         .build_session(PluginSessionRequest::creation(

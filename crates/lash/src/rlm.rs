@@ -150,7 +150,7 @@ impl RlmSessionExt for crate::LashSession {
 // `lash::process`; they are not re-exported here.
 pub use lash_lashlang_runtime::resolve_lashlang_module_operation;
 pub use lash_lashlang_runtime::{
-    LASHLANG_SURFACE_EXTENSION_ID, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
+    LASHLANG_SURFACE_EXTENSION_ID, LashlangHostCatalog, LashlangHostEnvironment,
     LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface, LashlangSurfaceContribution,
     lashlang_surface_extension,
 };
@@ -181,14 +181,14 @@ pub use lash_protocol_rlm::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,
 };
-/// The config groups and builder state an [`RlmProtocolPluginConfig`] is
-/// assembled from.
-pub use lash_protocol_rlm::{RlmAbilities, RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
 /// The RLM protocol's config owner and its command (FIG-4379).
 pub use lash_protocol_rlm::{
     RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedBehaviour, RlmRecordedConfig,
     RlmRenderRefusal, RlmRunOptions, SetRlmRender,
 };
+/// The config groups and builder state an [`RlmProtocolPluginConfig`] is
+/// assembled from.
+pub use lash_protocol_rlm::{RlmLanguageFeatures, RlmPromptFeatures, UnsetChannel};
 /// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`], a durable session extension the
 /// session's command lane records as an [`RlmSeed`] event (FIG-5134).

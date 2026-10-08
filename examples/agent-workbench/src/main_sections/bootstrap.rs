@@ -299,8 +299,7 @@ pub(crate) async fn workbench_core_builder(
                 .channel(rlm_channel)
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
-                .build()
-                .with_lashlang_abilities(workbench_lashlang_abilities());
+                .build();
             if let Some(warn_tokens) =
                 continue_as_warn_tokens_from_environment(context_window_tokens)?
             {

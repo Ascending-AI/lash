@@ -19,8 +19,7 @@ use std::cell::Cell;
 
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    LashlangAbilities, LashlangExecutionObservation, LashlangHostCatalog, LashlangHostEnvironment,
-    State, Value,
+    LashlangExecutionObservation, LashlangHostCatalog, LashlangHostEnvironment, State, Value,
 };
 
 #[path = "support/execute.rs"]
@@ -111,8 +110,7 @@ fn branching_loop(iterations: u32) -> String {
     reason = "the measured probe compiles and executes its fixture cell, per each message"
 )]
 fn allocated_while_running(source: &str) -> (Value, u64) {
-    let environment =
-        LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::all());
+    let environment = LashlangHostEnvironment::new(LashlangHostCatalog::new());
     let program = lash_typescript::parse_with_globals(source, &environment.globals)
         .expect("the probe parses");
     let linked = lashlang::LinkedModule::link(program, &environment).expect("the probe links");

@@ -5,8 +5,7 @@
 
 use lashlang::{
     AbilityOp, AbilityOutcome, CatchClause, ExecutionHost, ExecutionHostError, ExecutionOutcome,
-    Expr, LashlangAbilities, LashlangHostEnvironment, Program, Record, State, TryExpr, Value,
-    execute,
+    Expr, LashlangHostEnvironment, Program, Record, State, TryExpr, Value, execute,
 };
 use std::sync::Arc;
 
@@ -58,7 +57,7 @@ finish({
                     ),
                 )
                 .expect("process start operation");
-            let surface = LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
+            let surface = LashlangHostEnvironment::new(catalog);
             let linked = lashlang::LinkedModule::link(program, surface).expect("program links");
             let compiled = lashlang::compile(
                 &linked.artifact,
@@ -117,10 +116,7 @@ fn stack_budget_max_nesting_depth_lower_link_compile_execute() {
 
         let program =
             lash_typescript::parse(&nested_program(deepest)).expect("deepest program lowers");
-        let surface = LashlangHostEnvironment::new(
-            lashlang::LashlangHostCatalog::new(),
-            LashlangAbilities::all(),
-        );
+        let surface = LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new());
         let linked = lashlang::LinkedModule::link(program, surface).expect("program links");
         let compiled = lashlang::compile(
             &linked.artifact,
@@ -165,10 +161,7 @@ fn nested_try_program(depth: usize) -> Program {
 }
 
 fn stack_budget_environment() -> LashlangHostEnvironment {
-    LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::all(),
-    )
+    LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new())
 }
 
 /// The AST cap is only sound if the *most expensive* per-level AST variant

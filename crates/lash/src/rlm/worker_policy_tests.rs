@@ -35,7 +35,6 @@ async fn compile(
     factory
         .compile_lashlang_module(
             &PluginHost::new(vec![factory.clone()]),
-            false,
             LashlangModuleCompileRequest::new(
                 "worker-policy",
                 "const answer = 42;",

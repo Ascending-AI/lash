@@ -227,7 +227,6 @@ fn deployment(
 /// Publish the worker module and register its process.
 async fn seed(backend: &Backend) {
     let environment = LashlangSurface::default()
-        .for_process_registry(true)
         .host_environment(&lash_core_execution::ToolCatalog::default())
         .expect("the host environment");
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {

@@ -84,7 +84,7 @@ pub use json_schema::{
 };
 pub use lash_sansio::MediaType;
 pub use linker::{
-    LashlangAbilities, LashlangHostCatalog, LashlangHostCatalogError, LashlangHostEnvironment,
+    LashlangHostCatalog, LashlangHostCatalogError, LashlangHostEnvironment,
     LashlangLanguageFeatures, LinkError, LinkedModule, ModuleInstanceCatalog,
     ModuleOperationBinding, NamedDataType, NamedDataTypeError, OperationContract,
     OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding, ResourceTypeCatalog,
@@ -513,14 +513,12 @@ mod tests {
     #[test]
     fn linked_program_cache_reuses_source_when_host_environment_satisfies_requirements() {
         let source = r#"finish (await tools.read_file({ path: "." }))?"#;
-        let base_environment = LashlangHostEnvironment::new(
-            LashlangHostCatalog::tool_default(["read_file"]),
-            LashlangAbilities::default(),
-        );
-        let extra_environment = LashlangHostEnvironment::new(
-            LashlangHostCatalog::tool_default(["read_file", "unrelated"]),
-            LashlangAbilities::default(),
-        );
+        let base_environment =
+            LashlangHostEnvironment::new(LashlangHostCatalog::tool_default(["read_file"]));
+        let extra_environment = LashlangHostEnvironment::new(LashlangHostCatalog::tool_default([
+            "read_file",
+            "unrelated",
+        ]));
         let mut cache = LinkedProgramCache::with_capacity(2);
 
         let first = cache
@@ -550,10 +548,8 @@ mod tests {
     #[test]
     fn linked_program_cache_hit_does_not_relink_the_program() {
         let source = r#"finish (await tools.read_file({ path: "." }))?"#;
-        let environment = LashlangHostEnvironment::new(
-            LashlangHostCatalog::tool_default(["read_file"]),
-            LashlangAbilities::default(),
-        );
+        let environment =
+            LashlangHostEnvironment::new(LashlangHostCatalog::tool_default(["read_file"]));
         let mut cache = LinkedProgramCache::with_capacity(2);
 
         let first = cache
@@ -575,10 +571,8 @@ mod tests {
     #[test]
     fn linked_program_cache_keeps_source_and_host_requirements_distinct() {
         let source = r#"finish (await tools.read_file({ path: "." }))?"#;
-        let base_environment = LashlangHostEnvironment::new(
-            LashlangHostCatalog::tool_default(["read_file"]),
-            LashlangAbilities::default(),
-        );
+        let base_environment =
+            LashlangHostEnvironment::new(LashlangHostCatalog::tool_default(["read_file"]));
         let mut changed_resources = LashlangHostCatalog::new();
         changed_resources
             .add_module_operation(
@@ -590,12 +584,9 @@ mod tests {
                 TypeExpr::Any,
             )
             .expect("host catalog operation must not conflict");
-        let changed_environment =
-            LashlangHostEnvironment::new(changed_resources, LashlangAbilities::default());
-        let missing_environment = LashlangHostEnvironment::new(
-            LashlangHostCatalog::tool_default(["echo"]),
-            LashlangAbilities::default(),
-        );
+        let changed_environment = LashlangHostEnvironment::new(changed_resources);
+        let missing_environment =
+            LashlangHostEnvironment::new(LashlangHostCatalog::tool_default(["echo"]));
         let mut cache = LinkedProgramCache::with_capacity(4);
 
         let first = cache

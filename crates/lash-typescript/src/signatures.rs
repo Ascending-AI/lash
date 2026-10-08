@@ -74,7 +74,6 @@ pub fn render_schema_shape(shape: &SchemaShape) -> String {
                 .join(", "),
             render_schema_shape(&signature.output)
         ),
-
         // `ShapeKind` is non-exhaustive: a kind this dialect has no spelling
         // for yet is shown as the widest type rather than guessed at.
         _ => "unknown".to_string(),
@@ -553,8 +552,7 @@ mod tests {
                 TypeExpr::Bool,
             )
             .expect("tool catalogue");
-        let environment =
-            lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+        let environment = lashlang::LashlangHostEnvironment::new(catalog);
         assert_async_output_in_environment(
             "const worker = async () => { return await tools.check({}); }; finish(worker);",
             TypeExpr::Bool,

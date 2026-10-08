@@ -64,9 +64,6 @@ pub enum LashlangRuntimeError {
         #[source]
         source: serde_json::Error,
     },
-    /// The host does not provide sleeping.
-    #[error("sleep is not available")]
-    SleepUnavailable,
     /// The host does not provide label annotations.
     #[error("label annotations are not available")]
     LabelAnnotationsUnavailable,

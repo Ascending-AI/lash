@@ -493,8 +493,7 @@ fn a_prototype_chain_key_refuses_when_a_tool_result_carries_it() {
             &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("web binding");
-    let environment =
-        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+    let environment = lashlang::LashlangHostEnvironment::new(catalog);
     let linked = lash_typescript::link(r#"finish(await web.fetch({ url: "u" }));"#, &environment)
         .expect("TypeScript should link");
     let error = futures::executor::block_on(lashlang::execute(

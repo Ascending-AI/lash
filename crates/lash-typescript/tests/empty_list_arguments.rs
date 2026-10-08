@@ -7,7 +7,7 @@
 //! sentinel `list[null]`, which used to fail against `list[dict] | null`
 //! (FIG-1421). A populated list still has to type-check for real.
 
-use lashlang::{LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, TypeExpr};
+use lashlang::{LashlangHostCatalog, LashlangHostEnvironment, TypeExpr};
 
 /// A host module whose `run` operation takes `{ edits: list[dict] | null }`,
 /// the declaration shape from the ticket.
@@ -30,7 +30,7 @@ fn edits_environment() -> LashlangHostEnvironment {
             TypeExpr::Any,
         )
         .expect("index module operation");
-    LashlangHostEnvironment::new(catalog, LashlangAbilities::default())
+    LashlangHostEnvironment::new(catalog)
 }
 
 #[test]

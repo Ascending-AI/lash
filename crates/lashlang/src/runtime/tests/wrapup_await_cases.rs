@@ -205,11 +205,8 @@ fn aggregate_compile(program: Program) -> CompiledProgram {
             .unwrap();
     }
     crate::testing::harness::add_process_control_operations(&mut catalog);
-    let linked = crate::LinkedModule::link(
-        program,
-        crate::LashlangHostEnvironment::new(catalog, crate::LashlangAbilities::all()),
-    )
-    .expect("program should link");
+    let linked = crate::LinkedModule::link(program, crate::LashlangHostEnvironment::new(catalog))
+        .expect("program should link");
     crate::testing::harness::compile_linked_main(&linked)
 }
 

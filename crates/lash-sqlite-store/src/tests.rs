@@ -703,10 +703,7 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
     let module = one_process_module("scan", "root");
     let linked = lashlang::LinkedModule::link(
         module,
-        lashlang::LashlangHostEnvironment::new(
-            lashlang::LashlangHostCatalog::new(),
-            lashlang::LashlangAbilities::all(),
-        ),
+        lashlang::LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new()),
     )
     .expect("link module");
 

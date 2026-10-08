@@ -208,43 +208,6 @@ impl From<lashlang::LashlangLanguageFeatures> for RlmLanguageFeatures {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub struct RlmAbilities {
-    pub sleep: bool,
-}
-
-impl RlmAbilities {
-    pub fn union(self, other: Self) -> Self {
-        Self {
-            sleep: self.sleep || other.sleep,
-        }
-    }
-
-    pub fn satisfies(self, required: Self) -> bool {
-        !required.sleep || self.sleep
-    }
-
-    pub fn with_sleep(mut self) -> Self {
-        self.sleep = true;
-        self
-    }
-
-    pub fn all() -> Self {
-        Self::default().with_sleep()
-    }
-
-    pub(crate) fn into_engine(self) -> lashlang::LashlangAbilities {
-        lashlang::LashlangAbilities { sleep: self.sleep }
-    }
-}
-
-impl From<lashlang::LashlangAbilities> for RlmAbilities {
-    fn from(value: lashlang::LashlangAbilities) -> Self {
-        Self { sleep: value.sleep }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

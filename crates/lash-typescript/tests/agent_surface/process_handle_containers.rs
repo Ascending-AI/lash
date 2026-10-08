@@ -68,7 +68,7 @@ fn environment() -> lashlang::LashlangHostEnvironment {
             &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("ping operation");
-    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
+    lashlang::LashlangHostEnvironment::new(catalog)
 }
 
 const LIST: &str = "const handles=[]; for(let i=0;i<1;i=i+1){handles.push(await processes.start({definition:child}));}";

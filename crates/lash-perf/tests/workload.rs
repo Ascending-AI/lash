@@ -403,10 +403,7 @@ fn provider_host() -> anyhow::Result<lashlang::LashlangHostEnvironment> {
             ),
         )?;
     }
-    Ok(lashlang::LashlangHostEnvironment::new(
-        catalog,
-        lashlang::LashlangAbilities::all(),
-    ))
+    Ok(lashlang::LashlangHostEnvironment::new(catalog))
 }
 
 fn created_process_source(expr: &lashlang::Expr) -> Option<&str> {

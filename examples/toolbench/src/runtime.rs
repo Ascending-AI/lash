@@ -381,7 +381,7 @@ fn build_turn_core(
             config.prompt_features.images = false;
             config.prompt_features.decomposition = false;
             config.lashlang_language_features.label_annotations = false;
-            config.lashlang_abilities.sleep = false;
+
             config.continue_as_soft_warn_tokens = None;
             let factory = lash::rlm::RlmProtocolPluginFactory::new(
                 config,

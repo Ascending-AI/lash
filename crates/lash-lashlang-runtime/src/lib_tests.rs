@@ -172,11 +172,10 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
         @label(title: "Finish value")
         finish value
     "#;
-    let environment = LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::all(),
-    )
-    .with_language_features(lashlang::LashlangLanguageFeatures::default().with_label_annotations());
+    let environment = LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new())
+        .with_language_features(
+            lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
+        );
     let program = labeled_workflow_program();
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source,
@@ -250,10 +249,7 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
-    let environment = LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default(),
-    );
+    let environment = LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new());
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
         program: scan_module(),
@@ -550,10 +546,7 @@ fn manifest_tool_binding_accessor_reports_absent_valid_and_malformed() {
 #[tokio::test(flavor = "current_thread")]
 async fn prepared_start_replays_same_start_key_without_duplicate_child_identity() {
     let store = crate::lib_tests::memory_artifact_store().await;
-    let environment = LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default(),
-    );
+    let environment = LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new());
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: r#"process scan(root: str) -> str { finish root }"#,
         program: scan_module(),
@@ -606,10 +599,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
 #[tokio::test(flavor = "current_thread")]
 async fn prepared_start_checks_indirect_process_identity_against_named_signature() {
     let store = crate::lib_tests::memory_artifact_store().await;
-    let environment = LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default(),
-    );
+    let environment = LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new());
     let matching = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process handler(event: str, other: str) -> bool { finish true }",
         program: handler_module("event", lashlang::TypeExpr::Str, "other"),
@@ -801,10 +791,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
 #[tokio::test(flavor = "current_thread")]
 async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
     let store = crate::lib_tests::memory_artifact_store().await;
-    let environment = LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default(),
-    );
+    let environment = LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new());
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source: "process install(handler: Process<(event: str), bool> | str) -> bool { finish true }",
         program: process_module(
@@ -942,7 +929,6 @@ fn plugin_extensions_return_typed_catalog_conflicts() {
         lash_core::facade_support::PluginExtensionContribution::new(
             LASHLANG_SURFACE_EXTENSION_ID,
             LashlangSurfaceContribution::new(
-                LashlangAbilities::default(),
                 LashlangLanguageFeatures::default(),
                 LashlangHostCatalog::tool_default(["lookup"]),
             ),

@@ -63,25 +63,6 @@ impl PluginFactory for WorkbenchPluginFactory {
         "agent_workbench"
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the contribution wraps statically defined abilities and resources that \
-                  serialize by construction"
-    )]
-    fn extension_contributions(&self) -> Vec<lash::plugins::PluginExtensionContribution> {
-        vec![
-            lash::plugins::PluginExtensionContribution::new(
-                lash::rlm::LASHLANG_SURFACE_EXTENSION_ID,
-                lash::rlm::LashlangSurfaceContribution::new(
-                    workbench_lashlang_abilities(),
-                    lash::rlm::LashlangLanguageFeatures::default(),
-                    lash::rlm::lang::LashlangHostCatalog::new(),
-                ),
-            )
-            .expect("workbench lashlang surface serializes"),
-        ]
-    }
-
     /// The workbench's own config namespace: the host prompt text its
     /// sections render.
     fn register_config(

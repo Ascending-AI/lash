@@ -3436,7 +3436,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5310: a_host_started_process_runs_under_the_behaviour_its_creation_recorded runs on every tier in crates/lash-durable-test/tests/recorded_behaviour_laws.rs; missing and corrupt settings and the recorded sleep ability are vm_run laws in crates/lash-lashlang-runtime/src/engine/advance_tests.rs (unreadable_recorded_settings_end_the_process_typed, recorded_sleep_is_neither_enabled_nor_withheld_by_run_wiring); process_settings_have_one_recorded_engine_shape is in crates/lash-protocol-rlm/src/plugin/factory.rs and pins the captured plugin resources, which vm_run reads from the record alone (FIG-5198). a_child_session_runs_under_its_parents_recorded_behaviour is subject-deleted: 35b70ca82b (FIG-5296) made a non-fork create record only what its request states. process_law_on_double, the always_replay legs and the live Restate leg went with the engine (5ad9641f9e, FIG-5190)"
+note = "FIG-5310: a_host_started_process_runs_under_the_behaviour_its_creation_recorded runs on every tier in crates/lash-durable-test/tests/recorded_behaviour_laws.rs; missing and corrupt settings are vm_run laws in crates/lash-lashlang-runtime/src/engine/advance_tests.rs (unreadable_recorded_settings_end_the_process_typed); D-SLEEPALWAYS deletes the recorded sleep ability and its law; durable sleep is covered by core_node_processes::lashlang_process_runs_to_its_terminal; process_settings_have_one_recorded_engine_shape is in crates/lash-protocol-rlm/src/plugin/factory.rs and pins the captured plugin resources, which vm_run reads from the record alone (FIG-5198). a_child_session_runs_under_its_parents_recorded_behaviour is subject-deleted: 35b70ca82b (FIG-5296) made a non-fork create record only what its request states. process_law_on_double, the always_replay legs and the live Restate leg went with the engine (5ad9641f9e, FIG-5190)"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/plugin/runtime_state.rs"
@@ -15759,10 +15759,10 @@ lane = "L9c"
 laws = [
   "rlm_protocol_config_sleep_ability_drives_prompt_surface",
 ]
-disposition = "replaced-by:crates/lash/src/tests/core_session_builder/session_lifecycle.rs::rlm_protocol_config_sleep_ability_drives_prompt_surface"
+disposition = "subject-deleted"
 status = "deleted"
-owed = "rlm protocol config sleep ability drives prompt surface"
-note = "FIG-5307 re-wrote the law on the durable substrate: SQLite memory stores, the core's node serving the session; a core built with serve_sessions(false) keeps an input pending where the double held the session's shift"
+owed = "none: D-SLEEPALWAYS removes the sleep ability"
+note = "FIG-5539 deletes the optional-sleep API and this law; prompt_contract_tests::durable_sleep_is_taught_in_every_execution_channel covers universal sleep teaching, and cell_restore_laws covers durable timer recovery"
 
 [[row]]
 path = "crates/lash/src/tests/core_session_builder/session_lifecycle.rs"

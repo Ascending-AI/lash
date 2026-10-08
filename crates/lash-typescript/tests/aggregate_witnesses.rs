@@ -319,7 +319,7 @@ fn process_environment() -> lashlang::LashlangHostEnvironment {
             lashlang::TypeExpr::Any,
         )
         .expect("processes.start binding");
-    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
+    lashlang::LashlangHostEnvironment::new(catalog)
 }
 
 fn execute_linked(

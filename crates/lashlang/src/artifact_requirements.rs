@@ -295,12 +295,11 @@ impl<'program> RequirementsCollector<'program> {
                 }
                 Some(RequirementBinding::Value)
             }
-            Expr::SleepFor(expr) => {
-                self.requirements.abilities.sleep = true;
-                self.collect_expr(expr, scope);
-                Some(RequirementBinding::Value)
-            }
-            Expr::Await(expr) | Expr::ResultUnwrap(expr) | Expr::Print(expr) | Expr::Fail(expr) => {
+            Expr::SleepFor(expr)
+            | Expr::Await(expr)
+            | Expr::ResultUnwrap(expr)
+            | Expr::Print(expr)
+            | Expr::Fail(expr) => {
                 self.collect_expr(expr, scope);
                 Some(RequirementBinding::Value)
             }

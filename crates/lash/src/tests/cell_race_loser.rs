@@ -71,8 +71,7 @@ fn race_core(
             .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-            .build()
-            .with_lashlang_abilities(lash_protocol_rlm::RlmAbilities::all()),
+            .build(),
         Arc::new(lash_protocol_rlm::TypescriptDialect),
         &backend,
     )

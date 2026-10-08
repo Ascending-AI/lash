@@ -56,8 +56,8 @@ pub use lash_trace::{
     TraceNodeWaitResolution,
 };
 pub use lashlang::{
-    LASH_TYPE_KEY, LashlangAbilities, LashlangArtifacts, LashlangHostCatalog,
-    LashlangHostEnvironment, LashlangLanguageFeatures,
+    LASH_TYPE_KEY, LashlangArtifacts, LashlangHostCatalog, LashlangHostEnvironment,
+    LashlangLanguageFeatures,
 };
 
 pub const LASHLANG_ENGINE_KIND: &str = "lashlang";
@@ -70,19 +70,16 @@ pub const LASHLANG_SURFACE_EXTENSION_ID: &str = "lashlang.surface";
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct LashlangSurfaceContribution {
-    pub abilities: LashlangAbilities,
     pub language_features: LashlangLanguageFeatures,
     pub resources: LashlangHostCatalog,
 }
 
 impl LashlangSurfaceContribution {
     pub fn new(
-        abilities: LashlangAbilities,
         language_features: LashlangLanguageFeatures,
         resources: LashlangHostCatalog,
     ) -> Self {
         Self {
-            abilities,
             language_features,
             resources,
         }
@@ -90,7 +87,6 @@ impl LashlangSurfaceContribution {
 
     pub fn from_surface(surface: LashlangSurface) -> Self {
         Self {
-            abilities: surface.abilities,
             language_features: surface.language_features,
             resources: surface.resources,
         }
@@ -266,41 +262,21 @@ impl ToolManifestBindingExt for lash_core::ToolManifest {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct LashlangSurface {
-    pub abilities: LashlangAbilities,
     pub language_features: LashlangLanguageFeatures,
     pub resources: LashlangHostCatalog,
 }
 
-impl Default for LashlangSurface {
-    fn default() -> Self {
-        Self {
-            abilities: LashlangAbilities::default().with_sleep(),
-            language_features: LashlangLanguageFeatures::default(),
-            resources: LashlangHostCatalog::new(),
-        }
-    }
-}
-
 impl LashlangSurface {
     pub fn new(
-        abilities: LashlangAbilities,
         language_features: LashlangLanguageFeatures,
         resources: LashlangHostCatalog,
     ) -> Self {
         Self {
-            abilities,
             language_features,
             resources,
         }
-    }
-
-    /// Restrict durable sleep to hosts with a process registry. Availability
-    /// cannot enable an ability the recorded surface disabled.
-    pub fn for_process_registry(mut self, process_registry_available: bool) -> Self {
-        self.abilities.sleep &= process_registry_available;
-        self
     }
 
     pub fn with_resources(
@@ -318,7 +294,7 @@ impl LashlangSurface {
         for payload in extensions.payloads(LASHLANG_SURFACE_EXTENSION_ID) {
             let contribution: LashlangSurfaceContribution = serde_json::from_value(payload.clone())
                 .map_err(|source| LashlangRuntimeError::InvalidSurfaceExtension { source })?;
-            self.abilities = self.abilities.union(contribution.abilities);
+
             self.language_features = self.language_features.union(contribution.language_features);
             self.resources.try_extend(contribution.resources)?;
         }
@@ -348,7 +324,6 @@ impl LashlangSurface {
         mask_call_paths(&mut resources, masked_call_paths);
         lashlang_host_environment_from_resources(
             masked_tool_catalog_resources(catalog, masked_call_paths)?,
-            self.abilities,
             self.language_features,
             resources,
         )
@@ -410,13 +385,11 @@ fn filtered_tool_catalog(
 
 pub fn lashlang_host_environment_from_tool_catalog(
     catalog: &lash_core::ToolCatalog,
-    abilities: LashlangAbilities,
     language_features: LashlangLanguageFeatures,
     host_resources: LashlangHostCatalog,
 ) -> Result<LashlangHostEnvironment, ToolBindingError> {
     lashlang_host_environment_from_resources(
         masked_tool_catalog_resources(catalog, &BTreeSet::new())?,
-        abilities,
         language_features,
         host_resources,
     )
@@ -424,7 +397,6 @@ pub fn lashlang_host_environment_from_tool_catalog(
 
 fn lashlang_host_environment_from_resources(
     tool_resources: LashlangHostCatalog,
-    abilities: LashlangAbilities,
     language_features: LashlangLanguageFeatures,
     host_resources: LashlangHostCatalog,
 ) -> Result<LashlangHostEnvironment, ToolBindingError> {
@@ -450,10 +422,7 @@ fn lashlang_host_environment_from_resources(
             ),
         )?;
     }
-    Ok(
-        LashlangHostEnvironment::new(resources, abilities)
-            .with_language_features(language_features),
-    )
+    Ok(LashlangHostEnvironment::new(resources).with_language_features(language_features))
 }
 
 pub fn lashlang_resources_from_tool_catalog(
@@ -506,11 +475,6 @@ pub fn lashlang_host_environment_satisfies_requirements(
     required: &lashlang::HostRequirements,
     current: &LashlangHostEnvironment,
 ) -> Result<(), LashlangRuntimeError> {
-    let abilities = required.abilities;
-    let current_abilities = current.abilities;
-    if abilities.sleep && !current_abilities.sleep {
-        return Err(LashlangRuntimeError::SleepUnavailable);
-    }
     if required.language_features.label_annotations && !current.language_features.label_annotations
     {
         return Err(LashlangRuntimeError::LabelAnnotationsUnavailable);
@@ -910,7 +874,6 @@ fn lashlang_process_identity(input: &LashlangProcessInput) -> lash_core::Process
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LashlangRecordedSettings {
-    pub abilities: LashlangAbilities,
     pub language_features: LashlangLanguageFeatures,
     pub resources: LashlangHostCatalog,
     pub execution_bounds: lashlang::ExecutionBounds,
@@ -919,7 +882,6 @@ pub struct LashlangRecordedSettings {
 impl LashlangRecordedSettings {
     pub fn new(surface: LashlangSurface, execution_bounds: lashlang::ExecutionBounds) -> Self {
         Self {
-            abilities: surface.abilities,
             language_features: surface.language_features,
             resources: surface.resources,
             execution_bounds,
@@ -927,7 +889,7 @@ impl LashlangRecordedSettings {
     }
 
     fn into_surface(self) -> LashlangSurface {
-        LashlangSurface::new(self.abilities, self.language_features, self.resources)
+        LashlangSurface::new(self.language_features, self.resources)
     }
 }
 

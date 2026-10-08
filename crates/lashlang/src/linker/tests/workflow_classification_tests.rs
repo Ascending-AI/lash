@@ -19,8 +19,7 @@ fn assert_classified_producer(recovered: bool, with_owner: bool) {
     program
         .spans
         .insert(AstPath::main(vec![0]), Span { start: 1, end: 3 });
-    let environment =
-        LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::all());
+    let environment = LashlangHostEnvironment::new(LashlangHostCatalog::new());
     let path = AstPath::main(Vec::new());
     let owner = AstPath::main(vec![0]);
     let id: WorkflowNodeId =

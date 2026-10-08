@@ -306,7 +306,6 @@ async fn looping_process_payload(backend: &lash::Backend) -> serde_json::Value {
     use lashlang::CoercingBinaryOp::{Add, Less};
     use lashlang::testing::ast_builders as b;
     let environment = lash_lashlang_runtime::LashlangSurface::default()
-        .for_process_registry(true)
         .host_environment(&lash_core::ToolCatalog::default())
         .expect("the host environment");
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {

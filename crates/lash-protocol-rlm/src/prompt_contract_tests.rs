@@ -54,11 +54,6 @@ fn process_catalog() -> lash_core::ToolCatalog {
 
 fn dialect(enabled: bool) -> SessionDialect {
     let surface = LashlangSurface {
-        abilities: if enabled {
-            lashlang::LashlangAbilities::all()
-        } else {
-            lashlang::LashlangAbilities::default()
-        },
         language_features: if enabled {
             lashlang::LashlangLanguageFeatures::default().with_label_annotations()
         } else {
@@ -130,49 +125,15 @@ fn the_native_prompt_names_its_transport_and_carries_no_cell_syntax() {
     }
 }
 
+/// D-SLEEPALWAYS: every cell and native program can park on a durable timer,
+/// independently of optional prompt features and process catalog membership.
 #[test]
-fn typescript_capabilities_gate_in_both_assembled_channels() {
+fn durable_sleep_is_taught_in_every_execution_channel() {
+    let dialect = dialect(false);
     for native in [false, true] {
-        for sleep in [false, true] {
-            for process_surface in [false, true] {
-                let dialect = crate::dialect::SessionDialect::prompt_only(
-                    std::sync::Arc::new(crate::dialect::TypescriptDialect),
-                    LashlangSurface {
-                        abilities: lashlang::LashlangAbilities { sleep },
-                        ..Default::default()
-                    },
-                );
-                let catalog = if process_surface {
-                    process_catalog()
-                } else {
-                    catalog()
-                };
-                let prompt = system_with(&dialect, native, false, catalog);
-                for (needle, enabled) in [
-                    ("### Processes", process_surface),
-                    ("Captures are by value", process_surface),
-                    ("await sleep(ms)", sleep),
-                ] {
-                    assert_eq!(
-                        prompt.contains(needle),
-                        enabled,
-                        "sleep={sleep}, process_surface={process_surface}, native={native}, {needle}"
-                    );
-                }
-                // These retired surface syntaxes must never enter TypeScript
-                // copy, and neither may the deleted special forms (FIG-2999).
-                for needle in [
-                    "@label",
-                    "Type {",
-                    "### Type literals",
-                    "sleep for",
-                    "wait_signal",
-                    "defineProcess",
-                    "registerTrigger",
-                ] {
-                    assert!(!prompt.contains(needle), "{needle}: {prompt}");
-                }
-            }
+        for catalog in [catalog(), process_catalog()] {
+            let prompt = system_with(&dialect, native, false, catalog);
+            assert!(prompt.contains("await sleep(ms)"), "{prompt}");
         }
     }
 }

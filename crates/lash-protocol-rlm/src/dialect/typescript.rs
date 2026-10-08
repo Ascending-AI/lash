@@ -338,11 +338,7 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
     } else {
         format!("\n\n### Processes\n\n{durable}")
     };
-    let sleep = if environment.abilities.sleep {
-        "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call keeps running until the turn ends."
-    } else {
-        ""
-    };
+    let sleep = "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call keeps running until the turn ends.";
     let host_api = format!(
         r#"Top-level bindings persist across executions. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
@@ -396,7 +392,6 @@ mod tests {
                 workers: lash_vm_client::service::Service::default(),
                 artifact_store: crate::testing::sqlite_memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
-
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
                 code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
@@ -712,8 +707,7 @@ mod tests {
                 &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
             )
             .expect("operation binding");
-        let environment =
-            lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+        let environment = lashlang::LashlangHostEnvironment::new(catalog);
         let source = format!(r#"finish(await {call_path}({{ id: "m1" }}));"#);
         let linked = lash_typescript::link(&source, &environment)
             .unwrap_or_else(|error| panic!("`{source}` must link: {error:?}"));

@@ -104,7 +104,7 @@ fn typed_output_host_environment() -> LashlangHostEnvironment {
             }]),
         )
         .expect("host catalog operation must not conflict");
-    LashlangHostEnvironment::new(resources, LashlangAbilities::all())
+    LashlangHostEnvironment::new(resources)
 }
 
 #[test]

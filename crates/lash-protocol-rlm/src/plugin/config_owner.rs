@@ -21,8 +21,6 @@
 //! Every reader of the namespace decodes [`RlmRecordedConfig`]: nothing
 //! probes or strips its keys (FIG-4652).
 
-use std::sync::{Arc, OnceLock};
-
 use lash_core::facade_support::JsonSchema;
 use lash_core::plugin::{
     CandidateFacts, ConfigCommand, ConfigOwner, ConfigRegistrar, ConfigRegistrationError,
@@ -86,7 +84,7 @@ impl RlmRecordedConfig {
 impl RlmRecordedConfig {
     /// The recorded namespace of a session that stated `options`, for a
     /// test that executes the protocol without creating a session: an
-    /// unbounded cell-channel behaviour without process lifecycle.
+    /// unbounded cell-channel behaviour.
     #[expect(
         clippy::expect_used,
         reason = "a recorded RLM namespace is plain data and always encodes"
@@ -102,7 +100,6 @@ impl RlmRecordedConfig {
                 .instruction_limit(super::InstructionBound::unbounded())
                 .memory_limit(super::MemoryBound::unbounded())
                 .build()
-                .with_lashlang_abilities(super::RlmAbilities::default())
                 .recorded_behaviour(),
         })
         .expect("the recorded namespace encodes")
@@ -132,10 +129,6 @@ pub enum RlmConfigRefusal {
         recorded: Option<String>,
         candidate: Option<String>,
     },
-    /// The creating deployment has not declared whether it has process
-    /// lifecycle: a wiring fault of the deployment, independent of the
-    /// host-authored sleep choice.
-    ProcessLifecycleUndeclared,
 }
 
 impl std::fmt::Display for RlmConfigRefusal {
@@ -150,10 +143,6 @@ impl std::fmt::Display for RlmConfigRefusal {
                 "the session's RLM {pin} is recorded as {} and cannot become {}",
                 recorded.as_deref().unwrap_or("nothing"),
                 candidate.as_deref().unwrap_or("nothing"),
-            ),
-            Self::ProcessLifecycleUndeclared => formatter.write_str(
-                "the RLM protocol factory has not recorded whether process lifecycle is \
-                 available, so a new session's abilities are unknown",
             ),
         }
     }
@@ -189,9 +178,6 @@ pub struct RlmConfigOwner {
     pub(crate) channel: RlmChannel,
     pub(crate) dialect: &'static str,
     pub(crate) config: RlmProtocolPluginConfig,
-    /// The factory's process-lifecycle recording, shared: the owner is
-    /// registered before the deployment declares it.
-    pub(crate) process_lifecycle: Arc<OnceLock<bool>>,
 }
 
 impl ConfigOwner for RlmConfigOwner {
@@ -207,12 +193,7 @@ impl ConfigOwner for RlmConfigOwner {
         input: Option<RlmCreateConfig>,
     ) -> Result<Option<RlmRecordedConfig>, RlmConfigRefusal> {
         let stated = input.unwrap_or_default().0;
-        let process_lifecycle = self
-            .process_lifecycle
-            .get()
-            .ok_or(RlmConfigRefusal::ProcessLifecycleUndeclared)?;
-        let mut behaviour = self.config.recorded_behaviour();
-        behaviour.lashlang_abilities.sleep &= *process_lifecycle;
+        let behaviour = self.config.recorded_behaviour();
         Ok(Some(RlmRecordedConfig {
             render: stated.render,
             termination: stated.termination,
@@ -341,21 +322,12 @@ mod tests {
             .build()
     }
 
-    fn owner_with(process_lifecycle: Option<bool>) -> RlmConfigOwner {
-        let declared = OnceLock::new();
-        if let Some(process_lifecycle) = process_lifecycle {
-            declared.set(process_lifecycle).expect("first declaration");
-        }
+    fn owner() -> RlmConfigOwner {
         RlmConfigOwner {
             channel: RlmChannel::Cell,
             dialect: "typescript",
             config: config(),
-            process_lifecycle: Arc::new(declared),
         }
-    }
-
-    fn owner() -> RlmConfigOwner {
-        owner_with(Some(false))
     }
 
     fn created(input: Option<RlmCreateExtras>) -> RlmRecordedConfig {
@@ -494,8 +466,7 @@ mod tests {
             config(),
             std::sync::Arc::new(crate::TypescriptDialect),
             &crate::testing::sqlite_recording_backend_blocking().clone(),
-        )
-        .with_process_lifecycle(false);
+        );
         let registry =
             lash_core::ConfigRegistry::build(&[std::sync::Arc::new(factory)]).expect("registry");
         let mut config = lash_core::PersistedSessionConfig::from_policy(
@@ -625,65 +596,6 @@ mod tests {
                 Err(RlmConfigRefusal::PinChanged { pin, .. }) if pin == "behaviour"
             ));
         });
-    }
-
-    /// Creation cannot record behaviour before the deployment surface is declared.
-    #[test]
-    fn creation_refuses_an_undeclared_deployment_surface() {
-        assert_eq!(
-            owner_with(None)
-                .create(None)
-                .expect_err("undeclared lifecycle"),
-            RlmConfigRefusal::ProcessLifecycleUndeclared
-        );
-    }
-
-    /// D-SLEEPDEFAULT: creation records durable sleep only when the deployment
-    /// can honor it, and reopening cannot override an authored opt-out.
-    #[test]
-    fn durable_sleep_requires_lifecycle_and_preserves_host_opt_out() {
-        let deserialized: RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
-            "channel": "cell",
-            "instruction_limit": { "bounded": 1000 },
-            "memory_limit": { "bounded": 1048576 }
-        }))
-        .expect("omitted abilities use the standard preset");
-        for standard in [config(), deserialized] {
-            assert!(standard.lashlang_abilities.sleep);
-            for lifecycle in [false, true] {
-                for opt_out in [false, true] {
-                    let mut owner = owner_with(Some(lifecycle));
-                    owner.config = standard.clone();
-                    if opt_out {
-                        owner.config.lashlang_abilities.sleep = false;
-                    }
-                    let recorded = owner.create(None).expect("create").expect("namespace");
-                    let expected_sleep = lifecycle && !opt_out;
-                    assert_eq!(recorded.behaviour.lashlang_abilities.sleep, expected_sleep);
-                    let restored: RlmRecordedConfig = serde_json::from_value(
-                        serde_json::to_value(recorded).expect("recorded settings encode"),
-                    )
-                    .expect("recorded settings decode");
-                    let reopened = config().under_recorded_behaviour(&restored.behaviour);
-                    for reopening_lifecycle in [false, true] {
-                        let surface = super::super::factory::rlm_lashlang_surface(
-                            &reopened,
-                            reopening_lifecycle,
-                        );
-                        assert_eq!(
-                            surface.abilities.sleep,
-                            expected_sleep && reopening_lifecycle
-                        );
-                    }
-                    assert_eq!(
-                        super::super::factory::rlm_lashlang_surface(&owner.config, lifecycle)
-                            .abilities
-                            .sleep,
-                        expected_sleep
-                    );
-                }
-            }
-        }
     }
 
     /// The render a deployment configures is recorded behaviour: a session

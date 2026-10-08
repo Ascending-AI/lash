@@ -78,9 +78,10 @@ plus ~12-17 MB of schema-importer string churn on top.
 
 It runs far more often than "per catalog build":
 
-- `TypescriptDialect::render_execution_section` builds `host_environment`
-  **twice per preamble build** (typescript.rs:163 for the host-surface section,
-  typescript.rs:428 only to read `environment.abilities.sleep`).
+- `TypescriptDialect::render_execution_section` originally built
+  `host_environment` twice per preamble build: for the host-surface section
+  and for the optional sleep flag. FIG-5539 removes that flag and teaches
+  sleep unconditionally.
 - `executor/mod.rs:375` builds it **once per cell** on the plain path.
 - `resolve_and_build_deferred_environment_from_references` builds a masked
   environment **twice per cell** with deferred resolutions (deferred.rs:394 for
@@ -155,8 +156,8 @@ identity key already exists.
   `LashlangHostEnvironment` keyed by tool-set identity; apply
   `masked_call_paths`, `with_globals`, and `with_process_handles` as cheap
   per-cell overlays.
-- `render_execution_section`: build the host environment once (the second call
-  reads only `abilities.sleep`).
+- `render_execution_section`: use one host environment for the host surface;
+  sleep teaching is unconditional (FIG-5539).
 - `resolve_and_build_deferred_environment_from_references`: share the masked
   environment between ambient classification and the final build (masks differ;
   union-mask once).

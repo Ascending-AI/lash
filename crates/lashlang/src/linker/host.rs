@@ -111,7 +111,6 @@ pub enum LashlangHostCatalogError {
         resource_type: String,
         operation: String,
     },
-
     #[error("host operation `{operation}` declares a schema lash cannot read: {source}")]
     UnreadableOperationSchema {
         operation: String,
@@ -254,19 +253,16 @@ pub struct LashlangHostEnvironment {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub expired_functions: BTreeSet<String>,
     #[serde(default)]
-    pub abilities: LashlangAbilities,
-    #[serde(default)]
     pub language_features: LashlangLanguageFeatures,
 }
 
 impl LashlangHostEnvironment {
-    pub fn new(resources: LashlangHostCatalog, abilities: LashlangAbilities) -> Self {
+    pub fn new(resources: LashlangHostCatalog) -> Self {
         Self {
             resources,
             globals: BTreeSet::new(),
             process_handles: BTreeSet::new(),
             expired_functions: BTreeSet::new(),
-            abilities,
             language_features: LashlangLanguageFeatures::default(),
         }
     }
@@ -300,8 +296,7 @@ impl LashlangHostEnvironment {
     }
 
     pub fn satisfies(&self, requirements: &HostRequirements) -> bool {
-        self.abilities.satisfies(requirements.abilities)
-            && requirements.globals.is_subset(&self.globals)
+        requirements.globals.is_subset(&self.globals)
             && self
                 .language_features
                 .satisfies(requirements.language_features)
@@ -329,33 +324,6 @@ impl LashlangLanguageFeatures {
     pub fn with_label_annotations(mut self) -> Self {
         self.label_annotations = true;
         self
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct LashlangAbilities {
-    pub sleep: bool,
-}
-
-impl LashlangAbilities {
-    pub fn union(self, other: Self) -> Self {
-        Self {
-            sleep: self.sleep || other.sleep,
-        }
-    }
-
-    pub fn satisfies(self, required: Self) -> bool {
-        !required.sleep || self.sleep
-    }
-
-    pub fn with_sleep(mut self) -> Self {
-        self.sleep = true;
-        self
-    }
-
-    pub fn all() -> Self {
-        Self::default().with_sleep()
     }
 }
 

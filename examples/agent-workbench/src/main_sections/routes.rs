@@ -1039,10 +1039,6 @@ pub(crate) fn fold_turn_activities<'a>(
     state
 }
 
-pub(crate) fn workbench_lashlang_abilities() -> lash::rlm::lang::LashlangAbilities {
-    lash::rlm::lang::LashlangAbilities::default().with_sleep()
-}
-
 #[cfg(test)]
 mod turn_stream_state_tests {
     use super::*;

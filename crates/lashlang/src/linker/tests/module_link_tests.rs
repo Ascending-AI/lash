@@ -44,7 +44,7 @@ fn linked_module_accepts_board_process_with_imported_schemas() {
         .add_module_operation(["board"], "Board", "play", "play", play_input, play_output)
         .expect("host catalog operation must not conflict");
     crate::testing::harness::add_process_control_operations(&mut catalog);
-    let environment = LashlangHostEnvironment::new(catalog, LashlangAbilities::all());
+    let environment = LashlangHostEnvironment::new(catalog);
     // process play_center_once(board_tool: Board) {
     //   state = await board_tool.read({})?
     //   if state.turn == "O" and contains(state.legal_moves, 4) {
@@ -136,26 +136,6 @@ fn linked_module_accepts_board_process_with_imported_schemas() {
         Err(LinkError::IncompatibleOperationInput { expected, actual, .. })
             if expected == "{ cell: int }" && actual == "{ cell: float }"
     ));
-}
-
-#[test]
-fn linked_module_rejects_disabled_sleep() {
-    // sleep for "1s"
-    let sleep = builders::program(vec![builders::sleep_for(builders::string("1s"))]);
-    assert!(matches!(
-        LinkedModule::link(
-            sleep,
-            LashlangHostEnvironment::new(resources(), LashlangAbilities::default())
-        ),
-        Err(LinkError::FeatureDisabled {
-            feature: "sleep",
-            ..
-        })
-    ));
-
-    // The same module links against a host with every ability granted.
-    let sleep = builders::program(vec![builders::sleep_for(builders::string("1s"))]);
-    LinkedModule::link(sleep, full_host_environment()).expect("granted sleep links");
 }
 
 /// The artifact port keys store bytes by the reference its caller names, so a

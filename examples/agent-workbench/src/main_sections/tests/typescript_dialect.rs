@@ -146,7 +146,7 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
         )
         .expect("link process create operation");
     add_process_control_operations(&mut resources);
-    lash::rlm::lang::LashlangHostEnvironment::new(resources, workbench_lashlang_abilities())
+    lash::rlm::lang::LashlangHostEnvironment::new(resources)
 }
 
 /// The `processes` module the workbench's process-controls plugin binds.

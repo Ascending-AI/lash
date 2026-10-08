@@ -1049,18 +1049,15 @@ fn memory_artifact_backend() -> lash_core::Backend {
 }
 
 pub(crate) fn rlm_protocol_plugin_factory() -> Arc<dyn PluginFactory> {
-    Arc::new(
-        RlmProtocolPluginFactory::new(
-            RlmProtocolPluginConfig::builder()
-                .channel(lash_protocol_rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
-            &memory_artifact_backend(),
-        )
-        .with_process_lifecycle(false),
-    )
+    Arc::new(RlmProtocolPluginFactory::new(
+        RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::unbounded())
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        std::sync::Arc::new(lash_protocol_rlm::TypescriptDialect),
+        &memory_artifact_backend(),
+    ))
 }
 
 struct PluginStreamRun {

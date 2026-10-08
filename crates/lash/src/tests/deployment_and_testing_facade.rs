@@ -82,7 +82,6 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
         .build(crate::testing::runtime_lease_owner())
         .expect("the core builds");
     let environment = lash_lashlang_runtime::LashlangSurface::default()
-        .for_process_registry(true)
         .host_environment(&lash_core::ToolCatalog::default())
         .unwrap();
     let compiled = lashlang::compile_module(lashlang::ModuleCompileRequest {

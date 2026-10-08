@@ -507,7 +507,7 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
         .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
         .channel(lash::rlm::RlmChannel::Cell)
         .build();
-    config.lashlang_abilities = lash::rlm::lang::LashlangAbilities::all().into();
+
     config.lashlang_language_features = lash::rlm::lang::LashlangLanguageFeatures::default()
         .with_label_annotations()
         .into();

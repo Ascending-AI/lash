@@ -167,7 +167,7 @@ async fn linked_value_constructor_wraps_host_descriptor() {
             crate::TypeExpr::Ref("timer.Schedule".into()),
         )
         .expect("value constructor is unique");
-    let surface = crate::LashlangHostEnvironment::new(resources, crate::LashlangAbilities::all());
+    let surface = crate::LashlangHostEnvironment::new(resources);
     // source = timer.Schedule({ expr: "0 8 * * *" })
     // finish source
     let program = builders::program(vec![

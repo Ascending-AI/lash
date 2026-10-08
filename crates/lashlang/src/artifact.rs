@@ -41,9 +41,7 @@ use crate::ast::{
     AssignPathStep, Declaration, Expr, LabelMetadata, MethodKey, ProcessDecl, Program,
     ResourceRefExpr, TypeExpr,
 };
-use crate::linker::{
-    LashlangAbilities, LashlangHostCatalog, LashlangLanguageFeatures, ResourceOperationBinding,
-};
+use crate::linker::{LashlangHostCatalog, LashlangLanguageFeatures, ResourceOperationBinding};
 
 pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -61,7 +59,7 @@ pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 ///     shapes(
 ///         path = "crates/lashlang/src/linker/host.rs",
 ///         path = "crates/lashlang/src/linker/catalog.rs",
-///         cover(LashlangHostCatalog, LashlangAbilities, LashlangLanguageFeatures),
+///         cover(LashlangHostCatalog, LashlangLanguageFeatures),
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]
@@ -196,8 +194,6 @@ pub struct HostRequirements {
     pub resources: LashlangHostCatalog,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub globals: BTreeSet<String>,
-    #[serde(default)]
-    pub abilities: LashlangAbilities,
     #[serde(default)]
     pub language_features: LashlangLanguageFeatures,
 }
@@ -1052,8 +1048,6 @@ fn write_exports(writer: &mut HashWriter, exports: &ModuleExports) {
 }
 
 fn write_host_requirements(writer: &mut HashWriter, requirements: &HostRequirements) {
-    writer.atom("abilities");
-    writer.bool(requirements.abilities.sleep);
     if requirements.language_features.label_annotations {
         writer.atom("language-features");
         writer.atom("label-annotations");

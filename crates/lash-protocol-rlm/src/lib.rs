@@ -38,7 +38,7 @@ pub use executor::RLM_SNAPSHOT_VERSION;
 pub use executor::RlmCheckpointPerfFixture;
 pub use lash_lashlang_runtime::ResolvedToolBinding;
 pub use lash_lashlang_runtime::{
-    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
+    LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
 };
 /// The schema shapes a [`Dialect`] spells: the contract layer's reading of a
 /// tool's JSON Schemas, also constructed directly by runtime-value inference.
@@ -50,8 +50,8 @@ pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
 pub use plugin::{
     ExecutionBounds, InstructionBound, LashlangCompileSurface, LashlangCompileSurfaceRequest,
     LashlangModuleCompileError, LashlangModuleCompileRequest, MemoryBound, ModuleCompileOutput,
-    RLM_PROTOCOL_PLUGIN_ID, RlmAbilities, RlmChannel, RlmConfigOwner, RlmConfigRefusal,
-    RlmCreateConfig, RlmLanguageFeatures, RlmPresentationConfig, RlmProtocolPluginConfig,
+    RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig,
+    RlmLanguageFeatures, RlmPresentationConfig, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,
     RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender,
     UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_session_config,

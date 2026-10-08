@@ -154,9 +154,7 @@ fn shadowed_module_root_names_the_shadowing_binding() {
             lashlang::TypeExpr::Any,
         )
         .expect("text module operation");
-    let environment =
-        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
-            .with_globals(["text"]);
+    let environment = lashlang::LashlangHostEnvironment::new(catalog).with_globals(["text"]);
     let shadowed = lash_typescript::link("text.sha256({});", &environment)
         .expect_err("a session binding shadowing a real module root should explain the shadowing");
     assert_eq!(shadowed.code, Code::MethodUnsupported);

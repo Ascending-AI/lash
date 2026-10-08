@@ -113,9 +113,7 @@ pub(super) async fn typescript_method_diagnostics_consult_the_link_time_module_c
             lashlang::TypeExpr::Any,
         )
         .expect("text module operation");
-    let environment =
-        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
-            .with_globals(["text"]);
+    let environment = lashlang::LashlangHostEnvironment::new(catalog).with_globals(["text"]);
 
     let diagnostic = async |source: &str| match lash_vm_client::service::Service::default()
         .request_accounted(lash_vm_client::service::Request::CompileModule {
@@ -492,7 +490,6 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
                 .to_string();
             artifact_store = lashlang::LashlangArtifacts::new(Arc::new(FailingArtifactStore));
             surface = LashlangSurface::new(
-                lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
                 lashlang::LashlangHostCatalog::new(),
             );

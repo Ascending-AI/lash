@@ -16,10 +16,7 @@ fn return_runs_finally_while_finish_stops_the_cell() {
 
 #[test]
 fn pending_handle_survives_park_without_cross_cell_export() {
-    let environment = lashlang::LashlangHostEnvironment::new(
-        two_leaf_web_environment().resources,
-        lashlang::LashlangAbilities::all(),
-    );
+    let environment = lashlang::LashlangHostEnvironment::new(two_leaf_web_environment().resources);
     let linked = lash_typescript::link("const p = web.fetch({ value: 'kept' }); const nested = [p]; await sleep(5); finish(await p);", &environment).expect("cell links");
     let compiled = lashlang::testing::harness::compile_linked_main(&linked);
     futures::executor::block_on(async {
@@ -133,11 +130,8 @@ pub(super) fn literal_elisions_are_holes_for_in_has_own_property_and_iteration()
             let mut state = State::from_snapshot(restored);
             let linked = lash_typescript::link(
                 &format!("finish({probe});"),
-                &lashlang::LashlangHostEnvironment::new(
-                    lashlang::LashlangHostCatalog::new(),
-                    lashlang::LashlangAbilities::all(),
-                )
-                .with_globals(["a"]),
+                &lashlang::LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new())
+                    .with_globals(["a"]),
             )
             .expect("restored probe links");
             let outcome = futures::executor::block_on(lashlang::execute(

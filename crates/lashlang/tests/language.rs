@@ -280,7 +280,7 @@ fn test_host_environment() -> lashlang::LashlangHostEnvironment {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all())
+    lashlang::LashlangHostEnvironment::new(resources)
 }
 
 mod language_aggregate_await_comprehensions;

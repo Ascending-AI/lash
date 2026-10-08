@@ -1,4 +1,4 @@
-use super::{ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures};
+use super::{ExecutionBounds, InstructionBound, MemoryBound, RlmLanguageFeatures};
 
 /// Prompt and transcript presentation. These choices are pinned with protocol behaviour.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -33,7 +33,7 @@ impl RlmPresentationConfig {
 /// A host's RLM protocol configuration.
 ///
 /// The physical slots (the code renderer) are bound live. Every behavioural
-/// choice — the execution bounds, the Lashlang abilities and language
+/// choice — the execution bounds, the Lashlang language
 /// features, the prompt features, discovery, the output limit, the soft
 /// context-budget warning and the render — is this deployment's creation
 /// default: a session
@@ -59,8 +59,6 @@ pub struct RlmProtocolPluginConfig {
     pub memory_limit: MemoryBound,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
-    #[serde(default = "standard_lashlang_abilities")]
-    pub lashlang_abilities: RlmAbilities,
     /// Lashlang language features offered to the model. Absent from a host's
     /// config means the RLM default (label annotations on); a host that spells
     /// a feature `false` gets it off end to end — the plugin never re-enables
@@ -81,10 +79,6 @@ fn default_continue_as_soft_warn_tokens() -> Option<usize> {
     Some(100_000)
 }
 
-fn standard_lashlang_abilities() -> RlmAbilities {
-    RlmAbilities::default().with_sleep()
-}
-
 /// The RLM protocol's default language-feature set. This is the single site
 /// that decides the default: the builder and serde both read it, and the
 /// plugin factory applies the host's value verbatim.
@@ -103,7 +97,6 @@ fn default_lashlang_language_features() -> RlmLanguageFeatures {
 pub struct RlmRecordedBehaviour {
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
-    pub lashlang_abilities: RlmAbilities,
     pub lashlang_language_features: RlmLanguageFeatures,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub max_output_chars: usize,
@@ -191,7 +184,6 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
-            lashlang_abilities: standard_lashlang_abilities(),
             lashlang_language_features: default_lashlang_language_features(),
             max_output_chars: default_max_output_chars(),
             continue_as_soft_warn_tokens: default_continue_as_soft_warn_tokens(),
@@ -212,8 +204,7 @@ impl RlmProtocolPluginConfig {
     }
 
     /// Standard preset builder: complete standard print/preview render, images
-    /// and decomposition on, durable sleep when process lifecycle is available
-    /// unless the host opts out, label annotations on, 10,000 output
+    /// and decomposition on, label annotations on, 10,000 output
     /// characters, soft warning at 100,000 tokens, no discovery, and standard
     /// presentation. The historical values have no universal workload measurement.
     /// Execution budgets and channel are still explicit named inputs.
@@ -230,13 +221,11 @@ impl RlmProtocolPluginConfig {
     }
 
     /// The behaviour a session created under this configuration records:
-    /// every behavioural choice it states, including an authored sleep opt-out.
+    /// every behavioural choice it states.
     pub fn recorded_behaviour(&self) -> RlmRecordedBehaviour {
-        let lashlang_abilities = self.lashlang_abilities;
         RlmRecordedBehaviour {
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
-            lashlang_abilities,
             lashlang_language_features: self.lashlang_language_features,
             prompt_features: self.prompt_features,
             max_output_chars: self.max_output_chars,
@@ -256,7 +245,7 @@ impl RlmProtocolPluginConfig {
     pub(crate) fn under_recorded_behaviour(mut self, behaviour: &RlmRecordedBehaviour) -> Self {
         self.instruction_limit = behaviour.instruction_limit;
         self.memory_limit = behaviour.memory_limit;
-        self.lashlang_abilities = behaviour.lashlang_abilities;
+
         self.lashlang_language_features = behaviour.lashlang_language_features;
         self.prompt_features = behaviour.prompt_features;
         self.max_output_chars = behaviour.max_output_chars;
@@ -267,11 +256,6 @@ impl RlmProtocolPluginConfig {
             .map(|operation| lash_core::ToolDiscovery { operation });
         self.render = behaviour.render.clone();
         self.presentation = behaviour.presentation;
-        self
-    }
-
-    pub fn with_lashlang_abilities(mut self, abilities: impl Into<RlmAbilities>) -> Self {
-        self.lashlang_abilities = abilities.into();
         self
     }
 

@@ -280,11 +280,8 @@ fn host_requirements_ref_tracks_resource_requirements_not_unrelated_tools() {
     let program = tool_call_process("read_file", "path");
 
     let base = LinkedModule::link(program.clone(), full_host_environment()).expect("link base");
-    let extra = LinkedModule::link(
-        program.clone(),
-        LashlangHostEnvironment::new(with_extra, LashlangAbilities::all()),
-    )
-    .expect("link extra");
+    let extra = LinkedModule::link(program.clone(), LashlangHostEnvironment::new(with_extra))
+        .expect("link extra");
     // process scan(tool: Tools) { finish (await tool.echo({ value: "." }))? }
     let changed_requirement =
         LinkedModule::link(tool_call_process("echo", "value"), full_host_environment())

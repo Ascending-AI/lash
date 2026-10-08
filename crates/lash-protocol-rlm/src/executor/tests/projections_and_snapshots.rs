@@ -1092,7 +1092,6 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             ExecRequest { code },
             handler.artifacts(),
             LashlangSurface::new(
-                lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),
                 lashlang::LashlangHostCatalog::new(),
             ),

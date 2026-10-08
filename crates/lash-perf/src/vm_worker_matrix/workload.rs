@@ -192,9 +192,6 @@ fn ensure_echo(operation: &str) -> Result<(), ExecutionHostError> {
     }
 }
 pub fn environment() -> lashlang::LashlangHostEnvironment {
-    lashlang::LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::tool_default(["echo"]),
-        lashlang::LashlangAbilities::all(),
-    )
-    .with_globals(GLOBALS)
+    lashlang::LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::tool_default(["echo"]))
+        .with_globals(GLOBALS)
 }

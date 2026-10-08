@@ -66,7 +66,7 @@ fn host_environment() -> lashlang::LashlangHostEnvironment {
             ),
         )
         .expect("web fetch operation");
-    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
+    lashlang::LashlangHostEnvironment::new(catalog)
 }
 
 #[test]

@@ -30,7 +30,6 @@ fn environment(catalog: &lash_core::ToolCatalog) -> lashlang::LashlangHostEnviro
         catalog,
         Default::default(),
         Default::default(),
-        Default::default(),
     )
     .expect("MCP bindings import")
 }

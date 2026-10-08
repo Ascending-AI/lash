@@ -219,8 +219,7 @@ fn workflow_projection_preserves_shadow_loop_label_spans() {
 #[test]
 fn facet_echo_changes_no_execution_or_canonical_diff() {
     let source = "const value = [1,2]; if (true) { console.log(value[0]); } finish(value.length);";
-    let environment =
-        LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::all());
+    let environment = LashlangHostEnvironment::new(LashlangHostCatalog::new());
     let original =
         workflow_graph_from_source_with_facets(source, Some(&environment)).expect("facets");
     let mut wire = serde_json::to_value(&original).expect("wire");

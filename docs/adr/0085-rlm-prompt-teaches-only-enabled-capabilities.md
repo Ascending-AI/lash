@@ -16,10 +16,12 @@ Catalog operations do not appear there a second time. Reserved internal `__`
 modules remain hidden.
 
 Teaching follows the selected catalog, host environment, and prompt features.
-Process teaching depends on process catalog membership. Sleep depends on its
-host ability. Host event teaching follows the host tools actually enabled under ADR 0137. Image,
+Process teaching depends on process catalog membership. Durable `sleep` and
+`sleep_until` are always available to cells and processes;
+every execution section teaches sleep. A sleep parks on a timer row in the
+waits table, bounded by turn deadlines and host cancellation like any parked call. Host event teaching follows the host tools actually enabled under ADR 0137. Image,
 decomposition, and continuation instructions follow their configured features
-and catalog. The features and abilities a prompt teaches are the ones the
+and catalog. The optional features a prompt teaches are the ones the
 session recorded at creation, not the opening deployment's (FIG-4398, ADR
 0126). Empty sections are omitted. Promise aggregates and ordinary
 context handling do not require decomposition.

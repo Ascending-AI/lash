@@ -573,7 +573,6 @@ async fn every_model_code_path_runs_in_a_worker(tier: Tier) {
             source: "const answer = async (): Promise<number> => { return 42; };".into(),
             environment: lashlang::LashlangHostEnvironment::new(
                 lashlang::LashlangHostCatalog::new(),
-                lashlang::LashlangAbilities::all(),
             ),
         })
         .await

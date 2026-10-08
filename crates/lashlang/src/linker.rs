@@ -19,8 +19,8 @@ pub use catalog::{LashlangHostCatalog, OperationContract};
 mod host;
 use host::module_path_key;
 pub use host::{
-    LashlangAbilities, LashlangHostCatalogError, LashlangHostEnvironment, LashlangLanguageFeatures,
-    LinkedModule, ModuleInstanceCatalog, ModuleOperationBinding, NamedDataType, NamedDataTypeError,
+    LashlangHostCatalogError, LashlangHostEnvironment, LashlangLanguageFeatures, LinkedModule,
+    ModuleInstanceCatalog, ModuleOperationBinding, NamedDataType, NamedDataTypeError,
     OutputFromInputBinding, ResolvedOperation, ResourceOperationBinding, ResourceTypeCatalog,
     ValueConstructorBinding,
 };

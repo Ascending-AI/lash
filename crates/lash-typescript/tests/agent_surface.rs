@@ -55,7 +55,7 @@ fn process_environment_with(
         )
         .expect("process start operation");
 
-    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::all())
+    lashlang::LashlangHostEnvironment::new(catalog)
 }
 
 pub(super) fn finished(source: &str) -> Value {
@@ -461,8 +461,7 @@ fn promise_all_executes_on_the_shared_aggregate_batch_machine() {
             &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
-    let environment =
-        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+    let environment = lashlang::LashlangHostEnvironment::new(catalog);
     let linked = lash_typescript::link(
         "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
         &environment,
@@ -495,8 +494,7 @@ fn promise_all_settled_preserves_javascript_result_shape() {
             &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
-    let environment =
-        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+    let environment = lashlang::LashlangHostEnvironment::new(catalog);
     let linked = lash_typescript::link(
         "finish(await Promise.allSettled([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]));",
         &environment,
@@ -771,7 +769,6 @@ impl ExecutionHost for ProcessDurabilityHost {
                 ),
             )),
             AbilityOp::Sleep(_) => Ok(AbilityOutcome::Value(Value::Null)),
-
             // A start names the process it is asked to start: the fixture's
             // process values carry a `name`, so a handle minted here can be
             // told apart from a handle minted for another process.
@@ -994,7 +991,7 @@ fn two_leaf_web_environment() -> lashlang::LashlangHostEnvironment {
             &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
-    lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
+    lashlang::LashlangHostEnvironment::new(catalog)
 }
 
 /// [`two_leaf_web_environment`] plus the process control tools.

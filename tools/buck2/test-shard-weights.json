@@ -726,7 +726,6 @@
     "projection::transport::tests::reserved_projection_key_survives_in_plain_seed_data": 1,
     "projection::transport::tests::undefined_uses_json_stringify_container_rules": 1,
     "prompt_contract_tests::the_native_prompt_names_its_transport_and_carries_no_cell_syntax": 23,
-    "prompt_contract_tests::typescript_capabilities_gate_in_both_assembled_channels": 42,
     "protocol::driver::classification_tests::non_cell_reply_classification_table_is_byte_identical": 1,
     "protocol::driver::tests::bounded_output_recurses_through_failure_and_cancellation_raw_values": 1,
     "protocol::driver::tests::bounded_output_replaces_oversized_scalars_without_losing_structure_or_attachments": 1,

@@ -319,10 +319,7 @@ fn mini_program() -> lashlang::Program {
 }
 
 fn mini_environment() -> LashlangHostEnvironment {
-    LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::default().with_sleep(),
-    )
+    LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new())
 }
 
 fn mini_module() -> lashlang::ModuleCompileOutput {

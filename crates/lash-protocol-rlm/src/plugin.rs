@@ -20,9 +20,7 @@ pub use config_owner::{
     RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig, RlmRecordedConfig, RlmRenderRefusal,
     RlmRunOptions, SetRlmRender,
 };
-pub use config_types::{
-    ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLanguageFeatures,
-};
+pub use config_types::{ExecutionBounds, InstructionBound, MemoryBound, RlmLanguageFeatures};
 pub use factory::{
     LashlangCompileSurface, LashlangCompileSurfaceRequest, LashlangModuleCompileError,
     LashlangModuleCompileRequest, ModuleCompileOutput, RlmProtocolPluginFactory,

@@ -12,10 +12,10 @@
 
 use crate::{
     AbilityOp, AbilityOutcome, CompiledProgram, ExecutionEnvironment, ExecutionHost,
-    ExecutionHostError, ExecutionOutcome, LashlangAbilities, LashlangExecutionSite,
-    LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures, LinkedModule,
-    ProcessType, Program, ProjectedBindings, ResourceOperation, ResourceOperationBatchLeaf,
-    ResourceOperationOutcome, RuntimeError, RuntimeFailure, State, TypeExpr, TypeField, Value,
+    ExecutionHostError, ExecutionOutcome, LashlangExecutionSite, LashlangHostCatalog,
+    LashlangHostEnvironment, LashlangLanguageFeatures, LinkedModule, ProcessType, Program,
+    ProjectedBindings, ResourceOperation, ResourceOperationBatchLeaf, ResourceOperationOutcome,
+    RuntimeError, RuntimeFailure, State, TypeExpr, TypeField, Value,
 };
 
 /// A host that answers the four `tools.*` operations [`test_environment`]
@@ -131,7 +131,7 @@ pub fn add_process_control_operations(resources: &mut LashlangHostCatalog) {
 
 /// The host environment the scaffolding links against: a `tools` module with
 /// `echo`, `err`, `missing` and `spawn`, a `processes` module carrying the
-/// process control tools, and every ability granted.
+/// process control tools.
 #[expect(
     clippy::expect_used,
     reason = "test-support fixture a #[test] fn calls; the clippy.toml exemptions reach #[test] fns, not this helper"
@@ -151,7 +151,7 @@ pub fn test_environment() -> LashlangHostEnvironment {
             .expect("host catalog operation must not conflict");
     }
     add_process_control_operations(&mut resources);
-    LashlangHostEnvironment::new(resources, LashlangAbilities::all())
+    LashlangHostEnvironment::new(resources)
 }
 
 /// [`test_environment`] with `@label` annotations enabled.

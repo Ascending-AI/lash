@@ -145,9 +145,6 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
             "fallback",
         )),
     ]);
-    // Process lifecycle available for the compile surface (parity with the old
-    // core that wired a process registry).
-    let process_lifecycle_available = true;
     let plugin_config = || {
         let mut config = lash_core::PluginConfig::default();
         config.insert(
@@ -171,10 +168,8 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
         ),
     );
 
-    let surface =
-        factory.lashlang_compile_surface(&plugin_host, process_lifecycle_available, request)?;
+    let surface = factory.lashlang_compile_surface(&plugin_host, request)?;
 
-    assert!(surface.host_environment.abilities.sleep);
     assert!(surface.tool_catalog.has_callable_tool("compile_core_tool"));
     assert!(surface.tool_catalog.has_callable_tool("lookup"));
     assert!(!surface.tool_catalog.has_callable_tool("fallback"));
@@ -196,7 +191,6 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     let compiled = factory
         .compile_lashlang_module(
             &plugin_host,
-            process_lifecycle_available,
             crate::rlm::LashlangModuleCompileRequest::new(
                 "compile-module",
                 r#"

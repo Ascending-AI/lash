@@ -12,8 +12,7 @@
 //! are TypeScript and the accepting front-end is `lash_typescript`.
 
 use lashlang::{
-    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule,
-    check_ast_nesting_depth,
+    LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, check_ast_nesting_depth,
 };
 
 /// One nestable authored shape: a name and a generator that builds it `depth`
@@ -97,7 +96,7 @@ fn authored_shape_family() -> Vec<AuthoredShape> {
 }
 
 fn environment() -> LashlangHostEnvironment {
-    LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::all())
+    LashlangHostEnvironment::new(LashlangHostCatalog::new())
 }
 
 /// Walks every shape up to the depth the front-end refuses, and requires each

@@ -2,10 +2,9 @@ use super::*;
 
 pub(super) async fn execute_with_host_environment(
     code: &str,
-    abilities: lashlang::LashlangAbilities,
     resources: lashlang::LashlangHostCatalog,
 ) -> ExecResponse {
-    execute_with_host_environment_and_archives(code, abilities, resources)
+    execute_with_host_environment_and_archives(code, resources)
         .await
         .0
 }
@@ -13,7 +12,6 @@ pub(super) async fn execute_with_host_environment(
 /// Run a cell and return its response and attachment store.
 pub(super) async fn execute_with_host_environment_and_archives(
     code: &str,
-    abilities: lashlang::LashlangAbilities,
     resources: lashlang::LashlangHostCatalog,
 ) -> (
     ExecResponse,
@@ -23,11 +21,7 @@ pub(super) async fn execute_with_host_environment_and_archives(
     let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
     let artifact_store = handler.artifacts();
     let ctx = lash_core::testing::code_execution_context(handler.ports());
-    let surface = LashlangSurface::new(
-        abilities,
-        lashlang::LashlangLanguageFeatures::default(),
-        resources,
-    );
+    let surface = LashlangSurface::new(lashlang::LashlangLanguageFeatures::default(), resources);
     let attachments = ctx.attachment_store();
     let response = execute_code_with_test_render(
         &mut state,
@@ -60,7 +54,6 @@ pub(super) fn print_observation_preserves_typed_value_and_records_cut_metadata()
         );
         let (response, attachments) = execute_with_host_environment_and_archives(
             &format!("print({record});"),
-            lashlang::LashlangAbilities::default(),
             lashlang::LashlangHostCatalog::new(),
         )
         .await;
@@ -98,12 +91,9 @@ pub(super) fn console_log_of_a_large_record_stops_at_the_char_cap() {
             "console.log({{ output: {}, status: \"failed\" }});",
             serde_json::to_string(&large).expect("string literal")
         );
-        let (response, attachments) = execute_with_host_environment_and_archives(
-            &code,
-            lashlang::LashlangAbilities::default(),
-            lashlang::LashlangHostCatalog::new(),
-        )
-        .await;
+        let (response, attachments) =
+            execute_with_host_environment_and_archives(&code, lashlang::LashlangHostCatalog::new())
+                .await;
         assert!(response.error.is_none(), "{:?}", response.error);
         let archive = response.output_archive.as_ref().expect("archive");
         let bytes = attachments
@@ -121,49 +111,11 @@ pub(super) fn console_log_of_a_large_record_stops_at_the_char_cap() {
     });
 }
 
-/// A host can withhold the sleep ability.
-#[test]
-pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
-    block_on(async {
-        let code = "await sleep(1000);";
-        lash_typescript::parse(code).expect("the fixture parses");
-        let response = execute_with_host_environment(
-            code,
-            lashlang::LashlangAbilities::default(),
-            lashlang::LashlangHostCatalog::new(),
-        )
-        .await;
-        let error = response
-            .error
-            .as_ref()
-            .expect("a withheld ability fails at link time");
-
-        assert!(
-            error
-                .message
-                .contains("lashlang feature `sleep` is disabled by this host"),
-            "error was {}",
-            error.message,
-        );
-        assert!(response.calls.is_empty(), "no runtime tools are called");
-        assert!(
-            response.observations.is_empty(),
-            "no observations are emitted"
-        );
-        assert!(response.printed_images.is_empty(), "no images are emitted");
-        assert!(
-            response.terminal_finish.is_none(),
-            "the program does not finish terminally"
-        );
-    });
-}
-
 #[test]
 pub(super) fn subcap_prints_stay_fully_inline_including_empty_and_null_values() {
     block_on(async {
         let response = execute_with_host_environment(
             "print(\"\"); print(null); print({text: \"é🙂\", nested: [1, false]});",
-            lashlang::LashlangAbilities::default(),
             lashlang::LashlangHostCatalog::new(),
         )
         .await;

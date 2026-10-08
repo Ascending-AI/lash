@@ -79,7 +79,7 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    LashlangHostEnvironment::new(resources, LashlangAbilities::all())
+    LashlangHostEnvironment::new(resources)
         .with_globals(["history", "ctx", "snap", "img", "docs", "proj"])
 }
 

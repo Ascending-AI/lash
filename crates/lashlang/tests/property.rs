@@ -101,7 +101,7 @@ fn property_host_environment() -> lashlang::LashlangHostEnvironment {
             lashlang::TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all())
+    lashlang::LashlangHostEnvironment::new(resources)
 }
 
 #[derive(Clone, Debug)]

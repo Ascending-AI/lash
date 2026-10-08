@@ -11,7 +11,7 @@
 
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
-    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, State, TypeExpr,
+    LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, State, TypeExpr,
 };
 
 #[expect(
@@ -40,7 +40,7 @@ fn environment() -> LashlangHostEnvironment {
             TypeExpr::Any,
         )
         .expect("host catalog operation must not conflict");
-    LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
+    LashlangHostEnvironment::new(catalog)
 }
 
 #[expect(

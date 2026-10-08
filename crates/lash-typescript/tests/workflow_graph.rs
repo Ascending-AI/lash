@@ -16,11 +16,11 @@ use lash_typescript::workflow_graph::{
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lashlang::{
-    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField,
-    VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
-    WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdge,
-    WorkflowEdgeKind, WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide,
-    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowSlotPath,
+    LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField, VariableVersion,
+    WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument,
+    WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind,
+    WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide, WorkflowNode,
+    WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowSlotPath,
     WorkflowSlotPathSegment, WorkflowSubgraph, reconcile, workflow_call_to_ir, workflow_slot_value,
 };
 
@@ -1105,7 +1105,7 @@ fn facet_environment() -> LashlangHostEnvironment {
             }]),
         )
         .expect("host catalog operation must not conflict");
-    LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
+    LashlangHostEnvironment::new(catalog)
 }
 
 fn slot_path_environment() -> LashlangHostEnvironment {
@@ -1221,7 +1221,7 @@ fn slot_path_environment() -> LashlangHostEnvironment {
             TypeExpr::Str,
         )
         .expect("pair-text operation is unique");
-    LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
+    LashlangHostEnvironment::new(catalog)
 }
 
 #[test]

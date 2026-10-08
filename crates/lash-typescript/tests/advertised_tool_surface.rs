@@ -55,8 +55,7 @@ fn dispatch(call_path: &str, modules: &[&str], operation: &str) -> Vec<(String, 
             &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("operation binding");
-    let environment =
-        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default());
+    let environment = lashlang::LashlangHostEnvironment::new(catalog);
     let source = format!(r#"finish(await {call_path}({{ id: "m1" }}));"#);
     let linked = lash_typescript::link(&source, &environment)
         .unwrap_or_else(|error| panic!("`{source}` must link: {error:?}"));

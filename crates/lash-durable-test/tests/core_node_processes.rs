@@ -1746,7 +1746,6 @@ async fn lashlang_payload(
     };
     let name = process.name.to_string();
     let environment = lash_lashlang_runtime::LashlangSurface::default()
-        .for_process_registry(true)
         .host_environment(&lash_core::ToolCatalog::default())
         .expect("the host environment");
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {

@@ -933,7 +933,6 @@ impl<'module> Linker<'module> {
         path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
-        self.ensure_feature(self.surface.abilities.sleep, "sleep", scope.span)?;
         Ok((
             Expr::SleepFor(Box::new(self.lower_expr(inner, &path.child(0), scope)?.0)),
             Binding::Value(TypeExpr::Null),

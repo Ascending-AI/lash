@@ -458,13 +458,9 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
     config.continue_as_soft_warn_tokens = None;
     config.render.print.max_chars = Some(9);
     config.max_output_chars = 500;
-    config.lashlang_abilities.sleep = false;
+
     let recorded = config.recorded_behaviour();
     assert_eq!(recorded.presentation, config.presentation);
-    assert_eq!(
-        recorded.lashlang_abilities,
-        crate::rlm::RlmAbilities::default()
-    );
     let factory = crate::rlm::RlmProtocolPluginFactory::new(
         config,
         Arc::new(crate::rlm::TypescriptDialect),
@@ -542,7 +538,7 @@ console.log("abcdefghijklmnopqrstuvwxyz");"#,
     )?;
     assert_eq!(
         admitted.behaviour, recorded,
-        "creation preserves the authored sleep opt-out and full presentation"
+        "creation preserves the full presentation"
     );
     let mut omission = serde_json::to_value(&recorded)?;
     omission

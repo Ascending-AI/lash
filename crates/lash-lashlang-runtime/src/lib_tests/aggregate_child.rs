@@ -344,11 +344,10 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         }
         finish null
     "#;
-    let environment = LashlangHostEnvironment::new(
-        lashlang::LashlangHostCatalog::new(),
-        LashlangAbilities::all(),
-    )
-    .with_language_features(lashlang::LashlangLanguageFeatures::default().with_label_annotations());
+    let environment = LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new())
+        .with_language_features(
+            lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
+        );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
         source,
         program: program.clone(),

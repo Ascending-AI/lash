@@ -3,8 +3,6 @@
 //! laws the deleted engine-double session lifecycle tests owed.
 
 use super::*;
-#[cfg(feature = "rlm")]
-use crate::rlm::RlmSendBuilderExt as _;
 use lash_core::SessionId;
 
 mod session_binding;
@@ -70,80 +68,6 @@ async fn rlm_cell_answer_preserves_the_exact_string_without_presentation_policy(
             !prompts[0].contains("nicely formatted Markdown"),
             "{}",
             prompts[0]
-        );
-    }
-    core.shutdown().await.expect("shutdown");
-}
-
-#[cfg(feature = "rlm")]
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_protocol_config_sleep_ability_drives_prompt_surface() {
-    let seen = Arc::new(StdMutex::new(Vec::new()));
-    let provider = crate::testing::TestProvider::builder()
-        .kind("rlm-abilities-prompt-test")
-        .complete({
-            let seen = Arc::clone(&seen);
-            move |request| {
-                let seen = Arc::clone(&seen);
-                async move {
-                    seen.lock_recover().push(format!(
-                        "{}\n{}",
-                        system_text(&request),
-                        request_text(&request)
-                    ));
-                    Ok(text_response(&typescript_block("finish(\"ok\");")))
-                }
-            }
-        })
-        .build()
-        .into_handle();
-    let config: crate::rlm::RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
-        "channel": "cell",
-        "instruction_limit": { "bounded": 1_000_000 },
-        "memory_limit": { "bounded": 67_108_864 },
-        "lashlang_abilities": { "sleep": true }
-    }))
-    .expect("rlm config");
-    let backend = sqlite_memory_store_backend().await;
-    let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-        config,
-        Arc::new(lash_protocol_rlm::TypescriptDialect),
-        &backend,
-    )
-    .with_worker_service(untimed_fixture_workers());
-    let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
-        .serve_test_llm_profile(provider, mock_llm_profile_spec())
-        .build(crate::testing::runtime_lease_owner())
-        .expect("rlm core");
-    let created = core
-        .session(session("rlm-abilities-prompt"))
-        .create(crate::SessionCreation::root(
-            crate::plugins::SessionToolAccess::ambient(),
-            mock_session_spec(),
-        ))
-        .await
-        .expect("created");
-    created
-        .send(crate::TurnInput::text("hello"))
-        .require_finish()
-        .expect("finish required")
-        .output()
-        .await
-        .expect("the turn answers");
-
-    let prompts = seen.lock_recover().clone();
-    // `sleep` is the one surviving ability (FIG-2999): processes, signals and
-    // triggers are catalogue presence now, not configuration, so this session
-    // is told about `sleep` and about nothing it cannot call.
-    assert!(
-        prompts[0].contains("`await sleep(ms)` pauses the program."),
-        "{}",
-        prompts[0]
-    );
-    for retired in ["registerTrigger", "defineProcess", "triggers.list"] {
-        assert!(
-            !prompts[0].contains(retired),
-            "the prompt still advertises `{retired}`"
         );
     }
     core.shutdown().await.expect("shutdown");

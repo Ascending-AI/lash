@@ -26,8 +26,8 @@ use std::sync::Arc;
 
 use lashlang::{
     AbilityOp, AbilityOutcome, ExecutionBound, ExecutionBounds, ExecutionHost, ExecutionHostError,
-    ExecutionOutcome, Expr, LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment,
-    Record, RuntimeError, State, TypeExpr, Value,
+    ExecutionOutcome, Expr, LashlangHostCatalog, LashlangHostEnvironment, Record, RuntimeError,
+    State, TypeExpr, Value,
 };
 
 use crate::ast_support::{call, number, program, string, var};
@@ -61,7 +61,7 @@ impl ExecutionHost for BudgetHost {
 }
 
 fn environment() -> LashlangHostEnvironment {
-    LashlangHostEnvironment::new(LashlangHostCatalog::new(), LashlangAbilities::all())
+    LashlangHostEnvironment::new(LashlangHostCatalog::new())
 }
 
 /// A cell written in TypeScript. `seed` is inserted as the `input` global

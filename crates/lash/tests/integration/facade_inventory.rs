@@ -189,7 +189,6 @@ mod host_wrapping_inventory {
 mod rlm_host_wrapping_inventory {
     use lash::rlm::LashlangProcessAdmissionRefusal as _;
     use lash::rlm::LashlangRuntimeError as _;
-    use lash::rlm::RlmAbilities as _;
     use lash::rlm::RlmLanguageFeatures as _;
     use lash::rlm::RlmProjectedSeedEntry as _;
     use lash::rlm::RlmProjectedSeedSnapshot as _;
@@ -214,7 +213,6 @@ mod rlm_inventory {
     use lash::rlm::DialectRefusalKind as _;
     use lash::rlm::ExecutionSectionRequest as _;
     use lash::rlm::ExtraKeys as _;
-    use lash::rlm::LashlangAbilities as _;
     use lash::rlm::LashlangHostEnvironment as _;
     use lash::rlm::LinkedModule as _;
     use lash::rlm::ModuleCompileOutput as _;

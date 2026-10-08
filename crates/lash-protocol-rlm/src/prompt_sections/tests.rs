@@ -60,7 +60,6 @@ fn sections(catalog: &lash_core::ToolCatalog) -> RlmSections {
     RlmSections::cell(SessionDialect::prompt_only(
         Arc::new(crate::dialect::TypescriptDialect),
         LashlangSurface::new(
-            lashlang::LashlangAbilities::default(),
             lashlang::LashlangLanguageFeatures::default(),
             lashlang::LashlangHostCatalog::tool_default(
                 catalog.tool_names().iter().map(String::as_str),
@@ -158,7 +157,9 @@ Top-level bindings persist across executions. Return exactly the value and type 
 
 ### Host API
 
-`console.log(value)` shows output in the next step; `print(value)` shows a structured value, summarised field by field rather than cut off when it is large; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{ code, details }`."##;
+`console.log(value)` shows output in the next step; `print(value)` shows a structured value, summarised field by field rather than cut off when it is large; `finish(value)` ends the turn. A failed tool call throws an `Error` whose `cause` is `{ code, details }`.
+
+`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call keeps running until the turn ends."##;
 /// The declaration of the fixture binding.
 const READ_ONLY_VARIABLES: &str = r##"### Read-Only Variables
 

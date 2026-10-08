@@ -222,8 +222,7 @@ fn field(name: &str, field_type: &str, default: &str) -> OperationField {
 }
 
 use lash::rlm::lang::{
-    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
-    OperationContract,
+    LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures, OperationContract,
 };
 
 #[expect(
@@ -266,7 +265,7 @@ pub(crate) fn host_environment() -> LashlangHostEnvironment {
             )
             .expect("unique tool binding");
     }
-    LashlangHostEnvironment::new(catalog, LashlangAbilities::all())
+    LashlangHostEnvironment::new(catalog)
         .with_language_features(LashlangLanguageFeatures::default().with_label_annotations())
 }
 

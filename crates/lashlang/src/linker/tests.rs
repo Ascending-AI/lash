@@ -14,7 +14,7 @@ mod type_flow_tests;
 mod workflow_classification_tests;
 
 fn full_host_environment() -> LashlangHostEnvironment {
-    LashlangHostEnvironment::new(resources(), LashlangAbilities::all())
+    LashlangHostEnvironment::new(resources())
 }
 
 fn full_label_environment() -> LashlangHostEnvironment {

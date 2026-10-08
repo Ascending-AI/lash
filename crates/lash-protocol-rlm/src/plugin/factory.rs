@@ -1,7 +1,7 @@
 use lash_core::plugin::PluginSessionRequest;
 use lash_sansio::SessionId;
 use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use lash_core::facade_support::PluginHost;
 use lash_core::plugin::{
@@ -19,18 +19,12 @@ use super::{
 };
 use crate::dialect::{Dialect, RlmDialectServices, SessionDialect};
 
-/// Build the process engine's Lashlang surface under the host's stated
-/// abilities; process lifecycle never enables an authored-disabled ability.
-pub fn rlm_lashlang_surface(
-    config: &RlmProtocolPluginConfig,
-    process_lifecycle: bool,
-) -> LashlangSurface {
+/// Build the process engine's Lashlang surface under the host's language features.
+pub fn rlm_lashlang_surface(config: &RlmProtocolPluginConfig) -> LashlangSurface {
     LashlangSurface::new(
-        config.lashlang_abilities.into_engine(),
         config.lashlang_language_features.into_engine(),
         lashlang::LashlangHostCatalog::new(),
     )
-    .for_process_registry(process_lifecycle)
 }
 
 pub struct RlmProtocolPluginFactory {
@@ -45,16 +39,6 @@ pub struct RlmProtocolPluginFactory {
     /// The binding identity of the backend `artifact_store` belongs to: a
     /// runtime over any other backend refuses this factory.
     artifact_backend: Arc<str>,
-    /// Whether this deployment has process lifecycle available. Recorded once —
-    /// by core installing process-engine contributions (before any session is
-    /// built), by [`Self::with_process_lifecycle`] for hosts that assemble a
-    /// plugin host directly, or by the compile path's explicit argument — and
-    /// read back when building the per-session plugin surface so the prompt
-    /// advertises the same abilities the engine offers. Building a session
-    /// before the value is recorded fails loudly instead of silently degrading
-    /// abilities; conflicting recordings fail loudly too. The config owner
-    /// shares it: a session created here records the abilities it implies.
-    process_lifecycle: Arc<OnceLock<bool>>,
 }
 
 impl RlmProtocolPluginFactory {
@@ -86,7 +70,6 @@ impl RlmProtocolPluginFactory {
             deferred_tool_resolver: None,
             artifact_store: LashlangArtifacts::of_backend(backend),
             artifact_backend: Arc::from(backend.binding_identity().as_str()),
-            process_lifecycle: Arc::new(OnceLock::new()),
         }
     }
 
@@ -119,43 +102,6 @@ impl RlmProtocolPluginFactory {
         self.artifact_store.clone()
     }
 
-    /// Declare process-lifecycle availability explicitly, for hosts that build
-    /// sessions from a hand-assembled [`PluginHost`] (or durable worker)
-    /// instead of a core that installs process-engine contributions — the
-    /// install path records this automatically.
-    ///
-    /// Panics if a conflicting value was already recorded: that is a wiring
-    /// bug, not a runtime condition.
-    #[expect(
-        clippy::expect_used,
-        reason = "documented panicking builder half of record_process_lifecycle; the Err half is the wiring bug this panic names"
-    )]
-    pub fn with_process_lifecycle(self, process_lifecycle_available: bool) -> Self {
-        self.record_process_lifecycle(process_lifecycle_available)
-            .expect("conflicting process-lifecycle availability recorded on RLM protocol factory");
-        self
-    }
-
-    /// Record process-lifecycle availability: first recording wins, repeated
-    /// agreeing recordings are no-ops, and a conflicting recording is an error
-    /// (a silent flip would desynchronize the per-session plugin surface from
-    /// engines already handed out).
-    fn record_process_lifecycle(&self, process_lifecycle_available: bool) -> Result<(), String> {
-        if self
-            .process_lifecycle
-            .set(process_lifecycle_available)
-            .is_err()
-            && self.process_lifecycle.get() != Some(&process_lifecycle_available)
-        {
-            return Err(format!(
-                "RLM protocol factory already recorded process_lifecycle_available={}; \
-                 refusing conflicting recording of {}",
-                !process_lifecycle_available, process_lifecycle_available
-            ));
-        }
-        Ok(())
-    }
-
     /// The behaviour a session whose plugin configuration is
     /// `plugin_config` runs under: the one its RLM namespace recorded
     /// (FIG-4398). A session being created has recorded none yet and runs
@@ -178,41 +124,17 @@ impl RlmProtocolPluginFactory {
                     field: "behaviour".to_string(),
                 })
             }
-            None => {
-                self.process_lifecycle()?;
-                Ok(self.config.recorded_behaviour())
-            }
+            None => Ok(self.config.recorded_behaviour()),
         }
     }
 
-    fn process_lifecycle(&self) -> Result<bool, PluginError> {
-        self.process_lifecycle.get().copied().ok_or_else(|| {
-            PluginError::Registration(
-                "RLM protocol factory built a session before learning whether process \
-                 lifecycle is available; abilities would silently degrade. Install the \
-                 factory through a core (which records this while installing \
-                 process-engine contributions) or declare it explicitly with \
-                 `with_process_lifecycle`."
-                    .to_string(),
-            )
-        })
-    }
-
     /// Operation over the factory and a plugin host: the caller supplies a plugin
-    /// host containing this protocol factory plus any tool plugins to resolve,
-    /// and whether process lifecycle is available.
+    /// host containing this protocol factory plus any tool plugins to resolve.
     pub fn lashlang_compile_surface(
         &self,
         plugin_host: &PluginHost,
-        process_lifecycle_available: bool,
         request: LashlangCompileSurfaceRequest,
     ) -> Result<LashlangCompileSurface, PluginError> {
-        // The compile caller is the authority on process-lifecycle availability
-        // here; record it before building the throwaway catalog-resolution
-        // session below, which invokes this factory's `build` (the plugin host
-        // contains this factory) and reads the recorded value.
-        self.record_process_lifecycle(process_lifecycle_available)
-            .map_err(|err| PluginError::Registration(err.to_string()))?;
         let behaviour = self.session_behaviour(
             &request.execution_env_spec.plugin_config.config,
             lash_core::plugin::PluginSessionMaterialization::Creation,
@@ -226,7 +148,7 @@ impl RlmProtocolPluginFactory {
         ))?;
         let tool_catalog = plugins.resolved_tool_catalog()?;
         let config = self.config.clone().under_recorded_behaviour(&behaviour);
-        let surface = rlm_lashlang_surface(&config, process_lifecycle_available)
+        let surface = rlm_lashlang_surface(&config)
             .with_plugin_extensions(plugin_host.extensions())
             .and_then(|surface| surface.with_plugin_extensions(plugins.session_extensions()))
             .map_err(|err| PluginError::Registration(err.to_string()))?;
@@ -248,13 +170,11 @@ impl RlmProtocolPluginFactory {
     pub async fn compile_lashlang_module(
         &self,
         plugin_host: &PluginHost,
-        process_lifecycle_available: bool,
         request: LashlangModuleCompileRequest,
     ) -> Result<ModuleCompileOutput, LashlangModuleCompileError> {
         let surface = self
             .lashlang_compile_surface(
                 plugin_host,
-                process_lifecycle_available,
                 LashlangCompileSurfaceRequest {
                     session_id: request.session_id,
                     execution_env_spec: request.execution_env_spec,
@@ -305,7 +225,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
                 channel: self.config.channel,
                 dialect: self.dialect.language_id(),
                 config: self.config.clone(),
-                process_lifecycle: Arc::clone(&self.process_lifecycle),
             },
         )
     }
@@ -321,19 +240,13 @@ impl PluginFactory for RlmProtocolPluginFactory {
         &self,
         ctx: &ProcessEngineContributionContext<'_>,
     ) -> Result<Vec<lash_core::ProcessEngineRegistration>, PluginError> {
-        let process_lifecycle = ctx.process_lifecycle_available();
-        // Record for the per-session plugin surface; install runs before any
-        // session is built on this (shared) factory.
-        self.record_process_lifecycle(process_lifecycle)
-            .map_err(PluginError::Registration)?;
         let config = self.config.clone();
-        let surface = rlm_lashlang_surface(&config, process_lifecycle)
+        let surface = rlm_lashlang_surface(&config)
             .with_plugin_extensions(ctx.extensions())
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         let recorder = Arc::new(RlmProcessSettingsRecorder {
             deployment_config: self.config.clone(),
             plugin_host: ctx.plugin_host().clone(),
-            process_lifecycle,
         });
         let engine = LashlangProcessEngine::new(self.artifact_store.clone(), surface)
             .with_segment_policy(self.segment_policy)
@@ -363,7 +276,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
             ctx.materialization,
         )?;
         let lashlang_surface = LashlangSurface::new(
-            config.lashlang_abilities.into_engine(),
             config.lashlang_language_features.into_engine(),
             lashlang::LashlangHostCatalog::new(),
         )
@@ -415,7 +327,6 @@ fn recorded_config(
 struct RlmProcessSettingsRecorder {
     deployment_config: RlmProtocolPluginConfig,
     plugin_host: PluginHost,
-    process_lifecycle: bool,
 }
 
 impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRecorder {
@@ -436,7 +347,7 @@ impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRe
             .deployment_config
             .clone()
             .under_recorded_behaviour(&behaviour);
-        let mut surface = rlm_lashlang_surface(&config, self.process_lifecycle)
+        let mut surface = rlm_lashlang_surface(&config)
             .with_plugin_extensions(self.plugin_host.extensions())
             .map_err(|error| PluginError::Registration(error.to_string()))?;
         let context = PluginSessionContext {
@@ -549,7 +460,7 @@ mod label_annotation_tests {
     }
 
     fn rendered_surface(config: RlmProtocolPluginConfig) -> lashlang::LashlangHostEnvironment {
-        rlm_lashlang_surface(&config, false)
+        rlm_lashlang_surface(&config)
             .host_environment(&lash_core::ToolCatalog::from_tool_definitions(Vec::new()))
             .expect("host environment")
     }
@@ -603,18 +514,15 @@ mod label_annotation_tests {
         // FIG-3268: the factory used to hand `parse_failure` only
         // `span.start`, so the diagnostic's `span` stayed `None` and the
         // end of the offending token was lost.
-        let factory = std::sync::Arc::new(
-            crate::RlmProtocolPluginFactory::new(
-                crate::RlmProtocolPluginConfig::builder()
-                    .channel(crate::RlmChannel::Cell)
-                    .instruction_limit(crate::InstructionBound::instructions(1_000_000))
-                    .memory_limit(crate::MemoryBound::mebibytes(64))
-                    .build(),
-                std::sync::Arc::new(crate::TypescriptDialect),
-                &crate::testing::sqlite_memory_store_backend().await,
-            )
-            .with_process_lifecycle(false),
-        );
+        let factory = std::sync::Arc::new(crate::RlmProtocolPluginFactory::new(
+            crate::RlmProtocolPluginConfig::builder()
+                .channel(crate::RlmChannel::Cell)
+                .instruction_limit(crate::InstructionBound::instructions(1_000_000))
+                .memory_limit(crate::MemoryBound::mebibytes(64))
+                .build(),
+            std::sync::Arc::new(crate::TypescriptDialect),
+            &crate::testing::sqlite_memory_store_backend().await,
+        ));
         let factory_plugin: std::sync::Arc<dyn lash_core::facade_support::PluginFactory> =
             factory.clone();
         let plugin_host = lash_core::facade_support::PluginHost::new(vec![factory_plugin]);
@@ -622,7 +530,6 @@ mod label_annotation_tests {
         let err = factory
             .compile_lashlang_module(
                 &plugin_host,
-                false,
                 crate::LashlangModuleCompileRequest::new(
                     "factory-test",
                     source,
@@ -736,7 +643,6 @@ mod process_settings_tests {
                     lash_core::plugin::PluginSpec::new().with_extension_contribution(
                         lash_lashlang_runtime::lashlang_surface_extension(
                             &lash_lashlang_runtime::LashlangSurfaceContribution::new(
-                                lashlang::LashlangAbilities::default(),
                                 lashlang::LashlangLanguageFeatures::default(),
                                 resources(),
                             ),
@@ -751,10 +657,11 @@ mod process_settings_tests {
     #[tokio::test]
     async fn process_settings_have_one_recorded_engine_shape() {
         let backend = crate::testing::sqlite_memory_store_backend().await;
-        let creating_factory = Arc::new(
-            RlmProtocolPluginFactory::new(creating(), Arc::new(TypescriptDialect), &backend)
-                .with_process_lifecycle(false),
-        );
+        let creating_factory = Arc::new(RlmProtocolPluginFactory::new(
+            creating(),
+            Arc::new(TypescriptDialect),
+            &backend,
+        ));
         let installing_host = PluginHost::new(vec![
             Arc::new(RlmProtocolPluginFactory::new(
                 installing(),
@@ -807,7 +714,6 @@ mod process_settings_tests {
             record["execution_bounds"]["memory_limit"],
             serde_json::json!({"bounded": 67_108_864})
         );
-        assert_eq!(record["abilities"]["sleep"], serde_json::json!(false));
         assert_eq!(
             record["language_features"]["label_annotations"],
             serde_json::json!(true)
@@ -832,7 +738,6 @@ mod process_settings_tests {
         let hand_built = lash_lashlang_runtime::LashlangProcessEngine::new(
             creating_factory.artifact_store(),
             lash_lashlang_runtime::LashlangSurface::new(
-                lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
                 resources(),
             ),
