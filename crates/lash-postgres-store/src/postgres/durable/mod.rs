@@ -291,6 +291,28 @@ impl std::fmt::Debug for PostgresDurableStore {
 
 type Tx = GuardedTx<'static>;
 
+/// Model a shared server's scheduling delay at registration and claim,
+/// even when a claim finds no actors. The crash fixture's guard law uses
+/// real statements rather than delaying before a statement's timer starts.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) async fn delay_node_statements_for_testing(
+    pool: &PgPool,
+    delay: std::time::Duration,
+) -> sqlx::Result<()> {
+    sqlx::raw_sql(&format!(
+        "CREATE FUNCTION slow_matrix_statement() RETURNS trigger LANGUAGE plpgsql AS $$
+         BEGIN PERFORM pg_sleep(TG_ARGV[0]::double precision); RETURN NULL; END $$;
+         CREATE TRIGGER slow_registration BEFORE INSERT ON lash_nodes
+             FOR EACH STATEMENT EXECUTE FUNCTION slow_matrix_statement('{seconds}');
+         CREATE TRIGGER slow_claim BEFORE UPDATE ON lash_actors
+             FOR EACH STATEMENT EXECUTE FUNCTION slow_matrix_statement('{seconds}');",
+        seconds = delay.as_secs_f64(),
+    ))
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
 /// An operation that did not finish within its role's deadline: whether a
 /// commit in it landed is unknown.
 fn deadline_failure(deadline: std::time::Duration) -> DurableError {

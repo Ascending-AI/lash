@@ -32,10 +32,11 @@ pub struct LeaseSettings {
     /// that took work. Each empty claim doubles the wait up to
     /// `claim_poll`; a wake hint claims at once.
     pub claim_backoff: Duration,
-    /// How long a node may take to start, from its registration attempt
+    /// How long one startup attempt may take, from its registration attempt
     /// until its registration and its listener are in place. Its renewal
     /// starts as soon as it is registered, so a slow listener never ages
-    /// the lease.
+    /// the lease. Transient registration failures retry with the claim
+    /// backoff until the host stops the node.
     pub startup: Duration,
     /// How long a stopping node waits for its lease's release once its
     /// activations have stopped. A release that does not answer in time is

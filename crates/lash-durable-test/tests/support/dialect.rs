@@ -154,6 +154,18 @@ impl OffClockWork for WaitedOutPool {
 }
 
 /// The fixture configuration, its work fitted to the one shared pool.
-fn pool_config() -> lash_postgres_store::PostgresHostConfig {
-    lash_postgres_store::testing::work_pool_of(POOL_CONNECTIONS)
+///
+/// A cell owns its database, but shares the server's CPU and I/O with other
+/// cells. The production renewal/scheduler preset cancels a statement after
+/// one wall-clock second, introducing a fault the script never requested:
+/// another node can then take the work and the selected cut is never reached.
+/// Turn those statement guards off explicitly (including a server-inherited
+/// guard), rather than guessing a larger latency allowance. The existing
+/// two-second client operation deadlines and lock guards still bound database
+/// work; the simulation's clock owns node leases and the matrix horizon.
+pub(super) fn pool_config() -> lash_postgres_store::PostgresHostConfig {
+    let mut config = lash_postgres_store::testing::work_pool_of(POOL_CONNECTIONS);
+    config.guards.renewal.statement = lash_postgres_store::host::ServerTimeout::Disabled;
+    config.guards.scheduler.statement = lash_postgres_store::host::ServerTimeout::Disabled;
+    config
 }

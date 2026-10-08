@@ -554,6 +554,25 @@ mod tests {
         nodes
     }
 
+    /// FIG-5545: a transient refusal of the first registration does not
+    /// permanently end the boot. The same runner retries and serves mail.
+    #[tokio::test]
+    async fn a_transient_registration_failure_is_retried_and_the_node_serves() {
+        let script = Script::new();
+        script.cut_on("a", CommitLabel::NODE_REGISTER, 1, Fault::FailBefore);
+        let hold = Arc::new(Hold::default());
+        let nodes = holding(script, &hold).await;
+        let trace = nodes.script().trace();
+        let registrations: Vec<_> = trace
+            .iter()
+            .filter(|write| write.point.label == CommitLabel::NODE_REGISTER)
+            .collect();
+        assert_eq!(registrations.len(), 2, "one retry: {registrations:?}");
+        assert_eq!(registrations[0].cut, Some(Fault::FailBefore));
+        assert!(registrations[1].committed());
+        assert_eq!(hold.live.load(Ordering::SeqCst), 1);
+    }
+
     /// An activation that stops while its node still owns its actor never
     /// strands it: the runner releases it `ready`, fenced by the claimed
     /// epoch, and a claim runs it again (FIG-5227).

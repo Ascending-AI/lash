@@ -160,6 +160,20 @@ pub async fn cut_session_wakes(pool: &sqlx::PgPool, armed: bool) -> sqlx::Result
     crate::durable::cut_session_wakes(pool, armed).await
 }
 
+/// Install statement triggers delaying node registration and claim by
+/// `delay`, including claims that find no actors. Use on an isolated fixture
+/// database to model shared-service latency in the crash matrix's guard law.
+///
+/// # Errors
+///
+/// The trigger's DDL failed.
+pub async fn delay_node_statements(
+    pool: &sqlx::PgPool,
+    delay: std::time::Duration,
+) -> sqlx::Result<()> {
+    crate::durable::delay_node_statements_for_testing(pool, delay).await
+}
+
 /// One stored value: where it is, its bytes, and every JSON document those
 /// bytes decode to as this store writes them. The twin of
 /// `lash_sqlite_store::testing::StoredCell`.

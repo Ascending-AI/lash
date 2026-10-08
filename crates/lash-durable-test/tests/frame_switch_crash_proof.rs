@@ -479,3 +479,46 @@ async fn a_frame_switch_killed_at_every_label_runs_one_follow_on_on_postgres() {
     };
     prove(Dialect::Postgres, Some(url)).await;
 }
+
+/// FIG-5545: real database latency must not introduce an unscripted timeout
+/// at the matrix's registration or claim boundaries. A statement trigger
+/// models a backend descheduled beyond the production preset's one second,
+/// even for a claim that finds no actors.
+#[tokio::test]
+async fn postgres_matrix_guards_allow_slow_registration_and_claim() {
+    use lash_durable::{NodeId, NodeSpec};
+
+    let url = lash_postgres_store::testing::required_database_url();
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(16)
+        .connect(database.url())
+        .await
+        .expect("open the matrix's shared-role pool");
+    let storage = lash_postgres_store::testing::from_pool(pool, &dialect::pool_config())
+        .await
+        .expect("open with the matrix's guard policy");
+    lash_postgres_store::testing::delay_node_statements(
+        storage.pool(),
+        Duration::from_millis(1_100),
+    )
+    .await
+    .expect("model shared-service scheduling latency");
+    let store = storage.durable_store();
+    let registered = store
+        .register_node(&NodeSpec {
+            node: NodeId::new("slow-matrix-node"),
+            decodes: Vec::new(),
+            ttl_millis: 15_000,
+        })
+        .await;
+    assert!(
+        registered.is_ok(),
+        "shared-service latency must not refuse node.register: {registered:?}"
+    );
+    let claimed = store.claim(&registered.unwrap(), 1).await;
+    assert!(
+        matches!(&claimed, Ok(actors) if actors.is_empty()),
+        "shared-service latency must not refuse claim: {claimed:?}"
+    );
+}

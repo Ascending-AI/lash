@@ -20,7 +20,9 @@
 //! host's stop and the renewal's end, and the renewal's own heartbeat races
 //! the self-stop deadline, so a node whose heartbeat hangs still stops
 //! itself, and drops its activations, before anyone may reap it.
-//! Registration and the listener's start share the `startup` budget;
+//! Each registration attempt and the listener's start share the `startup`
+//! budget. Transient registration faults retry with the claim backoff until
+//! the host stops the node;
 //! the final release shares the `shutdown` budget, and a release that does
 //! not answer in time is left to the lease's expiry.
 //!
@@ -723,25 +725,47 @@ impl Runner {
     ///
     /// # Errors
     ///
-    /// The store's refusal of the node's registration or listener, either
-    /// one not in place within `startup` of the registration attempt, or
-    /// the store's refusal of the final release.
+    /// A non-transient refusal of the node's registration, the listener's
+    /// refusal or startup timeout, or the store's refusal of the final release.
     pub async fn run(self, stop: impl Future<Output = ()> + Send) -> Result<Stopped, DurableError> {
         let settings = self.config.lease.settings();
-        // The lease's clock starts when the registration is sent: the
-        // stored lease cannot start earlier, so the local deadline is never
-        // later than the stored one.
-        let registering = self.clock.now();
-        let started_by = registering + settings.startup;
+        tokio::pin!(stop);
         let spec = NodeSpec {
             node: self.config.node.clone(),
             decodes: self.config.decodes.clone(),
             ttl_millis: self.config.lease.ttl_millis(),
         };
-        let lease = self
-            .within(started_by, self.store.register_node(&spec))
-            .await
-            .unwrap_or_else(|| Err(not_started("registration", settings)))?;
+        let mut register_delay = settings.claim_backoff;
+        let (lease, registering) = loop {
+            // A failed attempt may have registered an unacknowledged boot.
+            // The next registration replaces it; only the successful
+            // attempt's send time starts this runner's local lease clock.
+            let registering = self.clock.now();
+            let registered = tokio::select! {
+                biased;
+                () = &mut stop => return Ok(Stopped::Requested),
+                answer = self.within(registering + settings.startup, self.store.register_node(&spec)) => {
+                    answer.unwrap_or_else(|| Err(not_started("registration", settings)))
+                }
+            };
+            match registered {
+                Ok(lease) => break (lease, registering),
+                Err(DurableError::Store(StoreFailure {
+                    kind: StoreFailureKind::Unavailable | StoreFailureKind::Contended,
+                    ..
+                })) => {}
+                Err(error) => return Err(error),
+            }
+            tokio::select! {
+                biased;
+                () = &mut stop => return Ok(Stopped::Requested),
+                () = self.clock.sleep_until(self.clock.now() + register_delay) => {}
+            }
+            register_delay = register_delay.saturating_mul(2).min(settings.claim_poll);
+        };
+        // The stored lease cannot start before this send, so the local
+        // deadline is never later than the stored one.
+        let started_by = registering + settings.startup;
         *self
             .hints
             .inner
@@ -802,7 +826,6 @@ impl Runner {
         // Whether the store records this node draining: the drain switch
         // alone already stops this runner's claims.
         let mut marked_draining = false;
-        tokio::pin!(stop);
         let stopped = 'serve: loop {
             // A hand-back that failed is retried at the next turn of the
             // loop; one the fence refused finds the actor already gone.
