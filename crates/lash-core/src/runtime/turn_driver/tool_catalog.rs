@@ -135,8 +135,8 @@ impl RuntimeTurnDriver<'_> {
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         request: &LlmRequest,
+        last_call_usage: Option<crate::TokenUsage>,
     ) -> Result<Option<crate::ProtocolLlmCallAction>, PluginError> {
-        let latest_prompt_usage = self.latest_prompt_usage.clone();
         self.session
             .plugins()
             .protocol_session()
@@ -147,7 +147,7 @@ impl RuntimeTurnDriver<'_> {
                     session_graph: self.session_services.graph_service(),
                     processes: self.session_services.process_service(),
                     state: self.checkpoint_state_view(messages, protocol_iteration),
-                    latest_prompt_usage,
+                    latest_prompt_usage: last_call_usage,
                 },
                 request,
             )

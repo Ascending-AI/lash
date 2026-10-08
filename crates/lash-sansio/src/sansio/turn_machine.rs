@@ -248,6 +248,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.messages.clone()
     }
 
+    /// The usage admitted across this turn's model calls, restored with the
+    /// turn so a resumed pass reads the same total as an uninterrupted one.
+    pub fn cumulative_usage(&self) -> &TokenUsage {
+        &self.cumulative_usage
+    }
+
     /// The usage the turn's last completed model call reported, restored
     /// with the turn: a pass that resumes it after that call reads it here.
     pub fn last_call_usage(&self) -> Option<&TokenUsage> {

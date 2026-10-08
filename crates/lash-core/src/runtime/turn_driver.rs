@@ -40,12 +40,6 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) turn_index: usize,
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) prelude: Box<crate::runtime::effect::TurnPrelude>,
-    /// Most recent provider usage observed during this execution attempt.
-    ///
-    /// The turn pipeline retains the projection basis captured before the
-    /// logical turn began so a persisted continuation cannot rebuild history
-    /// from a later call in the same turn.
-    pub(super) latest_prompt_usage: Option<crate::TokenUsage>,
     /// Parent-session calls only. Child runtimes assemble their own ledgers.
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
     /// Non-transcript evidence from charge-safety-refused generations, with

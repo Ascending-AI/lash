@@ -175,19 +175,17 @@ impl RuntimeTurnDriver<'_> {
             (error.code == Some(FailureCode::lash(TurnFailureCode::ProviderPanicked)))
                 .then(|| error.message.clone())
         });
-        if let Ok(response) = &result {
-            let usage = crate::runtime::effect::token_usage_from_llm(&response.usage);
-            self.latest_prompt_usage = nonzero_usage(usage);
-            if !text_streamed {
-                let prose_projector = self.session.plugins().assistant_prose_projector();
-                emit_semantic_response_parts(
-                    event_tx,
-                    &mut self.turn_observations,
-                    response,
-                    prose_projector.as_deref(),
-                    &ReasoningPublicationState::from_published_blocks(reasoning_published),
-                );
-            }
+        if let Ok(response) = &result
+            && !text_streamed
+        {
+            let prose_projector = self.session.plugins().assistant_prose_projector();
+            emit_semantic_response_parts(
+                event_tx,
+                &mut self.turn_observations,
+                response,
+                prose_projector.as_deref(),
+                &ReasoningPublicationState::from_published_blocks(reasoning_published),
+            );
         }
         self.handle_machine_response(
             machine,

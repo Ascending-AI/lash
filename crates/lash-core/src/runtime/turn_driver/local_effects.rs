@@ -8,6 +8,8 @@ struct LocalTurnEffectRunner {
     protocol_iteration: usize,
     messages: crate::MessageSequence,
     prompt_messages: crate::MessageSequence,
+    /// The machine's admitted last-call usage at this effect's boundary.
+    last_call_usage: Option<crate::TokenUsage>,
     active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
     event_tx: TurnObserver,
 }
@@ -44,7 +46,12 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
             RuntimeEffectCommand::BeforeLlmCall { request } => {
                 let decision = runner
                     .driver
-                    .run_before_llm_call(runner.messages, runner.protocol_iteration, &request)
+                    .run_before_llm_call(
+                        runner.messages,
+                        runner.protocol_iteration,
+                        &request,
+                        runner.last_call_usage,
+                    )
                     .await;
                 if let Err(error) = &decision {
                     let failure = error
@@ -244,7 +251,6 @@ pub(super) fn turn_effect_executor(
         .with_definition_engines(driver.host.core.process_engines.clone())
         .with_metrics(driver.host.core.tracing.metrics().clone())
         .with_trace(driver.trace.clone()),
-        latest_prompt_usage: driver.latest_prompt_usage.clone(),
         llm_calls: Vec::new(),
         failure_evidence: Vec::new(),
         session_services: Arc::clone(&driver.session_services),
@@ -274,6 +280,7 @@ pub(super) fn turn_effect_executor(
             protocol_iteration: machine.protocol_iteration(),
             messages: machine.message_sequence(),
             prompt_messages: machine.prompt_message_sequence(),
+            last_call_usage: machine.last_call_usage().cloned().and_then(nonzero_usage),
             active_events: driver.turn_pipeline.active_events(),
             event_tx,
         }),

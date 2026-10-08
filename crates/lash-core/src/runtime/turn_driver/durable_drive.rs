@@ -136,10 +136,6 @@ impl RuntimeDrive {
         // delivered before its last phase committed are bound to its run;
         // the turn's commit settles them with the rows its run took.
         driver.pending_turn_inputs.extend(delivered);
-        // The turn's last completed model call may be a pass behind this one:
-        // its usage is what the turn's commit records and its context budget
-        // reads, until this pass completes a call of its own (FIG-5352).
-        driver.latest_prompt_usage = machine.last_call_usage().cloned().and_then(nonzero_usage);
         let opening_work = driver.pending_queued.len();
         driver.pending_queued.extend(delivered_work);
         // The namespaces the turn's run committed, the pending
@@ -274,13 +270,6 @@ impl TurnDrive for RuntimeDrive {
         let observer = &self.observer;
         match effect {
             Effect::Emit(event) => {
-                if let SessionStreamEvent::TokenUsage {
-                    usage, cumulative, ..
-                } = &event
-                {
-                    driver.turn_pipeline.state_mut().token_usage = cumulative.clone();
-                    driver.latest_prompt_usage = nonzero_usage(usage.clone());
-                }
                 // A finished machine's `Error` is its stop's terminal: it
                 // publishes after the commit (ADR 0122).
                 if machine.is_done() && matches!(event, SessionStreamEvent::Error { .. }) {
@@ -532,11 +521,16 @@ impl TurnDrive for RuntimeDrive {
             None => None,
         };
         let failure_evidence = driver.failure_evidence.clone();
-        // The turn's last completed prompt commits with it: the next turn's
-        // context budget reads it, while this turn's own checkpoints read
-        // the one before.
-        if let Some(prompt) = driver.latest_prompt_usage.clone() {
-            driver.turn_pipeline.state_mut().last_prompt_usage = Some(prompt);
+        // The checkpoint owns usage, including calls a previous owner
+        // completed. Project it once at the commit, preserving the head's
+        // usage when this turn made no call and its last prompt when the
+        // last call reported zero usage.
+        if let Some(last) = self.machine.last_call_usage() {
+            let state = driver.turn_pipeline.state_mut();
+            state.token_usage = self.machine.cumulative_usage().clone();
+            if let Some(prompt) = nonzero_usage(last.clone()) {
+                state.last_prompt_usage = Some(prompt);
+            }
         }
         let mut commit = driver
             .turn_pipeline

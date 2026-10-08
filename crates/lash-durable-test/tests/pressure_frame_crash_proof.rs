@@ -27,7 +27,8 @@
 //! The pressure hook reads what the session's last turn committed as its
 //! prompt usage. A second matrix (FIG-5352) cuts an RLM turn whose one model
 //! call reports a prompt past the compaction threshold at every label, and
-//! checks the turn commits that call's usage however its owners resumed it:
+//! checks the turn commits that call's prompt and total usage however its
+//! owners resumed it (FIG-5352, FIG-5389):
 //! a pass that resumes it after its committed `model.done` makes no model
 //! call of its own.
 //!
@@ -934,15 +935,31 @@ impl Scenario for PromptUsage {
             other => violations.push(format!("the turn did not complete: {other:?}")),
         }
         let committed = match self.core().session(usage_session()).open().await {
-            Ok(session) => session.admin().state().export().await.last_prompt_usage,
+            Ok(session) => session.admin().state().export().await,
             Err(error) => {
                 violations.push(format!("the session does not open: {error}"));
                 return violations;
             }
         };
-        if committed.as_ref().map(|usage| usage.input_tokens) != Some(PROMPT_TOKENS) {
+        if committed
+            .last_prompt_usage
+            .as_ref()
+            .map(|usage| usage.input_tokens)
+            != Some(PROMPT_TOKENS)
+        {
             violations.push(format!(
-                "the turn committed prompt usage {committed:?}, not its call's {PROMPT_TOKENS} tokens"
+                "the turn committed prompt usage {:?}, not its call's {PROMPT_TOKENS} tokens",
+                committed.last_prompt_usage
+            ));
+        }
+        let expected = lash_core::TokenUsage {
+            input_tokens: PROMPT_TOKENS,
+            ..Default::default()
+        };
+        if committed.token_usage != expected {
+            violations.push(format!(
+                "the turn committed total usage {:?}, not its call's {expected:?}",
+                committed.token_usage
             ));
         }
         if let Some(cut) = cut {
@@ -956,11 +973,11 @@ fn usage_session() -> SessionId {
     SessionId::try_from(USAGE_SESSION.to_owned()).unwrap()
 }
 
-/// FIG-5352: an RLM turn whose model call reports a prompt past the
-/// compaction threshold, cut at every label, commits that call's prompt
-/// usage, so the next turn's pressure hook compacts: a pass that resumes the
-/// turn after its committed `model.done` keeps the usage its checkpoint
-/// carries.
+/// FIG-5352 and FIG-5389: an RLM turn whose model call reports a prompt past
+/// the compaction threshold, cut at every label, commits that call's prompt
+/// and total usage. The next turn's pressure hook compacts, and a pass that
+/// resumes the turn after its committed `model.done` keeps the usage its
+/// checkpoint carries.
 #[tokio::test]
 async fn a_turn_killed_at_every_label_commits_its_last_calls_prompt_usage() {
     let report = Matrix::new()

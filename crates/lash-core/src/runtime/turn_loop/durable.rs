@@ -355,7 +355,6 @@ impl LashRuntime {
             session_id: self.state.session_id.clone(),
             turn_index,
             turn_pipeline,
-            latest_prompt_usage: None,
             llm_calls: Vec::new(),
             failure_evidence: Vec::new(),
             session_services: manager,
