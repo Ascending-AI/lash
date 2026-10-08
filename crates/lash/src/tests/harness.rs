@@ -73,6 +73,28 @@ pub(crate) async fn store_backend_with_clock(
     lash_conformance::backend_over(stores)
 }
 
+/// A fresh PostgreSQL store set on an isolated database of the gate's
+/// server, and what must outlive it.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the test host reads the PostgreSQL service URL its gate sets"
+)]
+pub(crate) async fn postgres_store_set() -> (Arc<dyn lash_core::StoreSet>, Box<dyn std::any::Any>) {
+    let url = lash_postgres_store::testing::required_database_url();
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = lash_postgres_store::testing::connect(database.url())
+        .await
+        .expect("connect PostgreSQL");
+    let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    )) as Arc<dyn lash_core::StoreSet>;
+    (stores, Box::new((database, attachments, storage)))
+}
+
 /// One backend with some of its ports decorated by a test that observes
 /// or faults them. Every port a test does not decorate is the inner
 /// backend's, and every decoration is handed the inner port it wraps, so
@@ -97,6 +119,17 @@ impl DecoratedBackend {
     ) -> Self {
         Self {
             layered: self.layered.map_process_env_store(decorate),
+        }
+    }
+
+    pub(crate) fn session_store_factory(
+        self,
+        decorate: impl FnOnce(
+            Arc<dyn lash_core::DeploymentStore>,
+        ) -> Arc<dyn lash_core::DeploymentStore>,
+    ) -> Self {
+        Self {
+            layered: self.layered.map_session_store_factory(decorate),
         }
     }
 

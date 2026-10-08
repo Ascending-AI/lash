@@ -1,8 +1,9 @@
 use crate::support::{
     Arc, EmbedError, LashCore, PluginFactory, ProcessRegistry, Result, StaticPluginFactory,
-    ToolProvider, async_trait,
+    ToolProvider, TurnActivity, TurnActivitySink, TurnInput, async_trait,
 };
 use lash_core::facade_support::ProviderHandle;
+use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -101,6 +102,115 @@ fn last_user_text(request: &LlmRequest) -> String {
         .unwrap_or_default()
 }
 
+/// Test convenience over [`SessionConfigAdmin`](crate::admin::SessionConfigAdmin):
+/// apply a config transaction against the session's current config revision,
+/// under a fresh id, and require it to apply.
+pub(crate) trait ConfigureExt {
+    async fn configure(&self, transaction: crate::config::ConfigTransaction) -> Result<()>;
+}
+
+impl ConfigureExt for crate::admin::SessionConfigAdmin {
+    async fn configure(&self, transaction: crate::config::ConfigTransaction) -> Result<()> {
+        let revision = self.revision().await?;
+        let write = crate::config::ConfigWrite::new(
+            format!("test-config:{}", uuid::Uuid::new_v4()),
+            revision,
+        );
+        match self.apply(write, transaction).await? {
+            crate::config::ConfigTransactionOutcome::Applied { .. } => Ok(()),
+            outcome => Err(EmbedError::Session(crate::support::SessionError::Protocol(
+                format!("the config transaction did not apply: {outcome:?}"),
+            ))),
+        }
+    }
+}
+
+/// A turn-activity sink that keeps everything it was handed, in order.
+#[derive(Default)]
+struct RecordingEvents {
+    events: tokio::sync::Mutex<Vec<TurnActivity>>,
+}
+
+impl RecordingEvents {
+    async fn snapshot(&self) -> Vec<TurnActivity> {
+        self.events.lock().await.clone()
+    }
+}
+
+#[async_trait]
+impl TurnActivitySink for RecordingEvents {
+    async fn emit(&self, activity: TurnActivity) {
+        self.events.lock().await.push(activity);
+    }
+}
+
+/// `source` as one TypeScript cell of an RLM answer.
+#[cfg(feature = "rlm")]
+fn typescript_block(source: &str) -> String {
+    format!("<typescript>\n{}\n</typescript>", source.trim())
+}
+
+/// An RLM core builder over `backend`, with the default test factory.
+#[cfg(feature = "rlm")]
+fn rlm_core_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
+    let factory = rlm_factory(&backend);
+    LashCore::rlm_builder(backend, factory)
+}
+
+/// The session's committed head as a read view: its turns run on its
+/// session actor, so a host's open holds only the snapshot it opened with.
+async fn committed(session: &crate::LashSession) -> lash_core::SessionReadView {
+    session
+        .durable()
+        .read()
+        .await
+        .expect("read the committed head")
+        .expect("the session has a head")
+}
+
+/// `definition` bound under `tools.<name>`.
+fn test_tool_definition_with_tool_binding(
+    definition: lash_core::ToolDefinition,
+    name: impl Into<String>,
+) -> lash_core::ToolDefinition {
+    lash_core::ToolDefinitionBindingExt::with_tool_binding(
+        definition,
+        lash_core::ToolBinding::new(["tools"], name),
+    )
+}
+
+/// A provider that answers each request with the next of `texts`.
+fn queued_text_provider(texts: Vec<impl Into<String>>) -> ProviderHandle {
+    let responses = Arc::new(tokio::sync::Mutex::new(
+        texts
+            .into_iter()
+            .map(|text| text_response(&text.into()))
+            .collect::<std::collections::VecDeque<_>>(),
+    ));
+    crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete(move |_request| {
+            let responses = Arc::clone(&responses);
+            async move { Ok(responses.lock().await.pop_front().expect("queued response")) }
+        })
+        .build()
+        .into_handle()
+}
+
+/// Delete `session_id` through the core's administration and await its
+/// tombstone: the session actor closes itself (ADR 0132 §12).
+async fn delete_session_and_await(core: &LashCore, session_id: &str) -> Result<()> {
+    let administration = core.session_administration().await;
+    LashCore::delete_session(administration.delete_context(session_id)?).await?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        core.await_session_deletion(&SessionId::fixture(session_id.to_owned())),
+    )
+    .await
+    .expect("the session's deletion completes")?;
+    Ok(())
+}
+
 /// A standard core over `backend`.
 pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(backend))
@@ -146,14 +256,19 @@ fn untimed_fixture_workers() -> crate::rlm::WorkerService {
 }
 
 mod core_session_builder;
+mod crashed_create_drain;
 mod deployment_and_testing_facade;
+mod direct_completion;
 mod facade_construction;
 mod facade_turn;
+mod generation_policy;
 pub(crate) mod harness;
 mod node_drain;
+mod output_retention;
 pub(crate) use harness::{
-    DecoratedBackend, explicit_ephemeral_facets, mock_llm_profile_spec, mock_session_spec,
-    recorded_llm_profile, sqlite_memory_store_backend, sqlite_memory_store_set,
+    DecoratedBackend, explicit_ephemeral_facets, explicit_ephemeral_facets_with_budget,
+    llm_profile_spec, mock_llm_profile_spec, mock_session_spec, postgres_store_set,
+    recorded_llm_profile, session_spec_for, sqlite_memory_store_backend, sqlite_memory_store_set,
     store_backend_with_clock,
 };
 #[cfg(feature = "rlm")]
@@ -161,9 +276,17 @@ mod aggregate_oracle;
 mod plugin_build_refusal;
 mod plugin_reopen;
 mod provider_attempts;
+mod replay_origin;
+mod report_state;
 mod response_phase_replay;
+mod run_effects;
+mod send_handle;
 mod session_control;
+mod session_create;
+mod standard_compaction_persistence;
 mod standard_protocol_turns;
+mod stream_evidence;
 mod tool_intent_ingress;
 mod turn_checkpoints;
 mod turn_streaming;
+mod writer_fence;

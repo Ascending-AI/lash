@@ -52,8 +52,9 @@ impl SessionHead {
     ///
     /// # Errors
     ///
-    /// [`TurnError::Exec`] when the session is not in the store or has no
-    /// head; the store's refusal.
+    /// [`TurnError::Exec`] when the session is not in the store; the
+    /// terminal `SessionCreationUnrecorded` [`TurnError::Runtime`] when it
+    /// has no head; the store's refusal.
     pub async fn load(backend: &Backend, session: &SessionId) -> Result<Self, TurnError> {
         let store = session_store(backend, session).await?;
         let state = load_state(&store, session, WindowSelector::Current).await?;
@@ -289,10 +290,23 @@ pub(crate) async fn load_state(
     session: &SessionId,
     selector: WindowSelector,
 ) -> Result<RuntimeSessionState, TurnError> {
+    let current = matches!(selector, WindowSelector::Current);
     let loaded = crate::store::load_session_window_state(store, selector)
         .await
         .map_err(|error| TurnError::Exec(error.to_string()))?
-        .ok_or_else(|| TurnError::Exec(format!("session {session} has no head")))?;
+        .ok_or_else(|| {
+            // A catalog row no create committed a head for recorded no
+            // config: its turn is refused for good, never run on defaults
+            // (FIG-4553).
+            if current {
+                TurnError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::SessionCreationUnrecorded,
+                    format!("session {session} has no head: its creation recorded no config"),
+                ))
+            } else {
+                TurnError::Exec(format!("session {session} has no head"))
+            }
+        })?;
     if loaded.state.session_id != *session {
         return Err(TurnError::Exec(format!(
             "session {session}'s store holds session {}",

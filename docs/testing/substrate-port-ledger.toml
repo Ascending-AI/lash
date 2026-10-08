@@ -1,24 +1,16 @@
 # The substrate port ledger (ADR 0132 §14, FIG-5179).
 #
 # BEGIN SUMMARY (scripts/check-substrate-port-ledger.py --write-summary)
-# 1687 rows over 873 files, 4049 laws.
-# By class: mechanical 198, semantic 130, delete 888, replace 471.
-# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 92, L9c 354, L9d 100, L9e 138, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
-# By status: todo 186, ported 151, deleted 1350.
+# 1726 rows over 873 files, 4088 laws.
+# By class: mechanical 213, semantic 154, delete 888, replace 471.
+# By lane: L1b 12, L3 19, L3s 57, L4 26, L5 2, L6b 16, L7 25, L7b 22, L7p 8, L9b 97, L9c 364, L9d 122, L9e 140, L9f 125, L9g 98, L9h 123, L11 90, L8 26, L10a 184, L10b 40, L10g 15, L3t 11, L9t 30, I0 49, P4 23, P5 2.
+# By status: todo 146, ported 175, deleted 1405.
 #
 # New laws owed (replace rows), by owning lane:
 # - L8: runbooks/process-operations/runbook.md
 #   an operator can inspect and act on the process-operations surface on a multi-node PostgreSQL and S3 deployment, and every outcome stays truthful in durable state across a node kill (judged runbook)
 # - L8: runbooks/session-operator/runbook.md
 #   session operator verbs (withdraw an input, cancel a running run, redrive, cancel or fork parked work, repeat a lost reply) act once on live PostgreSQL and refuse stale repeats with unchanged receipts
-# - L9c: crates/lash-restate-test/tests/one_driver.rs
-#   a host's send leaves the engine the only driver, an empty commit finishes the work without another admission, and inputs on both sides of it each run once
-# - L9c: crates/lash-restate-test/tests/run_close.rs
-#   the next run is admitted while the previous run's close is owed, and a close crashed after the next admission converges once
-# - L9c: crates/lash-restate-test/tests/session_send.rs
-#   session sends: an idle send is admitted at once, busy sends answer in arrival order, at most one drive is queued, dropping a handle stops nothing
-# - L9c: crates/lash-restate-test/tests/session_shifts.rs
-#   a session actor runs every open item once, in arrival order and one at a time; a repeated request id is one drive; a crash at any commit label consumes each item once
 # - L9c: crates/lash-restate/src/tests/otel_laws.rs::golden_tree_survives_replay_and_redrive
 #   a turn's span tree is the golden tree after a kill and resume on another node
 # - L9c: crates/lash-restate/src/tests/run_coordinator_on_the_double.rs
@@ -549,8 +541,8 @@ laws = [
   "an_oversized_failure_is_retained_and_replays_verbatim_under_a_changed_policy",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+status = "ported"
+note = "FIG-5312: the retention half is ported to crates/lash-core-execution/tests/store_backed/kernel/session/output_retention.rs::an_oversized_failure_is_retained_behind_a_bounded_witness; the verbatim replay under a changed policy was the journal's replay (5ad9641f9e; nothing replays, ADR 0132 §2)"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/session/tool_execution/presentation_redrive.rs"
@@ -697,8 +689,9 @@ lane = "L9b"
 laws = [
   "a_host_read_after_a_dropped_attempt_sees_no_residue",
 ]
-disposition = "port"
-status = "todo"
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay"
+status = "deleted"
+note = "a_host_read_after_a_dropped_attempt_sees_no_residue: the resident runtime an engine attempt shared with host reads is gone (bbffe67d98, 0cc1b81d98); turns run on the session actor, hosts read the store, and a cut attempt leaves no residue at any label"
 
 [[row]]
 path = "crates/lash-core/src/testing/mod.rs"
@@ -711,8 +704,8 @@ laws = [
   "(no test functions) defines: sqlite_memory_backend, sqlite_recording_backend, kernel_double, sqlite_memory_store_set, sqlite_memory_store_backend, unbound_recording_store, unbound_recording_store_on, invalidate_resident_session_state_for_testing, response_synthesized_from_aborted_stream",
 ]
 disposition = "port"
-status = "todo"
-note = "kernel_double: the kernel's test backend; every lash-core kernel test reaches the double through it"
+status = "ported"
+note = "kernel_double went with the double (5ad9641f9e); the module now serves SQLite memory and recording store backends only"
 
 [[row]]
 path = "crates/lash-core/tests/panic_containment.rs"
@@ -1211,7 +1204,20 @@ laws = [
   "nested_direct_completion_exports_under_its_run_scope",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5312: direct_llm_completion_crosses_controller_and_records_usage_and_trace is re-written as crates/lash/src/tests/direct_completion.rs::a_tools_direct_completion_runs_in_its_call_and_records_usage_and_trace (a tool's direct completion runs inside its call on the actor's turn, answers its usage and call record, and is traced with its usage); the RecordingEffectController count and request-id replay were the effect seam and the journal (5ad9641f9e)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/effect_direct_llm.rs"
+test = "nested_direct_completion_exports_under_its_run_scope"
+area = "direct-llm"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = ["nested_direct_completion_exports_under_its_run_scope"]
+disposition = "covered-by:crates/lash-trace/src/otel/tests.rs::explicit_run_ignores_ambient_context"
+status = "deleted"
+note = "its invocation id was the double's handler attempt (5ad9641f9e); the span-under-the-admitted-anchor half is the cover"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/effect_response_hook.rs"
@@ -1370,8 +1376,8 @@ laws = [
   "protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_failure",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "FIG-5312 ported the file to crates/lash/src/tests/replay_origin.rs on facade turns over SQLite memory; the foreign replay is seeded by an admin append. 2 pass; #[ignore] FIG-5334 (a failed or cancelled call leaves no typed error or llm_calls record on the report): caller_shaped_failure_preserves_drop_sideband_and_original_error, caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop, confirm2_protocol_abort_conflict_retains_a_racing_provider_failure, caller_shaped_cancellation_preserves_drop_sideband_without_provider_trace"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
@@ -1394,8 +1400,123 @@ laws = [
   "publication_failure_preserves_committed_turn_and_exposes_gap",
 ]
 disposition = "port"
-status = "todo"
-note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+status = "ported"
+note = "FIG-5312: publication_failure_preserves_committed_turn_and_exposes_gap is ported to crates/lash/src/tests/turn_streaming/publication_gap.rs on SQLite memory; the scenario runner drove the double's turn loop, and its queue classes, admission boundaries and session lease went with run admission (0cc1b81d98, FIG-5196) and the turn loop (bbffe67d98, FIG-5208); each other case's cover is on its own row"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint"]
+disposition = "covered-by:crates/lash-conformance/src/conformance/runtime_persistence/attachments_and_queue.rs::pending_session_work_ordering_agrees_across_ingress_families"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_command_only_queue_drain_completes_without_turn_work"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_command_only_queue_drain_completes_without_turn_work"]
+disposition = "covered-by:crates/lash/src/tests/crashed_create_drain.rs::an_append_drained_after_a_crashed_create_is_committed_once"
+status = "deleted"
+note = "a command drains and commits with no turn"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_queued_work_admission_keeps_pending_next_turn_input"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_queued_work_admission_keeps_pending_next_turn_input"]
+disposition = "covered-by:crates/lash-conformance/src/conformance/runtime_persistence/attachments_and_queue.rs::pending_session_work_ordering_agrees_across_ingress_families"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_admits_process_wake_at_active_checkpoint_boundary"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_admits_process_wake_at_active_checkpoint_boundary"]
+disposition = "covered-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_filed_during_a_round_is_delivered_at_the_next_work_checkpoint"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_admits_queued_turn_input_and_completes_it"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_admits_queued_turn_input_and_completes_it"]
+disposition = "covered-by:crates/lash-durable-test/tests/session_send.rs::a_coalescing_drain_admits_the_queued_inputs_as_one_run"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_observation_replay_keeps_original_turn_input"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_observation_replay_keeps_original_turn_input"]
+disposition = "covered-by:crates/lash-conformance/src/conformance/runtime_persistence/turn_inputs_and_reopen.rs::pending_turn_input_duplicate_input_id"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_defers_checkpoint_turn_input_and_respects_cancel"]
+disposition = "covered-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_steer_at_the_terminal_checkpoint_is_withheld_and_runs_next"
+status = "deleted"
+note = "the cancel half: crates/lash-durable-test/tests/turn_phases.rs::a_cancelled_queued_input_is_withdrawn_and_never_runs"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_commits_after_advisory_session_lease_release"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_commits_after_advisory_session_lease_release"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "no advisory session lease remains (0cc1b81d98, FIG-5196): the actor's claim and epoch fence writers"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_waits_for_stale_session_lease_ttl"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_waits_for_stale_session_lease_ttl"]
+disposition = "covered-by:planned:F1"
+status = "deleted"
+note = "a stale claimant's commit is refused at every label"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/cases.rs"
+test = "runtime_scenario_opted_in_provider_drains_every_v1_tool_intent"
+area = "runtime-scenarios"
+needs = ["turn", "process"]
+class = "mechanical"
+lane = "L9d"
+laws = ["runtime_scenario_opted_in_provider_drains_every_v1_tool_intent"]
+disposition = "covered-by:crates/lash-durable-test/tests/core_node_processes.rs::public_signal_intent_wakes_parked_process"
+status = "deleted"
+note = "a durable turn's tool-call intent realizes; start, emit and cancel realization: crates/lash/src/tests/tool_intent_ingress.rs::ingress_start_intent_crosses_the_engine_admission_gate and ::identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/runtime_scenarios/support.rs"
@@ -1408,8 +1529,8 @@ laws = [
   "(no test functions) defines: new, session_id, host_behavior, phase, run, enqueue, enqueue_turn_input, cancel_turn_input_before_commit, expect_enqueued_classes, turn_index",
 ]
 disposition = "port"
-status = "todo"
-note = "the scenario runner (run, phase, session_id, host_behavior) went with the double; it is rewritten with the cases of runtime_scenarios/cases.rs; owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+status = "ported"
+note = "the scenario model still serves fault_matrix.rs; the runner (run, phase over the double) went with 5ad9641f9e and its cases' covers are on the cases.rs rows"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/session_freshness.rs"
@@ -1523,7 +1644,8 @@ laws = [
   "unstreamed_response_publishes_block_lifecycle_per_text_part",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5312 ported the file to crates/lash/src/tests/stream_evidence.rs on facade turns over SQLite memory (the runtime turn loop it drove went with bbffe67d98, FIG-5208); 7 pass. attempt_reset_clears_response_establishment_before_later_evidence is #[ignore] FIG-5334 (a stopped turn's report carries no typed failure)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/tool_restore_report.rs"
@@ -1784,8 +1906,9 @@ lane = "L9b"
 laws = [
   "active_input_settles_once_under_the_in_flight_turn_in_the_trace",
 ]
-disposition = "port"
-status = "todo"
+disposition = "covered-by:crates/lash-durable-test/tests/committed_turns.rs::a_steered_turns_rows_include_every_user_row"
+status = "deleted"
+note = "a steering input reaches the in-flight turn and commits once with it; the ingress.settled trace record the law read has had no producer since 0cc1b81d98 (FIG-5196)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/cancel_watch.rs"
@@ -1869,8 +1992,66 @@ laws = [
   "no_queued_work_submit_defers_without_refreshing_resident_state",
 ]
 disposition = "port"
-status = "todo"
-note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+status = "ported"
+note = "FIG-5312 ported the generation and effort laws to crates/lash/src/tests/generation_policy.rs (6 pass; an unsupported effort is now refused typed at session creation, ReasoningRefused/UnsupportedEffort, before any provider call) and session_manager_rejects_duplicate_child_session_ids to crates/lash/src/tests/session_create.rs::a_second_create_of_a_session_id_is_refused_already_exists; the runtime's in-process turn loop and drain entry went with bbffe67d98 (FIG-5208) and 0cc1b81d98 (FIG-5196)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
+test = "session_manager_persists_child_sessions_in_separate_store"
+area = "session-shift"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["session_manager_persists_child_sessions_in_separate_store"]
+disposition = "covered-by:crates/lash-durable-test/tests/core_node_processes.rs::a_linked_child_behaves_like_an_unlinked_session_and_outlives_its_parent"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
+test = "durable_process_wake_drains_as_committed_event_history_and_acknowledges"
+area = "session-shift"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["durable_process_wake_drains_as_committed_event_history_and_acknowledges"]
+disposition = "covered-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
+test = "a_fresh_storeless_runtime_materializes_its_first_turn"
+area = "session-shift"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["a_fresh_storeless_runtime_materializes_its_first_turn"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "a turn runs only on its session actor over the store; no storeless runtime runs a turn (bbffe67d98, FIG-5208)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
+test = "an_automatic_drain_without_a_durable_queue_says_so"
+area = "session-shift"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["an_automatic_drain_without_a_durable_queue_says_so"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "execute_next_queued_run and EmptyQueuedDrainReason::NoDurableQueue were deleted (0cc1b81d98, FIG-5196)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
+test = "no_queued_work_submit_defers_without_refreshing_resident_state"
+area = "session-shift"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["no_queued_work_submit_defers_without_refreshing_resident_state"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "NoSessionWork was deleted (0cc1b81d98, FIG-5196); a submitted command is a mail row committed with its wake (session_mail::a_producer_commits_its_row_and_its_wake_together)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/drain_and_recovery.rs"
@@ -1930,8 +2111,88 @@ laws = [
   "pending_process_wake_drains_into_idle_queued_turn_as_turn_event",
 ]
 disposition = "port"
-status = "todo"
-note = "owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+status = "ported"
+note = "FIG-5312 ported admitted_plugin_abort_commits_and_settles_input and stream_turn_tool_put_is_bound_to_the_turn_id to crates/lash/src/tests/run_effects.rs on facade turns over SQLite memory; the second is #[ignore] FIG-5357 (a durable turn's tool put is staged on an expiring upload, not held by the turn's execution; its session edge holds since 8786bf572d). The runtime queue and shift entry points went with 0cc1b81d98 and bbffe67d98"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
+test = "fig1123_queued_frame_switch_finishes_follow_on_before_next_queued_turn"
+area = "turn-queue"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["fig1123_queued_frame_switch_finishes_follow_on_before_next_queued_turn"]
+disposition = "covered-by:crates/lash/src/tests/facade_turn.rs::a_frame_switch_through_send_completes_and_its_follow_on_runs_next"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
+test = "mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_handoff"
+area = "turn-queue"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["mid_chain_cancellation_commits_one_cancelled_terminal_and_settles_handoff"]
+disposition = "covered-by:crates/lash/src/tests/send_handle.rs::a_cancel_reaches_a_run_past_its_frame_switch"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
+test = "later_session_command_drains_before_earlier_queued_turn"
+area = "turn-queue"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["later_session_command_drains_before_earlier_queued_turn"]
+disposition = "covered-by:crates/lash-conformance/src/conformance/runtime_persistence/attachments_and_queue.rs::pending_session_work_ordering_agrees_across_ingress_families"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
+test = "pending_process_wake_drains_into_idle_queued_turn_as_turn_event"
+area = "turn-queue"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["pending_process_wake_drains_into_idle_queued_turn_as_turn_event"]
+disposition = "covered-by:crates/lash-durable-test/tests/steering_crash_laws.rs::a_process_wake_after_the_last_work_checkpoint_runs_next"
+status = "deleted"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
+test = "admitted_shift_reuses_graph_across_follow_on_and_rechecks_next_shift"
+area = "turn-queue"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["admitted_shift_reuses_graph_across_follow_on_and_rechecks_next_shift"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the session shift (0cc1b81d98, FIG-5196)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
+test = "frame_switch_limit_capture_abort_abandons_prompt_admission_before_returning_diagnostic"
+area = "turn-queue"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["frame_switch_limit_capture_abort_abandons_prompt_admission_before_returning_diagnostic"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "a run no longer chains frame switches: a switch answers its send and the follow-on is its own run (FIG-5232); MAX_AGENT_FRAME_SWITCHES was deleted in bbffe67d98 (FIG-5208)"
+
+[[row]]
+path = "crates/lash-core/tests/runtime/tests/turns/effects_and_queue.rs"
+test = "idle_ordering_read_is_independent_of_pending_command_depth"
+area = "turn-queue"
+needs = ["turn", "process"]
+class = "semantic"
+lane = "L9d"
+laws = ["idle_ordering_read_is_independent_of_pending_command_depth"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the engine admission's selection read (0cc1b81d98, FIG-5196)"
 
 [[row]]
 path = "crates/lash-core/tests/runtime/tests/turns/frame_residency.rs"
@@ -2215,8 +2476,9 @@ lane = "L9b"
 laws = [
   "(no test functions) defines: activate",
 ]
-disposition = "port"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
+note = "activate opened a capability Run through the double's handler: the Restate server double and its handlers went with 5ad9641f9e (FIG-5190)"
 
 [[row]]
 path = "crates/lash-lashlang-runtime/src/deferred_triggers.rs"
@@ -2394,8 +2656,9 @@ lane = "L9h"
 laws = [
   "(no test functions) defines: measure",
 ]
-disposition = "port"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
+note = "measure counted the double's journal entries and server commands per tool batch: the double and its journal went with 5ad9641f9e (FIG-5190); crates/lash-perf/src/bin/durable_substrate.rs measures the durable substrate"
 
 [[row]]
 path = "crates/lash-perf/src/runtime_perf/harness.rs"
@@ -2465,8 +2728,9 @@ laws = [
   "smoke_turn_2_9_child_start_registers_under_its_128_kib_prompt",
   "smoke_turn_1_10_child_start_registers_under_its_2_kib_prompt",
 ]
-disposition = "port"
-status = "todo"
+disposition = "covered-by:crates/lash-core-execution/src/tool_dispatch/intent_executor.rs::a_128_kib_environment_keeps_durable_start_rows_under_the_intent_budget"
+status = "deleted"
+note = "both smoke laws replayed a workload turn on the double (5ad9641f9e); the bug they pinned (a 128 KiB prompt riding a declared start's environment past the intent batch budget) is pinned at the intent: its batch, row, command and process record stay under the budget. The 2 KiB control needs no law of its own"
 
 [[row]]
 path = "crates/lash-postgres-store/tests/conformance.rs"
@@ -3637,8 +3901,8 @@ laws = [
   "ended_referrer_retention_settles_on_postgres",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5174-coord (L4, FIG-5174) with fig-5172-prod: tool_effect, start_run_* and record_run_record are todo!, and the durable phase runner refuses a turn's tool round"
+status = "ported"
+note = "FIG-5312 re-wrote the laws over the store tiers (retention_laws! generates sqlite_memory, sqlite_file and postgres modules; postgres #[ignore] for the PostgreSQL gate): the double's handler went with 5ad9641f9e, the engine's redrive of a retryable derivation is the actor's next pass, and the journal stamp went with the journal"
 
 [[row]]
 path = "crates/lash-protocol-standard/src/retention_failure_tests.rs"
@@ -4639,10 +4903,10 @@ laws = [
   "a_run_admission_records_its_head_verdict_without_another_step",
   "inputs_on_both_sides_of_an_empty_commit_keep_their_shift",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/send_handle/arrival.rs::sends_run_once_each_in_arrival_order_one_at_a_time"
+status = "deleted"
 owed = "a host's send leaves the engine the only driver, an empty commit finishes the work without another admission, and inputs on both sides of it each run once"
-note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5312: the session actor is the only driver, and inputs on both sides of its idle pass each run once; the empty commit and the run admission's head verdict step went with the shift (0cc1b81d98, FIG-5196)"
 
 [[row]]
 path = "crates/lash-restate-test/tests/process_crash_replay.rs"
@@ -4711,10 +4975,10 @@ laws = [
   "the_next_run_is_admitted_while_the_previous_close_is_owed",
   "a_close_crashed_after_the_next_run_was_admitted_converges_once",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
 owed = "the next run is admitted while the previous run's close is owed, and a close crashed after the next admission converges once"
-note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "no run close is owed: a turn's end closes its scope inside its commit (0f733bcdc9, FIG-5176; ADR 0132 §12), so no next admission waits on or races one; the file went with the double (5ad9641f9e)"
 
 [[row]]
 path = "crates/lash-restate-test/tests/run_wake.rs"
@@ -4791,10 +5055,10 @@ laws = [
   "a_session_with_live_engine_work_is_not_re_asked",
   "a_second_core_over_one_engine_reports_its_ignored_driver",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/send_handle/arrival.rs::sends_run_once_each_in_arrival_order_one_at_a_time"
+status = "deleted"
 owed = "session sends: an idle send is admitted at once, busy sends answer in arrival order, at most one drive is queued, dropping a handle stops nothing"
-note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5312: the session actor runs an idle send at once and busy sends once each, in arrival order, one at a time; dropping_a_send_handle_stops_nothing is the dropped-handle law, a child turn being its own session's mail (bbffe67d98). The shift's queueing, its hold, its reconcile and the engine driver went with the shift (0cc1b81d98, FIG-5196); a row and its wake commit together (session_mail::a_producer_commits_its_row_and_its_wake_together)"
 
 [[row]]
 path = "crates/lash-restate-test/tests/session_send.rs"
@@ -4859,10 +5123,10 @@ laws = [
   "a_retryable_refusal_of_a_run_execution_redelivers_instead_of_releasing",
   "a_shift_crashed_at_any_journal_point_of_either_handler_consumes_each_item_once",
 ]
-disposition = "owed"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/send_handle/arrival.rs::sends_run_once_each_in_arrival_order_one_at_a_time"
+status = "deleted"
 owed = "a session actor runs every open item once, in arrival order and one at a time; a repeated request id is one drive; a crash at any commit label consumes each item once"
-note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+note = "FIG-5312: every open item runs once, in arrival order, one at a time, and a repeated id is one input; a crash at any commit label consumes each item once: turn_phases::a_turn_of_two_model_calls_resumes_at_every_label_without_replay and session_mail::two_claimers_racing_admission_admit_one_run. The shift's invocation chain, retry budgets, seals, handoffs and install order went with the shift (0cc1b81d98, FIG-5196)"
 
 [[row]]
 path = "crates/lash-restate-test/tests/session_shifts.rs"
@@ -9331,8 +9595,8 @@ laws = [
   "crashed_create_drain_laws! generates: sqlite_memory, sqlite_file, postgres",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn; blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+status = "ported"
+note = "FIG-5312 ported in place (sqlite_memory, sqlite_file; postgres #[ignore] for the PostgreSQL gate): the drain is the facade admin append the session actor applies, and a restart is a new core over the same stores. It found a bug, fixed: a send to a catalog row with no head never answered (now the typed SessionCreationUnrecorded refusal)"
 
 [[row]]
 path = "crates/lash/src/tests/deleted_session_run_replay.rs"
@@ -9449,8 +9713,8 @@ laws = [
   "(no test functions) defines: llm_profile_spec, mock_llm_profile_spec, mock_session_spec, session_spec_for, test_catalog, recorded_llm_profile, double_backend, double_backend_explicit_reconcile, double_backend_over, double_backend_over_explicit_reconcile",
 ]
 disposition = "port"
-status = "todo"
-note = "the double-backed helpers went with the double; the served durable facade backend the facade laws need is written with the first of them that can run: owed to L9d: written while L3s's shift_effect and schedule_shift were todo!, which L3s (FIG-5196, 0cc1b81d98) filled after this pass; the turn path this row needs is re-ported against the landed session mail"
+status = "ported"
+note = "the double-backed helpers went with the double (5ad9641f9e); the harness serves SQLite memory, file and PostgreSQL store backends that facade laws build a standard core over (the core's own node, ADR 0132)"
 
 [[row]]
 path = "crates/lash/src/tests/isolated_tool_route.rs"
@@ -9555,8 +9819,8 @@ laws = [
   "step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sqlite",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "FIG-5312 ported in place on SQLite memory; the _on_postgres legs are #[ignore] for the PostgreSQL gate; step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sqlite is #[ignore] FIG-5318 (a durable turn's commit roots no attachment its history references)"
 
 [[row]]
 path = "crates/lash/src/tests/plugin_generation.rs"
@@ -9896,9 +10160,9 @@ lane = "L9b"
 laws = [
   "(no test functions) defines: host_scope, runtime_operation_scope, delete_bound_session, delete_bound_session_outcome, in_delete_handler, delete_session_on, text_message",
 ]
-disposition = "port"
-status = "todo"
-note = "scope helpers over an open handler"
+disposition = "subject-deleted"
+status = "deleted"
+note = "its scope helpers opened the double's handlers: the Restate server double and its handlers went with 5ad9641f9e (FIG-5190)"
 
 [[row]]
 path = "crates/lash/src/tests/send_handle.rs"
@@ -9937,7 +10201,56 @@ laws = [
   "send_handle_laws! generates: restate",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5312 ported the file onto the core's own node over SQLite memory (send_handle_laws! now generates sqlite_memory in place of restate): a_shift_never_runs_on_a_session_opened_to_observe now pins that a run never executes on an observer's runtime and the actor's head moves; a_cancel_reaches_a_run_past_its_frame_switch cancels the follow-on run, which is its own run (frame_task_run, FIG-5232); exact_host_run_laws!' settlement leg runs for every host id form. New laws: crates/lash/src/tests/send_handle/arrival.rs"
+
+[[row]]
+path = "crates/lash/src/tests/send_handle.rs"
+test = "a_dropped_session_leaves_nothing_with_its_core"
+area = "send-handle"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = ["a_dropped_session_leaves_nothing_with_its_core"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the core's open-session registry (residents) went with the double (5ad9641f9e): turns run on the session actor, so no opened session holds anything with its core"
+
+[[row]]
+path = "crates/lash/src/tests/send_handle.rs"
+test = "a_send_answers_before_its_runs_scope_closes"
+area = "send-handle"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = ["a_send_answers_before_its_runs_scope_closes"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "no ScopeClose obligation remains after a send answers: a turn's scope closes inside its commit (0f733bcdc9, FIG-5176; ADR 0132 §12)"
+
+[[row]]
+path = "crates/lash/src/tests/send_handle.rs"
+test = "frame_switch"
+area = "send-handle"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = ["frame_switch"]
+disposition = "covered-by:crates/lash/src/tests/facade_turn.rs::a_frame_switch_through_send_completes_and_its_follow_on_runs_next"
+status = "deleted"
+note = "exact_host_run_laws!' frame_switch leg (exact_host_run_frame_switch): a follow-on no longer runs under the switching run's id with a physical-turn suffix; a frame switch answers its send and the follow-on is its own run (FIG-5232)"
+
+[[row]]
+path = "crates/lash/src/tests/send_handle.rs"
+test = "cancellation"
+area = "send-handle"
+needs = ["turn"]
+class = "mechanical"
+lane = "L9b"
+laws = ["cancellation"]
+disposition = "covered-by:crates/lash/src/tests/send_handle.rs::a_cancel_reaches_a_run_past_its_frame_switch"
+status = "deleted"
+note = "exact_host_run_laws!' cancellation leg: the suffixed follow-on id it cancelled is gone (FIG-5232); a cancel reaches the follow-on run by its own id"
 
 [[row]]
 path = "crates/lash/src/tests/send_handle.rs"
@@ -9969,7 +10282,8 @@ laws = [
   "a_held_turn_pinned_both_ways_forks_after_collection_on_postgres",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5312 ported in place on SQLite memory over the core's own node; the _on_postgres leg is #[ignore] for the PostgreSQL gate. Published reads its source through the fork rule and compares component bodies"
 
 [[row]]
 path = "crates/lash/src/tests/send_handle/pins.rs"
@@ -10012,9 +10326,56 @@ laws = [
   "a_shift_on_a_deleted_session_answers_its_retirement",
   "session_shift_laws! generates: restate",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: L3s (FIG-5196): a facade send reaches schedule_shift's todo! (lash-core-execution runtime/work/durable.rs), and drain_session_mail is a todo!"
+disposition = "subject-deleted"
+status = "deleted"
+note = "the session shift was deleted with run admission (0cc1b81d98, FIG-5196) and the file with the double (5ad9641f9e); each law's durable cover is on its own row"
+
+[[row]]
+path = "crates/lash/src/tests/session_shift.rs"
+test = "a_run_retried_on_a_held_runtime_starts_from_the_durable_session"
+area = "session-shift"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["a_run_retried_on_a_held_runtime_starts_from_the_durable_session"]
+disposition = "covered-by:crates/lash-durable-test/tests/turn_phases.rs::a_turn_of_two_model_calls_resumes_at_every_label_without_replay"
+status = "deleted"
+note = "a turn cut at every commit label resumes from the durable session and applies each input once; no held runtime remains to retry on"
+
+[[row]]
+path = "crates/lash/src/tests/session_shift.rs"
+test = "a_lost_shift_schedule_is_healed_by_the_reconcile_tick"
+area = "session-shift"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["a_lost_shift_schedule_is_healed_by_the_reconcile_tick"]
+disposition = "covered-by:crates/lash-conformance/src/conformance/session_mail.rs::a_producer_commits_its_row_and_its_wake_together"
+status = "deleted"
+note = "a row and its wake commit in one transaction, so no work exists whose schedule was lost; the reconcile tick is gone"
+
+[[row]]
+path = "crates/lash/src/tests/session_shift.rs"
+test = "a_booted_core_executes_lost_work_on_its_first_reconcile_tick"
+area = "session-shift"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["a_booted_core_executes_lost_work_on_its_first_reconcile_tick"]
+disposition = "covered-by:crates/lash-durable-test/tests/vertical_crash_proof.rs::a_cold_restart_restores_from_state_and_reruns_no_code_on_sqlite_memory"
+status = "deleted"
+note = "a fresh node runs the woken actor's open work"
+
+[[row]]
+path = "crates/lash/src/tests/session_shift.rs"
+test = "a_shift_on_a_deleted_session_answers_its_retirement"
+area = "session-shift"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["a_shift_on_a_deleted_session_answers_its_retirement"]
+disposition = "covered-by:crates/lash-conformance/src/conformance/session_mail.rs::a_producer_wakes_no_absent_or_deleted_session"
+status = "deleted"
 
 [[row]]
 path = "crates/lash/src/tests/session_shift.rs"
@@ -10081,8 +10442,80 @@ laws = [
   "prompt_view_removals_preserve_history_across_cold_replay",
 ]
 disposition = "port"
-status = "todo"
-note = "compaction's base and prompt are turn.prepare writes of turn_effect: blocked: fig-5172-prod (L3, FIG-5172): turn_effect (assistant-response, sync and plugin-checkpoint hooks) is a todo!, and the phase runner delivers no plugin checkpoint; blocked: fig-5172-prod (L3, FIG-5172): a facade session's create and open reach turn_control_binding's todo! (lash-core-execution runtime/actor/turn.rs), and no production TurnServices runs a facade turn"
+status = "ported"
+note = "FIG-5312 ported in place on SQLite memory, reading the committed head; the threshold follow-on is attached by frame_task_run (FIG-5232). #[ignore] FIG-5327 (a durable commit records no last_prompt_usage, so pressure never fires and overflow recovery opens no frame): pressure_compaction_opens_a_summary_frame_the_turn_continues_in, standard_compaction_threshold_turn_commits_from_durable_leaf_and_unblocks_compaction, overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in, overflow_recovery_starts_a_frame_without_a_reload"
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "before_turn_plugin_messages_remain_durable_across_threshold_turns"
+area = "compaction"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["before_turn_plugin_messages_remain_durable_across_threshold_turns"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "plugin message injection (TurnContributions messages) was deleted (5a7f31f0d0, FIG-5258)"
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "after_turn_enqueue_resident_next_turn_commits_from_durable_leaf"
+area = "compaction"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["after_turn_enqueue_resident_next_turn_commits_from_durable_leaf"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "after-turn message injection was deleted (5a7f31f0d0, FIG-5258)"
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "after_turn_enqueue_persists_the_reply_exactly_once"
+area = "compaction"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["after_turn_enqueue_persists_the_reply_exactly_once"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "after-turn message injection was deleted (5a7f31f0d0, FIG-5258); an after-turn callback's records commit once with its turn: crates/lash-durable-test/tests/after_turn_crash_laws.rs::an_after_turn_callbacks_effects_apply_once_however_its_turn_is_cut"
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "prompt_view_additions_reach_only_the_model_across_cold_replay"
+area = "compaction"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["prompt_view_additions_reach_only_the_model_across_cold_replay"]
+disposition = "covered-by:crates/lash/tests/integration/prompt_section_leak.rs::section_text_never_enters_history_or_a_compaction_seed"
+status = "deleted"
+note = "TurnContextTransform was deleted (5a7f31f0d0, FIG-5258)"
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "prompt_view_removals_preserve_history_across_cold_replay"
+area = "compaction"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["prompt_view_removals_preserve_history_across_cold_replay"]
+disposition = "covered-by:crates/lash/src/tests/standard_compaction_persistence.rs::attachment_pruning_never_rewrites_the_durable_message"
+status = "deleted"
+note = "TurnContextTransform was deleted (5a7f31f0d0, FIG-5258); pruning is the only history-side omission left"
+
+[[row]]
+path = "crates/lash/src/tests/standard_compaction_persistence.rs"
+test = "admin_compaction_commit_failure_applies_once_on_the_engines_retry"
+area = "compaction"
+needs = ["turn"]
+class = "semantic"
+lane = "L9c"
+laws = ["admin_compaction_commit_failure_applies_once_on_the_engines_retry"]
+disposition = "covered-by:planned:MATRIX"
+status = "deleted"
+note = "its journaled-summary read-back was the journal (5ad9641f9e); a command applies once at a cut of every commit label (crates/lash-sim/src/crash_matrix/cases/command.rs)"
 
 [[row]]
 path = "crates/lash/src/tests/store_faults.rs"
@@ -10157,8 +10590,8 @@ laws = [
   "(no test functions) defines: journaled_run_keys, journaled_llm_call_keys",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "journaled_run_keys and journaled_llm_call_keys read the double's journal and went with it (5ad9641f9e; nothing journals, ADR 0132 §2); the module's helpers now drive facade turns on SQLite memory"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/builders_and_queue.rs"
@@ -10174,7 +10607,8 @@ laws = [
   "a_send_never_answers_from_a_run_another_store_ran",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5312 ported in place on SQLite memory; idle_queued_input_emits_typed_remote_application_and_durable_identity reads the durable head (an opened LashSession's view is its open snapshot; turns run on the actor, ADR 0132) and asserts every application names a committed message"
 
 [[row]]
 path = "crates/lash/src/tests/turn_streaming/builders_and_queue.rs"
@@ -10215,8 +10649,32 @@ laws = [
   "rlm_exec_code_seal_key_survives_continue_as_seed_and_follow_turn",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "FIG-5312 ported the file onto facade turns over SQLite memory (12 pass; continue_as_seed_is_installed_before_the_follow_on_run is new; rlm_abort_drain_preserves_late_reasoning_replay_and_usage passes since FIG-5328). #[ignore] with tickets: rlm_tool_calls_stream_from_live_exec_boundary and rlm_recovered_tool_failure_remains_in_turn_accounting (FIG-5330: the report omits code-cell tool calls and execution metrics); rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes (FIG-5331: no protocol_step trace record). Its journaled-effect-outcome assertions went with the journal (5ad9641f9e)"
+
+[[row]]
+path = "crates/lash/src/tests/turn_streaming/rlm_streaming.rs"
+test = "lane_less_post_commit_from_plain_turn_does_not_affect_next_turn"
+area = "streaming"
+needs = ["turn", "round", "cell"]
+class = "semantic"
+lane = "L9e"
+laws = ["lane_less_post_commit_from_plain_turn_does_not_affect_next_turn"]
+disposition = "subject-deleted"
+status = "deleted"
+note = "the TurnPersisted lifecycle hook and nested post-commit lanes are gone (48569c927b, FIG-5247)"
+
+[[row]]
+path = "crates/lash/src/tests/turn_streaming/rlm_streaming.rs"
+test = "rlm_exec_code_seal_key_survives_continue_as_seed_and_follow_turn"
+area = "streaming"
+needs = ["turn", "round", "cell"]
+class = "semantic"
+lane = "L9e"
+laws = ["rlm_exec_code_seal_key_survives_continue_as_seed_and_follow_turn"]
+disposition = "replaced-by:crates/lash/src/tests/turn_streaming/rlm_streaming.rs::continue_as_seed_is_installed_before_the_follow_on_run"
+status = "deleted"
+note = "its seal-key half read the journal (5ad9641f9e; nothing replays, ADR 0132 §2); its seed half is the new law"
 
 [[row]]
 path = "crates/lash/src/tests/wrong_authority_redeploy.rs"
@@ -10230,8 +10688,9 @@ laws = [
   "refusal_reaches_sender",
   "laws! generates: sqlite_file, postgres",
 ]
-disposition = "port"
-status = "todo"
+disposition = "replaced-by:crates/lash/src/tests/writer_fence.rs::a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing_on_sqlite_file"
+status = "deleted"
+note = "the shift admission whose refusal it recorded is gone (0cc1b81d98, FIG-5196); a fenced writer writes nothing, so the durable law is the typed, never-retried refusal at the sender with nothing written (also _on_postgres)"
 
 [[row]]
 path = "crates/lash/src/tests/wrong_authority_redeploy.rs"
@@ -10261,8 +10720,8 @@ laws = [
   "tiered! generates: stored_module_refusals_preserve_causes_and_terminal_semantics, wait_edges_waits_for_condition_past_former_deadline, cold_reopen_globals_across_turns, overwrite_retains_old_module_until_frame_end, continue_as_carries_only_seeded_definition, a_pressure_seed_carries_its_module_into_the_new_frame, first_turn_continue_as_fences_its_initial_frame, carried_definition_id_retains_the_closure_across_frame_switch, uncarried_frame_switch_loses_an_uncarried_definition, host_pin_keeps_a_definition_across_an_uncarried_switch, created_definition_survives_cold_reopen_and_starts_by_value, created_definition_is_reclaimed_after_session_deletion",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "FIG-5312 ported the file onto the core's own node (SQLite memory; PostgreSQL legs #[ignore] for the PostgreSQL gate); stored_module_refusals_preserve_causes_and_terminal_semantics starts a real lashlang process on the node, and the double's server-stats check went with the double. #[ignore] FIG-5354 (a frame switch carries no seed modules): continue_as_carries_only_seeded_definition, carried_definition_id_retains_the_closure_across_frame_switch; #[ignore] FIG-5327: a_pressure_seed_carries_its_module_into_the_new_frame"
 
 [[row]]
 path = "crates/lash/tests/artifact_referrers_evidence/fixture.rs"
@@ -10275,8 +10734,8 @@ laws = [
   "(no test functions) defines: reconcile, new, edges",
 ]
 disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+status = "ported"
+note = "FIG-5312: the fixture runs over a store set on the core's own node (backend_over); reconcile is settle, since the core's cleanup relay runs in the background"
 
 [[row]]
 path = "crates/lash/tests/attachment_referrers_evidence.rs"
@@ -10305,9 +10764,9 @@ lane = "L9e"
 laws = [
   "(no test functions) defines: reconcile, new, catalog_session_ids",
 ]
-disposition = "port"
-status = "todo"
-note = "blocked: fig-5172-prod (L3, FIG-5172): no production TurnServices runs a facade turn (the only impls are lash-durable-test's and lash-postgres-workers'), so a facade session opens on SQLite memory but its send never completes: a probe that builds a standard core over sqlite_memory_store_backend, opens a session and sends one text input times out after 20 s with the provider never called (L3s's session mail, FIG-5196, has landed); the law is not written yet"
+disposition = "subject-deleted"
+status = "deleted"
+note = "the fixture drove the double; crates/lash/tests/attachment_referrers_evidence.rs's own row owns its laws and their port writes a fixture on the core's node, as crates/lash/tests/artifact_referrers_evidence/fixture.rs does: the Restate server double and its handlers went with 5ad9641f9e (FIG-5190)"
 
 [[row]]
 path = "crates/lash/tests/facade_host_wrappers/live_replay_bounds.rs"
@@ -10362,8 +10821,9 @@ lane = "L9b"
 laws = [
   "(no test functions) defines: double",
 ]
-disposition = "port"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
+note = "double built the double over each store tier; crates/lash/tests/facade_host_wrappers.rs's own row owns the laws it served: the Restate server double and its handlers went with 5ad9641f9e (FIG-5190)"
 
 [[row]]
 path = "crates/lash/tests/integration/embed_plugins.rs"
@@ -10451,7 +10911,8 @@ laws = [
   "(no test functions) defines: restate_double, sqlite_memory_store_set, sqlite_memory_store_backend",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "restate_double went with the double (5ad9641f9e); the module serves SQLite memory store sets and backends"
 
 [[row]]
 path = "crates/lash/tests/llm_profiles.rs"
@@ -11073,8 +11534,9 @@ laws = [
   "handler_cancels_a_disabled_registration_without_rearming_or_emitting",
   "non_live_session_cancels_without_reading_a_failing_registration_store",
 ]
-disposition = "port"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
+note = "the workbench's Restate cron object (arming, cancel, tick decisions, its registration-state reads and the occurrence emitter) went with 5ad9641f9e (FIG-5190); no timer fires a registered cron.Schedule in this build (examples/agent-workbench/README.md)"
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_replay.rs"
@@ -11148,8 +11610,9 @@ laws = [
   "cron_registration_state_propagates_classified_store_failures",
   "cron_tick_cancels_a_live_session_with_a_deleted_registration_without_rearming",
 ]
-disposition = "port"
-status = "todo"
+disposition = "subject-deleted"
+status = "deleted"
+note = "the workbench's Restate cron object (arming, cancel, tick decisions, its registration-state reads and the occurrence emitter) went with 5ad9641f9e (FIG-5190); no timer fires a registered cron.Schedule in this build (examples/agent-workbench/README.md)"
 
 [[row]]
 path = "examples/agent-workbench/src/restate/tests/cron_tests.rs"
@@ -11175,7 +11638,8 @@ laws = [
   "s30_replayed_task_keeps_one_body_receipt",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "FIG-5312 re-wrote s30_replayed_task_keeps_one_body_receipt as s30_each_task_operation_keeps_one_body_receipt on SQLite memory: the journal replay it forced (always_replay) went with the double (5ad9641f9e); two operations with identical input each enter their body and need their own release, and resubmitting a finished operation's key reattaches to that operation's result rather than starting another"
 
 [[row]]
 path = "examples/toolbench/src/runtime.rs"
@@ -11217,7 +11681,8 @@ laws = [
   "(no test functions) defines: state, state_and_core, run_workflow",
 ]
 disposition = "port"
-status = "todo"
+status = "ported"
+note = "4e083eb8de re-wrote the helpers over a durable SQLite memory core: state_and_core builds the example's app and the core that serves its sessions and processes, and run_workflow drives the app's /run route"
 
 [[row]]
 path = "runbooks/restate-postgres-workers/src/bin/mock_provider/load.rs"

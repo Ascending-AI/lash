@@ -1223,4 +1223,7 @@ mod driver_contract_tests;
 mod recorded_behaviour_tests;
 
 #[cfg(test)]
+mod retention_failure_tests;
+
+#[cfg(test)]
 mod prompt_tests;

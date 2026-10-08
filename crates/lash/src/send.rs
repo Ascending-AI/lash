@@ -93,13 +93,10 @@ impl SendContext {
         Ok(())
     }
 
-    /// The session's state as of the committed head.
+    /// The session's state as of the committed head, read from the store:
+    /// the session's turns run on its actor, so an open session's resident
+    /// runtime holds the state it opened with, not what its runs committed.
     async fn session_snapshot(&self) -> Result<lash_core::SessionSnapshot> {
-        if let Some(runtime) = &self.live {
-            let writer = runtime.writer();
-            let resident = writer.lock().await;
-            return Ok(resident.export_state());
-        }
         lash_core::store::load_session_window_state(
             &self.parts.store,
             lash_core::store::WindowSelector::Current,

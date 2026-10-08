@@ -186,8 +186,8 @@ impl SessionPlugin for ConsumerPlugin {
             .typed_task::<EchoTask, _, _>(move |ctx, text| {
                 let controls = controls.clone();
                 async move {
-                    // A task body runs again when its journal resumes. The
-                    // external hold belongs to the operation, so replay must
+                    // A task body runs again when its run resumes after a crash. The
+                    // external hold belongs to the operation, so a rerun must
                     // observe its release rather than consume a new permit.
                     let operation = (
                         ctx.session_id.clone(),
@@ -254,5 +254,87 @@ impl StaticToolExecute for Echo {
             });
         }
         ToolOutcome::ok(Value::String(args.text)).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::{Context as _, ensure};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// S30: a task's external hold belongs to its operation, not its input.
+    /// Two operations with identical input each enter their own body and
+    /// need their own release; resubmitting a finished operation's key
+    /// reattaches to that operation's result rather than starting another.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn s30_each_task_operation_keeps_one_body_receipt() -> anyhow::Result<()> {
+        let stores = Arc::new(lash::sqlite::SqliteStoreSet::memory().await?);
+        let backend = lash::durable::DurableBackendBuilder::new(stores).build()?;
+        let controls = Arc::new(super::Controls::default());
+        let metadata = lash::LlmProfileMetadata::builder("test/s30")
+            .context_window_tokens(8192)
+            .build()?;
+        let registry = lash::LlmProfileRegistry::new().register(
+            "consumer",
+            lash::RegisteredLlmProfile::new(metadata, super::provider()),
+        )?;
+        let core = lash::LashCore::standard_builder(backend)
+            .llm_profiles(Arc::new(registry))
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .plugin(Arc::new(super::ConsumerPlugin(controls.clone())))
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "s30", "sqlite",
+            ))?;
+        let id = lash::SessionId::parse("s30").expect("nonblank host identity");
+        core.session(id.clone())
+            .create(lash::SessionCreation::root(lash::SessionSpec::new(
+                "consumer",
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(8),
+            )))
+            .await?;
+        let session = core.session(id).open().await?;
+        for (ordinal, key) in ["first", "second"].into_iter().enumerate() {
+            let task = session
+                .plugin_operations()
+                .start_task::<super::EchoTask>("hold:task".into(), key)
+                .await?;
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while controls.receipts().len() <= ordinal {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .context("the new operation enters its own body")?;
+            ensure!(controls.release("hold:task"), "the task's gate exists");
+            let receipt = tokio::time::timeout(Duration::from_secs(10), task.result())
+                .await
+                .context("a released task completes")??;
+            ensure!(receipt.output == "hold:task", "the task kept its output");
+            ensure!(
+                controls.receipts().len() == ordinal + 1,
+                "a released operation enters its body once"
+            );
+        }
+        let again = session
+            .plugin_operations()
+            .start_task::<super::EchoTask>("hold:task".into(), "first")
+            .await?;
+        let receipt = tokio::time::timeout(Duration::from_secs(10), again.result())
+            .await
+            .context("a finished operation's key reattaches to its result")??;
+        ensure!(
+            receipt.output == "hold:task",
+            "the reattached task kept its output"
+        );
+        ensure!(
+            controls.receipts().len() == 2,
+            "reattaching starts no other operation: {:?}",
+            controls.receipts()
+        );
+        core.shutdown().await?;
+        Ok(())
     }
 }
