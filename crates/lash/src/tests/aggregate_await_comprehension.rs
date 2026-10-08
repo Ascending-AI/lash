@@ -72,6 +72,7 @@ fn retail_order_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["retail"], "order"))
 }
 

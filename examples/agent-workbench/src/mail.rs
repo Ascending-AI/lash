@@ -405,6 +405,7 @@ fn definition_for(slug: &str, display_name: &str, operation: &str) -> ToolDefini
         json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(execution_policy)
     .with_declaration(declaration)
     .with_tool_binding(ToolBinding::new(["inbox", slug], operation).with_authority_type("Inbox"))

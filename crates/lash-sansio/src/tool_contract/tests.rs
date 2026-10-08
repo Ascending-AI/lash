@@ -27,6 +27,7 @@ fn compact_tool_contract_renders_prompt_and_search_shape_from_schemas() {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_examples(vec![
         "await tools.search_docs({ query: \"rust\" })?".to_string(),
         "await tools.search_docs({ query: \"rust\", limit: 3 })?".to_string(),
@@ -108,7 +109,8 @@ fn compact_tool_contract_resolves_local_refs_in_string_or_list_parameters() {
             "items": { "type": "object" }
         }),
     )
-    .expect("valid declared tool schemas");
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120));
 
     let signature = tool.compact_contract().render_signature();
 
@@ -134,6 +136,7 @@ fn dynamic_output_contract_renders_schema_from_input_without_return_fields() {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_output_from_input_schema("output", None);
 
     let contract = tool.compact_contract();
@@ -167,6 +170,7 @@ fn dynamic_output_contract_renders_default_schema() {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_output_from_input_schema(
         "output",
         Some(
@@ -412,7 +416,8 @@ fn compact_contract_renders_an_open_nested_schema_with_full_fidelity() {
             }
         }),
     )
-    .expect("valid declared tool schemas");
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120));
 
     assert_eq!(
         tool.compact_contract().render_markdown(),

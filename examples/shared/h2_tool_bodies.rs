@@ -108,7 +108,8 @@ impl ToolBodies {
                     "A controlled body for the named real-host scenario.",
                     serde_json::json!({"type":"object", "properties":{}, "additionalProperties":false}),
                     output,
-                )?;
+                )?
+                .with_execution(std::time::Duration::from_secs(120));
                 let declaration = match result {
                     BodyResult::Inline { intents, .. } => ToolDeclaration::default()
                         .with_intents(intents.intents.iter().map(ToolIntent::kind)),
@@ -116,6 +117,13 @@ impl ToolBodies {
                     BodyResult::Handle { .. } => ToolDeclaration::default(),
                     BodyResult::EmitEvent { .. } | BodyResult::EmitToReceiver { .. } => ToolDeclaration::default()
                         .with_intents([lash::tools::ToolIntentKind::EmitProcessEvent]),
+                };
+                // A deferred body parks until the scenario's host resolves
+                // it, or the turn that called it ends.
+                let definition = if declaration.may_defer {
+                    definition.with_park(lash::tools::ParkBound::UntilScopeEnd)
+                } else {
+                    definition
                 };
                 Ok(definition
                     .with_tool_binding(lash::tools::ToolBinding::new(["tools"], label))

@@ -26,13 +26,14 @@
 
 use std::sync::Arc;
 
+use lash_core_execution::runtime::actor::round::MemberPin;
 use lash_core_execution::runtime::actor::round::{
     AdmittedExecution, Material, MemberBody, MemberResult, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
     ProcessSteps, StepAdmission, StepRefusal, StepRuntime, engine_step_policy, host_step_output,
-    tool_step_output, tool_step_resolved, tool_step_wait,
+    tool_step_output, tool_step_resolved,
 };
 use lash_core_execution::tool_run::CompletionSource;
 use lash_core_execution::{
@@ -261,34 +262,35 @@ impl ProcessSteps for WorkerSteps {
         step: &StepRequest,
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
-        let budgets = &self.0.config.runtime_host.control.execution_budgets;
         match step {
             StepRequest::Engine { kind, .. } => {
                 let engine = engine_kind(process).unwrap_or_default();
-                self.0
+                let total = self
+                    .0
                     .config
                     .runtime_host
                     .process_engines
-                    .engine_steps(engine, kind)?;
-                let total = budgets.tool_default();
+                    .engine_steps(engine, kind)?
+                    .execution(kind);
                 Ok(StepAdmission {
                     policy: engine_step_policy(),
                     limit: ExecutionLimit::starting_at(now_ms, total, total),
-                    wait: None,
+                    park: None,
                 })
             }
             StepRequest::Host { operation, .. } => {
                 let engine = engine_kind(process).unwrap_or_default();
-                self.0
+                let total = self
+                    .0
                     .config
                     .runtime_host
                     .process_engines
-                    .host_steps(engine, operation)?;
-                let total = budgets.tool_default();
+                    .host_steps(engine, operation)?
+                    .execution(operation);
                 Ok(StepAdmission {
                     policy: ExecutionPolicy::Once,
                     limit: ExecutionLimit::starting_at(now_ms, total, total),
-                    wait: None,
+                    park: None,
                 })
             }
             StepRequest::Tool { step, tool, .. } => {
@@ -307,24 +309,22 @@ impl ProcessSteps for WorkerSteps {
                         step: step.0.clone(),
                         tool: tool.as_str().to_owned(),
                     })?;
-                let total =
-                    budgets
-                        .admit_tool(manifest)
-                        .map_err(|refusal| StepRefusal::Refused {
-                            step: step.0.clone(),
-                            reason: refusal.to_string(),
-                        })?;
-                let limit = ExecutionLimit::starting_at(now_ms, total, total);
-                // One limit spans a deferring tool's body and its park, as a
-                // round member's does.
-                let wait = manifest
-                    .declaration
-                    .may_defer
-                    .then(|| tool_step_wait(&limit));
+                let bounds = manifest.bounds().map_err(|refusal| StepRefusal::Refused {
+                    step: step.0.clone(),
+                    reason: refusal.to_string(),
+                })?;
+                // The body's limit and the park's deadline are pinned
+                // separately, as a round member's are.
+                let pin = MemberPin::admitted(
+                    manifest.id.clone(),
+                    manifest.execution_policy,
+                    bounds,
+                    now_ms,
+                );
                 Ok(StepAdmission {
-                    policy: manifest.execution_policy,
-                    limit,
-                    wait,
+                    policy: pin.policy,
+                    limit: pin.limit,
+                    park: pin.park,
                 })
             }
         }

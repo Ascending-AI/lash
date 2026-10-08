@@ -197,6 +197,7 @@ fn echo_probe_definition() -> ToolDefinition {
         json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 /// A tool call streamed over the Codex WebSocket runs once, and the

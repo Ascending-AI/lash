@@ -18,6 +18,7 @@ fn direct_probe_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 /// A tool whose call asks the model [`PROMPT`] directly.

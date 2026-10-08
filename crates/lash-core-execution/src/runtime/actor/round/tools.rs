@@ -22,7 +22,7 @@ use lash_sansio::sansio::PendingToolCall;
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 
 use super::super::ActorContext;
-use super::super::waits::{Resolution, WaitDeadline};
+use super::super::waits::{ParkDeadline, Resolution};
 use super::{
     AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PolicyView, RoundError,
     SettledOutput, fold, settle,
@@ -39,11 +39,33 @@ pub struct MemberPin {
     pub tool: ToolId,
     /// Its declared execution policy.
     pub policy: ExecutionPolicy,
-    /// Its limit, starting now.
+    /// Its body's limit, starting now.
     pub limit: ExecutionLimit,
-    /// For a tool that may park, the deadline of the completion wait its
-    /// round pins: the call's park never outlives it.
-    pub wait: Option<WaitDeadline>,
+    /// For a tool that may park, what its park pins: the deadline of the
+    /// completion wait its round pins, separate from the body's limit, or
+    /// none for a park that lasts until its scope ends.
+    pub park: Option<ParkDeadline>,
+}
+
+impl MemberPin {
+    /// A call to `tool` admitted at `now_ms` under its host-set `bounds`:
+    /// its body is limited to `bounds.execution` from now, and a park it may
+    /// take is bounded by `bounds.park` from now, whatever its body took.
+    #[must_use]
+    pub fn admitted(
+        tool: ToolId,
+        policy: ExecutionPolicy,
+        bounds: crate::ToolBounds,
+        now_ms: u64,
+    ) -> Self {
+        let now = lash_durable::DurableInstant(i64::try_from(now_ms).unwrap_or(i64::MAX));
+        Self {
+            tool,
+            policy,
+            limit: ExecutionLimit::starting_at(now_ms, bounds.execution, bounds.execution),
+            park: bounds.park.map(|park| ParkDeadline::admitted(park, now)),
+        }
+    }
 }
 
 /// A trace admission proposed with the durable admission that retains its
@@ -241,7 +263,7 @@ pub fn call_draft(
         request_material(owner, call)?,
         pin.policy,
         pin.limit,
-        pin.wait,
+        pin.park,
     ))
 }
 

@@ -467,6 +467,7 @@ fn search_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     ).expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_examples(vec![
         "await tools.search({ query: \"text checksum\", limit: 3 });".to_string(),
     ])
@@ -595,6 +596,7 @@ fn utility_definition(
         output_schema,
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_examples(vec![format!(
         "await {}.{}({{ /* matching arguments */ }})?",
         module[0], operation

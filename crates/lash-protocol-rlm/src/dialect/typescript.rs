@@ -633,6 +633,7 @@ mod tests {
             serde_json::json!({ "$ref": "cron.Tick", "definitions": { "Tick": tick_schema } }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["probe"], "read"));
         let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
         let section = dialect
@@ -734,6 +735,7 @@ mod tests {
             }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["processes"], "start"));
         let with = render(&lash_core::ToolCatalog::from_tool_definitions(vec![start]));
         assert!(with.contains("### Processes"), "{with}");
@@ -956,6 +958,7 @@ mod tests {
                 serde_json::json!({ "type": "string" }),
             )
             .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
             .with_tool_binding(ToolBinding::new(modules.clone(), operation.as_str()));
             let registration = crate::tool_catalog::rlm_tool_catalog(
                 ToolCatalogContext {

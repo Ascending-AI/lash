@@ -329,7 +329,8 @@ async fn a_committed_frame_switch_clears_the_execution_state(tier: Tier) {
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         serde_json::json!({ "type": "object" }),
     )
-    .unwrap();
+    .unwrap()
+    .with_execution(std::time::Duration::from_secs(120));
     let tools = Arc::new(lash::tools::StaticToolProvider::new(
         vec![definition],
         SwitchFrame { task: TASK },
@@ -378,6 +379,7 @@ fn rotating_definition(name: &str) -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .unwrap()
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 #[async_trait::async_trait]

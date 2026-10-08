@@ -169,7 +169,7 @@ impl ProcessEngine for ProofEngine {
                     EngineAction::AwaitProcess {
                         process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                             .map_err(infra)?,
-                        deadline: Some(Duration::from_millis(WAIT_MS)),
+                        bound: lash_core::ParkBound::Within(Duration::from_millis(WAIT_MS)),
                     }
                 } else {
                     EngineAction::Idle
@@ -285,7 +285,7 @@ impl ProcessSteps for ProofSteps {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Ok(StepAdmission {
-            wait: None,
+            park: None,
             policy: policy(&step.admitted_tool(KIND)),
             limit: ExecutionLimit::starting_at(
                 now_ms,

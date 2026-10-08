@@ -1202,21 +1202,25 @@ impl Drop for AbortOnDrop {
     }
 }
 
+/// Import `server_name`'s advertised `tools`, each bounded by `execution`:
+/// the server's configured total cap on one call, which its host sets.
 fn import_tools(
     server_name: &str,
     tools: Vec<rmcp::model::Tool>,
+    execution: Duration,
 ) -> Result<BTreeMap<String, ImportedTool>, McpError> {
     let raw_names = tools
         .iter()
         .map(|tool| tool.name.as_ref())
         .collect::<Vec<_>>();
     let names = naming::build_catalog_names(server_name, &raw_names);
-    import_tools_with_name_builder(server_name, tools, |_, raw| names[raw].clone())
+    import_tools_with_name_builder(server_name, tools, execution, |_, raw| names[raw].clone())
 }
 
 fn import_tools_with_name_builder(
     server_name: &str,
     mut tools: Vec<rmcp::model::Tool>,
+    execution: Duration,
     mut build_name: impl FnMut(&str, &str) -> (String, lash_tool_support::ToolBinding),
 ) -> Result<BTreeMap<String, ImportedTool>, McpError> {
     tools.sort_by(|left, right| left.name.cmp(&right.name));
@@ -1249,6 +1253,7 @@ fn import_tools_with_name_builder(
             input_schema,
             output_schema,
         )?
+        .with_execution(execution)
         .with_tool_binding(lashlang_binding);
         definition.manifest.module = Some(Arc::clone(&module));
         let imported_tool = ImportedTool {

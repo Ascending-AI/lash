@@ -16,7 +16,7 @@ fn catalog_definitions() -> Vec<lash_core::ToolDefinition> {
             lash_core::ToolDefinition::raw(format!("tool:probe{index}"), format!("probe{index}"),
                 "Return a STRING containing record-looking text, not a structured record.",
                 serde_json::json!({"type":"object","properties":{"id":{"type":"string","description":"Record identifier"}},"required":["id"]}),
-                serde_json::json!({"type":"string"})).expect("valid declared tool schemas")
+                serde_json::json!({"type":"string"})).expect("valid declared tool schemas").with_execution(std::time::Duration::from_secs(120))
                 .with_tool_binding(ToolBinding::new(["probe"], format!("op{index}")))
         })).collect()
 }
@@ -46,6 +46,7 @@ fn process_catalog() -> lash_core::ToolCatalog {
             }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["processes"], "start")),
     );
     lash_core::ToolCatalog::from_tool_definitions(tools)

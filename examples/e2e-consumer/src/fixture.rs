@@ -176,7 +176,8 @@ impl SessionPlugin for ConsumerPlugin {
             "consumer:echo", "echo", "Echo the admitted text",
             json!({"type":"object", "properties":{"text":{"type":"string"}, "hold":{"type":"boolean"}}, "required":["text","hold"], "additionalProperties":false}),
             json!({"type":"string"}),
-        ).map_err(|error| PluginError::Session(error.to_string()))?;
+        ).map_err(|error| PluginError::Session(error.to_string()))?
+        .with_execution(std::time::Duration::from_secs(120));
         reg.tools().provider(Arc::new(StaticToolProvider::new(
             vec![definition],
             Echo(self.0.clone()),

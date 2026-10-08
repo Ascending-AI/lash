@@ -1356,7 +1356,7 @@ impl ProcessSteps for HangingSteps {
     ) -> Result<StepAdmission, StepRefusal> {
         let long = Duration::from_secs(60);
         Ok(StepAdmission {
-            wait: None,
+            park: None,
             policy: lash_sansio::ExecutionPolicy::Once,
             limit: lash_sansio::ExecutionLimit::starting_at(now_ms, long, long),
         })

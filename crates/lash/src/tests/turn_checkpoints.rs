@@ -262,6 +262,7 @@ fn send_tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "string" }),
     )
     .expect("the tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 /// What the tool body sends while the turn's round runs.

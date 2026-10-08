@@ -48,7 +48,7 @@ use lash_core_execution::runtime::actor::round::{
     RoundEnd, RoundRunner, RunFold, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits::{
-    self, Resolution, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
+    self, ParkDeadline, Resolution, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
 };
 use lash_core_execution::{ActorContext, AdmittedScope, Backend};
 use lash_core_store::effect_opener::EffectOpener;
@@ -373,8 +373,10 @@ impl RoundOwner {
                         member.tool.policy(),
                         limit,
                         member.tool.defers().then(|| {
-                            WaitDeadline::at_instant(lash_durable::DurableInstant(
-                                i64::try_from(limit.expires_at).unwrap(),
+                            ParkDeadline::At(WaitDeadline::at_instant(
+                                lash_durable::DurableInstant(
+                                    i64::try_from(limit.expires_at).unwrap(),
+                                ),
                             ))
                         }),
                     )

@@ -99,53 +99,77 @@ impl ExecutionPolicy {
     }
 }
 
-/// How long one inline execution of a tool is expected to run: the tool's
-/// duration policy, declared beside its [`ExecutionPolicy`] and never inside
-/// the closed [`ToolDeclaration`]. Registration admits it against the
-/// deployment's inline ceiling
-/// ([`ExecutionBudgets::admit_tool`](crate::ExecutionBudgets::admit_tool)).
+/// How long a deferring tool's call may stay parked, waiting for its
+/// completion: its host's choice, declared beside its
+/// [`ToolManifest::execution`] and never inside the closed
+/// [`ToolDeclaration`]. The deadline it sets is computed once, when the call
+/// is admitted, and pinned with the call's run: a crash or takeover never
+/// refreshes it.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ParkBound {
+    /// The park ends `TimedOut` this long after the call's admission.
+    Within(std::time::Duration),
+    /// The park has no deadline: it lasts until it resolves or the scope
+    /// that owns the call (its turn or its process) ends, which revokes it.
+    UntilScopeEnd,
+}
+
+/// The bound a tool's manifest must declare, named by
+/// [`RegistrationRefused::MissingBound`].
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolBound {
+    /// [`ToolManifest::execution`], which every tool declares.
+    Execution,
+    /// [`ToolManifest::park`], which every tool that may defer declares.
+    Park,
+}
+
+impl std::fmt::Display for ToolBound {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Execution => "execution",
+            Self::Park => "park",
+        })
+    }
+}
+
+/// A tool's admitted bounds: what its manifest declares, checked once at
+/// registration ([`ToolManifest::bounds`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ToolBounds {
+    /// How long one run of the tool's body may take.
+    pub execution: std::time::Duration,
+    /// How long a call may stay parked; `None` for a tool that never defers.
+    pub park: Option<ParkBound>,
+}
+
+/// Why registration refused a tool.
 #[derive(
     Clone,
-    Copy,
     Debug,
-    Default,
     PartialEq,
     Eq,
+    thiserror::Error,
     serde::Serialize,
     serde::Deserialize,
     schemars::JsonSchema,
 )]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ExpectedExecution {
-    /// The deployment's `tool_default`.
-    #[default]
-    Default,
-    /// The tool's own expectation, in milliseconds.
-    Declared { millis: std::num::NonZeroU64 },
-}
-
-impl ExpectedExecution {
-    /// The tool expects `duration`; anything under a millisecond rounds up to one.
-    #[must_use]
-    pub fn declared(duration: std::time::Duration) -> Self {
-        let millis = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
-        Self::Declared {
-            millis: std::num::NonZeroU64::new(millis).unwrap_or(std::num::NonZeroU64::MIN),
-        }
-    }
-
-    /// The expected duration, with `tool_default` standing in for none.
-    #[must_use]
-    pub fn resolve(self, tool_default: std::time::Duration) -> std::time::Duration {
-        match self {
-            Self::Default => tool_default,
-            Self::Declared { millis } => std::time::Duration::from_millis(millis.get()),
-        }
-    }
-
-    fn is_default(&self) -> bool {
-        *self == Self::Default
-    }
+#[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
+#[non_exhaustive]
+pub enum RegistrationRefused {
+    /// The tool's manifest does not declare a bound its host must set: its
+    /// `execution`, or the `park` of a tool that may defer.
+    #[error("tool `{tool}` declares no {bound} bound; its host must set one")]
+    MissingBound { tool: String, bound: ToolBound },
+    /// A tool that never defers declares a `park` bound it can never use.
+    #[error("tool `{tool}` declares a park bound, but it does not declare `may_defer`")]
+    ParkWithoutDeferral { tool: String },
 }
 
 fn default_tool_execution_policy() -> ExecutionPolicy {
@@ -384,13 +408,49 @@ pub struct ToolManifest {
         skip_serializing_if = "is_default_tool_execution_policy"
     )]
     pub execution_policy: ExecutionPolicy,
-    #[serde(default, skip_serializing_if = "ExpectedExecution::is_default")]
-    pub expected_execution: ExpectedExecution,
+    /// How long one run of the tool's body may take, set by its host. A
+    /// tool without one is refused at registration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<std::time::Duration>,
+    /// How long a call may stay parked waiting for its completion, set by
+    /// its host. Required exactly on a tool whose declaration may defer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub park: Option<ParkBound>,
     /// The author's three-capability declaration. Admission records it with
     /// this manifest; dispatch, recovery and replay read the recorded answer,
     /// never the live provider.
     #[serde(default, skip_serializing_if = "ToolDeclaration::is_default")]
     pub declaration: ToolDeclaration,
+}
+
+impl ToolManifest {
+    /// The bounds this manifest declares, as registration admits them: an
+    /// `execution` on every tool, and a `park` exactly on a tool that may
+    /// defer.
+    ///
+    /// # Errors
+    ///
+    /// [`RegistrationRefused`], naming the tool and the bound.
+    pub fn bounds(&self) -> Result<ToolBounds, RegistrationRefused> {
+        let missing = |bound| RegistrationRefused::MissingBound {
+            tool: self.name.clone(),
+            bound,
+        };
+        let execution = self
+            .execution
+            .ok_or_else(|| missing(ToolBound::Execution))?;
+        let park = match (self.declaration.may_defer, self.park) {
+            (true, Some(park)) => Some(park),
+            (true, None) => return Err(missing(ToolBound::Park)),
+            (false, None) => None,
+            (false, Some(_)) => {
+                return Err(RegistrationRefused::ParkWithoutDeferral {
+                    tool: self.name.clone(),
+                });
+            }
+        };
+        Ok(ToolBounds { execution, park })
+    }
 }
 
 /// Heavy tool contract resolved only when a prompt or call needs schemas/docs.
@@ -859,7 +919,8 @@ impl ToolDefinition {
                 bindings: std::collections::BTreeMap::new(),
                 argument_projection: ToolArgumentProjectionPolicy::default(),
                 execution_policy: default_tool_execution_policy(),
-                expected_execution: ExpectedExecution::Default,
+                execution: None,
+                park: None,
                 declaration: ToolDeclaration::default(),
             },
             contract: ToolContract {
@@ -907,9 +968,18 @@ impl ToolDefinition {
         self
     }
 
-    /// Declares how long one inline execution of the tool is expected to run.
-    pub fn with_expected_execution(mut self, expected_execution: ExpectedExecution) -> Self {
-        self.manifest.expected_execution = expected_execution;
+    /// Declares how long one run of the tool's body may take. Every tool
+    /// declares it; registration refuses a tool without one.
+    pub fn with_execution(mut self, execution: std::time::Duration) -> Self {
+        self.manifest.execution = Some(execution);
+        self
+    }
+
+    /// Declares how long a call may stay parked waiting for its completion.
+    /// A tool that may defer declares it; registration refuses one that
+    /// does not, and a tool that never defers that does.
+    pub fn with_park(mut self, park: ParkBound) -> Self {
+        self.manifest.park = Some(park);
         self
     }
 

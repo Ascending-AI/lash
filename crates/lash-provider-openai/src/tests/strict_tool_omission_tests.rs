@@ -167,6 +167,7 @@ fn tool_definition() -> ToolDefinition {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 fn provider(

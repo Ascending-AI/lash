@@ -50,6 +50,7 @@ fn count(runs: &Arc<AtomicUsize>) -> Arc<dyn lash_core::ToolProvider> {
         serde_json::json!({ "type": "object" }),
     )
     .expect("count_call's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(ExecutionPolicy::Once)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
     Arc::new(StaticToolProvider::new(

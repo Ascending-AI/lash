@@ -104,6 +104,7 @@ fn probe_definition(name: &str) -> lash_core::ToolDefinition {
         object,
     )
     .expect("the probe's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("a nonzero attempt bound"),
@@ -111,7 +112,11 @@ fn probe_definition(name: &str) -> lash_core::ToolDefinition {
         1,
     ));
     if name == DEFERRED {
-        definition.with_declaration(lash_core::ToolDeclaration::deferring())
+        definition
+            .with_declaration(lash_core::ToolDeclaration::deferring())
+            .with_park(lash_core::ParkBound::Within(
+                std::time::Duration::from_secs(120),
+            ))
     } else {
         definition
     }

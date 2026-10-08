@@ -273,6 +273,7 @@ fn seed_tool_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant
         examples: Vec::new(),
         argument_projection: None,
         execution_policy: None,
+        execution_ms: 30_000,
         bindings: BTreeMap::from([(
             "call".to_string(),
             serde_json::json!({
@@ -506,6 +507,7 @@ fn plugin_payload_seeds() -> Vec<(&'static str, String, Vec<u8>)> {
                 examples: Vec::new(),
                 argument_projection: None,
                 execution_policy: None,
+                execution_ms: 30_000,
                 bindings: BTreeMap::new(),
             }])
             .expect("encode tool grants"),

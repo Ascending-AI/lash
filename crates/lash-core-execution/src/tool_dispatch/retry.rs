@@ -298,6 +298,7 @@ mod panic_tests {
             serde_json::json!({ "type": "object" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
     }
 
     impl crate::ToolProvider for ConstructionPanicTool {

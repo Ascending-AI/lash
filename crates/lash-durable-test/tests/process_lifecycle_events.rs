@@ -296,6 +296,7 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
         serde_json::json!({ "type": "object" }),
     )
     .expect("the write tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL));
     Arc::new(lash::tools::StaticToolProvider::new(

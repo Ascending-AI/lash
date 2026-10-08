@@ -275,6 +275,7 @@ impl SessionPlugin for TelemetryPlugin {
             json!({"type":"string"}),
         )
         .map_err(|error| PluginError::Session(error.to_string()))?
+        .with_execution(std::time::Duration::from_secs(120))
         .with_execution_policy(ExecutionPolicy::repeatable(
             std::num::NonZeroU32::MIN.saturating_add(1),
             0,

@@ -367,6 +367,8 @@ fn tool_definition(
         json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    // One model call: as long as lash lets a model call run.
+    .with_execution(std::time::Duration::from_secs(10 * 60))
     .with_examples(examples)
 }
 

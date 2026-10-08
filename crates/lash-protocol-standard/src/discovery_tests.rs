@@ -41,7 +41,8 @@ fn an_open_nested_schema_reaches_the_provider_spec_and_the_schema_docs_whole() {
             input_schema.clone(),
             serde_json::json!({"type":"string"}),
         )
-        .expect("valid declared tool schemas"),
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120)),
     ]);
     let preamble = StandardProtocolDriver {
         config: StandardProtocolConfig {
@@ -90,7 +91,8 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
             serde_json::json!({"type":"object"}),
             serde_json::json!({"type":"string"}),
         )
-        .expect("valid declared tool schemas");
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120));
         tool.manifest.inline = inline;
         tool
     };

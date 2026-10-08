@@ -245,6 +245,10 @@ pub trait EngineSteps: Send + Sync {
     /// The kinds of body this engine runs.
     fn kinds(&self) -> Vec<EngineStepKind>;
 
+    /// How long one run of a `kind` body may take: the engine's own bound,
+    /// as a host sets a tool's. Lash holds no step default.
+    fn execution(&self, kind: &EngineStepKind) -> Duration;
+
     /// Run one body to its outcome, observing `cancel`.
     async fn run(
         &self,
@@ -276,6 +280,10 @@ pub struct HostStepRun {
 pub trait EngineHostSteps: Send + Sync {
     /// Whether `operation` is one of this engine's host steps.
     fn serves(&self, operation: &str) -> bool;
+
+    /// How long one run of `operation` may take: the bound its host sets.
+    /// Lash holds no step default.
+    fn execution(&self, operation: &str) -> Duration;
 
     /// Run one host step to its answer over `context`, the process's step
     /// execution context.
@@ -332,8 +340,9 @@ pub enum EngineAction {
         name: KeyName,
         /// The wait's kind.
         kind: HostWaitKind,
-        /// How long the wait may stay open.
-        deadline: Option<Duration>,
+        /// How long the wait may stay open: the engine's own bound, with no
+        /// lash default or ceiling.
+        bound: crate::ParkBound,
     },
     /// Wait for a pinned key's resolution.
     AwaitExternal {
@@ -344,8 +353,9 @@ pub enum EngineAction {
     AwaitProcess {
         /// The awaited process.
         process: ProcessId,
-        /// How long the wait may stay open.
-        deadline: Option<Duration>,
+        /// How long the wait may stay open: the engine's own bound, with no
+        /// lash default or ceiling.
+        bound: crate::ParkBound,
     },
     /// Sleep until a durable instant.
     Sleep {

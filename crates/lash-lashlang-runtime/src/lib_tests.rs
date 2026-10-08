@@ -323,7 +323,8 @@ fn missing_tool_binding_is_not_fabricated() {
         lash_core::ToolDefinition::default_input_schema(),
         lash_core::JsonSchema::any().into_value(),
     )
-    .expect("valid declared tool schemas");
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120));
 
     let err =
         required_tool_executable(&tool.manifest).expect_err("missing explicit binding should fail");
@@ -358,6 +359,7 @@ fn tool_catalog_imports_declared_static_schema_types() {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["fs"], "read").with_authority_type("Filesystem"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
 
@@ -411,6 +413,7 @@ fn tool_contracts_carry_lash_types_and_refuse_malformed_ones() {
         serde_json::json!({ "x-lash": { "kind": "handle", "payload": { "type": "string" } } }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["spawner"], "spawn").with_authority_type("Spawner"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![tool]);
     let resources = lashlang_resources_from_tool_catalog(&catalog).expect("tool schemas import");
@@ -443,6 +446,7 @@ fn tool_contracts_carry_lash_types_and_refuse_malformed_ones() {
         serde_json::json!({}),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["broken"], "run").with_authority_type("Broken"));
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![malformed]);
     let error = lashlang_resources_from_tool_catalog(&catalog)
@@ -468,6 +472,7 @@ fn from_input_schema_tool_imports_contract_marker_and_default() {
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_output_from_input_schema(
         "schema",
         Some(
@@ -534,6 +539,7 @@ fn dotted_operation_names_are_rejected() {
         lash_core::JsonSchema::any().into_value(),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["tools"], "update.plan"));
 
     let err = required_tool_executable(&tool.manifest)
@@ -559,6 +565,7 @@ fn empty_operation_names_render_as_empty_invalid_identifiers() {
         lash_core::JsonSchema::any().into_value(),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["tools"], ""));
 
     let err = required_tool_executable(&tool.manifest)
@@ -580,6 +587,7 @@ fn manifest_tool_binding_accessor_reports_absent_valid_and_malformed() {
         lash_core::JsonSchema::any().into_value(),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .manifest;
     assert_eq!(manifest.tool_binding().expect("absent binding"), None);
 
@@ -952,6 +960,7 @@ fn masked_host_environment_is_the_environment_without_the_masked_members() {
             serde_json::json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new([module], operation).with_authority_type(authority))
     };
     let unmasked_tools = vec![
@@ -1057,6 +1066,7 @@ fn remote_tool_grant(name: &str) -> lash_remote_protocol::RemoteToolGrant {
         examples: Vec::new(),
         argument_projection: None,
         execution_policy: None,
+        execution_ms: 30_000,
         bindings: Default::default(),
     }
 }

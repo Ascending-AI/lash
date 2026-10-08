@@ -347,25 +347,6 @@
       ],
       "type": "object"
     },
-    "Duration": {
-      "properties": {
-        "nanos": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "secs": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "secs",
-        "nanos"
-      ],
-      "type": "object"
-    },
     "EffectAddress": {
       "description": "Canonical address of one admitted runtime effect.",
       "properties": {
@@ -867,19 +848,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "An inline-only tool declares more execution than the ceiling allows.",
+          "description": "The tool's manifest does not declare a bound its host must set: its\n`execution`, or the `park` of a tool that may defer.",
           "properties": {
-            "ceiling": {
-              "$ref": "#/$defs/Duration"
-            },
-            "declared": {
-              "$ref": "#/$defs/Duration"
-            },
-            "hint": {
-              "type": "string"
+            "bound": {
+              "$ref": "#/$defs/ToolBound"
             },
             "refusal": {
-              "const": "inline_budget_exceeds_ceiling",
+              "const": "missing_bound",
               "type": "string"
             },
             "tool": {
@@ -889,9 +864,25 @@
           "required": [
             "refusal",
             "tool",
-            "declared",
-            "ceiling",
-            "hint"
+            "bound"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A tool that never defers declares a `park` bound it can never use.",
+          "properties": {
+            "refusal": {
+              "const": "park_without_deferral",
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "tool"
           ],
           "type": "object"
         }
@@ -2460,6 +2451,39 @@
             "member"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The tool's manifest does not declare the bounds its host must set: a\nmanifest no registration admitted, such as an execution grant's.",
+          "properties": {
+            "cause": {
+              "$ref": "#/$defs/RegistrationRefused"
+            },
+            "refusal": {
+              "const": "bounds",
+              "type": "string"
+            }
+          },
+          "required": [
+            "refusal",
+            "cause"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolBound": {
+      "description": "The bound a tool's manifest must declare, named by\n[`RegistrationRefused::MissingBound`].",
+      "oneOf": [
+        {
+          "const": "execution",
+          "description": "[`ToolManifest::execution`], which every tool declares.",
+          "type": "string"
+        },
+        {
+          "const": "park",
+          "description": "[`ToolManifest::park`], which every tool that may defer declares.",
+          "type": "string"
         }
       ]
     },

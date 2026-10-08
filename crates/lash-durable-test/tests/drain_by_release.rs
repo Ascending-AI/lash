@@ -201,7 +201,7 @@ impl ProcessSteps for DrainSteps {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Ok(StepAdmission {
-            wait: None,
+            park: None,
             policy: ExecutionPolicy::Once,
             limit: ExecutionLimit::starting_at(
                 now_ms,

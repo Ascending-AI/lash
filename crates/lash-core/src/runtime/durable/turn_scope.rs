@@ -147,9 +147,6 @@ pub enum TurnChildrenStopError {
     /// The store refused.
     #[error(transparent)]
     Durable(#[from] DurableError),
-    /// The grace does not make a wait deadline.
-    #[error(transparent)]
-    Deadline(#[from] waits::WaitDeadlineRefusal),
 }
 
 /// Wait up to `stop_grace` for the first `limit` live processes of `run`'s
@@ -160,8 +157,8 @@ pub enum TurnChildrenStopError {
 ///
 /// # Errors
 ///
-/// [`TurnChildrenStopError`]: the grace makes no deadline, or the store
-/// failed while the children were awaited.
+/// [`TurnChildrenStopError`]: the store failed while the children were
+/// awaited.
 pub async fn await_turn_children(
     cx: &ActorContext,
     session: &SessionId,
@@ -172,12 +169,7 @@ pub async fn await_turn_children(
     let durable = cx.backend().durable();
     let scope = ScopeKey::Turn(session.clone(), run.clone());
     let live = durable.live_until_descendants(&scope, limit).await?;
-    let deadline = WaitDeadline::resolve(
-        Some(stop_grace),
-        stop_grace,
-        stop_grace,
-        durable.now().await?,
-    )?;
+    let deadline = WaitDeadline::after(stop_grace, durable.now().await?);
     let outcomes = futures_util::future::join_all(
         live.iter()
             .map(|child| waits::await_process(cx, child, deadline)),

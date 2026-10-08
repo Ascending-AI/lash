@@ -17,7 +17,8 @@ fn sentinel_grant() -> lash_lashlang_runtime::Resolution {
                 serde_json::json!({"type": "object"}),
                 serde_json::json!({"type": "string"}),
             )
-            .expect("valid declared tool schemas"),
+            .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120)),
         )
         .with_source_id("registry:vault")
         .with_execution_binding(serde_json::json!({"token": SENTINEL_SECRET})),
@@ -162,7 +163,8 @@ async fn worker_returned_state_cannot_replace_parent_authority() {
                     serde_json::json!({"type": "object"}),
                     serde_json::json!({"type": "string"}),
                 )
-                .expect("valid declared tool schemas"),
+                .expect("valid declared tool schemas")
+                .with_execution(std::time::Duration::from_secs(120)),
             )
             .with_execution_binding(serde_json::json!({"token": "forged-by-the-worker"})),
         )),

@@ -178,6 +178,7 @@ fn search_tool() -> lash_core::ToolDefinition {
         object,
     )
     .expect("the tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL))
 }
 

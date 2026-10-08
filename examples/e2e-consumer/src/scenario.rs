@@ -387,7 +387,7 @@ impl<P: CaseId> SessionPlugin for CasePlugin<P> {
                 } else {
                     ToolDeclaration::default()
                 };
-                Ok(ToolDefinition::raw(
+                let definition = ToolDefinition::raw(
                     format!("tool:e2e.{}", plan.name),
                     &plan.name,
                     "A body the real-host case controls.",
@@ -395,8 +395,16 @@ impl<P: CaseId> SessionPlugin for CasePlugin<P> {
                     json!({}),
                 )
                 .map_err(|error| PluginError::Registration(error.to_string()))?
-                .with_execution_policy(plan.policy)
-                .with_declaration(declaration))
+                .with_execution(std::time::Duration::from_secs(120))
+                .with_execution_policy(plan.policy);
+                // A deferred body parks until the case's host resolves it, or
+                // the turn that called it ends.
+                let definition = if declaration.may_defer {
+                    definition.with_park(lash::tools::ParkBound::UntilScopeEnd)
+                } else {
+                    definition
+                };
+                Ok(definition.with_declaration(declaration))
             })
             .collect::<Result<Vec<_>, PluginError>>()?;
         let view = reg.state();

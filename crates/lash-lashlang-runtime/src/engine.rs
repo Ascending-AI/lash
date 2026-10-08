@@ -44,6 +44,11 @@ impl LashlangEngineSteps {
     }
 }
 
+/// The lashlang engine's bound on one run of a step it issues, a VM run
+/// segment, a timer or a trigger command: the engine sets it, as a host
+/// sets its tools' bounds.
+const LASHLANG_STEP_EXECUTION: std::time::Duration = std::time::Duration::from_secs(2 * 60);
+
 #[async_trait::async_trait]
 impl lash_core::EngineSteps for LashlangEngineSteps {
     fn kinds(&self) -> Vec<EngineStepKind> {
@@ -51,6 +56,10 @@ impl lash_core::EngineSteps for LashlangEngineSteps {
             EngineStepKind::new(VM_RUN_STEP),
             EngineStepKind::new(TIMER_STEP),
         ]
+    }
+
+    fn execution(&self, _kind: &EngineStepKind) -> std::time::Duration {
+        LASHLANG_STEP_EXECUTION
     }
 
     async fn run(&self, run: EngineStepRun, cancel: CancellationToken) -> SettledOutput {
@@ -81,6 +90,10 @@ impl LashlangHostSteps {
 impl lash_core::EngineHostSteps for LashlangHostSteps {
     fn serves(&self, operation: &str) -> bool {
         lashlang::TriggerHostOperation::from_host_operation(operation).is_some()
+    }
+
+    fn execution(&self, _operation: &str) -> std::time::Duration {
+        LASHLANG_STEP_EXECUTION
     }
 
     async fn run(

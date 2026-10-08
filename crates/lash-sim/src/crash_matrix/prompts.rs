@@ -339,11 +339,13 @@ fn tools() -> Result<Arc<dyn lash_core::ToolProvider>, lash_core::PluginError> {
         // Repeatable: a crash before a call's outcome commits runs it again
         // at its ordinal, so every cell's T is the one the model asked for.
         .map(|definition| {
-            definition.with_execution_policy(ExecutionPolicy::repeatable(
-                std::num::NonZeroU32::MIN.saturating_add(2),
-                100,
-                1_000,
-            ))
+            definition
+                .with_execution(std::time::Duration::from_secs(120))
+                .with_execution_policy(ExecutionPolicy::repeatable(
+                    std::num::NonZeroU32::MIN.saturating_add(2),
+                    100,
+                    1_000,
+                ))
         })
         .map_err(|error| lash_core::PluginError::Registration(error.to_string()))
     };

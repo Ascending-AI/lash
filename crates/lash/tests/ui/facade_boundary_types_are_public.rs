@@ -404,6 +404,7 @@ fn schema_dialect_types_are_nameable() {
         serde_json::json!({}),
     )
     .unwrap()
+    .with_execution(std::time::Duration::from_secs(120))
     .with_input_schema_projection(dialect, JsonSchema::any())
     .with_output_schema_projection(SchemaDialect::OpenaiStructuredOutput, JsonSchema::any());
 }

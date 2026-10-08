@@ -175,7 +175,9 @@ impl ProcessEngine for SimProcessEngine {
                     EngineAction::PinKey {
                         name: KeyName(KEY.to_owned()),
                         kind: HostWaitKind::Custom,
-                        deadline: Some(Duration::from_millis(KEY_MS)),
+                        bound: lash_core_execution::ParkBound::Within(Duration::from_millis(
+                            KEY_MS,
+                        )),
                     }
                 } else {
                     EngineAction::Idle
@@ -193,7 +195,7 @@ impl ProcessEngine for SimProcessEngine {
                 EngineAction::AwaitProcess {
                     process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                         .map_err(infra)?,
-                    deadline: Some(Duration::from_millis(AWAIT_MS)),
+                    bound: lash_core_execution::ParkBound::Within(Duration::from_millis(AWAIT_MS)),
                 }
             }
             EngineEvent::ProcessWaitTimedOut { .. } if root => {
@@ -287,7 +289,7 @@ impl ProcessSteps for SimSteps {
         now_ms: u64,
     ) -> Result<StepAdmission, StepRefusal> {
         Ok(StepAdmission {
-            wait: None,
+            park: None,
             policy: policy(&step.admitted_tool(KIND)),
             limit: ExecutionLimit::starting_at(
                 now_ms,

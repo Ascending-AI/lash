@@ -42,6 +42,7 @@ fn test_tool(name: &str, description: &str) -> ToolDefinition {
         json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 fn tool_id(name: &str) -> crate::ToolId {
@@ -223,7 +224,8 @@ impl ToolSourceExecutor for ExternalMockSource {
                 }),
                 json!({ "type": "object", "additionalProperties": true }),
             )
-            .expect("valid declared tool schemas"),
+            .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120)),
         ])
     }
 
@@ -244,7 +246,8 @@ impl ToolSourceExecutor for ExternalMockSource {
                     }),
                     json!({ "type": "object", "additionalProperties": true }),
                 )
-                .expect("valid declared tool schemas"),
+                .expect("valid declared tool schemas")
+                .with_execution(std::time::Duration::from_secs(120)),
             ],
             name,
         )
@@ -501,7 +504,8 @@ fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
             json!({ "type": "object", "properties": { "query": { "type": "string" } } }),
             json!({ "type": "string" }),
         )
-        .expect("valid declared tool schemas"),
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120)),
     ]));
     let registry = ToolRegistry::from_tool_providers(vec![Arc::new(DriftingProvider {
         definitions: Arc::clone(&definitions),
@@ -515,7 +519,8 @@ fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
         json!({ "type": "object", "properties": { "needle": { "type": "integer" } } }),
         json!({ "type": "integer" }),
     )
-    .expect("valid declared tool schemas");
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120));
     let reused_name = ToolDefinition::raw(
         "tool:different-id",
         "search",
@@ -523,7 +528,8 @@ fn indexed_contract_lookup_does_not_cross_identity_after_name_drift() {
         json!({ "type": "object", "properties": { "query": { "type": "boolean" } } }),
         json!({ "type": "boolean" }),
     )
-    .expect("valid declared tool schemas");
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120));
     *definitions.lock_recover() = vec![reassigned_id.clone(), reused_name.clone()];
 
     let actual = registry
@@ -1050,6 +1056,7 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
                 json!({ "type": "string" }),
             )
             .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
         }
     }
 
@@ -1099,7 +1106,8 @@ async fn execution_grant_routes_multi_provider_source_by_id_not_name() {
             ToolDefinition::default_input_schema(),
             json!({ "type": "string" }),
         )
-        .expect("valid declared tool schemas"),
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120)),
     )
     .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID);
 
@@ -1316,6 +1324,7 @@ fn unadmitted_alias_lookup_does_not_fall_through_to_source() {
                     json!({ "type": "string" }),
                 )
                 .expect("valid declared tool schemas")
+                .with_execution(std::time::Duration::from_secs(120))
                 .manifest()
             })
         }

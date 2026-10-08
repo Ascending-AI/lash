@@ -76,7 +76,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument as _;
 
 use super::super::ActorContext;
-use super::super::waits::{self, RaceWinner, Resolution, WaitId, WaitKind, WaitRef};
+use super::super::waits::{self, ParkDeadline, RaceWinner, Resolution, WaitId, WaitKind, WaitRef};
 use super::{
     AdmittedExecution, Material, PolicyView, Recovery, RoundError, RoundView, RunFold,
     SettledOutput, Stop, StoreLocalEffect, ToolBody, run_bounded, settle, settle_retry,
@@ -693,12 +693,14 @@ impl Lifecycle {
                     ends.push((entry, output));
                 }
             }
+            // A park that outlives its own deadline times out on that
+            // deadline, never on its body's limit.
             RaceWinner::TimedOut(wait) => {
                 if let Some(entry) = member_of(&wait) {
                     ends.push((
                         entry,
                         SettledOutput::TimedOut {
-                            cause: LimitCause::ExecutionTotal,
+                            cause: LimitCause::WaitDeadline,
                             evidence: AvailableEvidence::default(),
                         },
                     ));
@@ -829,7 +831,7 @@ impl Lifecycle {
             Err(Stop::Durable(error)) => return Err(error.into()),
         };
         // A park whose resolver awaits a process waits on its terminal too:
-        // the wait is pinned with the park, under the call's own deadline.
+        // the wait is pinned with the park, under the park's own deadline.
         if let (SettledOutput::Waiting(source), Some(process)) = (&mut output, terminal) {
             let (wait, _) = waits::pin(
                 tx,
@@ -837,7 +839,7 @@ impl Lifecycle {
                     kind: WaitKind::ProcessTerminal,
                     scope: waits::execution_wait_scope(&self.cx, &execution.id().owner)?,
                     target_process: Some(process),
-                    deadline: execution.draft().wait(),
+                    deadline: execution.draft().park().and_then(ParkDeadline::deadline),
                 },
             )
             .map_err(|refusal| {

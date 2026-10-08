@@ -338,7 +338,8 @@ fn module_tool(name: &str, module: &str) -> lash::tools::ToolDefinition {
         serde_json::json!({"type": "object"}),
         serde_json::json!({}),
     )
-    .expect("tool schema admits");
+    .expect("tool schema admits")
+    .with_execution(std::time::Duration::from_secs(120));
     tool.manifest.module = Some(Arc::new(lash::tools::ToolModule {
         name: module.into(),
     }));

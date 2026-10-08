@@ -480,7 +480,7 @@ fn an_await_stands_until_its_process_ends() {
     });
     let standing = EngineAction::AwaitProcess {
         process: awaited.clone(),
-        deadline: None,
+        bound: lash_core::ParkBound::UntilScopeEnd,
     };
     assert_eq!(action, standing);
     let outcome = lash_core::ProcessAwaitOutput::from_tool_output(

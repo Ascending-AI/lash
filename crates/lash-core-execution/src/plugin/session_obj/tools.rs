@@ -191,7 +191,6 @@ impl PluginSession {
             tools,
             resolve_contract,
             contributions,
-            budgets: self.host.execution_budgets(),
         })
         .map_err(|err| match err {
             source @ lash_sansio::ToolCatalogBuildError::UnusableSchema { .. } => {

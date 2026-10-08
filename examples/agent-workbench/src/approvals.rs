@@ -323,6 +323,8 @@ impl ApprovalToolProvider {
                 "additionalProperties": false
             }),
         ).expect("valid declared tool schemas")
+        // The body only hands out its key and parks: a short bound.
+        .with_execution(std::time::Duration::from_secs(30))
         .with_tool_binding(
             ToolBinding::new(["ops"], "apply_change").with_authority_type("Ops"),
         )
@@ -330,6 +332,9 @@ impl ApprovalToolProvider {
         // may defer and its round pins the completion wait whose key the body
         // reads from its `AttemptContext`.
         .with_declaration(lash::tools::ToolDeclaration::deferring())
+        // A human decides in their own time: the park lasts until the
+        // decision or the end of the turn that asked.
+        .with_park(lash::tools::ParkBound::UntilScopeEnd)
     }
 }
 

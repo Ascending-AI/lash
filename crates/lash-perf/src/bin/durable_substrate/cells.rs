@@ -193,6 +193,7 @@ fn echo() -> Result<Arc<dyn lash_core::ToolProvider>> {
         serde_json::json!({ "type": "object" }),
     )
     .map_err(|error| anyhow::anyhow!("ext_echo's schemas: {error}"))?
+    .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(ExecutionPolicy::Once)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], CELL_TOOL));
     Ok(Arc::new(StaticToolProvider::new(vec![definition], Echo)))

@@ -32,15 +32,15 @@ pub fn admit_round(
     check_drafts(&round.members)?;
     let mut members = Vec::with_capacity(round.members.len());
     for draft in round.members {
-        let pinned = match draft.wait() {
-            Some(deadline) => {
+        let pinned = match draft.park() {
+            Some(park) => {
                 let (wait, _) = waits::pin(
                     tx,
                     WaitSpec {
                         kind: WaitKind::ToolCompletion,
                         scope: scope.clone(),
                         target_process: None,
-                        deadline: Some(deadline),
+                        deadline: park.deadline(),
                     },
                 )?;
                 Some(PinnedWait { id: wait.id() })

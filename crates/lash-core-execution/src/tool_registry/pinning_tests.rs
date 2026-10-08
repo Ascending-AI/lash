@@ -28,6 +28,7 @@ fn test_tool(name: &str, description: &str) -> ToolDefinition {
         json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 fn tool_id(name: &str) -> ToolId {
@@ -367,6 +368,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
     }
 
     let a_active = Arc::new(AtomicBool::new(true));
@@ -406,6 +408,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
                 json!({ "type": "string" }),
             )
             .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
             .manifest(),
         ),
     );
@@ -426,6 +429,7 @@ async fn pinned_source_executes_with_the_provider_manifest_under_alias_drift_and
         json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .manifest();
     let attempt = test_attempt_context();
     let outcome = pinned

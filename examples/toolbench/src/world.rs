@@ -138,7 +138,7 @@ impl SharedWorld {
     )]
     pub(crate) fn standard_provider(&self) -> Arc<dyn ToolProvider> {
         let mut tools = definitions(self.snapshot().catalog);
-        tools.push(ToolDefinition::raw("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task. Call exactly once, on its own, after all other work has succeeded.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), json!({})).expect("valid declared tool schemas"));
+        tools.push(ToolDefinition::raw("tool:toolbench_submit", "submit", "Submit exactly the value the task asks for and end the task. Call exactly once, on its own, after all other work has succeeded.", json!({"type":"object", "properties":{"value":{"type":["number","string","boolean","null","array","object"]}}, "required":["value"], "additionalProperties":false}), json!({})).expect("valid declared tool schemas").with_execution(std::time::Duration::from_secs(120)));
         Arc::new(StaticToolProvider::new(tools, self.clone()))
     }
 
@@ -411,6 +411,7 @@ fn definition<const N: usize>(
         output_schema,
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(module, operation))
 }
 

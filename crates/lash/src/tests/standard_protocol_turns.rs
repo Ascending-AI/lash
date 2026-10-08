@@ -154,6 +154,7 @@ fn status_tool() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 #[async_trait]
@@ -305,7 +306,8 @@ fn discovery_tool(name: &str, inline: bool) -> lash_core::ToolDefinition {
         }),
         serde_json::json!({ "type": "string" }),
     )
-    .expect("valid declared tool schemas");
+    .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120));
     tool.manifest.inline = inline;
     tool
 }
@@ -568,6 +570,7 @@ fn lookup_tool() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 #[async_trait]
@@ -713,6 +716,7 @@ fn intent_leaf() -> lash_core::ToolDefinition {
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(lash_core::ToolDeclaration::default().with_intents([
         lash_core::ToolIntentKind::StartProcess,
         lash_core::ToolIntentKind::SignalProcess,
@@ -890,6 +894,7 @@ fn over_budget_tool() -> lash_core::ToolDefinition {
         serde_json::json!({"type": "object", "additionalProperties": true}),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
         lash_core::ToolDeclaration::default()
             .with_intents([lash_core::ToolIntentKind::SignalProcess]),

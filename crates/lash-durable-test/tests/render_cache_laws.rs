@@ -237,6 +237,7 @@ fn fixture_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 /// The tool: a long result, then a short one, then long ones, each of its

@@ -721,7 +721,11 @@ fn pending_tool_definition() -> lash_core::ToolDefinition {
         json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(lash_core::ToolDeclaration::deferring())
+    .with_park(lash_core::ParkBound::Within(
+        std::time::Duration::from_secs(120),
+    ))
 }
 
 /// The pending-tool turn's provider: a tool call, then the final answer once

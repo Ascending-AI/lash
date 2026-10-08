@@ -293,7 +293,8 @@ mod tests {
             }),
             serde_json::json!({}),
         )
-        .expect("valid declared tool schemas");
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120));
 
         validate_tool_input(
             &tool.contract(),
@@ -320,7 +321,8 @@ mod tests {
             }),
             serde_json::json!({}),
         )
-        .expect("valid declared tool schemas");
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120));
 
         validate_tool_input(
             &tool.contract(),

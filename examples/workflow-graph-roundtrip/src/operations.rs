@@ -296,7 +296,7 @@ pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
         let name = format!("display_{}", operation.operation);
         definitions.push(ToolDefinition::raw(format!("tool:{name}"), name, operation.label,
             serde_json::json!({"type":"object", "properties":properties, "required":operation.fields.iter().map(|field| field.name).collect::<Vec<_>>(), "additionalProperties":false}),
-            serde_json::json!({"type":"null"})).expect("display schema")
+            serde_json::json!({"type":"null"})).expect("display schema").with_execution(std::time::Duration::from_secs(120))
             .with_tool_binding(ToolBinding::new(["display"], operation.operation).with_authority_type("ToyDisplay"))
             // A display tool appends its operation to the workflow's event journal.
             .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::EmitProcessEvent])));
@@ -311,6 +311,7 @@ pub(crate) fn tool_definitions() -> Vec<lash::tools::ToolDefinition> {
             operation.output_schema(),
         )
         .expect("example schema")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(
             ToolBinding::new([operation.module], operation.operation)
                 .with_authority_type(operation.resource_type),

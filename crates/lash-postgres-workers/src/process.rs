@@ -137,7 +137,7 @@ impl ProcessEngine for WorkerEngine {
                 EngineAction::PinKey {
                     name: KeyName(WAIT.to_owned()),
                     kind: HostWaitKind::Custom,
-                    deadline: Some(Duration::from_millis(
+                    bound: lash_core::ParkBound::Within(Duration::from_millis(
                         script["wait_ms"].as_u64().unwrap_or(1_000),
                     )),
                 },
@@ -243,7 +243,7 @@ impl ProcessSteps for WorkerSteps {
     ) -> Result<StepAdmission, StepRefusal> {
         let _ = step;
         Ok(StepAdmission {
-            wait: None,
+            park: None,
             policy: ExecutionPolicy::Once,
             limit: ExecutionLimit::starting_at(
                 now_ms,

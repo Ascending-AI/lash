@@ -90,7 +90,8 @@ fn long_text_tool_definition() -> lash_core::ToolDefinition {
             }),
             serde_json::json!({ "type": "string" }),
         )
-        .expect("valid declared tool schemas"),
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120)),
         "app_lookup",
     )
 }

@@ -83,13 +83,13 @@ impl MemberDraft {
             request,
             opener,
             (pin.policy, pin.limit),
-            pin.wait,
+            pin.park,
         )
     }
 
     /// The member `call` of `tool` over `request`, owned by `opener`'s run,
-    /// under `policy` and `limit`, and parking until at most `wait` when it
-    /// may defer. Its request material is the digest of `request`.
+    /// under `policy` and `limit`, and parking as `park` pins when it may
+    /// defer. Its request material is the digest of `request`.
     ///
     /// # Errors
     ///
@@ -100,7 +100,7 @@ impl MemberDraft {
         request: EncodedPayload,
         opener: &lash_core_store::effect_opener::EffectOpener,
         pin: (lash_sansio::ExecutionPolicy, lash_sansio::ExecutionLimit),
-        wait: Option<lash_core_execution::runtime::actor::waits::WaitDeadline>,
+        park: Option<lash_core_execution::runtime::actor::waits::ParkDeadline>,
     ) -> Result<Self, ParentFault> {
         use lash_core_store::tool_run::{
             MaterialDigest, MaterialLocation, MaterialOwner, MaterialRef, MaterialRole,
@@ -122,7 +122,7 @@ impl MemberDraft {
                 },
                 policy,
                 limit,
-                wait,
+                park,
             ),
             request,
         })

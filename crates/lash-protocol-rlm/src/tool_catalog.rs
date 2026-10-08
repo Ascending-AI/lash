@@ -139,6 +139,7 @@ mod tests {
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["authority"], "pinned"));
         let drifted = ToolDefinition::raw(
             "tool:test/pinned",
@@ -153,6 +154,7 @@ mod tests {
             json!({ "type": "integer" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["authority"], "pinned"));
         let resolutions = Arc::new(AtomicUsize::new(0));
         let resolution_count = Arc::clone(&resolutions);
@@ -167,7 +169,6 @@ mod tests {
                 }))
             })),
             contributions: Vec::new(),
-            budgets: lash_core::ExecutionBudgets::default(),
         })
         .expect("first resident definition is pinned");
 
@@ -229,7 +230,8 @@ mod tests {
             ToolContract::default_input_schema(),
             json!({ "type": "string" }),
         )
-        .expect("valid declared tool schemas");
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120));
 
         let err = rlm_tool_catalog(
             ToolCatalogContext {
@@ -263,6 +265,7 @@ mod tests {
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["plan"], "update"));
         let binding = retired_only
             .manifest
@@ -320,6 +323,7 @@ mod tests {
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["plan"], "update"));
 
         let contracts: std::collections::BTreeMap<_, _> = [update_plan.clone()]
@@ -347,7 +351,6 @@ mod tests {
                 contracts.get(&manifest.id).cloned()
             })),
             contributions: vec![contribution],
-            budgets: lash_core::ExecutionBudgets::default(),
         })
         .expect("complete resident definitions");
 
@@ -430,6 +433,7 @@ mod tests {
             }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["tracker"], "issues_search"));
         let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![search]);
 
@@ -473,6 +477,7 @@ mod tests {
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["agents"], "spawn"))
     }
 
@@ -488,7 +493,6 @@ mod tests {
                 move |_| Some(Arc::clone(&contract))
             })),
             contributions: vec![ToolCatalogContribution::default()],
-            budgets: lash_core::ExecutionBudgets::default(),
         })
         .expect("complete resident definition");
         let docs = rlm_prompt_tool_docs(
@@ -535,6 +539,7 @@ mod discovery_tests {
                 serde_json::json!({"type":"string"}),
             )
             .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
             .with_tool_binding(ToolBinding::new(["tools"], name));
             tool.manifest.inline = inline;
             tool

@@ -244,6 +244,7 @@ fn steer_round(
         serde_json::json!({ "type": "object" }),
     )
     .expect("steer_round's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     // A call a kill interrupted runs again at its ordinal, so the first
     // round's body sends the steer whatever was cut.
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(

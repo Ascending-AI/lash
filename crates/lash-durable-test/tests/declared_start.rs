@@ -387,6 +387,7 @@ fn probe_tool() -> lash_core::ToolDefinition {
         object,
     )
     .expect("the probe's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], PROBE_TOOL))
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(2).unwrap(),
@@ -399,6 +400,7 @@ fn probe_tool() -> lash_core::ToolDefinition {
         lash_core::ToolDeclaration::deferring()
             .with_intents([lash_core::ToolIntentKind::StartProcess]),
     )
+    .with_park(lash_core::ParkBound::Within(std::time::Duration::from_secs(120)))
 }
 
 /// A tool whose `Pending` declares one held child: the child idles until it

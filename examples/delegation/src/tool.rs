@@ -67,6 +67,8 @@ fn tool_definition(
         output_schema,
     )
     .expect("valid declared tool schemas")
+    // The body only declares its child's start and parks: a short bound.
+    .with_execution(std::time::Duration::from_secs(30))
 }
 
 /// `spawn_agent`: run one child session on a task and answer its final
@@ -113,6 +115,9 @@ pub fn spawn_agent_tool_definition() -> ToolDefinition {
     .with_output_from_input_schema("output", None)
     // The child runs as a declared process start the call parks on.
     .with_declaration(ToolDeclaration::deferring().with_intents([ToolIntentKind::StartProcess]))
+    // The call waits for its child, however long the child's own bounds let
+    // it run, or until the delegating turn ends.
+    .with_park(lash::tools::ParkBound::UntilScopeEnd)
     // The body's one effect is that start, under a key derived from the
     // call: a rerun after a crash gets the child it registered back, so the
     // call is rerun rather than settled as interrupted.

@@ -121,7 +121,7 @@ pub use effect_identity::{
 };
 pub use execution_budgets::{
     ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit,
-    MAX_EXECUTION_BUDGET, MAX_PROVIDER_ATTEMPTS, ProviderAttemptLimits, RegistrationRefused,
+    MAX_EXECUTION_BUDGET, MAX_PROVIDER_ATTEMPTS, ProviderAttemptLimits,
 };
 pub use frame_key::{FrameKey, FrameKeyError};
 pub use handle::{
@@ -190,10 +190,10 @@ pub use tool_catalog::{
 #[cfg(feature = "schema-validation")]
 pub use tool_contract::validate_tool_input;
 pub use tool_contract::{
-    Backoff, BoundedRetry, CompactToolContract, ExecutionPolicy, ExpectedExecution, ExtraKeys,
-    LimitCause, ModelTool, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape,
+    Backoff, BoundedRetry, CompactToolContract, ExecutionPolicy, ExtraKeys, LimitCause, ModelTool,
+    ObjectShape, ParkBound, ProcessParamShape, ProcessShape, RegistrationRefused, SchemaShape,
     ShapeConstraints, ShapeField, ShapeKind, ShapeRow, TOOL_BINDING_KEY,
-    ToolArgumentProjectionPolicy, ToolBinding, ToolContract, ToolDefinition,
+    ToolArgumentProjectionPolicy, ToolBinding, ToolBound, ToolBounds, ToolContract, ToolDefinition,
     ToolDefinitionBindingExt, ToolDiscovery, ToolId, ToolManifest, ToolModule, ToolOutputContract,
     X_LASH_KEYWORD, XLashParam, XLashSignature, XLashType, is_named_type_reference, schema_for,
 };

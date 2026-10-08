@@ -29,6 +29,7 @@ impl crate::ToolProvider for DynamicSnapshotTools {
                     serde_json::json!({}),
                 )
                 .expect("valid declared tool schemas")
+                .with_execution(std::time::Duration::from_secs(120))
                 .manifest()
             })
             .collect()
@@ -49,6 +50,7 @@ impl crate::ToolProvider for DynamicSnapshotTools {
                         serde_json::json!({}),
                     )
                     .expect("valid declared tool schemas")
+                    .with_execution(std::time::Duration::from_secs(120))
                     .contract(),
                 )
             })

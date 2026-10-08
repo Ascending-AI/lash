@@ -599,6 +599,7 @@ fn attachment_result_tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 #[async_trait::async_trait]
@@ -873,6 +874,7 @@ fn array_attachment_tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "array" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 #[async_trait::async_trait]

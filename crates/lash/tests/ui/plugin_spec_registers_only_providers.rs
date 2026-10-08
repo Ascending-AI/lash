@@ -8,6 +8,7 @@ fn main() {
         "a definition with no provider",
         serde_json::json!({ "type": "object" }),
         serde_json::json!({ "type": "object" }),
-    ).expect("valid declared tool schemas");
+    ).expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120));
     let _ = lash::plugins::PluginSpec::new().with_tool_provider(definition);
 }

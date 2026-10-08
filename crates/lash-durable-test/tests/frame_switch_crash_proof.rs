@@ -102,7 +102,8 @@ fn switch_frame() -> Arc<dyn lash_core::ToolProvider> {
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         serde_json::json!({ "type": "object" }),
     )
-    .expect("switch_frame's schemas");
+    .expect("switch_frame's schemas")
+    .with_execution(std::time::Duration::from_secs(120));
     Arc::new(StaticToolProvider::new(vec![definition], SwitchFrame))
 }
 

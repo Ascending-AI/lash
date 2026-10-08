@@ -220,7 +220,8 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
                     serde_json::json!({"type":"object"}),
                     serde_json::json!({"type":"string"}),
                 )
-                .expect("tool schema"),
+                .expect("tool schema")
+                .with_execution(std::time::Duration::from_secs(120)),
             ],
             Ping,
         )))

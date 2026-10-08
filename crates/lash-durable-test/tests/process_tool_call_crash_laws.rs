@@ -84,6 +84,7 @@ fn probe_definition() -> lash_core::ToolDefinition {
         object,
     )
     .expect("the probe's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], PROBE))
     // A call a kill interrupted runs again at its ordinal: the raced calls
     // stay in flight across the kill, so the race is still held when the

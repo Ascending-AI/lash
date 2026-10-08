@@ -117,7 +117,7 @@ impl ProcessSteps for LashlangSteps {
     ) -> Result<StepAdmission, StepRefusal> {
         match step {
             StepRequest::Engine { .. } => Ok(StepAdmission {
-                wait: None,
+                park: None,
                 policy: ExecutionPolicy::repeatable(
                     std::num::NonZeroU32::new(3).expect("nonzero"),
                     0,

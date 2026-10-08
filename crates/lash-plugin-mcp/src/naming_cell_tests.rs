@@ -16,6 +16,7 @@ fn catalog(names: &[&str]) -> lash_core::ToolCatalog {
                         .expect("tool")
                 })
                 .collect(),
+            std::time::Duration::from_secs(30),
         )
         .expect("catalog imports")
         .into_values()

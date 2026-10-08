@@ -262,7 +262,10 @@ async fn l07_l08_mcp_sockets_refuse_remote_defer_and_isolation_before_send() {
     for mode in ["deferred", "task", "isolated"] {
         let mut manifest = original.clone();
         match mode {
-            "deferred" => manifest.declaration.may_defer = true,
+            "deferred" => {
+                manifest.declaration.may_defer = true;
+                manifest.park = Some(lash_core::ParkBound::UntilScopeEnd);
+            }
             "isolated" => manifest.declaration.isolated = true,
             _ => {
                 manifest
@@ -370,7 +373,7 @@ async fn l07_mcp_required_remote_tasks_refuse_during_admission() {
         "execution": {"taskSupport": "required"},
     }))
     .unwrap();
-    let imported = import_tools("mock", vec![remote]).unwrap();
+    let imported = import_tools("mock", vec![remote], std::time::Duration::from_secs(30)).unwrap();
     let service = entry.service_snapshot().unwrap();
     let imported = admission::bind_imported_tools(imported, &entry, &service.peer).unwrap();
     entry.replace_imported_tools(imported).unwrap();

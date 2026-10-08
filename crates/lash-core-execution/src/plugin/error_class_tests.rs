@@ -94,11 +94,9 @@ plugin_error_samples! {
         name: "sampled".to_string(),
     },
     ToolRegistrationRefused { .. } => PluginError::ToolRegistrationRefused {
-        source: Box::new(crate::RegistrationRefused::InlineBudgetExceedsCeiling {
+        source: Box::new(crate::RegistrationRefused::MissingBound {
             tool: "sampled".to_string(),
-            declared: std::time::Duration::from_secs(600),
-            ceiling: std::time::Duration::from_secs(300),
-            hint: "sampled".to_string(),
+            bound: crate::ToolBound::Execution,
         }),
     },
     ResidentToolRouteUnavailable { .. } => PluginError::ResidentToolRouteUnavailable {

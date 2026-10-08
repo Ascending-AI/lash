@@ -52,6 +52,7 @@ fn tool_definition(name: &str) -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], name));
     if name == RETRY {
         definition.with_execution_policy(lash_core::ExecutionPolicy::repeatable(

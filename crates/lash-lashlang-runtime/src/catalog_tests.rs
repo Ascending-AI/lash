@@ -11,6 +11,7 @@ fn conflicting_tool_catalog_lashlang_bindings_return_an_error() {
             lash_core::JsonSchema::any().into_value(),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["shared"], "run").with_authority_type("Shared"))
     };
     let catalog = lash_core::ToolCatalog::from_tool_definitions(vec![

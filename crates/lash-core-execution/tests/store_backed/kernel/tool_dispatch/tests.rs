@@ -33,6 +33,7 @@ fn named_beta_tool(name: &str) -> crate::ToolDefinition {
         json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 fn manifests(definitions: Vec<crate::ToolDefinition>) -> Vec<crate::ToolManifest> {
@@ -324,6 +325,7 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
             json!({ "type": "object", "additionalProperties": true }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
     }
 
     #[async_trait::async_trait]
@@ -384,6 +386,7 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
             json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_argument_projection(
             crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"),
         )

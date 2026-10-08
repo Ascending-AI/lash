@@ -20,12 +20,15 @@ use crate::{ToolAdmissionRefusal, ToolFailure, ToolFailureCause, ToolFailureClas
 ///
 /// # Errors
 ///
-/// An invalid declaration, or an isolated one no process implementation
-/// runs.
+/// A manifest missing a bound its host must set, an invalid declaration, or
+/// an isolated one no process implementation runs.
 pub(crate) fn admit_tool(
     manifest: &ToolManifest,
     isolation_bound: bool,
 ) -> Result<(), ToolAdmissionRefusal> {
+    manifest
+        .bounds()
+        .map_err(|cause| ToolAdmissionRefusal::Bounds { cause })?;
     manifest.declaration.admit(isolation_bound)
 }
 
@@ -33,7 +36,9 @@ pub(crate) fn admit_tool(
 #[must_use]
 pub fn admission_failure(tool_name: &str, refusal: ToolAdmissionRefusal) -> ToolFailure {
     let class = match refusal {
-        ToolAdmissionRefusal::Declaration { .. } => ToolFailureClass::Internal,
+        ToolAdmissionRefusal::Declaration { .. } | ToolAdmissionRefusal::Bounds { .. } => {
+            ToolFailureClass::Internal
+        }
         ToolAdmissionRefusal::UnsupportedIsolation | ToolAdmissionRefusal::Sibling { .. } => {
             ToolFailureClass::Unavailable
         }
@@ -101,15 +106,20 @@ mod tests {
     use crate::{ToolDeclaration, ToolDefinition};
 
     fn manifest(name: &str, declaration: ToolDeclaration) -> ToolManifest {
-        ToolDefinition::new(
+        let definition = ToolDefinition::new(
             name,
             name,
             "",
             crate::SchemaContract::default(),
             crate::SchemaContract::default(),
         )
-        .with_declaration(declaration)
-        .manifest()
+        .with_execution(std::time::Duration::from_secs(30));
+        let definition = if declaration.may_defer {
+            definition.with_park(crate::ParkBound::UntilScopeEnd)
+        } else {
+            definition
+        };
+        definition.with_declaration(declaration).manifest()
     }
 
     #[test]

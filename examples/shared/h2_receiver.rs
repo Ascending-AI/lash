@@ -194,7 +194,8 @@ impl ProcessEngine for SourceEngine {
             EngineEvent::Started { .. } => EngineAction::PinKey {
                 name: name(),
                 kind: HostWaitKind::Custom,
-                deadline: None,
+                // The receiver waits for its source as long as it lives.
+                bound: lash::tools::ParkBound::UntilScopeEnd,
             },
             EngineEvent::KeyPinned { key, .. } => EngineAction::Emit {
                 event_type: source_pinned_type()?,

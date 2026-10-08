@@ -37,6 +37,7 @@ impl SchemaChangingTool {
             serde_json::json!({ "type": "object", "additionalProperties": true }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
     }
 }
 
@@ -147,7 +148,11 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(lash_core::ToolDeclaration::deferring())
+    .with_park(lash_core::ParkBound::Within(
+        std::time::Duration::from_secs(120),
+    ))
 }
 
 /// FIG-5263: observation publication after durable admission uses the

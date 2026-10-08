@@ -110,6 +110,7 @@ fn approval_request_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["approval"],
         "request",
@@ -455,6 +456,7 @@ fn echo_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["echo"], "say"))
 }
 
@@ -806,7 +808,7 @@ fn widened_contract_definition() -> lash_core::ToolDefinition {
             { "type":"object", "properties": {"text":{"type":"string","minLength":4}}, "required":["text"] },
             { "type":"object", "properties": {"text":{}}, "additionalProperties":false }
         ]
-    }), serde_json::json!({"type":"string"})).expect("valid declared tool schemas")
+    }), serde_json::json!({"type":"string"})).expect("valid declared tool schemas").with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["bounded"], "say"))
 }
 

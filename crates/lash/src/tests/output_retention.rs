@@ -52,7 +52,8 @@ fn retention_tool(name: &str) -> lash_core::ToolDefinition {
             serde_json::json!({"type": "object", "properties": {}, "additionalProperties": false}),
             serde_json::json!({}),
         )
-        .expect("valid declared tool schemas"),
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120)),
         name,
     )
 }

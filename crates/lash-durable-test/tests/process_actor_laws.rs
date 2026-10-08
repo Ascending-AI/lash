@@ -163,7 +163,7 @@ impl ProcessEngine for LawEngine {
             ("await", EngineEvent::Started { .. }) => EngineAction::AwaitProcess {
                 process: ProcessId::parse(script["await"].as_str().unwrap_or_default())
                     .map_err(infra)?,
-                deadline: Some(
+                bound: lash_core::ParkBound::Within(
                     script["deadline_ms"]
                         .as_u64()
                         .map_or(LONG, Duration::from_millis),
@@ -268,7 +268,7 @@ impl ProcessSteps for LawSteps {
             });
         }
         Ok(StepAdmission {
-            wait: None,
+            park: None,
             policy: ExecutionPolicy::Once,
             limit: ExecutionLimit::starting_at(
                 now_ms,

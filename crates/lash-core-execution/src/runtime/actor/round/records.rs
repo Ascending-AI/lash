@@ -10,7 +10,7 @@ use lash_sansio::{ExecutionLimit, ExecutionPolicy};
 use serde::{Deserialize, Serialize};
 
 use super::{ExecutionDraft, PinnedWait, SettledOutput};
-use crate::runtime::actor::waits::{WaitDeadline, WaitId};
+use crate::runtime::actor::waits::{ParkDeadline, WaitDeadline, WaitId};
 use crate::{ToolCallId, ToolId};
 
 /// The format of a run record's body: the admission, start, outcome, retry
@@ -71,17 +71,22 @@ impl AdmittedMember {
             policy: draft.policy(),
             limit_expires_at_ms: draft.limit().expires_at,
             limit_max_slice_ms: millis(draft.limit().max_slice),
-            wait_deadline_ms: draft.wait().map(|wait| wait.at().0),
+            wait_deadline_ms: draft
+                .park()
+                .and_then(ParkDeadline::deadline)
+                .map(|deadline| deadline.at().0),
             wait_id: draft.pinned_wait().map(|pinned| pinned.id.to_hex()),
             trace: draft.trace().cloned(),
         }
     }
 
-    /// The draft the admission pinned, exactly: never refreshed.
+    /// The draft the admission pinned, exactly: never refreshed. A member
+    /// with a pinned wait and no deadline parks until its scope ends.
     ///
     /// # Errors
     ///
-    /// A pinned wait whose id does not decode.
+    /// A pinned wait whose id does not decode, or a park deadline without a
+    /// pinned wait.
     pub(super) fn draft(&self) -> Result<ExecutionDraft, &'static str> {
         let pinned = self
             .wait_id
@@ -92,6 +97,15 @@ impl AdmittedMember {
                     .ok_or("a pinned wait id is not a wait id")
             })
             .transpose()?;
+        let deadline = self
+            .wait_deadline_ms
+            .map(|at| WaitDeadline::at_instant(DurableInstant(at)));
+        let park = match (pinned, deadline) {
+            (Some(_), Some(deadline)) => Some(ParkDeadline::At(deadline)),
+            (Some(_), None) => Some(ParkDeadline::UntilScopeEnd),
+            (None, None) => None,
+            (None, Some(_)) => return Err("a park deadline has no pinned wait"),
+        };
         Ok(ExecutionDraft::new(
             self.call.clone(),
             ToolId::new(self.tool.clone()),
@@ -101,8 +115,7 @@ impl AdmittedMember {
                 expires_at: self.limit_expires_at_ms,
                 max_slice: Duration::from_millis(self.limit_max_slice_ms),
             },
-            self.wait_deadline_ms
-                .map(|at| WaitDeadline::at_instant(DurableInstant(at))),
+            park,
         )
         .with_pinned_wait(pinned)
         .with_trace(self.trace.clone()))

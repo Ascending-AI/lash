@@ -16,6 +16,7 @@ pub(super) fn deferred_fetch_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["web"], "fetch"))
 }
 

@@ -366,6 +366,7 @@ fn step_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["oracle"], "step"))
     // Every step call may park, and a step that emits declares its process
     // event as an intent.
@@ -373,6 +374,7 @@ fn step_definition() -> lash_core::ToolDefinition {
         lash_core::ToolDeclaration::deferring()
             .with_intents([lash_core::ToolIntentKind::EmitProcessEvent]),
     )
+    .with_park(lash_core::ParkBound::Within(std::time::Duration::from_secs(120)))
 }
 
 #[async_trait]

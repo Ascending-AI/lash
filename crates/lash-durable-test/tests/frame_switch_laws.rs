@@ -74,7 +74,8 @@ async fn world(
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         serde_json::json!({ "type": "object" }),
     )
-    .expect("switch_frame's schemas");
+    .expect("switch_frame's schemas")
+    .with_execution(std::time::Duration::from_secs(120));
     let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(StaticToolProvider::new(
         vec![definition],
         SwitchFrame(sender, session),

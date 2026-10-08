@@ -85,7 +85,7 @@ fn pin(index: u64) -> EngineAction {
     EngineAction::PinKey {
         name: KeyName(format!("w{index}")),
         kind: HostWaitKind::Custom,
-        deadline: Some(Duration::from_secs(3_600)),
+        bound: lash_core::ParkBound::Within(Duration::from_secs(3_600)),
     }
 }
 

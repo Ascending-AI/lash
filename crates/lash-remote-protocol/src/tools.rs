@@ -26,6 +26,9 @@ pub struct RemoteToolGrant {
     pub argument_projection: Option<RemoteToolArgumentProjectionPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_policy: Option<RemoteExecutionPolicy>,
+    /// How long one run of the granted tool's body may take, in
+    /// milliseconds: the host's bound, which lash never defaults.
+    pub execution_ms: u64,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub bindings: BTreeMap<String, serde_json::Value>,
 }

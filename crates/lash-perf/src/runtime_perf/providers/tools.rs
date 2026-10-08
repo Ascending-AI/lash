@@ -441,6 +441,7 @@ fn benchmark_mail_tool_definition(account: &str, operation: &str) -> ToolDefinit
         output_schema,
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["inbox", account], operation).with_authority_type("Inbox"))
     .with_declaration(declaration)
 }
@@ -560,6 +561,7 @@ fn benchmark_echo_tool_definition() -> ToolDefinition {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["tools"], "benchmark_echo").with_authority_type("Tools"))
 }
 
@@ -590,6 +592,7 @@ fn benchmark_slow_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     ).expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(
         ToolBinding::new(["tools"], "benchmark_slow").with_authority_type("Tools"),
     )
@@ -625,8 +628,12 @@ fn benchmark_async_tool_definition() -> ToolDefinition {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["tools"], "benchmark_async").with_authority_type("Tools"))
     .with_declaration(lash_core::ToolDeclaration::deferring())
+    .with_park(lash_core::ParkBound::Within(
+        std::time::Duration::from_secs(120),
+    ))
 }
 
 pub(super) fn benchmark_oblique_tool_definitions() -> Vec<ToolDefinition> {
@@ -673,6 +680,7 @@ pub(super) fn benchmark_oblique_search_tool_definition() -> ToolDefinition {
         }),
         oblique_search_output_schema(),
     ).expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(
         ToolBinding::new(["obliq"], "search").with_authority_type("Obliq"),
     )
@@ -718,6 +726,7 @@ fn benchmark_oblique_judge_tool_definition() -> ToolDefinition {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(ToolBinding::new(["obliq"], "judge_candidates").with_authority_type("Obliq"))
 }
 
@@ -747,6 +756,7 @@ fn benchmark_oblique_list_handles_tool_definition() -> ToolDefinition {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(
         ToolBinding::new(["obliq"], "list_async_handles").with_authority_type("Obliq"),
     )
@@ -965,6 +975,7 @@ fn gmail_like_tool_definition(index: usize, name: &str) -> ToolDefinition {
         gmail_like_input_schema(name),
         gmail_like_output_schema(name),
     ).expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_examples(vec![
         format!(
             r#"call {name} {{ user_id: "me", message_id: "msg_123", payload: {{ label_ids: ["INBOX", "IMPORTANT"] }} }}"#

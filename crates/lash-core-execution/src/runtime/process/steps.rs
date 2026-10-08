@@ -39,7 +39,7 @@ use crate::runtime::actor::round::{
     AdmittedExecution, Material, MemberBody, MemberResult, RoundTools, SettledOutput,
     decode_completed,
 };
-use crate::runtime::actor::waits::{Resolution, WaitDeadline};
+use crate::runtime::actor::waits::{ParkDeadline, Resolution};
 use crate::{
     ActorContext, PluginError, ProcessId, ProcessRecord, RuntimeEffectControllerError, ToolCatalog,
 };
@@ -60,11 +60,12 @@ const ENGINE_STEP_ATTEMPTS: std::num::NonZeroU32 = std::num::NonZeroU32::MIN.sat
 pub struct StepAdmission {
     /// The tool's execution policy.
     pub policy: ExecutionPolicy,
-    /// The step's limit, within the tool ceiling.
+    /// The step body's limit, from the bound its host set.
     pub limit: ExecutionLimit,
-    /// For a step that may park, the deadline of the completion wait its
-    /// admission pins: its park never outlives it.
-    pub wait: Option<WaitDeadline>,
+    /// For a step that may park, what its park pins: the deadline of the
+    /// completion wait its admission pins, separate from the body's limit,
+    /// or none for a park that lasts until its process scope ends.
+    pub park: Option<ParkDeadline>,
 }
 
 /// A step refused before its admission; nothing was recorded. The process
@@ -348,15 +349,6 @@ pub fn host_step_output(process: &ProcessId, output: &crate::ToolCallOutput) -> 
         // operation may or may not have taken effect.
         Err(_) => SettledOutput::Interrupted,
     }
-}
-
-/// The completion wait of a catalog tool step that may defer: one limit
-/// spans its body and its park, as a round member's does.
-#[must_use]
-pub fn tool_step_wait(limit: &ExecutionLimit) -> WaitDeadline {
-    WaitDeadline::at_instant(lash_durable::DurableInstant(
-        i64::try_from(limit.expires_at).unwrap_or(i64::MAX),
-    ))
 }
 
 /// The answer of `process`'s catalog tool step that parked as `parked`,

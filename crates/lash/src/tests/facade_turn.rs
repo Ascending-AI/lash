@@ -166,7 +166,8 @@ async fn a_frame_switch_through_send_completes_and_its_follow_on_runs_next() {
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         serde_json::json!({ "type": "object" }),
     )
-    .expect("switch_frame's schemas");
+    .expect("switch_frame's schemas")
+    .with_execution(std::time::Duration::from_secs(120));
     // The model compacts by calling `switch_frame`, and answers the task it
     // finds on the new frame.
     let provider = crate::testing::TestProvider::builder()
@@ -267,6 +268,7 @@ fn account_tool(name: &str) -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "string" }),
     )
     .expect("the account tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 #[async_trait]

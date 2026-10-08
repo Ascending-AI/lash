@@ -234,6 +234,8 @@ fn process_list_tool_definition() -> ToolDefinition {
         }),
         process_list_output_schema(),
     ).expect("valid declared tool schemas")
+    // One store read or write: a short body.
+    .with_execution(std::time::Duration::from_secs(30))
     .with_examples(vec![
         "await processes.list({})?".into(),
         r#"await processes.list({ status: "any" })?"#.into(),
@@ -294,10 +296,15 @@ fn process_await_tool_definition() -> ToolDefinition {
             "description": "The process's terminal outcome."
         }),
     ).expect("valid declared tool schemas")
+    // One store read or write: a short body.
+    .with_execution(std::time::Duration::from_secs(30))
     .with_examples(vec!["await processes.await({ handle: h })?".into()])
     // `await_process` parks, so admission records that it may defer and the
     // runtime pre-derives the completion key its recorded attempt reads.
     .with_declaration(lash_core::ToolDeclaration::deferring())
+    // An await has no deadline of its own: it parks until the awaited
+    // process ends or the awaiting scope does.
+    .with_park(lash_core::ParkBound::UntilScopeEnd)
     .with_tool_binding(ToolBinding::new(["processes"], "await"))
 }
 
@@ -337,6 +344,8 @@ fn process_cancel_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
     ).expect("valid declared tool schemas")
+    // One store read or write: a short body.
+    .with_execution(std::time::Duration::from_secs(30))
     .with_examples(vec![
         "await processes.cancel({ handle: h })?".into(),
         r#"await processes.cancel({ process_id: "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C" })?"#.into(),

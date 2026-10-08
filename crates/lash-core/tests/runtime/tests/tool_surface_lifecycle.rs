@@ -41,6 +41,7 @@ impl DynamicToolSpec {
             json!({ "type": "object", "additionalProperties": true }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
     }
 }
 

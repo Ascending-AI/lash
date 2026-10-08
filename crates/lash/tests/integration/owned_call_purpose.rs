@@ -92,7 +92,8 @@ impl lash::plugins::SessionPlugin for Probe {
             serde_json::json!({"type":"object","additionalProperties":false}),
             serde_json::json!({"type":"string"}),
         )
-        .map_err(|error| PluginError::Session(error.to_string()))?;
+        .map_err(|error| PluginError::Session(error.to_string()))?
+        .with_execution(std::time::Duration::from_secs(120));
         reg.tools()
             .provider(Arc::new(StaticToolProvider::new(vec![definition], Probe)))?;
         Ok(())

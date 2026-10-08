@@ -422,7 +422,11 @@ impl SuspendToolProvider {
             json!({ "type": "object" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_declaration(lash_core::ToolDeclaration::deferring())
+        .with_park(lash_core::ParkBound::Within(
+            std::time::Duration::from_secs(120),
+        ))
     }
 }
 

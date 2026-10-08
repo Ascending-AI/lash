@@ -77,7 +77,7 @@ use lash_sansio::{ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause}
 use tokio_util::sync::CancellationToken;
 
 use super::ActorContext;
-use super::waits::{WaitDeadline, WaitId, WaitKind, WaitRef};
+use super::waits::{ParkDeadline, WaitId, WaitKind, WaitRef};
 use crate::{ToolCallId, ToolId};
 
 pub use crate::plugin::StagedPluginState;
@@ -125,8 +125,8 @@ impl PinnedWait {
 }
 
 /// One execution to admit: a call, its tool, its request material, the
-/// policy and limit pinned now, the wait deadline of a call that may park
-/// (Pending), with the wait its round pins, and the trace scope its
+/// policy and body limit pinned now, the park deadline of a call that may
+/// park (Pending), with the wait its round pins, and the trace scope its
 /// admission retains.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecutionDraft {
@@ -135,14 +135,14 @@ pub struct ExecutionDraft {
     request: MaterialRef,
     policy: ExecutionPolicy,
     limit: ExecutionLimit,
-    wait: Option<WaitDeadline>,
+    park: Option<ParkDeadline>,
     pinned: Option<PinnedWait>,
     trace: Option<lash_trace::DurableTraceScope>,
 }
 
 impl ExecutionDraft {
-    /// A draft of `call` of `tool` over `request`, its policy and limit
-    /// pinned now.
+    /// A draft of `call` of `tool` over `request`, its policy, body limit
+    /// and, for a call that may park, its park deadline pinned now.
     #[must_use]
     pub fn new(
         call: ToolCallId,
@@ -150,7 +150,7 @@ impl ExecutionDraft {
         request: MaterialRef,
         policy: ExecutionPolicy,
         limit: ExecutionLimit,
-        wait: Option<WaitDeadline>,
+        park: Option<ParkDeadline>,
     ) -> Self {
         Self {
             call,
@@ -158,7 +158,7 @@ impl ExecutionDraft {
             request,
             policy,
             limit,
-            wait,
+            park,
             pinned: None,
             trace: None,
         }
@@ -209,10 +209,11 @@ impl ExecutionDraft {
         self.limit
     }
 
-    /// A Pending call's wait deadline.
+    /// What a call that may park pinned for its park; `None` for a call
+    /// that never parks.
     #[must_use]
-    pub fn wait(&self) -> Option<WaitDeadline> {
-        self.wait
+    pub fn park(&self) -> Option<ParkDeadline> {
+        self.park
     }
 
     /// The completion wait its round pinned, for a call that may park.

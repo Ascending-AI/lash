@@ -174,6 +174,7 @@ fn tool_definition(name: &str) -> lash_core::ToolDefinition {
         object,
     )
     .expect("the tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
     // A call a kill interrupted runs again at its ordinal.
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(

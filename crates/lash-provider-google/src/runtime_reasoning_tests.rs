@@ -57,6 +57,7 @@ fn runtime_lookup_definition() -> lash_core::ToolDefinition {
         json!({ "type": "object" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 #[async_trait::async_trait]

@@ -160,6 +160,7 @@ fn ext_write(world: Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
         serde_json::json!({ "type": "object" }),
     )
     .expect("ext_write's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(ExecutionPolicy::Once)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], TOOL));
     Arc::new(StaticToolProvider::new(

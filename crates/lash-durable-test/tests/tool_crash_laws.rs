@@ -423,6 +423,7 @@ fn probe_definition() -> lash_core::ToolDefinition {
         object,
     )
     .expect("the probe's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], PROBE))
     // A call a kill interrupted runs again at its ordinal, so every call
     // the turn makes is answered and the turn reaches the call past the
@@ -470,6 +471,7 @@ fn put_definition() -> lash_core::ToolDefinition {
         object,
     )
     .expect("the put tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], PUT))
     // A put a kill interrupted runs again at its ordinal and puts the same
     // bytes again.
@@ -533,6 +535,7 @@ fn state_definition(name: &str) -> lash_core::ToolDefinition {
         object,
     )
     .expect("the state tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
     // A call a kill interrupted runs again at its ordinal and sets a value
     // of its own entry.

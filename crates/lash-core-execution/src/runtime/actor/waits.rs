@@ -88,49 +88,15 @@ impl std::fmt::Debug for PinnedKey {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct WaitDeadline(DurableInstant);
 
-/// A refused wait deadline.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
-pub enum WaitDeadlineRefusal {
-    /// The request is above the ceiling.
-    #[error("a wait of {requested:?} is above the ceiling {ceiling:?}")]
-    AboveCeiling {
-        /// The requested wait.
-        requested: Duration,
-        /// The ceiling.
-        ceiling: Duration,
-    },
-    /// The deadline does not fit a durable instant.
-    #[error("a wait of {0:?} does not fit a durable instant")]
-    Unrepresentable(Duration),
-}
-
 impl WaitDeadline {
-    /// The deadline a wait of `requested` (or `default`) minted at `now`
-    /// gets, refused above `ceiling`. Callers pass `ExecutionBudgets`'
-    /// `wait_default` and `wait_ceiling`; a nested wait keeps its own
+    /// The deadline of a wait of `wait` minted at `now`: the bound its
+    /// requester set. Lash holds no wait default or ceiling; a deadline past
+    /// the last durable instant is that instant. A nested wait keeps its own
     /// deadline.
-    ///
-    /// # Errors
-    ///
-    /// [`WaitDeadlineRefusal`].
-    pub fn resolve(
-        requested: Option<Duration>,
-        default: Duration,
-        ceiling: Duration,
-        now: DurableInstant,
-    ) -> Result<Self, WaitDeadlineRefusal> {
-        let wait = requested.unwrap_or(default);
-        if wait > ceiling {
-            return Err(WaitDeadlineRefusal::AboveCeiling {
-                requested: wait,
-                ceiling,
-            });
-        }
-        i64::try_from(wait.as_millis())
-            .ok()
-            .and_then(|millis| now.0.checked_add(millis))
-            .map(|at| Self(DurableInstant(at)))
-            .ok_or(WaitDeadlineRefusal::Unrepresentable(wait))
+    #[must_use]
+    pub fn after(wait: Duration, now: DurableInstant) -> Self {
+        let millis = i64::try_from(wait.as_millis()).unwrap_or(i64::MAX);
+        Self(DurableInstant(now.0.saturating_add(millis)))
     }
 
     /// The deadline at the stored instant `at`: a deadline read back from
@@ -144,6 +110,39 @@ impl WaitDeadline {
     #[must_use]
     pub fn at(self) -> DurableInstant {
         self.0
+    }
+}
+
+/// What a call's admission pinned for its park: the deadline its
+/// [`ParkBound`](crate::ParkBound) set, or none for a park that lasts until
+/// its scope ends. Computed once, at admission, and recorded with the call's
+/// run: a crash or takeover reads it back, never computes it again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ParkDeadline {
+    /// The park times out at this deadline.
+    At(WaitDeadline),
+    /// The park has no deadline: the end of its turn or process scope
+    /// revokes it.
+    UntilScopeEnd,
+}
+
+impl ParkDeadline {
+    /// What a park bounded by `bound` and admitted at `now` pins.
+    #[must_use]
+    pub fn admitted(bound: crate::ParkBound, now: DurableInstant) -> Self {
+        match bound {
+            crate::ParkBound::Within(wait) => Self::At(WaitDeadline::after(wait, now)),
+            crate::ParkBound::UntilScopeEnd => Self::UntilScopeEnd,
+        }
+    }
+
+    /// The deadline the park's waits are pinned under, if it has one.
+    #[must_use]
+    pub fn deadline(self) -> Option<WaitDeadline> {
+        match self {
+            Self::At(deadline) => Some(deadline),
+            Self::UntilScopeEnd => None,
+        }
     }
 }
 

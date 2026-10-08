@@ -87,6 +87,8 @@ pub fn process_create_tool_definition() -> ToolDefinition {
             "description": "The created process definition.",
         }),
     ).expect("valid declared tool schemas")
+    // One store read or write: a short body.
+    .with_execution(std::time::Duration::from_secs(30))
     .with_declaration(
         lash_core::ToolDeclaration::default()
             .with_intents([lash_core::ToolIntentKind::PublishDefinition]),
@@ -314,6 +316,7 @@ mod tests {
                 serde_json::json!({ "type": "string" }),
             )
             .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
             .with_tool_binding(lash_core::ToolBinding::new(["demo"], "echo")),
         ])
     }

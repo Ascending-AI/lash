@@ -1025,6 +1025,7 @@ fn ask_twice_definition() -> lash::tools::ToolDefinition {
         serde_json::json!({"type": "string"}),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 /// Where an [`AskTwice`] attempt retires the session's key, once.

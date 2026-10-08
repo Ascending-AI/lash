@@ -127,6 +127,7 @@ fn create_definition() -> lash_core::ToolDefinition {
         production.contract.input_schema,
         production.contract.output_schema,
     )
+    .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(production.manifest.declaration)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], CREATE))
 }

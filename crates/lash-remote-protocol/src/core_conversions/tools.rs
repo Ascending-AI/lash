@@ -58,6 +58,7 @@ impl TryFrom<&RemoteToolGrant> for ToolDefinition {
             examples,
             argument_projection,
             execution_policy,
+            execution_ms,
             bindings,
         } = value;
         let mut definition = ToolDefinition::new(
@@ -67,8 +68,10 @@ impl TryFrom<&RemoteToolGrant> for ToolDefinition {
             input_schema.clone().into(),
             output_schema.clone().into(),
         )
+        .with_execution(std::time::Duration::from_secs(120))
         .with_examples(examples.clone())
-        .with_output_contract(output_contract.clone().into());
+        .with_output_contract(output_contract.clone().into())
+        .with_execution(std::time::Duration::from_millis(*execution_ms));
         definition.contract.input_schema.projection = input_schema.projection.clone().into();
         definition.contract.output_schema.projection = output_schema.projection.clone().into();
         definition.manifest.bindings = bindings.clone();

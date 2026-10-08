@@ -9,7 +9,7 @@ use crate::runtime::actor::round::{
     PolicyView, Presented, RoundTools, SettledOutput, StoreLocalEffect, completed_material,
     decode_completed,
 };
-use crate::runtime::actor::waits::{self, Resolution, WaitDeadline};
+use crate::runtime::actor::waits::{self, Resolution};
 use crate::session::tool_execution::ToolInvocation;
 use crate::tool_dispatch::call_run::{AdmittedToolCall, AttemptEnd, CallEnd};
 use crate::tool_run::{
@@ -612,34 +612,31 @@ pub(super) fn completed_answer(
 }
 
 /// The catalog's pin of the tool `manifest` declares (or none), read at
-/// `now_ms` over `context`'s budgets: its policy, a limit starting now, and
-/// for a deferring tool the deadline of the completion wait its admission
-/// pins, which is the limit's.
+/// `now_ms`: its policy, its body's limit from its host-set execution bound,
+/// and for a deferring tool the deadline its host-set park bound sets,
+/// written once with the admission ([`MemberPin::admitted`]). A call no tool
+/// answers, or whose tool declares no admissible bounds, is pinned under
+/// `context`'s control-phase bound: its body only answers its refusal.
 pub(super) fn member_pin(
     context: &RuntimeExecutionContext<'_>,
     manifest: Option<&crate::ToolManifest>,
     tool: crate::ToolId,
     now_ms: u64,
 ) -> MemberPin {
-    let budgets = context.dispatch().plugins.execution_budgets();
-    let total = manifest
-        .and_then(|manifest| budgets.admit_tool(manifest).ok())
-        .unwrap_or_else(|| budgets.tool_default());
-    let limit = lash_sansio::ExecutionLimit::starting_at(now_ms, total, total);
-    // One limit spans a deferring call's body and its park: its wait's
-    // deadline is the limit's, written once with the admission.
-    let wait = manifest
-        .filter(|manifest| manifest.declaration.may_defer)
-        .map(|_| {
-            WaitDeadline::at_instant(lash_durable::DurableInstant(
-                i64::try_from(limit.expires_at).unwrap_or(i64::MAX),
-            ))
-        });
+    let policy = manifest.map_or(ExecutionPolicy::Once, |manifest| manifest.execution_policy);
+    if let Some(bounds) = manifest.and_then(|manifest| manifest.bounds().ok()) {
+        return MemberPin::admitted(tool, policy, bounds, now_ms);
+    }
+    let control = context
+        .dispatch()
+        .plugins
+        .execution_budgets()
+        .control_phase();
     MemberPin {
         tool,
-        policy: manifest.map_or(ExecutionPolicy::Once, |manifest| manifest.execution_policy),
-        limit,
-        wait,
+        policy,
+        limit: lash_sansio::ExecutionLimit::starting_at(now_ms, control, control),
+        park: None,
     }
 }
 

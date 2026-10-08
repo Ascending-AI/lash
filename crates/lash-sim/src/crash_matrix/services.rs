@@ -755,13 +755,17 @@ struct Catalog {
 impl RoundTools for Catalog {
     fn pin(&self, call: &PendingToolCall, now_ms: u64) -> MemberPin {
         let tool = Tool::named(&call.tool_name).unwrap_or(Tool::WriteNow);
-        let budget = ExecutionBudgets::default().tool_default();
-        MemberPin {
-            tool: ToolId::new(tool.name()),
-            policy: tool.policy(),
-            limit: ExecutionLimit::starting_at(now_ms, budget, budget),
-            wait: None,
-        }
+        // No tool of this catalog parks; each body is bounded as its host
+        // would bound a store write.
+        MemberPin::admitted(
+            ToolId::new(tool.name()),
+            tool.policy(),
+            lash_sansio::ToolBounds {
+                execution: std::time::Duration::from_secs(120),
+                park: None,
+            },
+            now_ms,
+        )
     }
 
     fn resolved(

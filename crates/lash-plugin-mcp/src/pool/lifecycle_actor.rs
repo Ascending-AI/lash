@@ -601,10 +601,15 @@ impl LifecycleActor {
             }
         };
 
-        let imported = match import_tools(&server_name, tools).and_then(|tools| {
-            let entry = self.entry.upgrade().ok_or(McpError::PoolShutDown)?;
-            admission::bind_imported_tools(tools, &entry, &peer)
-        }) {
+        let imported = match self
+            .entry
+            .upgrade()
+            .ok_or(McpError::PoolShutDown)
+            .and_then(|entry| {
+                let tools =
+                    import_tools(&server_name, tools, entry.config.call_max_total_timeout())?;
+                admission::bind_imported_tools(tools, &entry, &peer)
+            }) {
             Ok(imported) => imported,
             Err(error) => {
                 self.record_mcp_error(&error);
@@ -665,9 +670,14 @@ impl LifecycleActor {
                         let shutdown = connection.cancel_and_reap(self, &server_name).await;
                         return if shutdown { ConnectionExit::Shutdown } else { ConnectionExit::Disconnected };
                     };
-                    match result.and_then(|tools| import_tools(&server_name, tools))
+                    match result
                         .and_then(|tools| {
                             let entry = self.entry.upgrade().ok_or(McpError::PoolShutDown)?;
+                            let tools = import_tools(
+                                &server_name,
+                                tools,
+                                entry.config.call_max_total_timeout(),
+                            )?;
                             admission::bind_imported_tools(tools, &entry, &peer)
                         })
                         .and_then(|tools| self.entry.upgrade()

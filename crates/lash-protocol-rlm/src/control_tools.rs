@@ -60,6 +60,8 @@ fn read_output_tool_definition() -> ToolDefinition {
         }),
         json!({"type": "array", "items": {}}),
     ).expect("valid schemas")
+    // One store read or write: a short body.
+    .with_execution(std::time::Duration::from_secs(30))
     .with_tool_binding(ToolBinding::new(["control"], "read_output"))
 }
 
@@ -127,6 +129,8 @@ pub(crate) fn continue_as_tool_definition_for(
         continue_as_input_schema(),
         continue_as_output_schema(),
     ).expect("valid declared tool schemas")
+    // One store read or write: a short body.
+    .with_execution(std::time::Duration::from_secs(30))
     .with_examples(vec![vocabulary.continue_as_example.into()])
     .with_tool_binding(ToolBinding::new(["control"], "continue_as"))
     .with_argument_projection(ToolArgumentProjectionPolicy::preserve_projected_refs_in_field(

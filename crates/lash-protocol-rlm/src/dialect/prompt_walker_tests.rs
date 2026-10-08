@@ -153,6 +153,7 @@ async fn assembled_prompt_fragments_with_projection(
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_examples(vec![
         // Authored as Lashlang, like every example in the resident catalog.
         // Six of seven in the shipped catalog carry the try-operator, which is
@@ -198,6 +199,7 @@ async fn assembled_prompt_fragments_with_projection(
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_examples(vec![
         r#"await processes.list({ status: "any" })?"#.to_string(),
     ])
@@ -248,6 +250,7 @@ async fn assembled_prompt_fragments_with_projection(
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["tracker"],
         "issues_search",

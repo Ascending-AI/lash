@@ -158,6 +158,7 @@ fn echo_definition() -> lash_core::ToolDefinition {
         object,
     )
     .expect("the echo's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], ECHO))
 }
 

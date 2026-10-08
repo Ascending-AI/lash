@@ -423,6 +423,7 @@ fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["tools"],
         "app_lookup",
@@ -540,11 +541,15 @@ fn contract_durable_input_definition() -> lash_core::ToolDefinition {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
         ["tools"],
         "mock_input_request",
     ))
     .with_declaration(lash_core::ToolDeclaration::deferring())
+    .with_park(lash_core::ParkBound::Within(
+        std::time::Duration::from_secs(120),
+    ))
 }
 
 pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineConfig {

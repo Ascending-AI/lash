@@ -14,8 +14,6 @@ pub struct ToolCatalogBuildInput {
     pub tools: Vec<ToolManifest>,
     pub resolve_contract: Option<ToolContractResolver>,
     pub contributions: Vec<ToolCatalogContribution>,
-    /// The budgets every member's declared execution is admitted against.
-    pub budgets: crate::ExecutionBudgets,
 }
 
 /// A trusted plugin's contribution to catalog assembly. Membership is the
@@ -186,7 +184,6 @@ impl ToolCatalog {
                 resolver_contracts.get(&manifest.id).cloned()
             })),
             contributions: Vec::new(),
-            budgets: crate::ExecutionBudgets::default(),
         })
     }
 
@@ -322,9 +319,8 @@ pub fn build_tool_catalog(
                 name: manifest.name.clone(),
             });
         }
-        input
-            .budgets
-            .admit_tool(manifest)
+        manifest
+            .bounds()
             .map_err(|refusal| ToolCatalogBuildError::RegistrationRefused { refusal })?;
     }
     let entries = tools
@@ -369,6 +365,7 @@ mod tests {
             serde_json::json!({ "type": "string" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(30))
     }
 
     fn build_input(
@@ -385,7 +382,6 @@ mod tests {
                 contracts.get(&manifest.id).cloned()
             })),
             contributions,
-            budgets: crate::ExecutionBudgets::default(),
         }
     }
 
@@ -492,7 +488,6 @@ mod tests {
             tools: vec![missing.clone()],
             resolve_contract: None,
             contributions: vec![ToolCatalogContribution::remove_tools(["missing"])],
-            budgets: crate::ExecutionBudgets::default(),
         })
         .expect("suppressed manifests are not resident members");
         assert!(hidden.tools.is_empty());
@@ -501,7 +496,6 @@ mod tests {
             tools: vec![missing.clone()],
             resolve_contract: None,
             contributions: Vec::new(),
-            budgets: crate::ExecutionBudgets::default(),
         })
         .expect_err("an effective resident member requires a contract");
         assert_eq!(
@@ -527,7 +521,6 @@ mod tests {
                 None
             })),
             contributions: Vec::new(),
-            budgets: crate::ExecutionBudgets::default(),
         })
         .expect_err("a duplicate effective ToolId is ambiguous authority");
         assert_eq!(
@@ -549,7 +542,8 @@ mod tests {
                     ToolDefinition::default_input_schema(),
                     serde_json::json!({ "type": "string" }),
                 )
-                .expect("valid declared tool schemas"),
+                .expect("valid declared tool schemas")
+                .with_execution(std::time::Duration::from_secs(30)),
                 ToolDefinition::raw(
                     repeated_name.id,
                     repeated_name.name,
@@ -557,7 +551,8 @@ mod tests {
                     ToolDefinition::default_input_schema(),
                     serde_json::json!({ "type": "string" }),
                 )
-                .expect("valid declared tool schemas"),
+                .expect("valid declared tool schemas")
+                .with_execution(std::time::Duration::from_secs(30)),
             ],
             Vec::new(),
         ))
@@ -565,6 +560,92 @@ mod tests {
         assert_eq!(
             error,
             ToolCatalogBuildError::DuplicateName { name: first.name }
+        );
+    }
+
+    /// FIG-5410 law 4: registration refuses a tool missing a bound its host
+    /// must set, naming the tool and the bound: an `execution` on any tool,
+    /// a `park` on a tool that may defer. A tool that never defers declares
+    /// no park. Lash supplies neither bound.
+    #[test]
+    fn registration_refuses_a_tool_missing_a_host_set_bound() {
+        let refused = |definition: ToolDefinition| match build_tool_catalog(build_input(
+            vec![definition],
+            Vec::new(),
+        )) {
+            Err(ToolCatalogBuildError::RegistrationRefused { refusal }) => refusal,
+            Err(other) => panic!("refused for another reason: {other}"),
+            Ok(_) => panic!("the tool was registered"),
+        };
+        let mut unbounded = tool("unbounded");
+        unbounded.manifest.execution = None;
+        assert_eq!(
+            refused(unbounded),
+            crate::RegistrationRefused::MissingBound {
+                tool: "unbounded".into(),
+                bound: crate::ToolBound::Execution,
+            }
+        );
+        let mut parked_unbounded = tool("approve_unbounded")
+            .with_declaration(crate::ToolDeclaration::deferring())
+            .with_park(crate::ParkBound::UntilScopeEnd);
+        parked_unbounded.manifest.execution = None;
+        assert_eq!(
+            refused(parked_unbounded),
+            crate::RegistrationRefused::MissingBound {
+                tool: "approve_unbounded".into(),
+                bound: crate::ToolBound::Execution,
+            }
+        );
+        assert_eq!(
+            refused(tool("approve").with_declaration(crate::ToolDeclaration::deferring())),
+            crate::RegistrationRefused::MissingBound {
+                tool: "approve".into(),
+                bound: crate::ToolBound::Park,
+            }
+        );
+        assert_eq!(
+            refused(tool("read").with_park(crate::ParkBound::UntilScopeEnd)),
+            crate::RegistrationRefused::ParkWithoutDeferral {
+                tool: "read".into(),
+            }
+        );
+
+        let hour = std::time::Duration::from_secs(60 * 60);
+        let catalog = build_tool_catalog(build_input(
+            vec![
+                tool("approve")
+                    .with_declaration(crate::ToolDeclaration::deferring())
+                    .with_park(crate::ParkBound::Within(hour)),
+                tool("read"),
+            ],
+            Vec::new(),
+        ))
+        .expect("tools declaring their bounds register");
+        let bounds = catalog
+            .tools
+            .iter()
+            .map(|entry| (entry.manifest.name.as_str(), entry.manifest.bounds()))
+            .collect::<Vec<_>>();
+        let execution = std::time::Duration::from_secs(30);
+        assert_eq!(
+            bounds,
+            vec![
+                (
+                    "approve",
+                    Ok(crate::ToolBounds {
+                        execution,
+                        park: Some(crate::ParkBound::Within(hour)),
+                    })
+                ),
+                (
+                    "read",
+                    Ok(crate::ToolBounds {
+                        execution,
+                        park: None,
+                    })
+                ),
+            ]
         );
     }
 }

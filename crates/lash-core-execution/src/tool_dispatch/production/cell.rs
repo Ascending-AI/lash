@@ -195,10 +195,11 @@ pub(crate) struct CellTools {
 
 impl CellTools {
     /// What `call` is admitted as, read from the catalog at `now_ms`: its
-    /// tool's declared policy, a limit starting now within the tool
-    /// ceiling, and for a tool that may defer the completion wait its
-    /// admission pins. A call no tool answers is admitted `Once`, and its
-    /// body answers it unavailable. Runs no hook, preparation or body.
+    /// tool's declared policy, a body limit starting now from its host-set
+    /// execution bound, and for a tool that may defer the deadline its
+    /// host-set park bound gives the completion wait its admission pins. A
+    /// call no tool answers is admitted `Once`, and its body answers it
+    /// unavailable. Runs no hook, preparation or body.
     #[must_use]
     pub(crate) fn pin(&self, call: &CellCall, now_ms: u64) -> MemberPin {
         let definition = ProductionToolHandlers::new(self.context.clone(), None)
@@ -384,8 +385,8 @@ impl CellMembers {
     }
 
     /// What `member` is admitted as at `now_ms`: a tool call as its tool
-    /// declares it ([`CellTools::pin`]), a host call `Once` under the tool
-    /// default limit.
+    /// declares it ([`CellTools::pin`]), a host call, one store write, `Once`
+    /// under the control-phase bound.
     #[must_use]
     pub fn pin(&self, member: &CellMember, now_ms: u64) -> MemberPin {
         match member {

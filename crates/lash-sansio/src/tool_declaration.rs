@@ -93,6 +93,10 @@ pub enum ToolAdmissionRefusal {
     /// start either.
     #[error("member {member} of this call's round was refused at admission")]
     Sibling { member: u32 },
+    /// The tool's manifest does not declare the bounds its host must set: a
+    /// manifest no registration admitted, such as an execution grant's.
+    #[error("the tool's bounds are refused: {cause}")]
+    Bounds { cause: crate::RegistrationRefused },
 }
 
 impl ToolAdmissionRefusal {

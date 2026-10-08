@@ -10,6 +10,7 @@ fn tool(id: &str, operation: &str, description: &str) -> lash_core::ToolDefiniti
         lash_core::JsonSchema::any().into_value(),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(crate::ToolBinding::new(["app"], operation).with_authority_type("App"))
 }
 

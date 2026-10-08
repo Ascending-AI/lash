@@ -87,6 +87,7 @@ fn switch_tool_definition() -> ToolDefinition {
         json!({"type": "object"}),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 fn tool_call_response() -> LlmResponse {
@@ -393,6 +394,7 @@ impl BoundedSwitchTools {
             json!({"type": "object"}),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
     }
 }
 

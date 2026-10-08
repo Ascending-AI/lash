@@ -28,7 +28,7 @@ use super::wait_laws::{LawBroken, LawResult};
 use crate::runtime::actor::round::{
     self, AdmittedExecution, Material, MemberState, PolicyView, SettledOutput,
 };
-use crate::runtime::actor::waits::{self, Resolution, WaitDeadline};
+use crate::runtime::actor::waits::{self, ParkDeadline, Resolution, WaitDeadline};
 use crate::runtime::process::steps::{ProcessSteps, StepAdmission, StepRefusal};
 use crate::{
     Ancestry, Backend, BackendParts, CancelOrigin, DurableSettings, EngineAction, EngineEvent,
@@ -171,7 +171,8 @@ fn origin_name(origin: CancelOrigin) -> String {
 /// - `hold`: idles until cancelled, then answers its cancel;
 /// - `stuck`: runs one step whose body ignores its cancel token, and
 ///   ignores its own cancel, so lash forces its end at the grace;
-/// - `await`: awaits process `await` with deadline `deadline_ms`, and ends
+/// - `await`: awaits process `await` within `deadline_ms` (until its scope
+///   ends when it names none), and ends
 ///   with what it saw;
 /// - `await_signal`: idles until a signal names the process to await, then
 ///   behaves as `await`;
@@ -202,7 +203,11 @@ fn await_action(script: &Value) -> Result<EngineAction, ProcessInfraError> {
         .ok_or_else(|| infra("an await names no process"))?;
     Ok(EngineAction::AwaitProcess {
         process: ProcessId::parse(target).map_err(infra)?,
-        deadline: script["deadline_ms"].as_u64().map(Duration::from_millis),
+        bound: script["deadline_ms"]
+            .as_u64()
+            .map_or(crate::ParkBound::UntilScopeEnd, |ms| {
+                crate::ParkBound::Within(Duration::from_millis(ms))
+            }),
     })
 }
 
@@ -434,10 +439,10 @@ impl ProcessSteps for LawSteps {
         Ok(StepAdmission {
             policy,
             limit,
-            wait: (step_tool(step) == LAW_PARK).then(|| {
-                WaitDeadline::at_instant(lash_durable::DurableInstant(
+            park: (step_tool(step) == LAW_PARK).then(|| {
+                ParkDeadline::At(WaitDeadline::at_instant(lash_durable::DurableInstant(
                     i64::try_from(limit.expires_at).unwrap_or(i64::MAX),
-                ))
+                )))
             }),
         })
     }

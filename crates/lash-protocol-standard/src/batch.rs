@@ -55,6 +55,7 @@ pub(crate) fn batch_tool_definition(max_members: NonZeroUsize) -> ToolDefinition
         ),
         batch_output_schema(),
     ).expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 fn batch_output_schema() -> Value {

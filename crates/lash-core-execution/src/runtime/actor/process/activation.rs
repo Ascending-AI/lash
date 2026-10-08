@@ -67,7 +67,7 @@ use crate::runtime::actor::round::{
     self, AdmittedExecution, ExecutionDraft, Material, MemberBodies, MemberBody, PolicyView,
     RoundDraft, RoundError, RunFold, SettledOutput,
 };
-use crate::runtime::actor::waits::{self, Resolution, WaitDeadline, WaitKind, WaitSpec};
+use crate::runtime::actor::waits::{self, ParkDeadline, Resolution, WaitKind, WaitSpec};
 use crate::runtime::process::engine_state::{
     EngineAction, EngineEvent, EngineState, HostWaitKind, StepRequest,
 };
@@ -1023,15 +1023,8 @@ impl ProcessActivation {
         let ProcessInput::Engine { kind: engine, .. } = record.input.as_ref() else {
             return Err(corrupt("an advanced process", "it runs no engine"));
         };
-        let budgets = lash_sansio::ExecutionBudgets::default();
-        let deadline = |requested: Option<std::time::Duration>| {
-            WaitDeadline::resolve(
-                requested,
-                budgets.wait_default(),
-                budgets.wait_ceiling(),
-                now,
-            )
-        };
+        // An engine wait is bounded by the engine's own bound, fixed now.
+        let deadline = |bound| ParkDeadline::admitted(bound, now).deadline();
         driver.blocked = None;
         match action {
             EngineAction::Steps(requests) => {
@@ -1104,7 +1097,7 @@ impl ProcessActivation {
                         step_request_material(process, &step),
                         step.policy,
                         step.limit(),
-                        admitted.wait,
+                        admitted.park,
                     ));
                     driver.steps.insert(step.request.step().clone(), step);
                 }
@@ -1125,15 +1118,7 @@ impl ProcessActivation {
                 .map_err(|refusal| corrupt("a process step's admission", refusal))?;
                 fresh.extend(admitted.members().iter().cloned());
             }
-            EngineAction::PinKey {
-                name,
-                kind,
-                deadline: requested,
-            } => {
-                let deadline = match deadline(requested) {
-                    Ok(deadline) => deadline,
-                    Err(refusal) => return Ok(Some(refused(refusal.to_string()))),
-                };
+            EngineAction::PinKey { name, kind, bound } => {
                 let kind = match kind {
                     HostWaitKind::ToolCompletion => WaitKind::ToolCompletion,
                     HostWaitKind::Custom => WaitKind::Custom,
@@ -1144,7 +1129,7 @@ impl ProcessActivation {
                         kind,
                         scope: ScopeKey::Process(process.clone()),
                         target_process: None,
-                        deadline: Some(deadline),
+                        deadline: deadline(bound),
                     },
                 )
                 .map_err(|refusal| corrupt("a pinned key", refusal))?;
@@ -1169,19 +1154,15 @@ impl ProcessActivation {
             }
             EngineAction::AwaitProcess {
                 process: target,
-                deadline: requested,
+                bound,
             } => {
-                let deadline = match deadline(requested) {
-                    Ok(deadline) => deadline,
-                    Err(refusal) => return Ok(Some(refused(refusal.to_string()))),
-                };
                 let (wait, _) = waits::pin(
                     tx,
                     WaitSpec {
                         kind: WaitKind::ProcessTerminal,
                         scope: ScopeKey::Process(process.clone()),
                         target_process: Some(target.clone()),
-                        deadline: Some(deadline),
+                        deadline: deadline(bound),
                     },
                 )
                 .map_err(|refusal| corrupt("a process wait", refusal))?;

@@ -12,6 +12,7 @@ fn lost_tool_definition() -> lash::tools::ToolDefinition {
         json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash::tools::ToolBinding::new(["workbench"], "seed_lookup"))
 }
 

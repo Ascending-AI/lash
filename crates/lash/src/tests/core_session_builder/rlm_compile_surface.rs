@@ -119,7 +119,8 @@ fn compile_surface_tool_definition(name: &str) -> lash_core::ToolDefinition {
             }),
             serde_json::json!({ "type": "object" }),
         )
-        .expect("valid declared tool schemas"),
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120)),
         name.to_string(),
     )
 }

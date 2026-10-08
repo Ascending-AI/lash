@@ -117,6 +117,7 @@ fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "string" }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(2).expect("nonzero attempt bound"),
         0,

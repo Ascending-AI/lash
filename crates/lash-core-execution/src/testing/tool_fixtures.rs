@@ -33,6 +33,7 @@ pub fn fixture_echo_definition() -> ToolDefinition {
         }),
     )
     .expect("valid declared tool schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 /// A fixed provider that serves the command-free [`fixture_echo_definition`].

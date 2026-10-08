@@ -337,7 +337,8 @@ async fn a_native_model_patch_reaches_all_runtime_consumers() {
         serde_json::json!({ "type": "object", "additionalProperties": false, "properties": {} }),
         serde_json::json!({ "type": "object" }),
     )
-    .expect("switch_frame's schemas");
+    .expect("switch_frame's schemas")
+    .with_execution(std::time::Duration::from_secs(120));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,
     ))

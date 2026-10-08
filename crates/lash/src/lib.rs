@@ -261,9 +261,9 @@ pub use lash_core::{
     facade_support::TurnOutcome, facade_support::TurnStop, facade_support::TurnTerminal,
     facade_support::TurnWorkDriver,
 };
-/// Every execution bound the runtime enforces (`LashCoreBuilder::execution_budgets`),
-/// the limit one executable stretch runs under, and the registration refusal
-/// of an inline tool declared above the ceiling.
+/// Lash's own execution bounds (`LashCoreBuilder::execution_budgets`), the
+/// limit one executable stretch runs under, and the registration refusal of
+/// a tool missing a bound its host must set.
 pub use lash_core::{
     ExecutionBudgets, ExecutionBudgetsConfig, ExecutionBudgetsError, ExecutionLimit,
     ProviderAttemptLimits, RegistrationRefused,
@@ -431,10 +431,6 @@ pub mod tools {
     pub use crate::tool_intent_ingress::{
         ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,
     };
-    /// A tool's expected inline execution, carried by
-    /// [`ToolDefinition::with_expected_execution`] and admitted against the
-    /// runtime's inline ceiling at registration.
-    pub use lash_core::ExpectedExecution;
     /// Typed cancellation evidence constructed by tool implementors; pass it to
     /// [`ToolCallOutput::cancelled`] when a tool stops without completing.
     pub use lash_core::ToolCancellation;
@@ -472,6 +468,10 @@ pub mod tools {
     /// and what refuses an outcome its declaration does not admit.
     pub use lash_core::{DeclarationRefusal, OutcomeShape, ToolAdmissionRefusal, ToolDeclaration};
     pub use lash_core::{DeclaredStart, DeclaredStartRefused};
+    /// A tool's host-set bounds: [`ToolDefinition::with_execution`] bounds
+    /// its body, [`ToolDefinition::with_park`] the park of a tool that may
+    /// defer. Registration refuses a tool missing one, naming the bound.
+    pub use lash_core::{ParkBound, ToolBound, ToolBounds};
     /// Tool-execution request batches, replies, and child-process observation hooks.
     pub use lash_core::{
         PreparedToolBatch, PreparedToolBatchCall, ToolChildExecutionTraceHook,

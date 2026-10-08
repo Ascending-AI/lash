@@ -891,6 +891,7 @@ mod tool_catalog_cache_tests {
                 serde_json::json!({ "type": "string" }),
             )
             .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
         }
     }
 
@@ -961,12 +962,13 @@ mod tool_catalog_cache_tests {
                 serde_json::json!({ "type": "string" }),
             )
             .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
         }
     }
 
     impl ReassignableResidentProvider {
         fn definition(&self) -> crate::ToolDefinition {
-            crate::ToolDefinition::raw(
+            let definition = crate::ToolDefinition::raw(
                 "tool:reassigned",
                 "reassigned",
                 format!("resident route {}", self.label),
@@ -979,11 +981,19 @@ mod tool_catalog_cache_tests {
                 serde_json::json!({ "type": "string" }),
             )
             .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
             .with_declaration(if self.label == "route_a" {
                 crate::ToolDeclaration::deferring()
             } else {
                 crate::ToolDeclaration::default()
-            })
+            });
+            if self.label == "route_a" {
+                definition.with_park(crate::ParkBound::Within(std::time::Duration::from_secs(
+                    120,
+                )))
+            } else {
+                definition
+            }
         }
     }
 
@@ -1057,7 +1067,8 @@ mod tool_catalog_cache_tests {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
         )
-        .expect("valid declared tool schemas")])
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))])
         .expect("valid restricted definition");
 
         assert_ne!(
@@ -1416,7 +1427,8 @@ mod tool_catalog_cache_tests {
             }),
             serde_json::json!({ "type": "string" }),
         )
-        .expect("valid declared tool schemas");
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120));
         let renamed_surface = session
             .pin_tool_surface(
                 &crate::SessionToolAccess::restricted([renamed])
@@ -1441,7 +1453,8 @@ mod tool_catalog_cache_tests {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
         )
-        .expect("valid declared tool schemas");
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120));
         let error = match session.pin_tool_surface(
             &crate::SessionToolAccess::restricted([missing]).expect("valid restricted definition"),
         ) {
@@ -1466,7 +1479,8 @@ mod tool_catalog_cache_tests {
             crate::ToolDefinition::default_input_schema(),
             serde_json::json!({ "type": "string" }),
         )
-        .expect("valid declared tool schemas");
+        .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120));
         let plugins = admission_probe_plugins(
             Arc::new(AdmissionProbeProvider {
                 contract_available: true,

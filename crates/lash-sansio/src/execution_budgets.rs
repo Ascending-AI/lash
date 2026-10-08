@@ -1,10 +1,11 @@
-//! Execution budgets, execution limits and the inline ceiling (spec v3
-//! Parts C and E; ADR 0132 §7).
+//! Execution budgets and execution limits (spec v3 Part C; ADR 0132 §7).
 //!
-//! One validated [`ExecutionBudgets`] is the only source of every execution
-//! bound: the tool default and ceiling, the model call's hard total, the
-//! control-phase bound, the stop grace, the wait default and ceiling, and the
-//! provider attempt limits. Nothing else carries a timeout constant of its own.
+//! One validated [`ExecutionBudgets`] is the only source of lash's own
+//! execution bounds: the model call's hard total, the control-phase bound,
+//! the stop grace and the provider attempt limits. A tool's bounds are its
+//! host's ([`ToolManifest::execution`](crate::ToolManifest::execution) and
+//! [`ToolManifest::park`](crate::ToolManifest::park)), as is every engine
+//! step's: lash holds no tool or wait default or ceiling.
 //!
 //! An [`ExecutionLimit`] is one executable stretch's bound, minted from the
 //! budgets at an instant of lash's injected clock. Nested stretches take
@@ -12,8 +13,6 @@
 
 use std::num::NonZeroU32;
 use std::time::Duration;
-
-use crate::{ToolDeclaration, ToolIntentKind, ToolManifest};
 
 /// The most provider attempts one model call may make. A larger count is
 /// an unbounded retry in all but name.
@@ -188,10 +187,6 @@ impl Default for ProviderAttemptLimits {
 /// shipped defaults; [`ExecutionBudgets::new`] validates a value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExecutionBudgetsConfig {
-    /// One inline tool execution with no declared duration: 2 min.
-    pub tool_default: Duration,
-    /// The longest inline tool execution a tool may declare: 5 min.
-    pub tool_ceiling: Duration,
     /// The hard cap on one model call, over throttle, backoff and every
     /// provider attempt: 10 min.
     pub model_total: Duration,
@@ -200,10 +195,6 @@ pub struct ExecutionBudgetsConfig {
     /// Spent once, after a stretch ends at its limit or on cancellation, to
     /// collect evidence: 2 s.
     pub stop_grace: Duration,
-    /// One deferred or external wait with no declared deadline: 1 h.
-    pub wait_default: Duration,
-    /// The longest deferred or external wait: 24 h.
-    pub wait_ceiling: Duration,
     pub provider: ProviderAttemptLimits,
     /// Bound on a chain of agent frame switches: 16. The follow-on at this
     /// depth stops with `AgentFrameSwitchLimit` before calling the model.
@@ -213,13 +204,9 @@ pub struct ExecutionBudgetsConfig {
 impl Default for ExecutionBudgetsConfig {
     fn default() -> Self {
         Self {
-            tool_default: Duration::from_secs(2 * 60),
-            tool_ceiling: Duration::from_secs(5 * 60),
             model_total: Duration::from_secs(10 * 60),
             control_phase: Duration::from_secs(60),
             stop_grace: Duration::from_secs(2),
-            wait_default: Duration::from_secs(60 * 60),
-            wait_ceiling: Duration::from_secs(24 * 60 * 60),
             provider: ProviderAttemptLimits::default(),
             agent_frame_switch_limit: NonZeroU32::MIN.saturating_add(15),
         }
@@ -237,48 +224,27 @@ impl ExecutionBudgets {
     /// # Errors
     ///
     /// A non-positive or unrepresentable bound, a stretch whose grace
-    /// overflows, a default above its ceiling, a provider sublimit above the
-    /// model total, or an unbounded provider retry.
+    /// overflows, a provider sublimit above the model total, or an unbounded
+    /// provider retry.
     pub fn new(config: ExecutionBudgetsConfig) -> Result<Self, ExecutionBudgetsError> {
         let ExecutionBudgetsConfig {
-            tool_default,
-            tool_ceiling,
             model_total,
             control_phase,
             stop_grace,
-            wait_default,
-            wait_ceiling,
             provider,
             agent_frame_switch_limit: _,
         } = config;
-        bounded("tool_default", tool_default)?;
-        bounded("tool_ceiling", tool_ceiling)?;
         bounded("model_total", model_total)?;
         bounded("control_phase", control_phase)?;
         bounded("stop_grace", stop_grace)?;
-        bounded("wait_default", wait_default)?;
-        bounded("wait_ceiling", wait_ceiling)?;
         // Construction through `ProviderAttemptLimits::new` is the only
         // way to a value, so it is already in range.
-        not_above(
-            ("tool_default", tool_default),
-            ("tool_ceiling", tool_ceiling),
-        )?;
-        not_above(
-            ("wait_default", wait_default),
-            ("wait_ceiling", wait_ceiling),
-        )?;
         not_above(
             ("provider.per_request", provider.per_request),
             ("model_total", model_total),
         )?;
-        bounded_sum(("tool_ceiling", tool_ceiling), ("stop_grace", stop_grace))?;
         bounded_sum(("model_total", model_total), ("stop_grace", stop_grace))?;
         bounded_sum(("control_phase", control_phase), ("stop_grace", stop_grace))?;
-        bounded_sum(
-            ("wait_ceiling", wait_ceiling),
-            ("tool_ceiling", tool_ceiling),
-        )?;
         Ok(Self(std::sync::Arc::new(config)))
     }
 
@@ -286,16 +252,6 @@ impl ExecutionBudgets {
     #[must_use]
     pub fn config(&self) -> ExecutionBudgetsConfig {
         *self.0
-    }
-
-    #[must_use]
-    pub fn tool_default(&self) -> Duration {
-        self.0.tool_default
-    }
-
-    #[must_use]
-    pub fn tool_ceiling(&self) -> Duration {
-        self.0.tool_ceiling
     }
 
     #[must_use]
@@ -311,16 +267,6 @@ impl ExecutionBudgets {
     #[must_use]
     pub fn stop_grace(&self) -> Duration {
         self.0.stop_grace
-    }
-
-    #[must_use]
-    pub fn wait_default(&self) -> Duration {
-        self.0.wait_default
-    }
-
-    #[must_use]
-    pub fn wait_ceiling(&self) -> Duration {
-        self.0.wait_ceiling
     }
 
     #[must_use]
@@ -353,71 +299,6 @@ impl ExecutionBudgets {
     pub fn control_phase_limit(&self, now_ms: u64) -> ExecutionLimit {
         ExecutionLimit::starting_at(now_ms, self.0.control_phase, self.0.control_phase)
     }
-
-    /// Admit a tool's declared execution against the inline ceiling (spec v3
-    /// Part E), answering the bound of its inline execution.
-    ///
-    /// A tool that may only finish inline and declares more than
-    /// [`tool_ceiling`](Self::tool_ceiling) is refused. An isolated,
-    /// process-starting or Pending tool is admitted whatever it declares: its
-    /// inline prefix is bounded by the ceiling, and the rest of its work
-    /// waits under a wait deadline. Nothing is promoted at runtime.
-    ///
-    /// # Errors
-    ///
-    /// [`RegistrationRefused::InlineBudgetExceedsCeiling`].
-    pub fn admit_tool(&self, manifest: &ToolManifest) -> Result<Duration, RegistrationRefused> {
-        let declared = manifest.expected_execution.resolve(self.0.tool_default);
-        if declared <= self.0.tool_ceiling {
-            return Ok(declared);
-        }
-        if runs_long_work_outside_inline(&manifest.declaration) {
-            return Ok(self.0.tool_ceiling);
-        }
-        Err(RegistrationRefused::InlineBudgetExceedsCeiling {
-            tool: manifest.name.clone(),
-            declared,
-            ceiling: self.0.tool_ceiling,
-            hint: INLINE_CEILING_HINT.to_string(),
-        })
-    }
-}
-
-const INLINE_CEILING_HINT: &str =
-    "declare it as a process tool, an isolated tool, or a Pending tool that may defer";
-
-/// Whether a declaration lets the tool's work continue past its inline
-/// execution: an isolated call, a process-starting body, or a Pending body.
-fn runs_long_work_outside_inline(declaration: &ToolDeclaration) -> bool {
-    declaration.isolated
-        || declaration.may_defer
-        || declaration.intents.contains(&ToolIntentKind::StartProcess)
-}
-
-/// Why registration refused a tool.
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    thiserror::Error,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
-#[serde(tag = "refusal", rename_all = "snake_case", deny_unknown_fields)]
-#[non_exhaustive]
-pub enum RegistrationRefused {
-    /// An inline-only tool declares more execution than the ceiling allows.
-    #[error(
-        "tool `{tool}` declares {declared:?} of inline execution, above the {ceiling:?} ceiling: {hint}"
-    )]
-    InlineBudgetExceedsCeiling {
-        tool: String,
-        declared: Duration,
-        ceiling: Duration,
-        hint: String,
-    },
 }
 
 /// The bound of one executable stretch: when it expires on lash's clock,

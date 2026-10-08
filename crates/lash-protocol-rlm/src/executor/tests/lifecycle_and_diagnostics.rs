@@ -454,6 +454,7 @@ fn colliding_host_catalog() -> lash_core::ToolCatalog {
             serde_json::json!({ "type": "boolean" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
             ["test"],
             "collision",

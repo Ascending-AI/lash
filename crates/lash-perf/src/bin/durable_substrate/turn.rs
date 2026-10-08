@@ -636,13 +636,16 @@ struct EchoTools {
 
 impl RoundTools for EchoTools {
     fn pin(&self, _call: &PendingToolCall, now_ms: u64) -> MemberPin {
-        let budget = ExecutionBudgets::default().tool_default();
-        MemberPin {
-            tool: ToolId::new(ECHO),
-            policy: ExecutionPolicy::Once,
-            limit: ExecutionLimit::starting_at(now_ms, budget, budget),
-            wait: None,
-        }
+        // The echo answers at once: its host sets it a short body bound.
+        MemberPin::admitted(
+            ToolId::new(ECHO),
+            ExecutionPolicy::Once,
+            lash_sansio::ToolBounds {
+                execution: std::time::Duration::from_secs(30),
+                park: None,
+            },
+            now_ms,
+        )
     }
 
     fn policies(&self) -> PolicyView {

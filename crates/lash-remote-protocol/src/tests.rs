@@ -660,6 +660,7 @@ fn demo_grant(name: &str, module: &str, operation: &str) -> RemoteToolGrant {
         examples: Vec::new(),
         argument_projection: None,
         execution_policy: None,
+        execution_ms: 30_000,
         bindings: BTreeMap::from([(
             EXAMPLE_BINDING_KEY.to_string(),
             serde_json::json!({

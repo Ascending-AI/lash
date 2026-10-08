@@ -292,7 +292,7 @@ pub(super) fn record_refused(
                         expires_at: u64::try_from(tx.opened_at().0).unwrap_or(0),
                         max_slice: std::time::Duration::ZERO,
                     },
-                    wait: None,
+                    park: None,
                 },
             )
         })

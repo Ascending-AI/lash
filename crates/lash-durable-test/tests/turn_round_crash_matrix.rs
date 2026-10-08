@@ -80,7 +80,7 @@ use lash_core_execution::runtime::actor::round::{
     self, AdmittedExecution, CompletedCall, Material, MemberBody, MemberPin, MemberResult,
     PolicyView, RoundTools, RunFold, SettledOutput,
 };
-use lash_core_execution::runtime::actor::waits::{self, WaitDeadline};
+use lash_core_execution::runtime::actor::waits::{self, ParkDeadline};
 use lash_core_execution::{ActorContext, Backend, StoreSet};
 use lash_core_store::tool_run::{
     CompletionSource, KnownFailureReason, MaterialOwner, MaterialRole,
@@ -95,9 +95,9 @@ use lash_sansio::llm::types::{ProviderRequestBody, ProviderRouteIdentity};
 use lash_sansio::sansio::ExecutionEnvironmentSync;
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{
-    ExecutionBudgets, ExecutionLimit, ExecutionPolicy, ModelToolReturn, SessionId, ToolCallId,
-    ToolCallOutput, ToolFailure, ToolFailureClass, ToolId, TurnCancelMode,
-    TurnCancelUndeliveredInputPolicy, TurnId,
+    ExecutionBudgets, ExecutionLimit, ExecutionPolicy, LimitCause, ModelToolReturn, ParkBound,
+    SessionId, ToolBounds, ToolCallId, ToolCallOutput, ToolFailure, ToolFailureClass, ToolId,
+    TurnCancelMode, TurnCancelUndeliveredInputPolicy, TurnId,
 };
 
 const SESSION: &str = "l4t-session";
@@ -195,6 +195,18 @@ enum Mode {
     /// The model calls one tool that parks on an approval the host gives
     /// only once the session released its claim.
     Approval,
+    /// As [`Approval`](Self::Approval), with a body bound of
+    /// [`BODY_MS`] and a park of an hour: the host approves after the body
+    /// bound has passed.
+    ApprovalOutlivesBody,
+    /// As [`Approval`](Self::Approval), with a body bound of
+    /// [`BODY_MS`] and a park of [`PARK_MS`]: the host never approves, so
+    /// the park expires.
+    ApprovalExpires,
+    /// As [`Approval`](Self::Approval), with a body bound of
+    /// [`BODY_MS`] and a park until its turn's scope ends: the host never
+    /// approves, and cancels the turn instead.
+    ApprovalUntilScopeEnd,
 }
 
 impl Mode {
@@ -209,7 +221,27 @@ impl Mode {
             Self::Pending => vec![Tool::Defer, Tool::Write { millis: 0 }],
             Self::AfterStepWhileStreaming => vec![Tool::Write { millis: 0 }],
             Self::CancelInCell => Vec::new(),
-            Self::Approval => vec![Tool::Approve],
+            Self::Approval
+            | Self::ApprovalOutlivesBody
+            | Self::ApprovalExpires
+            | Self::ApprovalUntilScopeEnd => vec![Tool::Approve],
+        }
+    }
+
+    /// The bounds the scenario's host sets `tool`: a park only on the tools
+    /// that defer.
+    fn bounds(self, tool: Tool) -> ToolBounds {
+        let two_minutes = Duration::from_secs(120);
+        let body = Duration::from_millis(BODY_MS);
+        let (execution, park) = match self {
+            Self::ApprovalOutlivesBody => (body, ParkBound::Within(Duration::from_secs(3_600))),
+            Self::ApprovalExpires => (body, ParkBound::Within(Duration::from_millis(PARK_MS))),
+            Self::ApprovalUntilScopeEnd => (body, ParkBound::UntilScopeEnd),
+            _ => (two_minutes, ParkBound::Within(two_minutes)),
+        };
+        ToolBounds {
+            execution,
+            park: matches!(tool, Tool::Defer | Tool::Approve).then_some(park),
         }
     }
 }
@@ -223,6 +255,12 @@ struct ExternalWorld {
 
 /// How long the outside world takes to resolve a key it was handed.
 const RESOLVE_AFTER_MS: u64 = 20;
+
+/// The body bound of the approval the FIG-5410 laws park.
+const BODY_MS: u64 = 1_000;
+
+/// The park bound of [`Mode::ApprovalExpires`]'s approval.
+const PARK_MS: u64 = 30_000;
 
 /// The answer the outside world resolves a parked call with.
 fn host_answer(call: &ToolCallId) -> serde_json::Value {
@@ -731,18 +769,12 @@ struct Catalog {
 impl RoundTools for Catalog {
     fn pin(&self, call: &PendingToolCall, now_ms: u64) -> MemberPin {
         let tool = Tool::named(&call.tool_name);
-        let budget = ExecutionBudgets::default().tool_default();
-        let limit = ExecutionLimit::starting_at(now_ms, budget, budget);
-        MemberPin {
-            tool: ToolId::new(tool.name()),
-            policy: tool.policy(),
-            limit,
-            wait: matches!(tool, Tool::Defer | Tool::Approve).then(|| {
-                WaitDeadline::at_instant(lash_durable::DurableInstant(
-                    i64::try_from(limit.expires_at).unwrap(),
-                ))
-            }),
-        }
+        MemberPin::admitted(
+            ToolId::new(tool.name()),
+            tool.policy(),
+            self.services.mode.bounds(tool),
+            now_ms,
+        )
     }
 
     fn policies(&self) -> PolicyView {
@@ -996,7 +1028,15 @@ impl Scenario for L4 {
             .get(&(session(), run()))
             .copied()
             .unwrap_or(0);
-        if restores > 1 {
+        // A takeover restores the turn at most once. An approval left to
+        // expire also releases its session's claim as `waiting`, and the
+        // claim its expiry wakes restores the turn once more.
+        let restorable = if self.mode == Mode::ApprovalExpires {
+            2
+        } else {
+            1
+        };
+        if restores > restorable {
             violations.push(format!("NR-4: the turn was restored {restores} times"));
         }
 
@@ -1043,7 +1083,16 @@ impl Scenario for L4 {
                     violations.push(format!("the turn committed {commits} times"));
                 }
             }
-            Mode::Pending | Mode::Approval => {
+            Mode::ApprovalExpires => {
+                violations.extend(expiry_laws(&fold, database.as_ref()).await);
+                let commits = committed(CommitLabel::TURN_COMMIT);
+                if commits != 1 {
+                    violations.push(format!("the turn committed {commits} times"));
+                }
+            }
+            // Its law checks the cancelled turn itself.
+            Mode::ApprovalUntilScopeEnd => {}
+            Mode::Pending | Mode::Approval | Mode::ApprovalOutlivesBody => {
                 violations.extend(pending_laws(
                     self.mode,
                     &fold,
@@ -1323,6 +1372,58 @@ fn pending_laws(
     violations
 }
 
+/// FIG-5410 law 2 over [`Mode::ApprovalExpires`]: the approval's park
+/// deadline is the one its admission pinned, [`PARK_MS`] after the admission
+/// instant, whichever node read it back, and its wait carries that same
+/// deadline; the park expires `TimedOut` on its wait deadline, never on its
+/// body's limit, and not before that deadline. An approval whose owner died
+/// before its park committed is `Interrupted`.
+async fn expiry_laws(fold: &RunFold, database: &dyn DurableStore) -> Vec<String> {
+    let mut violations = Vec::new();
+    let Some((run, _)) = declared(fold) else {
+        return vec!["the round was never admitted".to_owned()];
+    };
+    for member in fold.round(run).unwrap().members() {
+        let draft = member.draft();
+        let admitted_at = draft.limit().expires_at - BODY_MS;
+        let pinned = i64::try_from(admitted_at + PARK_MS).unwrap();
+        match draft.park() {
+            Some(ParkDeadline::At(deadline)) if deadline.at().0 == pinned => {}
+            other => violations.push(format!(
+                "the park pinned {other:?}, not {pinned} ms ({PARK_MS} ms after its admission)"
+            )),
+        }
+        let wait = match draft.pinned_wait() {
+            Some(pinned) => database.wait(&pinned.id).await.ok().flatten(),
+            None => None,
+        };
+        let Some(wait) = wait else {
+            violations.push("the park pinned no wait".to_owned());
+            continue;
+        };
+        if wait.purpose.deadline().map(|at| at.0) != Some(pinned) {
+            violations.push(format!(
+                "the park's wait carries {:?}, not the admission's {pinned}",
+                wait.purpose.deadline()
+            ));
+        }
+        match (member.outcome(), &wait.lifecycle) {
+            (
+                Some(SettledOutput::TimedOut {
+                    cause: LimitCause::WaitDeadline,
+                    ..
+                }),
+                lash_durable::domain::WaitLifecycle::TimedOut { at },
+            ) if at.0 >= pinned => {}
+            (Some(SettledOutput::Interrupted), _) => {}
+            (other, lifecycle) => violations.push(format!(
+                "the expired park settled {other:?} with its wait {lifecycle:?}"
+            )),
+        }
+    }
+    violations
+}
+
 /// A cancel requested while a member runs ends it `Cancelled` (or
 /// `Interrupted`, when its owner died first) and calls the model no more.
 fn cancel_laws(fold: &RunFold, world: &ExternalWorld, seen: &Seen) -> Vec<String> {
@@ -1553,8 +1654,39 @@ async fn a_parked_member_settles_from_its_key_at_every_label() {
 #[tokio::test]
 async fn a_turn_whose_only_member_is_a_parked_approval_releases_its_claim_and_resumes_on_resolution()
  {
-    const HORIZON_MS: u64 = 600_000;
     let scenario = L4::new(Mode::Approval);
+    let (clock, nodes, parked) = until_waiting(&scenario).await;
+    assert!(parked.owner.is_none(), "a waiting session holds no slot");
+    assert!(
+        parked.next_due.is_some(),
+        "the session released without its approval's deadline as its due"
+    );
+    assert!(
+        nodes.database().turn(&session()).await.unwrap().is_some(),
+        "the turn is still open while its approval is pending"
+    );
+
+    let (call, key) = approval(&scenario);
+    let backend = scenario.backend.lock_recover().clone().unwrap();
+    let answer = waits::resolve_host(&backend, &key, waits::Resolution::Ok(host_answer(&call)))
+        .await
+        .unwrap();
+    assert_eq!(answer, lash_durable::domain::ResolveAnswer::Resolved);
+
+    until_done(&scenario, &clock, &nodes).await;
+    let violations = scenario.check(&nodes, None).await;
+    assert!(violations.is_empty(), "{violations:#?}");
+}
+
+/// How far a law that steps the nodes by hand may run the virtual clock.
+const HORIZON_MS: u64 = 600_000;
+
+/// Start `scenario`'s turn on fresh nodes and step them until the session
+/// released its claim as `waiting`, with only its parked approval: the
+/// nodes, their clock and the session actor's snapshot.
+async fn until_waiting(
+    scenario: &L4,
+) -> (Arc<SimClock>, Arc<SimNodes>, lash_durable::ActorSnapshot) {
     let clock = SimClock::new();
     let database = scenario.database(Arc::clone(&clock)).await;
     let nodes = Arc::new(SimNodes::new(
@@ -1592,30 +1724,12 @@ async fn a_turn_whose_only_member_is_a_parked_approval_releases_its_claim_and_re
         );
         assert!(nodes.step().await.is_some(), "stalled before the release");
     };
-    assert!(parked.owner.is_none(), "a waiting session holds no slot");
-    assert!(
-        parked.next_due.is_some(),
-        "the session released without its approval's deadline as its due"
-    );
-    assert!(
-        nodes.database().turn(&session()).await.unwrap().is_some(),
-        "the turn is still open while its approval is pending"
-    );
+    (clock, nodes, parked)
+}
 
-    let (call, key) = scenario
-        .seen
-        .lock_recover()
-        .approvals
-        .first()
-        .cloned()
-        .expect("the approval handed out its key");
-    let backend = scenario.backend.lock_recover().clone().unwrap();
-    let answer = waits::resolve_host(&backend, &key, waits::Resolution::Ok(host_answer(&call)))
-        .await
-        .unwrap();
-    assert_eq!(answer, lash_durable::domain::ResolveAnswer::Resolved);
-
-    while !scenario.done(&nodes).await {
+/// Step `nodes` until `scenario`'s session is idle, its turn ended.
+async fn until_done(scenario: &L4, clock: &SimClock, nodes: &SimNodes) {
+    while !scenario.done(nodes).await {
         assert!(
             clock.logical_ms() < HORIZON_MS,
             "the approved turn did not resume and commit"
@@ -1623,6 +1737,145 @@ async fn a_turn_whose_only_member_is_a_parked_approval_releases_its_claim_and_re
         assert!(nodes.step().await.is_some(), "stalled after the approval");
     }
     nodes.quiesce().await;
+}
+
+/// The approval the host was handed: its call and completion key.
+fn approval(scenario: &L4) -> (ToolCallId, String) {
+    scenario
+        .seen
+        .lock_recover()
+        .approvals
+        .first()
+        .cloned()
+        .expect("the approval handed out its key")
+}
+
+/// The run records' one round's only member, folded.
+async fn only_member(nodes: &SimNodes) -> round::RoundMember {
+    let rows = nodes.database().run_records(&owner()).await.unwrap();
+    let fold = round::fold(&rows, &PolicyView::default()).unwrap();
+    let (run, _) = declared(&fold).expect("the round was admitted");
+    let mut members = fold.round(run).unwrap().members().to_vec();
+    assert_eq!(members.len(), 1, "the round has one member");
+    members.remove(0)
+}
+
+/// FIG-5410 law 1: a parked call outlives its body. The approval's body
+/// bound is [`BODY_MS`] and its park an hour; the host approves well after
+/// the body bound passed, and the call settles from that approval, not
+/// `TimedOut`.
+#[tokio::test]
+async fn a_parked_call_outlives_its_body_bound() {
+    let scenario = L4::new(Mode::ApprovalOutlivesBody);
+    let (clock, nodes, _) = until_waiting(&scenario).await;
+    clock.advance_by(5 * BODY_MS).await;
+
+    let (call, key) = approval(&scenario);
+    let backend = scenario.backend.lock_recover().clone().unwrap();
+    let answer = waits::resolve_host(&backend, &key, waits::Resolution::Ok(host_answer(&call)))
+        .await
+        .unwrap();
+    assert_eq!(
+        answer,
+        lash_durable::domain::ResolveAnswer::Resolved,
+        "the park ended with the body bound"
+    );
+    until_done(&scenario, &clock, &nodes).await;
+    let answered = host_answer(&call).to_string();
+    match only_member(&nodes).await.outcome() {
+        Some(SettledOutput::Completed(material)) if material.payload() == answered => {}
+        other => panic!("the parked call settled {other:?}, not from its approval"),
+    }
     let violations = scenario.check(&nodes, None).await;
     assert!(violations.is_empty(), "{violations:#?}");
+}
+
+/// FIG-5410 law 2: an approval parked [`PARK_MS`] from its admission keeps
+/// that deadline across every cut and takeover of its turn, and expires
+/// `TimedOut` on it, distinct from its body's [`BODY_MS`] limit.
+#[tokio::test]
+async fn a_park_deadline_survives_a_takeover_and_expires_timed_out() {
+    prove(
+        Mode::ApprovalExpires,
+        &[
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::TURN_COMMIT,
+        ],
+    )
+    .await;
+}
+
+/// FIG-5410 law 3: an approval parked until its scope ends has no deadline:
+/// its session releases its claim with nothing due, and the park lasts past
+/// any bound until the host cancels the turn, whose end revokes the wait and
+/// settles the call `Cancelled`.
+#[tokio::test]
+async fn an_until_scope_end_park_is_revoked_when_its_turn_ends() {
+    let scenario = L4::new(Mode::ApprovalUntilScopeEnd);
+    let (clock, nodes, parked) = until_waiting(&scenario).await;
+    assert_eq!(
+        parked.next_due, None,
+        "a park until its scope ends has no deadline to wake on"
+    );
+    let member = only_member(&nodes).await;
+    assert_eq!(member.draft().park(), Some(ParkDeadline::UntilScopeEnd));
+    let pinned = member.draft().pinned_wait().expect("the park's wait");
+    let wait = nodes.database().wait(&pinned.id).await.unwrap().unwrap();
+    assert_eq!(wait.purpose.deadline(), None, "the wait has no deadline");
+
+    // Well past the two minutes lash once gave a parked call: nothing
+    // times the park out.
+    let until = clock.logical_ms() + 10 * 60 * 1_000;
+    while clock.logical_ms() < until {
+        assert!(nodes.step().await.is_some(), "stalled while parked");
+    }
+    assert!(
+        nodes.database().turn(&session()).await.unwrap().is_some(),
+        "the turn ended while its park was pending"
+    );
+
+    let services = L4Services {
+        mode: scenario.mode,
+        seen: Arc::clone(&scenario.seen),
+        world: Arc::clone(&scenario.world),
+        backend: Arc::clone(&scenario.backend),
+        clock: Arc::clone(&scenario.clock),
+    };
+    services.request_cancel(TurnCancelMode::Immediate).await;
+    let horizon = clock.logical_ms() + HORIZON_MS;
+    while !scenario.done(&nodes).await {
+        assert!(
+            clock.logical_ms() < horizon,
+            "the cancelled turn did not end"
+        );
+        assert!(nodes.step().await.is_some(), "stalled after the cancel");
+    }
+    nodes.quiesce().await;
+
+    let wait = nodes.database().wait(&pinned.id).await.unwrap().unwrap();
+    assert!(
+        matches!(
+            wait.lifecycle,
+            lash_durable::domain::WaitLifecycle::Revoked { .. }
+        ),
+        "the turn's end left the park's wait {:?} (scope {:?}, member {:?})",
+        wait.lifecycle,
+        wait.scope,
+        only_member(&nodes).await.outcome()
+    );
+    match only_member(&nodes).await.outcome() {
+        Some(SettledOutput::Cancelled { .. }) | None => {}
+        other => panic!("the revoked park settled {other:?}"),
+    }
+    let (_, key) = approval(&scenario);
+    let backend = scenario.backend.lock_recover().clone().unwrap();
+    let late = waits::resolve_host(&backend, &key, waits::Resolution::Ok(serde_json::json!(1)))
+        .await
+        .unwrap();
+    assert_ne!(
+        late,
+        lash_durable::domain::ResolveAnswer::Resolved,
+        "a revoked park took a resolution"
+    );
 }

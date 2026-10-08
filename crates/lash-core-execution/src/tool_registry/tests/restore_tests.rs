@@ -210,7 +210,8 @@ fn restore_drops_superseded_orphan_and_does_not_transfer_opt_out() {
                     ToolDefinition::default_input_schema(),
                     json!({}),
                 )
-                .expect("valid declared tool schemas"),
+                .expect("valid declared tool schemas")
+                .with_execution(std::time::Duration::from_secs(120)),
             ])
         }
         fn resolve_contract(&self, _name: &str) -> Option<Arc<ToolContract>> {
@@ -400,6 +401,7 @@ fn project_tool_catalog_projects_all_members_with_catalog_metadata() {
             serde_json::json!({}),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
     }
     let catalog = project_tool_catalog(["read_file", "search_tools"].map(|name| {
         let definition = member_fixture(name);
@@ -433,6 +435,7 @@ fn project_tool_catalog_preserves_dynamic_output_contracts() {
             serde_json::json!({}),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
     }
     let definition = member_fixture("llm_query").with_output_from_input_schema(
         "output",

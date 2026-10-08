@@ -176,7 +176,9 @@ fn standing(state: &LashlangEngineState) -> Result<EngineAction, ProcessInfraErr
             ..
         } => EngineAction::AwaitProcess {
             process: process.clone(),
-            deadline: None,
+            // A program's `await` has no deadline of its own: the wait
+            // lasts until the awaited process ends or this one's scope does.
+            bound: lash_core::ParkBound::UntilScopeEnd,
         },
         Phase::Running { .. }
         | Phase::Parked {

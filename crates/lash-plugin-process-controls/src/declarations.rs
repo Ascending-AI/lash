@@ -50,6 +50,7 @@ pub fn process_start_tool_definition() -> ToolDefinition {
             "additionalProperties": false
         }),
         serde_json::json!({"x-lash": {"kind": "process_unknown"}})).expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(30))
         .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::StartProcess]))
         .with_tool_binding(ToolBinding::new(["processes"], "start"))
 }
@@ -62,6 +63,7 @@ pub fn process_get_tool_definition() -> ToolDefinition {
     ToolDefinition::raw("tool:get_process_definition", "get_process_definition", "Resolve a tagged definition ID and retain its definition in this execution.",
         serde_json::json!({"type": "object", "properties": {"definition_id": definition_id_schema()}, "required": ["definition_id"], "additionalProperties": false}),
         serde_json::json!({"type": "object", "properties": {"id": definition_id_schema(), "signature": {}}, "required": ["id", "signature"], "additionalProperties": false})).expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(30))
         .with_declaration(ToolDeclaration::default().with_intents([ToolIntentKind::GetDefinition]))
         .with_tool_binding(ToolBinding::new(["processes"], "get"))
 }
@@ -134,6 +136,7 @@ pub fn process_signal_tool_definition() -> ToolDefinition {
         }),
         serde_json::json!({ "description": "The recorded signal event." }),
     ).expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(30))
     .with_examples(vec![
         r#"await processes.signal({ handle: h, name: "approved", payload: { by: "sam" } })?"#.into(),
     ])
@@ -168,6 +171,7 @@ pub fn process_emit_tool_definition() -> ToolDefinition {
         }),
         serde_json::json!({ "description": "The appended process event." }),
     ).expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(30))
     .with_examples(vec![
         r#"await processes.emit({ value: { stage: "approved" } })?"#.into(),
     ])

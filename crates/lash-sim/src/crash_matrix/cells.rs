@@ -271,6 +271,7 @@ fn ext_write(world: Weak<World>) -> Result<Arc<dyn lash_core::ToolProvider>, Str
         serde_json::json!({ "type": "object" }),
     )
     .map_err(|error| error.to_string())?
+    .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(ExecutionPolicy::Once)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], EXT_WRITE));
     Ok(Arc::new(StaticToolProvider::new(

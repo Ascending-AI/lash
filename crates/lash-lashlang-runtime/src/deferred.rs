@@ -553,6 +553,7 @@ mod tests {
             serde_json::json!({ "type": "boolean" }),
         )
         .expect("valid declared tool schemas")
+        .with_execution(std::time::Duration::from_secs(120))
         .with_tool_binding(ToolBinding::new(["web"], "fetch").with_authority_type("Web"));
         let grant = ToolGrant::new(definition);
         let mut environment = empty_host_environment();

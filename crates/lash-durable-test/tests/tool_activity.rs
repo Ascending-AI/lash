@@ -79,9 +79,14 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
         object,
     )
     .expect("the tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], name));
     if name == DEFERRED {
-        definition.with_declaration(lash_core::ToolDeclaration::deferring())
+        definition
+            .with_declaration(lash_core::ToolDeclaration::deferring())
+            .with_park(lash_core::ParkBound::Within(
+                std::time::Duration::from_secs(120),
+            ))
     } else {
         definition.with_declaration(
             lash_core::ToolDeclaration::default()

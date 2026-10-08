@@ -15,6 +15,7 @@ fn definition() -> lash::tools::ToolDefinition {
         json!({"type": "object"}),
     )
     .expect("valid schemas")
+    .with_execution(std::time::Duration::from_secs(120))
 }
 
 #[async_trait]

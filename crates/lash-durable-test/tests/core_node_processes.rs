@@ -762,6 +762,7 @@ fn write_attachment_tool() -> Arc<dyn lash_core::ToolProvider> {
         serde_json::json!({}),
     )
     .expect("the attachment tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], "write_attachment"));
     Arc::new(lash::tools::StaticToolProvider::new(
         vec![definition],
@@ -1234,6 +1235,7 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
         serde_json::json!({ "type": "object" }),
     )
     .expect("the write tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(lash_core::ExecutionPolicy::Once)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], WRITE_TOOL));
     Arc::new(lash::tools::StaticToolProvider::new(
@@ -1560,6 +1562,10 @@ impl lash_core::EngineSteps for Double {
         vec![lash_core::EngineStepKind::new(DOUBLE)]
     }
 
+    fn execution(&self, _kind: &lash_core::EngineStepKind) -> std::time::Duration {
+        std::time::Duration::from_secs(30)
+    }
+
     async fn run(
         &self,
         run: lash_core::EngineStepRun,
@@ -1877,6 +1883,7 @@ fn signal_intent_tool() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     )
     .expect("the signal tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_declaration(
         lash_core::ToolDeclaration::default()
             .with_intents([lash_core::ToolIntentKind::SignalProcess]),
@@ -2288,6 +2295,7 @@ fn isolated_definition() -> lash_core::ToolDefinition {
         serde_json::json!({ "type": "object" }),
     )
     .expect("the isolated tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_tool_binding(lash_core::ToolBinding::new(["iso"], "run"))
     .with_declaration(lash_core::ToolDeclaration {
         isolated: true,

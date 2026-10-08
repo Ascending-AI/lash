@@ -221,6 +221,7 @@ finish("started deterministic failing process");"#,
                 serde_json::json!({ "type": "object" }),
             )
             .expect("valid declared tool schemas")
+            .with_execution(std::time::Duration::from_secs(120))
             .with_tool_binding(lash::tools::ToolBinding::new(
                 ["workbench_surface"],
                 "terminal",

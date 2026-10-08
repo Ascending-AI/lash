@@ -230,6 +230,7 @@ fn definition(name: &str, policy: ExecutionPolicy, output: Value) -> lash_core::
         output,
     )
     .expect("the tool's schemas")
+    .with_execution(std::time::Duration::from_secs(120))
     .with_execution_policy(policy)
     .with_tool_binding(lash_core::ToolBinding::new(["tools"], name))
 }
