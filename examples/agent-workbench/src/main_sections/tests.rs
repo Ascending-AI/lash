@@ -627,7 +627,7 @@ async fn event_stream_forwards_session_observation_replay_gap() {
     .live_replay(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
         lash::observe::InMemoryLiveReplayStoreConfig {
             max_events_per_session: 1,
-            ..lash::observe::InMemoryLiveReplayStoreConfig::default()
+            ..lash::observe::InMemoryLiveReplayStoreConfig::standard()
         },
     )))
     .build()
@@ -709,7 +709,9 @@ async fn state_snapshot_cursor_attaches_to_the_live_incarnation_without_a_gap() 
         );
     }
 
-    let dead_incarnation = lash::observe::InMemoryLiveReplayStore::default();
+    let dead_incarnation = lash::observe::InMemoryLiveReplayStore::new(
+        lash::observe::InMemoryLiveReplayStoreConfig::standard(),
+    );
     let stale_cursor = lash::observe::LiveReplayStore::current_cursor(
         &dead_incarnation,
         &session_id,

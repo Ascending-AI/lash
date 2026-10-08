@@ -30,11 +30,12 @@ pub struct OutputRetentionPolicy {
 }
 
 impl OutputRetentionPolicy {
-    /// 64 KiB inline, a 4 KiB witness. The standard renderer's default cut
-    /// (16,000 characters) stays inline under it, so the policy retains what
-    /// no renderer bounded: failures a renderer passed through, plugin
-    /// additions after the cut, and RLM values.
-    pub const DEFAULT: Self = Self {
+    /// The standard policy, which a host names to choose it: 64 KiB inline, a
+    /// 4 KiB witness. The standard renderer's default cut (16,000 characters)
+    /// stays inline under it, so the policy retains what no renderer bounded:
+    /// failures a renderer passed through, plugin additions after the cut,
+    /// and RLM values. No measurement backs the witness size.
+    pub const STANDARD: Self = Self {
         inline_limit_bytes: 64 * 1024,
         witness_bytes: 4 * 1024,
     };
@@ -69,12 +70,6 @@ fn prefix_within(text: &str, bound: usize) -> &str {
         end -= 1;
     }
     &text[..end]
-}
-
-impl Default for OutputRetentionPolicy {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
 }
 
 /// An output history does not hold: the attachment that holds its complete

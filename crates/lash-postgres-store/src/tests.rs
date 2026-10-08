@@ -660,16 +660,20 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     };
     live_store
         .admit_session(&request)
         .await
         .expect("admit live root authority");
     let blobs = tempfile::tempdir().expect("attachment directory");
-    let backend = lash_sqlite_store::SqliteStoreSet::open((blobs.path()).join("attachments.db"))
-        .await
-        .expect("SQLite attachment store")
-        .attachment_store();
+    let backend = lash_sqlite_store::SqliteStoreSet::open(
+        (blobs.path()).join("attachments.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("SQLite attachment store")
+    .attachment_store();
     let attachment = lash_core_execution::AttachmentStore::put(
         backend.as_ref(),
         b"postgres-live-committed-blob".to_vec(),

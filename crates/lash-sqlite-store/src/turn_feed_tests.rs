@@ -20,9 +20,12 @@ async fn a_polling_reader_never_skips_or_repeats_a_change_in_memory() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_polling_reader_never_skips_or_repeats_a_change_on_file() {
     let root = tempfile::tempdir().expect("store directory");
-    let set = SqliteStoreSet::open(root.path().join("lash.db"))
-        .await
-        .expect("open the file store set");
+    let set = SqliteStoreSet::open(
+        root.path().join("lash.db"),
+        crate::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open the file store set");
     lash_core_execution::testing::turn_feed_law::a_polling_reader_never_skips_or_repeats_a_turn_change(
         set.session_store_factory(),
         16,
@@ -49,9 +52,12 @@ async fn a_reader_polling_one_session_never_misses_or_repeats_a_committed_turn_i
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_reader_polling_one_session_never_misses_or_repeats_a_committed_turn_on_file() {
     let root = tempfile::tempdir().expect("store directory");
-    let set = SqliteStoreSet::open(root.path().join("lash.db"))
-        .await
-        .expect("open the file store set");
+    let set = SqliteStoreSet::open(
+        root.path().join("lash.db"),
+        crate::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open the file store set");
     lash_core_execution::testing::committed_turns_law::a_reader_polling_one_session_never_misses_or_repeats_a_turn(
         set.session_store_factory(),
         8,

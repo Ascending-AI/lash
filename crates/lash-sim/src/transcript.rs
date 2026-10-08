@@ -458,6 +458,7 @@ mod tests {
                     lash_core::SessionToolAccess::ambient(),
                 ),
                 head: SessionCreationHead::Config,
+                retention: lash_core::Retention::UntilGc,
             })
             .await
             .expect("create observed store");

@@ -295,7 +295,13 @@ async fn live_replay() -> Result<Option<Arc<dyn lash::observe::LiveReplayStore>>
 async fn stores(root: &std::path::Path) -> Result<Arc<dyn lash::StoreSet>> {
     Ok(match required("E2E_CONSUMER_STORE")?.as_str() {
         "memory" => Arc::new(lash::sqlite::SqliteStoreSet::memory().await?),
-        "file" => Arc::new(lash::sqlite::SqliteStoreSet::open(root.join("lash.db")).await?),
+        "file" => Arc::new(
+            lash::sqlite::SqliteStoreSet::open(
+                root.join("lash.db"),
+                lash::sqlite::SqliteSynchronous::Normal,
+            )
+            .await?,
+        ),
         "postgres" => {
             let url = required("E2E_CONSUMER_DATABASE_URL")?;
             let endpoints = lash::postgres::PostgresEndpoints::from_url(&url)?;
@@ -310,6 +316,7 @@ async fn stores(root: &std::path::Path) -> Result<Arc<dyn lash::StoreSet>> {
                 &storage,
                 lash::sqlite::SqliteStoreSet::open(
                     (root.join("attachments")).join("attachments.db"),
+                    lash::sqlite::SqliteSynchronous::Normal,
                 )
                 .await
                 .context("open SQLite attachment storage")?
@@ -352,6 +359,7 @@ async fn main() -> Result<()> {
         (None, None) => fixture::provider(),
     };
     let metadata = lash::LlmProfileMetadata::builder("test/external-consumer")
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()?;
     let profiles = lash::LlmProfileRegistry::new().register(
@@ -368,6 +376,7 @@ async fn main() -> Result<()> {
     let builder = LashCore::standard_builder(backend)
         .llm_profiles(Arc::new(profiles))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

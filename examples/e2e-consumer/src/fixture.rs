@@ -274,6 +274,7 @@ mod tests {
         let backend = lash::durable::DurableBackendBuilder::new(stores).build()?;
         let controls = Arc::new(super::Controls::default());
         let metadata = lash::LlmProfileMetadata::builder("test/s30")
+            .cache_retention(lash::provider::CacheRetention::Short)
             .context_window_tokens(8192)
             .build()?;
         let registry = lash::LlmProfileRegistry::new().register(
@@ -283,6 +284,7 @@ mod tests {
         let core = lash::LashCore::standard_builder(backend)
             .llm_profiles(Arc::new(registry))
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())

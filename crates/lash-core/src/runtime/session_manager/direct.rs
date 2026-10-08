@@ -437,6 +437,7 @@ mod tests {
             crate::ToolSourcePolicy::Tolerate,
             crate::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),
+            crate::DataRetentionConfig::standard(),
         ))
         .with_plugin_host(Arc::new(crate::PluginHost::new(
             crate::testing::test_standard_protocol_factories(),

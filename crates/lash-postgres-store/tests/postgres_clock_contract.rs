@@ -223,6 +223,7 @@ async fn session_command_and_pending_input_decisions_follow_the_postgres_clock()
                 lash_core_execution::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
+            retention: lash_core_execution::Retention::UntilGc,
         })
         .await
         .expect("create skewed-clock session store");
@@ -387,6 +388,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
                 lash_core_execution::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
+            retention: lash_core_execution::Retention::UntilGc,
         })
         .await
         .expect("create final-commit session store");

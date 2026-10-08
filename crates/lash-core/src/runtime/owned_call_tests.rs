@@ -92,6 +92,7 @@ async fn world() -> World {
             MODEL,
             crate::RegisteredLlmProfile::new(
                 crate::LlmProfileMetadata::builder(MODEL)
+                    .cache_retention(crate::provider::CacheRetention::Short)
                     .context_window_tokens(128_000)
                     .build()
                     .expect("valid model"),

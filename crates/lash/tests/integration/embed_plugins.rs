@@ -273,6 +273,7 @@ async fn core_with_responses(
                     "mock-model",
                     lash::RegisteredLlmProfile::new(
                         lash::LlmProfileMetadata::builder("mock-model")
+                            .cache_retention(lash::provider::CacheRetention::Short)
                             .context_window_tokens(16_000)
                             .build()
                             .expect("valid model spec"),
@@ -282,6 +283,7 @@ async fn core_with_responses(
                 .expect("register the test model"),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

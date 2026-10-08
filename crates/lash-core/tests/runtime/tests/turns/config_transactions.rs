@@ -62,6 +62,7 @@ pub(super) async fn config_submission_refuses_what_no_owner_registers() {
         &mut runtime,
         "admitted-model",
         lash_core::LlmProfileMetadata::builder("admitted-model")
+            .cache_retention(lash_core::provider::CacheRetention::Short)
             .context_window_tokens(32_000)
             .build()
             .expect("model"),

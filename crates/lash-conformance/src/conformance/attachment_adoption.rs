@@ -193,6 +193,7 @@ pub async fn cross_session_attachment_adoption_conformance(
         faulting.clone(),
         store.clone(),
         RuntimeOwner::Process(ProcessId::fixture("byte-writer")),
+        lash_core::facade_support::AttachmentPolicy::standard(),
     );
     faulting.fail_put(true);
     let failed = facade.put(vec![8], image_meta()).await.unwrap_err();

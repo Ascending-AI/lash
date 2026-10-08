@@ -693,6 +693,7 @@ fn metadata(
     efforts: &[&str],
 ) -> crate::LlmProfileMetadata {
     let metadata = crate::LlmProfileMetadata::builder(key)
+        .cache_retention(crate::provider::CacheRetention::Short)
         .context_window_tokens(context_window_tokens)
         .build()
         .expect("model metadata");

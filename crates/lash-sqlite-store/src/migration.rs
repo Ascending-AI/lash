@@ -1011,7 +1011,7 @@ mod nested_format_tests {
         let root = tempfile::tempdir().expect("store root");
         let database = root.path().join("lash.db");
         drop(
-            crate::SqliteStoreSet::open(&database)
+            crate::SqliteStoreSet::open(&database, crate::SqliteSynchronous::Normal)
                 .await
                 .expect("provision"),
         );
@@ -1024,7 +1024,12 @@ mod nested_format_tests {
             br#"{"format":1,"state":"migrating"}"#.as_slice(),
         ] {
             std::fs::write(backup.join("manifest.json"), bytes).expect("unreadable manifest");
-            let error = match crate::SqliteStoreSet::open(&database).await {
+            let error = match crate::SqliteStoreSet::open(
+                &database,
+                crate::SqliteSynchronous::Normal,
+            )
+            .await
+            {
                 Err(error) => crate::sqlite_async_error(error),
                 Ok(_) => panic!("unreadable recovery record was admitted"),
             };

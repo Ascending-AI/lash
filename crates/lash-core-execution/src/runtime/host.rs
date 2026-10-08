@@ -51,10 +51,42 @@ pub struct RuntimeDurabilityConfig {
     /// to the live session (with a reference-tracking manifest) at session
     /// start. Before rebinding it is an ephemeral facade with no boundary guard.
     pub attachment_store: Arc<crate::RuntimeAttachmentStore>,
+    /// The revision retention every session this host creates is recorded
+    /// with ([`DataRetentionConfig::session_revisions`]).
+    pub session_retention: crate::Retention,
     pub process_env_store: Arc<dyn ProcessExecutionEnvStore>,
     /// Where a turn's environment sync records its preparation, which the
     /// sync's outcome journals by digest (FIG-5133).
     pub turn_prelude_store: Arc<dyn crate::TurnPreludeStore>,
+}
+
+/// What a host keeps and for how long: its attachment and retained-output
+/// policy, and which session revisions outlive a commit. Every field is the
+/// host's decision; a [`RuntimeHostConfig`] is not constructed without one
+/// (D-DEFAULTS2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DataRetentionConfig {
+    /// Attachment put bound, read budgets, upload expiry and retained output.
+    pub attachments: crate::AttachmentPolicy,
+    /// The revision retention every session this host creates is recorded
+    /// with. A session's own
+    /// [`set_retention`](crate::store::SessionCatalog::set_retention) changes
+    /// it afterwards.
+    pub session_revisions: crate::Retention,
+}
+
+impl DataRetentionConfig {
+    /// The standard retention:
+    /// [`AttachmentPolicy::standard`](crate::AttachmentPolicy::standard) and
+    /// [`Retention::UntilGc`](crate::Retention::UntilGc), under which every
+    /// revision stays forkable until the host collects. No measurement backs
+    /// the choice; it keeps the most.
+    pub const fn standard() -> Self {
+        Self {
+            attachments: crate::AttachmentPolicy::standard(),
+            session_revisions: crate::Retention::UntilGc,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -264,8 +296,8 @@ impl RuntimeControlConfig {
 impl RuntimeHostConfig {
     /// A config over `backend`: its effect host, attachment port,
     /// process-exec-env store and clock, with the commit budget, queued-work
-    /// batching, tool-source policy, execution budgets and delta coalescing
-    /// named explicitly.
+    /// batching, tool-source policy, execution budgets, delta coalescing and
+    /// data retention named explicitly.
     ///
     /// There is intentionally no `Default` and no in-memory constructor. The
     /// backend and the commit limits decide a runtime's durability envelope,
@@ -279,6 +311,7 @@ impl RuntimeHostConfig {
         tool_source_policy: crate::ToolSourcePolicy,
         execution_budgets: crate::ExecutionBudgets,
         delta_coalescing: DeltaCoalescing,
+        data_retention: DataRetentionConfig,
     ) -> Self {
         let effect_host = crate::ActorContext::detached(backend.clone());
         let attachment_store = backend.attachment_store();
@@ -293,7 +326,9 @@ impl RuntimeHostConfig {
                 queued_work_batching,
                 attachment_store: Arc::new(crate::RuntimeAttachmentStore::ephemeral(
                     attachment_store,
+                    data_retention.attachments,
                 )),
+                session_retention: data_retention.session_revisions,
                 process_env_store,
                 turn_prelude_store,
             },
@@ -344,17 +379,11 @@ impl RuntimeHostConfig {
     /// setting kept. Every backend-bound port moves together, so the config
     /// still names exactly one backend (ADR 0102, D2).
     pub fn with_backend(mut self, backend: crate::Backend) -> Self {
-        let max_attachment_bytes = self.durability.attachment_store.max_attachment_bytes();
-        let upload_expiry_ms = self.durability.attachment_store.upload_expiry_ms();
-        let output_retention = self.durability.attachment_store.output_retention();
         self.durability.attachment_store = Arc::new(
             crate::RuntimeAttachmentStore::ephemeral(
                 self.delivery_backend(backend.attachment_store()),
+                self.durability.attachment_store.policy(),
             )
-            .with_max_attachment_bytes(max_attachment_bytes)
-            .with_read_policy(self.durability.attachment_store.read_policy())
-            .with_upload_expiry_ms(upload_expiry_ms)
-            .with_output_retention(output_retention)
             .with_reclamation_retry(self.durability.attachment_store.reclamation_retry()),
         );
         self.durability.turn_prelude_store = backend.turn_prelude_store();
@@ -382,18 +411,6 @@ impl RuntimeHostConfig {
     pub fn with_clock(mut self, clock: Arc<dyn super::Clock>) -> Self {
         self.tracing = self.tracing.with_clock(Arc::clone(&clock));
         self.clock = clock;
-        self
-    }
-
-    /// `None` is the default and preserves unbounded attachment puts. A
-    /// configured limit is independent from the runtime commit budget and is
-    /// enforced before the attachment backend is called.
-    pub fn with_max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
-        self.durability.attachment_store = Arc::new(
-            self.durability
-                .attachment_store
-                .reconfigured_max_attachment_bytes(max_attachment_bytes),
-        );
         self
     }
 
@@ -437,45 +454,6 @@ impl RuntimeHostConfig {
                 self.provider_file_cache,
             ))
         }
-    }
-
-    pub fn with_attachment_read_policy(mut self, policy: crate::AttachmentReadPolicy) -> Self {
-        self.durability.attachment_store = Arc::new(
-            self.durability
-                .attachment_store
-                .reconfigured_read_policy(policy),
-        );
-        self
-    }
-
-    /// How long an unbound put's upload edge holds its bytes before the
-    /// cleanup executor may end it (ADR 0124). Every runtime this host
-    /// builds, session or process, inherits it.
-    pub fn with_attachment_upload_expiry_ms(mut self, upload_expiry_ms: u64) -> Self {
-        let max_attachment_bytes = self.durability.attachment_store.max_attachment_bytes();
-        self.durability.attachment_store = Arc::new(
-            self.durability
-                .attachment_store
-                .reconfigured_max_attachment_bytes(max_attachment_bytes)
-                .with_upload_expiry_ms(upload_expiry_ms),
-        );
-        self
-    }
-
-    /// The byte policy every output is measured against before it enters
-    /// session history (FIG-1643): an oversized tool presentation or RLM
-    /// print or final value is retained as a session attachment, and history
-    /// keeps a bounded witness and its reference. The default is
-    /// [`OutputRetentionPolicy::DEFAULT`](crate::OutputRetentionPolicy::DEFAULT).
-    /// Each step that applies the policy journals it, so changing it never
-    /// changes what a replay serves.
-    pub fn with_output_retention(mut self, policy: crate::OutputRetentionPolicy) -> Self {
-        self.durability.attachment_store = Arc::new(
-            self.durability
-                .attachment_store
-                .reconfigured_output_retention(policy),
-        );
-        self
     }
 
     /// Replace the effect host.

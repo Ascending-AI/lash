@@ -654,7 +654,9 @@ where
             )));
         }
     };
-    let mut model = lash::LlmProfileMetadata::builder(model_name).context_window_tokens(200_000);
+    let mut model = lash::LlmProfileMetadata::builder(model_name)
+        .cache_retention(lash::provider::CacheRetention::Short)
+        .context_window_tokens(200_000);
     if provider_kind == ANTHROPIC {
         // Messages requires a cap, and lash invents none.
         model = model.max_output_tokens(4_096);

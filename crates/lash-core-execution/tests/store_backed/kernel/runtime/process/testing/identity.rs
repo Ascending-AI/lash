@@ -57,6 +57,7 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
         crate::RecordedLlmProfile::mint(
             crate::LlmProfileKey::new("model"),
             crate::LlmProfileMetadata::builder("model")
+                .cache_retention(lash_core_execution::provider::CacheRetention::Short)
                 .context_window_tokens(100)
                 .build()
                 .unwrap()

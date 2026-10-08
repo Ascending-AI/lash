@@ -65,12 +65,13 @@ pub(crate) fn release_unretained_conn(
     Ok(released.len())
 }
 
-/// The retention policy of `session_id`; a session with no metadata row
-/// keeps the default.
+/// The retention policy recorded for `session_id`, or `None` for a session
+/// with no metadata row: it recorded no policy, and nothing stands in for
+/// one.
 pub(crate) fn retention_conn(
     conn: &Connection,
     session_id: &SessionId,
-) -> Result<Retention, StoreError> {
+) -> Result<Option<Retention>, StoreError> {
     conn.query_row(
         session_sql().meta.select_retention.sql(),
         params![session_id.as_str()],
@@ -78,9 +79,8 @@ pub(crate) fn retention_conn(
     )
     .optional()
     .map_err(sqlite_error)?
-    .map_or(Ok(Retention::default()), |(kind, last_turns)| {
-        Retention::from_stored(&kind, last_turns)
-    })
+    .map(|(kind, last_turns)| Retention::from_stored(&kind, last_turns))
+    .transpose()
 }
 
 /// Refuse a session the catalog does not hold: a deletion tombstone answers
@@ -418,8 +418,8 @@ impl SqliteStore {
             .map_err(sqlite_error)?;
             // A policy that releases as the session commits releases what
             // this pin alone held now; `until_gc` leaves it to the host's
-            // collection.
-            if retention_conn(tx, &session_id)?.releases_at_commit() {
+            // collection, and so does a session that recorded no policy.
+            if retention_conn(tx, &session_id)?.is_some_and(Retention::releases_at_commit) {
                 release_unretained_conn(tx, false, Some(&session_id))?;
             }
             Ok(())
@@ -434,7 +434,9 @@ impl SqliteStore {
         let session_id = session_id.clone();
         self.revision_read(move |conn, _| {
             require_session_conn(conn, &session_id)?;
-            retention_conn(conn, &session_id)
+            retention_conn(conn, &session_id)?.ok_or_else(|| StoreError::SessionNotFound {
+                session_id: session_id.clone(),
+            })
         })
         .await
     }

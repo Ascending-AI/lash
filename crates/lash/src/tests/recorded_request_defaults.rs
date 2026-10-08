@@ -34,7 +34,9 @@ fn key_one_metadata() -> lash_core::LlmProfileMetadata {
         .with_request_defaults(lash_core::provider::LlmProfileRequestDefaults {
             response_metadata_headers: vec!["x-key-one-cost".to_string()],
             response_metadata_body_paths: vec!["/key-one/cost".to_string()],
-            ..lash_core::provider::LlmProfileRequestDefaults::default()
+            ..lash_core::provider::LlmProfileRequestDefaults::new(
+                lash_core::provider::CacheRetention::Short,
+            )
         });
     metadata.limits.output_tokens =
         crate::OutputTokenLimits::new(None, Some(1111)).expect("valid recorded cap");

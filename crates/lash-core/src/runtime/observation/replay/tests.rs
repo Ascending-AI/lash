@@ -62,7 +62,7 @@ fn session_observation_event_constructor_rejects_malformed_cursor() {
 /// delivery of each identity and drops the redelivery (FIG-3753).
 #[tokio::test]
 async fn a_redelivered_turn_activity_collapses_into_the_stored_copy() {
-    let store = InMemoryLiveReplayStore::default();
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard());
     let session = SessionId::from("deduped");
     let revision = SessionRevision::new(1);
     let start = store.current_cursor(&session, revision);
@@ -110,7 +110,7 @@ async fn a_redelivered_turn_activity_collapses_into_the_stored_copy() {
 /// position right behind what observers actually received.
 #[tokio::test]
 async fn a_fully_redelivered_publication_publishes_nothing() {
-    let store = InMemoryLiveReplayStore::default();
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard());
     let session = SessionId::from("deduped-batch");
     let revision = SessionRevision::new(1);
     let start = store.current_cursor(&session, revision);
@@ -168,7 +168,7 @@ fn activity_texts(events: &[Arc<SessionObservationEvent>]) -> Vec<String> {
 /// lands twice, none is lost, and what follows still lands (FIG-5098).
 #[tokio::test]
 async fn a_redrive_framed_differently_adds_no_text_twice_and_loses_none() {
-    let store = InMemoryLiveReplayStore::default();
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard());
     let session = SessionId::from("framed-redrive");
     let revision = SessionRevision::new(1);
     let start = store.current_cursor(&session, revision);
@@ -232,7 +232,7 @@ async fn a_redelivery_straddling_the_delivered_range_is_a_gap() {
     use futures_util::FutureExt as _;
     use futures_util::StreamExt as _;
 
-    let store = InMemoryLiveReplayStore::default();
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard());
     let session = SessionId::from("straddled-redrive");
     let revision = SessionRevision::new(1);
     let start = store.current_cursor(&session, revision);
@@ -313,7 +313,7 @@ fn session_cursor_rejects_malformed_and_wrong_session() {
 
 #[tokio::test]
 async fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
-    let store = InMemoryLiveReplayStore::default();
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard());
     store
         .publish_test_event(
             &SessionId::from("s"),
@@ -341,7 +341,7 @@ async fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
 
 #[tokio::test]
 async fn in_memory_replay_subscription_yields_replay_then_live() {
-    let store = InMemoryLiveReplayStore::default();
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard());
     let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
     store
         .publish_test_event(
@@ -478,7 +478,7 @@ async fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
             max_sessions: 100_001,
             max_events_per_session: 1,
             max_retained_bytes: 1024 * 1024 * 1024,
-            ..InMemoryLiveReplayStoreConfig::default()
+            ..InMemoryLiveReplayStoreConfig::standard()
         },
         clock.clone(),
     );
@@ -496,7 +496,7 @@ async fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
         assert_eq!(retention.buffers.len(), 100_000);
         assert_eq!(retention.expiry_entry_count(), 100_000);
     }
-    clock.advance(DEFAULT_LIVE_REPLAY_TTL + Duration::from_secs(1));
+    clock.advance(STANDARD_LIVE_REPLAY_TTL + Duration::from_secs(1));
     assert_eq!(store.expire_idle_sessions(), 100_000);
     assert!(
         store.sessions.lock_recover().buffers.is_empty(),
@@ -516,7 +516,7 @@ async fn expiry_tick_releases_one_hundred_thousand_idle_sessions() {
 
 #[tokio::test]
 async fn deployment_session_capacity_evicts_with_a_gap() {
-    let store = InMemoryLiveReplayStore::default();
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard());
     let session = SessionId::from("capacity-victim");
     let old = store.current_cursor(&session, SessionRevision(1));
     for index in 0..4097 {
@@ -553,7 +553,7 @@ async fn deployment_byte_capacity_evicts_with_a_gap() {
         max_events_per_session: 1,
         max_sessions: 100,
         max_retained_bytes: 8192,
-        ..InMemoryLiveReplayStoreConfig::default()
+        ..InMemoryLiveReplayStoreConfig::standard()
     });
     let victim = SessionId::from("byte-victim");
     let old = store.current_cursor(&victim, SessionRevision(1));
@@ -596,7 +596,7 @@ async fn deployment_byte_capacity_evicts_with_a_gap() {
 
 #[tokio::test]
 async fn invalidation_releases_events_queued_for_live_subscribers() {
-    let store = InMemoryLiveReplayStore::default();
+    let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard());
     let session = SessionId::from("queued-victim");
     let cursor = store.current_cursor(&session, SessionRevision(1));
     let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = store
@@ -629,7 +629,7 @@ async fn an_oversized_publication_fences_continuity_without_taking_positions() {
     let store = InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig {
         max_events_per_session: 1,
         max_retained_bytes: 8192,
-        ..InMemoryLiveReplayStoreConfig::default()
+        ..InMemoryLiveReplayStoreConfig::standard()
     });
     let session = SessionId::from("oversized");
     let before = store.current_cursor(&session, SessionRevision(1));

@@ -529,6 +529,7 @@ fn profile(wire_model: &str) -> crate::LlmProfileConfig {
     crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
         crate::LlmProfileKey::new("direct-test"),
         crate::LlmProfileMetadata::builder(wire_model)
+            .cache_retention(crate::provider::CacheRetention::Short)
             .context_window_tokens(128_000)
             .build()
             .expect("valid standalone profile"),

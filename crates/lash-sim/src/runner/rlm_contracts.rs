@@ -753,10 +753,10 @@ fn rlm_contract_config_with_turn_options(
                 lash_sansio::llm_profile::LlmProfileMetadata::new(
                     "rlm-contract".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                    lash_sansio::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
-                .with_extra_body(Default::default())
-                .with_request_defaults(Default::default()),
+                .with_extra_body(Default::default()),
             ),
         )
         .with_reasoning(Default::default()),

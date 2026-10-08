@@ -48,6 +48,7 @@ pub(super) async fn put_image(backend: &Backend) -> Result<Image, String> {
         backend.attachment_store(),
         backend.attachment_referrers(),
         lash_core::RuntimeOwner::Session(session()),
+        lash_core::facade_support::AttachmentPolicy::standard(),
     );
     let reference = store
         .put(
@@ -250,6 +251,7 @@ async fn send_adapter_attempt(
             backend.attachment_store(),
             backend.attachment_referrers(),
             lash_core::RuntimeOwner::Session(session()),
+            lash_core::AttachmentPolicy::standard(),
         ),
         seen: Arc::clone(&services.seen),
     };

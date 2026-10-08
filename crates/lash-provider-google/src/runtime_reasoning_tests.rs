@@ -122,6 +122,7 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
                     "gemini-test",
                     lash::RegisteredLlmProfile::new(
                         lash::LlmProfileMetadata::builder("gemini-test")
+                            .cache_retention(lash::provider::CacheRetention::Short)
                             .context_window_tokens(16_000)
                             .expose_thinking(true)
                             .build()
@@ -133,6 +134,7 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
         ))
         .tools(Arc::new(RuntimeLookupTool))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -208,6 +210,7 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
                     "gemini-test",
                     lash::RegisteredLlmProfile::new(
                         lash::LlmProfileMetadata::builder("gemini-test")
+                            .cache_retention(lash::provider::CacheRetention::Short)
                             .context_window_tokens(16_000)
                             .expose_thinking(true)
                             .build()
@@ -218,6 +221,7 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
                 .expect("register the test model"),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

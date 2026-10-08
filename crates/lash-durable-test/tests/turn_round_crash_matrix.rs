@@ -449,10 +449,10 @@ fn machine_config(session: &SessionId, run: &TurnId) -> TurnMachineConfig {
                 lash_sansio::llm_profile::LlmProfileMetadata::new(
                     "scripted".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                    lash_sansio::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::LlmProfileCapability::default())
-                .with_extra_body(Default::default())
-                .with_request_defaults(Default::default()),
+                .with_extra_body(Default::default()),
             ),
         )
         .with_reasoning(Default::default()),

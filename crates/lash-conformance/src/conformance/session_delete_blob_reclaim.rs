@@ -377,6 +377,7 @@ where
                     &source.request.config.session_policy(),
                     crate::SessionToolAccess::ambient(),
                 ),
+                retention: crate::Retention::UntilGc,
             })
             .await
             .expect("fork the admission's base");
@@ -598,6 +599,7 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
             &committed.request.config.session_policy(),
             crate::SessionToolAccess::ambient(),
         ),
+        retention: crate::Retention::UntilGc,
     };
     handles
         .factory
@@ -747,6 +749,7 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
         bytes.clone(),
         Arc::clone(store.store()) as Arc<dyn crate::AttachmentReferrers>,
         crate::RuntimeOwner::Session((request.session_id).clone()),
+        crate::AttachmentPolicy::standard(),
     );
     let reference = parent
         .put(
@@ -836,6 +839,7 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
             &request.config.session_policy(),
             crate::SessionToolAccess::ambient(),
         ),
+        retention: crate::Retention::UntilGc,
     };
     handles
         .factory
@@ -871,6 +875,7 @@ async fn attachment_prefix_retention(backend_name: &str, handles: SessionDeleteB
         bytes.clone(),
         Arc::clone(fork.store()) as Arc<dyn crate::AttachmentReferrers>,
         crate::RuntimeOwner::Session((fork_request.session_id).clone()),
+        crate::AttachmentPolicy::standard(),
     );
     assert_eq!(
         child

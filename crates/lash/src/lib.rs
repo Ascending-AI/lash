@@ -74,6 +74,7 @@ pub mod admin;
 mod artifacts;
 mod change_page;
 mod core;
+mod data_retention;
 pub use change_page::ChangePage;
 /// The durable substrate's backend builder (ADR 0132 §1).
 pub mod durable;
@@ -189,6 +190,7 @@ pub use crate::core::{
     DeploymentDrainStatus, LashCore, LashCoreBuilder, NodeDrainError, NodeDrainReport,
     SessionDeleteCompletion, SessionDeletion,
 };
+pub use crate::data_retention::DataRetention;
 pub use crate::durable_session::DurableSession;
 pub use crate::error::{EmbedError, Result, SendError};
 pub use crate::parked_work::{ControlIntentPage, ControlIntentQuery, ParkedWork};
@@ -644,11 +646,12 @@ pub mod persistence {
         AdoptedAttachmentCondemnation, AttachmentCondemnation, AttachmentCondemnationAdoption,
         AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
         AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentContentMismatch,
-        AttachmentDeleteArming, AttachmentDeleteStallReason, AttachmentReadPolicy,
-        AttachmentReclamationPolicy, AttachmentRetentionFailure, AttachmentRetentionStoreFailure,
-        AttachmentRootSet, AttachmentSettlementOutcome, AttachmentStore, AttachmentStoreError,
-        AttachmentStoreFailureClass, AttachmentStorePersistence, AttachmentSweepGeneration,
-        AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
+        AttachmentDeleteArming, AttachmentDeleteStallReason, AttachmentPolicy,
+        AttachmentReadPolicy, AttachmentReclamationPolicy, AttachmentRetentionFailure,
+        AttachmentRetentionStoreFailure, AttachmentRootSet, AttachmentSettlementOutcome,
+        AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
+        AttachmentStorePersistence, AttachmentSweepGeneration, AttachmentWriteFence,
+        AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
         MAX_ATTACHMENT_DELETE_ATTEMPTS, ProcessExecutionEnvStore, StoredAttachment, StoredBlobRef,
         TurnPreludeStore, attachments::AttachmentReclamationFailure,
         facade_support::AttachmentGcFence, facade_support::AttachmentReclamationReport,
@@ -1046,10 +1049,14 @@ pub mod attachments {
     pub use lash_core::{
         AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, MediaType,
     };
-    /// Output kept out of session history (FIG-1643): the byte policy
-    /// [`LashCoreBuilder::output_retention`](crate::LashCoreBuilder::output_retention)
-    /// configures, the witness and reference history keeps in an oversized
-    /// output's place, and a value that is one or the other.
+    /// The attachment half of a host's data-retention statement: the put
+    /// bound, the read budgets, the upload expiry and the retained-output
+    /// policy.
+    pub use lash_core::{AttachmentPolicy, AttachmentReadPolicy};
+    /// Output kept out of session history (FIG-1643): the byte policy a host
+    /// states in [`DataRetention::attachments`](crate::DataRetention::attachments),
+    /// the witness and reference history keeps in an oversized output's
+    /// place, and a value that is one or the other.
     pub use lash_core::{OutputRetentionPolicy, OutputValue, RetainedOutput};
     pub use lash_sansio::llm::attachment_delivery::{
         AttachmentPosition, Delivery, DeliveryContext, DeliveryFetchHorizon, DeliveryForms,
@@ -1173,7 +1180,10 @@ pub mod durability {
     };
     /// Durable group and journal values returned by effect-host implementors.
     pub use lash_core::runtime::{JournalReplay, ProcessDriveStep, RecordedKeyRange};
-    pub use lash_core::{facade_support::RuntimeEnvironment, facade_support::RuntimeHostConfig};
+    pub use lash_core::{
+        facade_support::DataRetentionConfig, facade_support::RuntimeEnvironment,
+        facade_support::RuntimeHostConfig,
+    };
     pub use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig};
     /// The session work a node runs `SessionTurn` processes with, which
     /// [`DurableProcessWorker`] implements (FIG-5208).

@@ -99,9 +99,12 @@ async fn double(tier: Tier) -> Option<Double> {
         Tier::SqliteFile => {
             let root = tempfile::tempdir().expect("SQLite store directory");
             let path = root.path().join("lash.db");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(&path)
-                .await
-                .expect("SQLite file stores");
+            let stores = lash_sqlite_store::SqliteStoreSet::open(
+                &path,
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite file stores");
             Some(Double {
                 stores: Arc::new(stores),
                 _keep: vec![Box::new(root)],
@@ -118,6 +121,7 @@ async fn double(tier: Tier) -> Option<Double> {
                 &storage,
                 lash_sqlite_store::SqliteStoreSet::open(
                     (attachments.path()).join("attachments.db"),
+                    lash_sqlite_store::SqliteSynchronous::Normal,
                 )
                 .await
                 .expect("SQLite attachment store")
@@ -208,6 +212,7 @@ fn metadata(wire_model: &str, revision: &str) -> LlmProfileMetadata {
     let mut extra_body = serde_json::Map::new();
     extra_body.insert("catalog_revision".to_string(), revision.into());
     LlmProfileMetadata::builder(wire_model)
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(64_000)
         .extra_body(extra_body)
         .build()
@@ -246,6 +251,7 @@ fn core_serving(double: &Double, entries: &[Entry<'_>], worker: &str, serve: boo
         .serve_sessions(serve)
         .llm_profiles(catalog(entries))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -374,6 +380,7 @@ fn core_over(
     let mut builder = LashCore::standard_builder(double.backend())
         .llm_profiles(Arc::clone(catalog) as Arc<dyn lash::LlmProfiles>)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -796,6 +803,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     let glm = Route::new("glm answers");
     let high = lash::provider::ReasoningSelection::Effort("high".to_string());
     let thinking = LlmProfileMetadata::builder("thinker-1")
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(64_000)
         .capability(lash::provider::LlmProfileCapability {
             reasoning: Some(lash::provider::ReasoningCapability {
@@ -823,6 +831,7 @@ async fn an_unsupported_reasoning_selection_is_refused_where_it_is_stated(tier: 
     let core = LashCore::standard_builder(double.backend())
         .llm_profiles(Arc::new(registry))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

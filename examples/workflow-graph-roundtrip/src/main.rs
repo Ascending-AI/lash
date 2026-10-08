@@ -12,9 +12,10 @@ async fn main() -> Result<()> {
         .context("invalid WORKFLOW_GRAPH_ADDR")?;
     let database = std::env::var("WORKFLOW_GRAPH_SQLITE_PATH")
         .unwrap_or_else(|_| ".workflow-graph/lash.db".into());
-    let stores = lash::sqlite::SqliteStoreSet::open(database)
-        .await
-        .context("open workflow SQLite stores")?;
+    let stores =
+        lash::sqlite::SqliteStoreSet::open(database, lash::sqlite::SqliteSynchronous::Normal)
+            .await
+            .context("open workflow SQLite stores")?;
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
         .build()
         .context("build the durable backend")?;

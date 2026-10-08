@@ -41,10 +41,13 @@ fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentByt
         let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let path = (root.join(format!("bytes-{ordinal}"))).join("attachments.db");
         sync_await(async move {
-            lash_sqlite_store::SqliteStoreSet::open(path)
-                .await
-                .expect("SQLite attachment store")
-                .attachment_store()
+            lash_sqlite_store::SqliteStoreSet::open(
+                path,
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store()
         }) as Arc<dyn lash_core_execution::AttachmentStore>
     })
 }
@@ -130,7 +133,7 @@ fn pg_law_stores(
     let attachments = tempfile::tempdir().expect("attachment directory");
     let path = attachments.path().join("attachments.db");
     let bytes = sync_await(async move {
-        lash_sqlite_store::SqliteStoreSet::open(path)
+        lash_sqlite_store::SqliteStoreSet::open(path, lash_sqlite_store::SqliteSynchronous::Normal)
             .await
             .expect("SQLite attachment store")
             .attachment_store()
@@ -576,6 +579,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
                 lash_core_execution::SessionToolAccess::ambient(),
             ),
             head: lash_core_execution::SessionCreationHead::Config,
+            retention: lash_core_execution::Retention::UntilGc,
         })
         .await
         .expect("admit clocked Postgres session");

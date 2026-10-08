@@ -186,6 +186,7 @@ async fn process_cancel_withdraws_its_inputs_and_preserves_foreign_child_inputs(
             ),
             head: crate::SessionCreationHead::Config,
             owning_process_id: Some(process_id.clone()),
+            retention: crate::Retention::UntilGc,
         },
     )
     .await

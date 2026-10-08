@@ -68,7 +68,8 @@ fn fixture(backend: Arc<dyn AttachmentStore>, policy: AttachmentReadPolicy) -> F
     ));
     Fixture {
         uploads,
-        store: RuntimeAttachmentStore::ephemeral(files).with_read_policy(policy),
+        store: RuntimeAttachmentStore::ephemeral(files, lash_core::AttachmentPolicy::standard())
+            .with_read_policy(policy),
         ctx: DeliveryContext {
             valid_through_ms: 1000,
             live_file_scope: Some(scope),
@@ -110,7 +111,7 @@ fn file_id(delivery: &Delivery) -> &str {
     reason = "conformance fixture setup must succeed"
 )]
 pub async fn attachment_delivery_derives_per_media_type(backend: Arc<dyn AttachmentStore>) {
-    let fixture = fixture(backend.clone(), AttachmentReadPolicy::DEFAULT);
+    let fixture = fixture(backend.clone(), AttachmentReadPolicy::STANDARD);
     let put = |media_type: &'static str| {
         let backend = backend.clone();
         async move {
@@ -174,8 +175,8 @@ pub async fn attachment_delivery_charges_a_provider_file_as_a_file(
     backend: Arc<dyn AttachmentStore>,
 ) {
     let scaled = AttachmentReadPolicy {
-        max_blob_bytes: AttachmentReadPolicy::DEFAULT.max_blob_bytes / 1024,
-        max_request_bytes: AttachmentReadPolicy::DEFAULT.max_request_bytes / 1024,
+        max_blob_bytes: AttachmentReadPolicy::STANDARD.max_blob_bytes / 1024,
+        max_request_bytes: AttachmentReadPolicy::STANDARD.max_request_bytes / 1024,
     };
     let fixture = fixture(backend.clone(), scaled);
     let reference = backend

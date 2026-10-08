@@ -246,5 +246,6 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     }
 }

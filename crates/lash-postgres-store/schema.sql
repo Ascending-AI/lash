@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     admission_base_checkpoint_ref TEXT,
     closing_intent BIGINT,
     owning_process_id TEXT,
-    retention_kind TEXT NOT NULL DEFAULT 'until_gc',
+    retention_kind TEXT NOT NULL,
     retention_last_turns BIGINT,
     -- The session's standing fault (ADR 0109 §9) and when it was recorded.
     fault_json TEXT,

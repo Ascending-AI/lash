@@ -90,9 +90,12 @@ async fn stores(tier: Tier) -> (Arc<dyn StoreSet>, Vec<Box<dyn std::any::Any + S
         ),
         Tier::SqliteFile => {
             let dir = tempfile::tempdir().expect("a temporary directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
-                .await
-                .expect("a file store set opens");
+            let stores = lash_sqlite_store::SqliteStoreSet::open(
+                dir.path().join("lash.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("a file store set opens");
             (Arc::new(stores), vec![Box::new(dir)])
         }
         Tier::Postgres => {
@@ -140,6 +143,7 @@ async fn deploy_with(
         .expect("the backend assembles");
     let core = build(&backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -158,6 +162,7 @@ async fn deploy_with(
 
 fn metadata() -> lash_core::LlmProfileMetadata {
     lash_core::LlmProfileMetadata::builder(MODEL)
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .expect("the model's metadata")

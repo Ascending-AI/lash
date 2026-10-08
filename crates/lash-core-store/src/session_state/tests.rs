@@ -9,6 +9,7 @@ fn recorded_llm_profile(key: &str) -> crate::LlmProfileConfig {
     crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
         crate::LlmProfileKey::new(key),
         lash_core_llm::llm_profile::LlmProfileMetadata::builder(format!("{key}-wire"))
+            .cache_retention(lash_core_llm::provider::CacheRetention::Short)
             .context_window_tokens(32_000)
             .build()
             .expect("model"),

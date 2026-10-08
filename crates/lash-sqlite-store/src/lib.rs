@@ -532,16 +532,26 @@ pub enum BuiltinBlobProfile {
     Compact,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StoreOptions {
     /// Blob compression profile. This controls storage size and CPU use for
     /// persisted payloads independently of the connection policy.
     pub blob_profile: BuiltinBlobProfile,
-    /// SQLite connection behavior for stores opened with these options.
-    /// Defaults preserve the current 15-second, normal-synchronous, WAL
-    /// autocheckpoint, and cache-size behavior; change it for a deployment
-    /// with different lock, durability, WAL-growth, or memory constraints.
+    /// SQLite connection behavior for stores opened with these options,
+    /// including the `synchronous` mode the host states.
     pub connection_policy: SqliteConnectionPolicy,
+}
+
+impl StoreOptions {
+    /// Balanced blob compression and
+    /// [`SqliteConnectionPolicy::standard`] under the `synchronous` mode the
+    /// host states.
+    pub fn standard(synchronous: SqliteSynchronous) -> Self {
+        Self {
+            blob_profile: BuiltinBlobProfile::Balanced,
+            connection_policy: SqliteConnectionPolicy::standard(synchronous),
+        }
+    }
 }
 
 /// The durable artifact-blob envelope. It carries no payload-family field:

@@ -29,6 +29,7 @@ fn uploads(core: &LashCore) -> lash_core::facade_support::RuntimeAttachmentStore
         core.backend().attachment_store(),
         core.backend().attachment_referrers(),
         lash_core::RuntimeOwner::Session(SESSION.into()),
+        lash_core::facade_support::AttachmentPolicy::standard(),
     )
     .with_upload_expiry_ms(1_000)
 }

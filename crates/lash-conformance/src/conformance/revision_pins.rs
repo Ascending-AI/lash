@@ -91,6 +91,7 @@ impl PinLaw {
                 },
                 pending_observer_intents: Vec::new(),
                 config: revision.fork_config(),
+                retention: crate::Retention::UntilGc,
             })
             .await?;
         Ok(session_id)

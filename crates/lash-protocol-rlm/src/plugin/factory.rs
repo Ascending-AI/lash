@@ -772,6 +772,7 @@ mod process_settings_tests {
                     lash_core::ToolSourcePolicy::Tolerate,
                     lash_core::ExecutionBudgets::recommended(),
                     lash_core::runtime::DeltaCoalescing::recommended(),
+                    lash_core::facade_support::DataRetentionConfig::standard(),
                 ),
                 true,
             )

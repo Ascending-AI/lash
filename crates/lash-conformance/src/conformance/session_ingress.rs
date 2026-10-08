@@ -162,6 +162,7 @@ pub fn session_ingress_session_request() -> crate::SessionStoreCreateRequest {
             crate::SessionToolAccess::ambient(),
         ),
         head: crate::SessionCreationHead::Config,
+        retention: crate::Retention::UntilGc,
     }
 }
 

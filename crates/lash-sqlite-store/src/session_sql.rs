@@ -22,8 +22,10 @@ lash_store_sql::statements! {
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
               caused_by_effect_id, caused_by_call_id, caused_by_process_id,
               caused_by_process_event_sequence, caused_by_node_id, source_session_id,
-              source_node_id, created_at_ms, last_commit_at_ms, owning_process_id)
-             VALUES (?1, ?15, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL, ?16)";
+              source_node_id, created_at_ms, last_commit_at_ms, owning_process_id,
+              retention_kind, retention_last_turns)
+             VALUES (?1, ?15, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, NULL, ?16,
+                     ?17, ?18)";
 
         /// The stored relation of `?1`.
         ///

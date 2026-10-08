@@ -29,7 +29,7 @@ fn machine_config(max_turns: Option<usize>) -> TurnMachineConfig {
                     .context_window_tokens(128_000)
                     .capability(lash_core::LlmProfileCapability::default())
                     .extra_body(Default::default())
-                    .request_defaults(Default::default())
+                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),

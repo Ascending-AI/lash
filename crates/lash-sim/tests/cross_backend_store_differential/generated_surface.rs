@@ -144,11 +144,15 @@ async fn surface_runners(
             lash_core::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core::Retention::UntilGc,
     };
     let sqlite_store = Arc::new(
-        SqliteStore::open(&sqlite_runtime_root.join("lash.db"))
-            .await
-            .unwrap(),
+        SqliteStore::open(
+            &sqlite_runtime_root.join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .unwrap(),
     );
     sqlite_store.admit_session(&session_request).await.unwrap();
     let sqlite_runtime: Arc<dyn RuntimeStore> = sqlite_store;
@@ -159,7 +163,7 @@ async fn surface_runners(
         &sqlite_stores_path,
         SqliteStoreSetOptions {
             process_id_mint: sqlite_mint,
-            ..SqliteStoreSetOptions::default()
+            ..SqliteStoreSetOptions::standard(lash_sqlite_store::SqliteSynchronous::Normal)
         },
         Arc::clone(&clock),
     )
@@ -456,10 +460,12 @@ async fn attachment_blob_store_differential_agrees() {
     let sqlite_memory_stores = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
     let memory = sqlite_memory_stores.attachment_store();
     let root = tempfile::tempdir().unwrap();
-    let sqlite_file_stores =
-        lash_sqlite_store::SqliteStoreSet::open((root.path()).join("attachments.db"))
-            .await
-            .expect("SQLite attachment store");
+    let sqlite_file_stores = lash_sqlite_store::SqliteStoreSet::open(
+        (root.path()).join("attachments.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("SQLite attachment store");
     let file = sqlite_file_stores.attachment_store();
     // The S3 server this runs against is named by the same LASH_S3_* settings
     // the lash-s3-store suite reads (`scripts/ci/s3-service.sh` owns them), so

@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     admission_base_checkpoint_ref     TEXT,
     closing_intent                    INTEGER,
     owning_process_id                 TEXT,
-    retention_kind                    TEXT NOT NULL DEFAULT 'until_gc',
+    retention_kind                    TEXT NOT NULL,
     retention_last_turns              INTEGER,
     -- The session's standing fault (ADR 0109 §9) and when it was recorded.
     fault_json                       TEXT,
@@ -938,8 +938,8 @@ mod observer_intent_migration_tests {
                      FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
                  );
                  INSERT INTO session_meta
-                     (session_id, relation_kind, observer_intent_depth)
-                     VALUES ('fold-session', 'root', 2);
+                     (session_id, relation_kind, retention_kind, observer_intent_depth)
+                     VALUES ('fold-session', 'root', 'until_gc', 2);
                  INSERT INTO session_meta_observer_intent_processes VALUES
                      ('fold-session', 0, 0, 'shared-process'),
                      ('fold-session', 1, 0, 'host-only-process');

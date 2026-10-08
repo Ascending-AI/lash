@@ -42,9 +42,12 @@ async fn retained_mcp_binary_retrieves_exact_bytes_with_octet_stream() {
 async fn attachment_usage_gate() {
     let data_dir = tempfile::tempdir().expect("create gate data dir");
     let stores: Arc<dyn lash::StoreSet> = Arc::new(
-        lash::sqlite::SqliteStoreSet::open(data_dir.path().join("lash-sessions.db"))
-            .await
-            .expect("open the gate's SQLite store set"),
+        lash::sqlite::SqliteStoreSet::open(
+            data_dir.path().join("lash-sessions.db"),
+            lash::sqlite::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open the gate's SQLite store set"),
     );
     let session_id_path = data_dir.path().join("session-id");
     let sessions =
@@ -72,7 +75,7 @@ async fn attachment_usage_gate() {
     match attachment_store
         .get(
             &missing_id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
     {
@@ -134,7 +137,7 @@ async fn attachment_usage_gate() {
     let stored = attachment_store
         .get(
             &uploaded.attachment.id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
         .expect("read uploaded bytes from workbench attachment store");

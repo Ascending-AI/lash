@@ -148,9 +148,12 @@ pub async fn stores(
             Ok((Arc::new(stores), storage.effective_config().node))
         }
         Database::Sqlite(path) => {
-            let stores = lash_sqlite_store::SqliteStoreSet::open(path)
-                .await
-                .map_err(|error| format!("open the lash database: {error}"))?;
+            let stores = lash_sqlite_store::SqliteStoreSet::open(
+                path,
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .map_err(|error| format!("open the lash database: {error}"))?;
             Ok((Arc::new(stores), settings(notifier)))
         }
     }

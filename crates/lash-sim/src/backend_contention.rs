@@ -71,11 +71,13 @@ pub async fn run_backend_contention_report_against(
     let mut scenarios = Vec::new();
 
     let sqlite_root = artifact_root.join("sqlite-store");
-    let sqlite_factory: Arc<dyn DeploymentStore> =
-        lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("lash.db"))
-            .await
-            .map_err(|error| format!("open SQLite contention store: {error}"))?
-            .session_store_factory();
+    let sqlite_factory: Arc<dyn DeploymentStore> = lash_sqlite_store::SqliteStoreSet::open(
+        sqlite_root.join("lash.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .map_err(|error| format!("open SQLite contention store: {error}"))?
+    .session_store_factory();
     scenarios.push(
         run_factory_contention_scenario("sqlite", "lash_sqlite_store::SqliteStore", sqlite_factory)
             .await?,
@@ -219,6 +221,7 @@ fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
             lash_core::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core::Retention::UntilGc,
     }
 }
 

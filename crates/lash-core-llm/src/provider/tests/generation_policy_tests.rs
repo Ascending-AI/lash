@@ -44,7 +44,7 @@ fn generation_policy_prefers_request_then_model_default_and_invents_no_cap() {
     let model_defaults = LlmProfileRequestDefaults {
         cache_retention: CacheRetention::Long,
         expose_thinking: true,
-        ..LlmProfileRequestDefaults::default()
+        ..LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short)
     };
     let unset = resolve_generation_policy(&empty_request(), "test", &open_wire())
         .expect("nothing to refuse");
@@ -162,7 +162,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 output_token_cap: NonZeroUsize::new(1_024),
                 ..GenerationOptions::default()
             },
-            options: LlmProfileRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short),
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Unsupported,
                 ..open_wire()
@@ -172,7 +172,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
         Case {
             name: "default cap on a wire without one",
             generation: GenerationOptions::default(),
-            options: LlmProfileRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short),
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Unsupported,
                 ..open_wire()
@@ -182,7 +182,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
         Case {
             name: "no cap on a wire that requires one",
             generation: GenerationOptions::default(),
-            options: LlmProfileRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short),
             wire: GenerationWire {
                 output_token_cap: OutputCapWire::Required,
                 ..open_wire()
@@ -195,7 +195,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 temperature: temperature(),
                 ..GenerationOptions::default()
             },
-            options: LlmProfileRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short),
             wire: GenerationWire {
                 temperature: false,
                 ..open_wire()
@@ -208,7 +208,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 seed: Some(1),
                 ..GenerationOptions::default()
             },
-            options: LlmProfileRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short),
             wire: GenerationWire {
                 seed: false,
                 ..open_wire()
@@ -221,7 +221,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 stop_sequences: vec!["END".to_string()],
                 ..GenerationOptions::default()
             },
-            options: LlmProfileRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short),
             wire: GenerationWire {
                 stop_sequences: false,
                 ..open_wire()
@@ -234,7 +234,7 @@ fn generation_policy_refuses_every_setting_the_wire_cannot_carry() {
                 parallel_tool_calls: Some(true),
                 ..GenerationOptions::default()
             },
-            options: LlmProfileRequestDefaults::default(),
+            options: LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short),
             wire: GenerationWire {
                 parallel_tool_calls: false,
                 ..open_wire()
@@ -314,7 +314,7 @@ fn pinned_sampling_refuses_a_set_temperature_on_every_wire() {
 fn expose_thinking_is_local_visibility_and_a_wire_flag_only_where_one_exists() {
     let options = LlmProfileRequestDefaults {
         expose_thinking: true,
-        ..LlmProfileRequestDefaults::default()
+        ..LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short)
     };
     for (summary, expected) in [
         (ThinkingSummaryWire::NoField, false),
@@ -391,7 +391,7 @@ fn receipt_joins_requested_settings_with_adapter_emission() {
     };
     let options = LlmProfileRequestDefaults {
         expose_thinking: true,
-        ..LlmProfileRequestDefaults::default()
+        ..LlmProfileRequestDefaults::new(crate::provider::CacheRetention::Short)
     };
     let policy = resolve_generation_policy(
         &with_cap(with_defaults(request.clone(), options), 4096),

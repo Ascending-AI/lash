@@ -42,6 +42,7 @@ pub(super) async fn durable_core(
                 .expect("register the test model"),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -105,6 +106,7 @@ fn websocket_provider(server: &ScriptedWsServer) -> ProviderHandle {
 
 fn websocket_metadata() -> lash::LlmProfileMetadata {
     lash::LlmProfileMetadata::builder("gpt-5.4")
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(16_000)
         .build()
         .expect("valid model spec")

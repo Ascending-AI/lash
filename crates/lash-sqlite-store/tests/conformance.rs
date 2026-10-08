@@ -47,7 +47,9 @@ async fn a_lifecycle_page_read_keeps_its_identity_snapshot_during_prune() {
         path.join("lash.db"),
         lash_sqlite_store::SqliteStoreSetOptions {
             pauses: Some(pauses.clone()),
-            ..Default::default()
+            ..lash_sqlite_store::SqliteStoreSetOptions::standard(
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
         },
         Arc::new(lash_core_execution::facade_support::SystemClock),
     )
@@ -175,10 +177,12 @@ async fn lifecycle_snapshot_competing_pruner() {
         .expect("the law's prune cutoff")
         .parse()
         .expect("a millisecond cutoff");
-    let stores =
-        lash_sqlite_store::SqliteStoreSet::open(std::path::Path::new(&root).join("lash.db"))
-            .await
-            .expect("open competing process registry writer");
+    let stores = lash_sqlite_store::SqliteStoreSet::open(
+        std::path::Path::new(&root).join("lash.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open competing process registry writer");
     let prune = stores
         .process_registry()
         .prune_terminal_processes(

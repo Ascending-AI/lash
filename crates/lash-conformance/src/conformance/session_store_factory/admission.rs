@@ -103,6 +103,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
                 model: Some(crate::testing::test_llm_profile_config(
                     "a-rebinding-model",
                     crate::LlmProfileMetadata::builder("a-rebinding-model")
+                        .cache_retention(lash_core::provider::CacheRetention::Short)
                         .context_window_tokens(1_000)
                         .build()
                         .expect("valid test model"),

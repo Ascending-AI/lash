@@ -54,10 +54,13 @@ pub(crate) fn attachment_bytes(
         let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let path = (root.join(format!("bytes-{ordinal}"))).join("attachments.db");
         sync_await(async move {
-            lash_sqlite_store::SqliteStoreSet::open(path)
-                .await
-                .expect("SQLite attachment store")
-                .attachment_store()
+            lash_sqlite_store::SqliteStoreSet::open(
+                path,
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store()
         }) as Arc<dyn lash_core_execution::AttachmentStore>
     })
 }
@@ -100,7 +103,9 @@ impl TestBackend {
                 let dir = tempfile::tempdir().expect("file backend tempdir");
                 let stores = SqliteStoreSet::open_with_options_and_clock(
                     dir.path().join("lash.db"),
-                    configure(SqliteStoreSetOptions::default()),
+                    configure(SqliteStoreSetOptions::standard(
+                        lash_sqlite_store::SqliteSynchronous::Normal,
+                    )),
                     clock,
                 )
                 .await

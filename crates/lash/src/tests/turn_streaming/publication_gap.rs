@@ -82,7 +82,9 @@ impl lash_core::LiveReplayStore for PublicationFailureStore {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 pub(super) async fn publication_failure_preserves_committed_turn_and_exposes_gap() -> Result<()> {
     let replay = Arc::new(PublicationFailureStore {
-        inner: Default::default(),
+        inner: lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+        ),
         armed: std::sync::atomic::AtomicBool::new(false),
         failed: std::sync::atomic::AtomicBool::new(false),
     });

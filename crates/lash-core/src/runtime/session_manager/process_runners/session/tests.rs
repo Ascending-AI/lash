@@ -217,6 +217,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
+        crate::DataRetentionConfig::standard(),
     ));
     // The refusal lands before any turn runs: no provider call is made.
     let transport = mock_provider(Vec::new());

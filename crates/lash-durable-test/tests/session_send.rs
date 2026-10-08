@@ -342,6 +342,7 @@ async fn coalesced_inputs_commit_distinct_user_rows(tier: Tier) {
         lash::LashCore::standard_builder(backend.clone())
             .serve_sessions(serve)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(
                 lash::QueuedWorkBatchingConfig::new(1).with_drain_mode(lash::DrainMode::All),
             )
@@ -730,6 +731,7 @@ async fn sqlite_memory_cancelled_model_keeps_sealed_attempts() {
     let backend = served::backend(Arc::new(stores));
     let core = lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

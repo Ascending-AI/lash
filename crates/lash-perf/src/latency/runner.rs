@@ -268,9 +268,12 @@ pub(crate) async fn run_case(
     let topology = match spec.topology {
         Topology::SameProcess => {
             let stores_dir = case_dir.join("same");
-            let stores = lash::sqlite::SqliteStoreSet::open(stores_dir.join("lash.db"))
-                .await
-                .map_err(|error| anyhow::anyhow!("open case store set: {error}"))?;
+            let stores = lash::sqlite::SqliteStoreSet::open(
+                stores_dir.join("lash.db"),
+                lash::sqlite::SqliteSynchronous::Normal,
+            )
+            .await
+            .map_err(|error| anyhow::anyhow!("open case store set: {error}"))?;
             let backend = durable_backend(stores)?;
             let core = build_core(
                 backend,
@@ -355,6 +358,7 @@ fn build_core(
         .serve_test_llm_profile(provider, latency_llm_profile_spec()?)
         .plugins(plugins)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -367,9 +371,12 @@ fn build_core(
 /// durable pollers read through its connections (WAL readers beside the
 /// writer) so their cadence never serializes on the shift's own connections.
 async fn build_observer(stores_dir: &Path) -> Result<lash::LashCore> {
-    let stores = lash::sqlite::SqliteStoreSet::open(stores_dir.join("lash.db"))
-        .await
-        .map_err(|error| anyhow::anyhow!("open observer store set: {error}"))?;
+    let stores = lash::sqlite::SqliteStoreSet::open(
+        stores_dir.join("lash.db"),
+        lash::sqlite::SqliteSynchronous::Normal,
+    )
+    .await
+    .map_err(|error| anyhow::anyhow!("open observer store set: {error}"))?;
     let backend = durable_backend(stores)?;
     let spec = CaseSpec {
         name: "observer",
@@ -398,6 +405,7 @@ fn durable_backend(stores: lash::sqlite::SqliteStoreSet) -> Result<lash::Backend
 
 fn latency_llm_profile_spec() -> Result<lash::LlmProfileMetadata> {
     lash::LlmProfileMetadata::builder("latency-model")
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .map_err(|error| anyhow::anyhow!("latency model spec: {error}"))
@@ -1092,6 +1100,7 @@ mod tests {
                     lash_core::SessionToolAccess::ambient(),
                 ),
                 head: lash_core::SessionCreationHead::Config,
+                retention: lash_core::Retention::UntilGc,
             })
             .await
             .expect("create the probe's inner store");

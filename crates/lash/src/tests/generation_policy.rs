@@ -35,6 +35,7 @@ async fn session_serving(
 
 fn with_efforts(efforts: &[&str]) -> lash_core::LlmProfileMetadata {
     lash_core::LlmProfileMetadata::builder("mock-model")
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .expect("valid model spec")

@@ -94,11 +94,13 @@ async fn witness(stores: Arc<dyn lash_core::StoreSet>, lane: &str, witness: Witn
                 .serve_test_llm_profile(
                     ProviderHandle::new(provider.into_components()),
                     lash::LlmProfileMetadata::builder("budget-model")
+                        .cache_retention(lash::provider::CacheRetention::Short)
                         .context_window_tokens(16_000)
                         .build()
                         .unwrap(),
                 )
                 .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                .data_retention(lash::DataRetention::standard())
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
                 .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                 .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -168,9 +170,12 @@ async fn response_body_budget_current_turn_path_sqlite_memory_and_file() {
     witness(memory, "sqlite-memory", Witness::Refusal).await;
     let root = tempfile::tempdir().unwrap();
     let file: Arc<dyn lash_core::StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(root.path().join("lash.db"))
-            .await
-            .expect("open a file store set"),
+        lash_sqlite_store::SqliteStoreSet::open(
+            root.path().join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open a file store set"),
     );
     witness(file, "sqlite-file", Witness::Refusal).await;
 }

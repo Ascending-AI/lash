@@ -89,6 +89,7 @@ fn model() -> ProviderHandle {
 
 fn metadata() -> lash_core::LlmProfileMetadata {
     lash_core::LlmProfileMetadata::builder(MODEL)
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .expect("the model's metadata")
@@ -137,6 +138,7 @@ impl ChildTurn {
                 lash::LashCore::standard_builder(backend)
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                    .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
                     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
                     .execution_budgets(lash::ExecutionBudgets::recommended())

@@ -582,7 +582,7 @@ async fn trimmed_gap_recovery_replaces_the_same_output_identity() {
         .live_replay(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
             lash::observe::InMemoryLiveReplayStoreConfig {
                 max_events_per_session: 1,
-                ..lash::observe::InMemoryLiveReplayStoreConfig::default()
+                ..lash::observe::InMemoryLiveReplayStoreConfig::standard()
             },
         )))
         .build()

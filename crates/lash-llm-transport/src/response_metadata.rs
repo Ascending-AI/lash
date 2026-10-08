@@ -115,7 +115,7 @@ mod tests {
         let options = LlmProfileRequestDefaults {
             response_metadata_headers: vec!["X-Request-Cost".to_string()],
             response_metadata_body_paths: vec!["/usage/cost".to_string()],
-            ..LlmProfileRequestDefaults::default()
+            ..LlmProfileRequestDefaults::new(lash_core::provider::CacheRetention::Short)
         };
         let mut capture = ResponseMetadataCapture::from_response(
             &options,

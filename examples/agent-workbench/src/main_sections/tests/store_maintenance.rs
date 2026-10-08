@@ -325,7 +325,7 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments() {
     attachment_store
         .get(
             &orphan.id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
         .expect("the retention window kept the unreferenced blob");
@@ -369,14 +369,14 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments() {
     attachment_store
         .get(
             &referenced_id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
         .expect("the committed turn's attachment survives the sweep");
     match attachment_store
         .get(
             &orphan.id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
     {
@@ -433,7 +433,7 @@ async fn store_maintenance_serves_incomplete_sweep_with_failure_counts() {
     inner
         .get(
             &orphan.id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
         .expect("the failed delete leaves the blob intact");
@@ -501,7 +501,7 @@ async fn store_maintenance_refuses_an_empty_root_set() {
     attachment_store
         .get(
             &blob_id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
         .expect("the refused sweep deleted nothing");
@@ -523,7 +523,7 @@ async fn store_maintenance_refuses_an_empty_root_set() {
     match attachment_store
         .get(
             &blob_id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
     {
@@ -592,7 +592,7 @@ async fn store_maintenance_serves_stalled_delete_counts() {
     inner
         .get(
             &orphan.id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
         .expect("stalled bytes remain");

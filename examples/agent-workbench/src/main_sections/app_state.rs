@@ -574,6 +574,7 @@ pub(crate) fn workbench_recorded_llm_profile(
         ));
     }
     let metadata = lash::LlmProfileMetadata::builder(key.as_str())
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(workbench_context_window_tokens())
         .expose_thinking(true)
         .build()

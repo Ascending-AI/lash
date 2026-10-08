@@ -178,8 +178,8 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
         calls: AtomicUsize::new(0),
         fault: Fault::None,
     });
-    let store =
-        RuntimeAttachmentStore::ephemeral(probe.clone()).with_read_policy(AttachmentReadPolicy {
+    let store = RuntimeAttachmentStore::ephemeral(probe.clone(), AttachmentPolicy::standard())
+        .with_read_policy(AttachmentReadPolicy {
             max_blob_bytes: 4,
             max_request_bytes: 8192,
         });
@@ -242,8 +242,8 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
             calls: AtomicUsize::new(0),
             fault,
         });
-        let store =
-            RuntimeAttachmentStore::ephemeral(probe).with_read_policy(AttachmentReadPolicy {
+        let store = RuntimeAttachmentStore::ephemeral(probe, AttachmentPolicy::standard())
+            .with_read_policy(AttachmentReadPolicy {
                 max_blob_bytes: 4,
                 max_request_bytes: 8192,
             });
@@ -274,10 +274,11 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
         vec![uploader.clone()],
         Default::default(),
     ));
-    let store = RuntimeAttachmentStore::ephemeral(files).with_read_policy(AttachmentReadPolicy {
-        max_blob_bytes: 4,
-        max_request_bytes: 8192,
-    });
+    let store = RuntimeAttachmentStore::ephemeral(files, AttachmentPolicy::standard())
+        .with_read_policy(AttachmentReadPolicy {
+            max_blob_bytes: 4,
+            max_request_bytes: 8192,
+        });
     let file_slot = slot(
         first.reference.clone(),
         ProviderAccepts {
@@ -311,8 +312,8 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
             vec![uploader],
             Default::default(),
         ));
-        let store =
-            RuntimeAttachmentStore::ephemeral(files).with_read_policy(AttachmentReadPolicy {
+        let store = RuntimeAttachmentStore::ephemeral(files, AttachmentPolicy::standard())
+            .with_read_policy(AttachmentReadPolicy {
                 max_blob_bytes: 4,
                 max_request_bytes: 8192,
             });
@@ -404,11 +405,11 @@ pub async fn attachment_delivery_read_budgets(backend: Arc<dyn AttachmentStore>)
         ));
     }
     assert_eq!(
-        AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+        AttachmentReadPolicy::STANDARD.max_blob_bytes,
         32 * 1024 * 1024
     );
     assert_eq!(
-        AttachmentReadPolicy::DEFAULT.max_request_bytes,
+        AttachmentReadPolicy::STANDARD.max_request_bytes,
         128 * 1024 * 1024
     );
 }

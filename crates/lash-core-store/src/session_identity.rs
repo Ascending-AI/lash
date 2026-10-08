@@ -732,6 +732,12 @@ pub struct SessionStoreCreateRequest {
     /// creation, as `session_meta.owning_process_id`; a start made in one of
     /// the session's turns records that process's lineage above the session.
     pub owning_process_id: Option<crate::ProcessId>,
+    /// Which revisions the session keeps besides its head and its pins,
+    /// recorded with the catalog row a creating admission writes. The
+    /// creator states it: a store has no retention of its own to fall back
+    /// on. A request that finds the session already created leaves the
+    /// recorded retention as it is.
+    pub retention: crate::store::Retention,
 }
 /// What an admission that creates a session records beside its catalog row
 /// (FIG-4099).

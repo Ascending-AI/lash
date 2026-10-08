@@ -123,8 +123,8 @@ impl Default for AttachmentReclamationRetryPolicy {
 #[error("attachment retry requires positive ordered delays and fewer initial yields than attempts")]
 pub struct AttachmentReclamationRetryPolicyError;
 
-/// The default lifetime of an unbound session upload's staging referrer.
-pub const DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS: u64 = 86_400_000;
+/// The upload expiry [`AttachmentPolicy::standard`] states: 24 hours.
+pub const STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS: u64 = 86_400_000;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AttachmentHolder {
     Ephemeral,
@@ -139,10 +139,54 @@ pub struct AttachmentReadPolicy {
     pub max_request_bytes: u64,
 }
 impl AttachmentReadPolicy {
-    pub const DEFAULT: Self = Self {
+    /// The read budgets [`AttachmentPolicy::standard`] states: 32 MiB per
+    /// blob and 128 MiB per request. No measurement backs either value.
+    pub const STANDARD: Self = Self {
         max_blob_bytes: 32 * 1024 * 1024,
         max_request_bytes: 128 * 1024 * 1024,
     };
+}
+
+/// What a host keeps of attachments and retained output, and how much of it
+/// one put or read may move. These are the host's decisions: lash has no
+/// default for any of them (D-DEFAULTS2), and every
+/// [`RuntimeAttachmentStore`] is constructed under one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttachmentPolicy {
+    /// The largest attachment a put admits, in bytes; `None` states that
+    /// puts are unbounded. Enforced before the attachment backend is called,
+    /// and independent of the commit budget.
+    pub max_attachment_bytes: Option<u64>,
+    /// The bytes one read and one request may materialize.
+    pub read: AttachmentReadPolicy,
+    /// How long an attachment put outside any turn stays held by its upload
+    /// before cleanup may reclaim it, in milliseconds, unless a turn, process
+    /// or session acquires it first.
+    pub upload_expiry_ms: u64,
+    /// Which outputs leave history for a retained attachment, and the
+    /// witness history keeps in their place (FIG-1643).
+    pub output_retention: lash_sansio::OutputRetentionPolicy,
+}
+
+impl AttachmentPolicy {
+    /// The standard policy: unbounded puts,
+    /// [`AttachmentReadPolicy::STANDARD`] reads (32 MiB per blob, 128 MiB
+    /// per request), a 24-hour upload expiry
+    /// ([`STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS`]) and
+    /// [`OutputRetentionPolicy::STANDARD`](lash_sansio::OutputRetentionPolicy::STANDARD)
+    /// (64 KiB inline, a 4 KiB witness).
+    ///
+    /// No measurement backs the read budgets or the upload expiry. The
+    /// retained-output limit is sized so the standard renderer's 16,000
+    /// character cut stays inline.
+    pub const fn standard() -> Self {
+        Self {
+            max_attachment_bytes: None,
+            read: AttachmentReadPolicy::STANDARD,
+            upload_expiry_ms: STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS,
+            output_retention: lash_sansio::OutputRetentionPolicy::STANDARD,
+        }
+    }
 }
 
 /// Attachment bytes held by a session execution, a process record, or one
@@ -187,45 +231,65 @@ impl RuntimeAttachmentStore {
         backend: Arc<dyn AttachmentStore>,
         referrers: Arc<dyn AttachmentReferrers>,
         owner: crate::runtime_owner::RuntimeOwner,
+        policy: AttachmentPolicy,
     ) -> Self {
-        Self::new_with_clock(backend, referrers, owner, Arc::new(crate::SystemClock))
+        Self::new_with_clock(
+            backend,
+            referrers,
+            owner,
+            Arc::new(crate::SystemClock),
+            policy,
+        )
     }
     pub fn new_with_clock(
         backend: Arc<dyn AttachmentStore>,
         referrers: Arc<dyn AttachmentReferrers>,
         owner: crate::runtime_owner::RuntimeOwner,
         clock: Arc<dyn crate::Clock>,
+        policy: AttachmentPolicy,
     ) -> Self {
         Self {
             backend,
             referrers,
             holder: AttachmentHolder::Runtime(owner),
-            max_attachment_bytes: None,
-            read_policy: AttachmentReadPolicy::DEFAULT,
-            upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
-            output_retention: lash_sansio::OutputRetentionPolicy::DEFAULT,
+            max_attachment_bytes: policy.max_attachment_bytes,
+            read_policy: policy.read,
+            upload_expiry_ms: policy.upload_expiry_ms,
+            output_retention: policy.output_retention,
             reclamation_retry: AttachmentReclamationRetryPolicy::standard(),
             execution: Mutex::new(None),
             clock,
         }
     }
-    pub fn ephemeral(backend: Arc<dyn AttachmentStore>) -> Self {
+    pub fn ephemeral(backend: Arc<dyn AttachmentStore>, policy: AttachmentPolicy) -> Self {
         Self {
             backend,
             referrers: Arc::new(NoopAttachmentReferrers),
             holder: AttachmentHolder::Ephemeral,
-            max_attachment_bytes: None,
-            read_policy: AttachmentReadPolicy::DEFAULT,
-            upload_expiry_ms: DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS,
-            output_retention: lash_sansio::OutputRetentionPolicy::DEFAULT,
+            max_attachment_bytes: policy.max_attachment_bytes,
+            read_policy: policy.read,
+            upload_expiry_ms: policy.upload_expiry_ms,
+            output_retention: policy.output_retention,
             reclamation_retry: AttachmentReclamationRetryPolicy::standard(),
             execution: Mutex::new(None),
             clock: Arc::new(crate::SystemClock),
         }
     }
+    /// The policy this store runs under.
+    pub fn policy(&self) -> AttachmentPolicy {
+        AttachmentPolicy {
+            max_attachment_bytes: self.max_attachment_bytes,
+            read: self.read_policy,
+            upload_expiry_ms: self.upload_expiry_ms,
+            output_retention: self.output_retention,
+        }
+    }
     #[cfg(any(test, feature = "testing"))]
     pub fn unavailable() -> Self {
-        Self::ephemeral(Arc::new(UnavailableAttachmentStore))
+        Self::ephemeral(
+            Arc::new(UnavailableAttachmentStore),
+            AttachmentPolicy::standard(),
+        )
     }
     pub fn backend(&self) -> &Arc<dyn AttachmentStore> {
         &self.backend

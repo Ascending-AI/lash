@@ -91,7 +91,9 @@ mod tests {
             stream_termination,
             defaults: lash_core::provider::LlmProfileRequestDefaults {
                 expose_thinking: false,
-                ..Default::default()
+                ..lash_core::provider::LlmProfileRequestDefaults::new(
+                    lash_core::provider::CacheRetention::Short,
+                )
             },
         }
     }
@@ -466,7 +468,9 @@ mod tests {
                     stream_termination: StreamTermination::RequireTerminalEvidence,
                     defaults: lash_core::provider::LlmProfileRequestDefaults {
                         expose_thinking,
-                        ..Default::default()
+                        ..lash_core::provider::LlmProfileRequestDefaults::new(
+                            lash_core::provider::CacheRetention::Short,
+                        )
                     },
                 },
                 None,

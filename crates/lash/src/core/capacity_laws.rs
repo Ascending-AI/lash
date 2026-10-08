@@ -83,7 +83,9 @@ async fn facade_held_observation_capacity_limits_the_live_suffix() {
         held_observations: 1,
         ..TraceLimits::standard()
     });
-    let config = builder.resolve_runtime_host_config().unwrap();
+    let config = builder
+        .resolve_runtime_host_config(crate::durability::DataRetentionConfig::standard())
+        .unwrap();
     let actor = ActorContext::unavailable()
         .scoped(AdmittedScope::turn("capacity", "turn"))
         .unwrap();
@@ -122,7 +124,9 @@ async fn facade_evidence_cuts_bound_attempts_failures_and_divergences() {
         diagnostic_error_chars: 2,
         ..TraceLimits::standard()
     });
-    let config = builder.resolve_runtime_host_config().unwrap();
+    let config = builder
+        .resolve_runtime_host_config(crate::durability::DataRetentionConfig::standard())
+        .unwrap();
     let limits = config.tracing.limits();
     let recorder = AttemptStreamRecorder::start(limits.attempt_stream_bytes);
     recorder.observe(ShiftObservation {
@@ -285,7 +289,7 @@ async fn facade_observation_publisher_yields_at_the_host_batch() {
         ..Default::default()
     });
     let limits = builder
-        .resolve_runtime_host_config()
+        .resolve_runtime_host_config(crate::durability::DataRetentionConfig::standard())
         .unwrap()
         .observation_work_limits;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

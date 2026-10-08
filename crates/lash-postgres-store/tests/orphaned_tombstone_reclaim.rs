@@ -77,6 +77,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
                     lash_core_execution::SessionToolAccess::ambient(),
                 ),
                 head: lash_core_execution::SessionCreationHead::Config,
+                retention: lash_core_execution::Retention::UntilGc,
             })
             .await
             .expect("create store");
@@ -134,6 +135,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
                 &policy.clone(),
                 lash_core_execution::SessionToolAccess::ambient(),
             ),
+            retention: lash_core_execution::Retention::UntilGc,
         })
         .await
         .expect("fork at the parent's live tip");

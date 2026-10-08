@@ -312,9 +312,10 @@ fn recovery_json_uses_sqlite_and_keeps_typed_refusals() {
         use lash_core_store::store::{
             ClaimToken, DeliveryError, ObligationKind, ObligationSettlement, StallReason,
         };
-        let stores = lash::sqlite::SqliteStoreSet::open(&path)
-            .await
-            .expect("open the selected store");
+        let stores =
+            lash::sqlite::SqliteStoreSet::open(&path, lash::sqlite::SqliteSynchronous::Normal)
+                .await
+                .expect("open the selected store");
         let ledger = stores.obligation_ledger(ObligationKind::ArtifactCleanup);
         let mut ids = Vec::new();
         for index in 0..2 {

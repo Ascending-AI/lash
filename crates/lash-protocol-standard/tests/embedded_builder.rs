@@ -15,6 +15,7 @@ fn test_llm_profile() -> Option<lash_core::LlmProfileConfig> {
     Some(lash_core::testing::test_llm_profile_config(
         "gpt-5.4-mini",
         lash_core::LlmProfileMetadata::builder("gpt-5.4-mini")
+            .cache_retention(lash_core::provider::CacheRetention::Short)
             .context_window_tokens(200_000)
             .build()
             .expect("valid test model"),
@@ -83,6 +84,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
                 lash_core::ToolSourcePolicy::Tolerate,
                 lash_core::ExecutionBudgets::recommended(),
                 lash_core::runtime::DeltaCoalescing::recommended(),
+                lash_core::facade_support::DataRetentionConfig::standard(),
             ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )
@@ -150,6 +152,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
                 lash_core::ToolSourcePolicy::Tolerate,
                 lash_core::ExecutionBudgets::recommended(),
                 lash_core::runtime::DeltaCoalescing::recommended(),
+                lash_core::facade_support::DataRetentionConfig::standard(),
             ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )

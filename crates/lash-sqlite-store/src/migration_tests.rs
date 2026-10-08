@@ -34,7 +34,7 @@ const FILE: &str = "lash.db";
 const FIXTURE_ROWS: [(&str, &str); 2] = [
     (
         "session_meta",
-        "INSERT INTO session_meta (session_id, relation_kind) VALUES ('fixture-session', 'root')",
+        "INSERT INTO session_meta (session_id, relation_kind, retention_kind) VALUES ('fixture-session', 'root', 'until_gc')",
     ),
     (
         "process_tombstones",
@@ -88,7 +88,7 @@ fn bytes(root: &Path) -> Vec<u8> {
 fn options(hook: Option<SqliteMigrationHook>) -> SqliteStoreSetOptions {
     SqliteStoreSetOptions {
         migration_hook: hook,
-        ..SqliteStoreSetOptions::default()
+        ..SqliteStoreSetOptions::standard(crate::SqliteSynchronous::Normal)
     }
 }
 

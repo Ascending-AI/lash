@@ -151,6 +151,7 @@ pub async fn upload_staging_identities_are_distinct_guarded_and_fenced_independe
         store.clone(),
         RuntimeOwner::Session("uploads".into()),
         clock,
+        lash_core::facade_support::AttachmentPolicy::standard(),
     )
     .with_upload_expiry_ms(1000);
     let first = facade.put(vec![1], image_meta()).await.unwrap();
@@ -262,6 +263,7 @@ pub async fn retained_output_is_held_by_its_execution_until_a_commit_names_it(
             Arc::clone(&backend),
             Arc::clone(&store) as Arc<dyn AttachmentReferrers>,
             RuntimeOwner::Session(SessionId::from(SESSION)),
+            lash_core::facade_support::AttachmentPolicy::standard(),
         )
         .with_output_retention(POLICY),
     );
@@ -494,6 +496,7 @@ pub async fn attachment_prefix_pin_keeps_the_session_edge_until_unpin(
         bytes.clone(),
         store.clone(),
         RuntimeOwner::Session(session.clone()),
+        lash_core::facade_support::AttachmentPolicy::standard(),
     );
     let reference = facade.put(vec![42], image_meta()).await.unwrap();
     let mut current = state(session.as_str());
@@ -573,8 +576,12 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
         SessionReferrerState::Live
     );
     let bytes = (h.bytes)();
-    let facade =
-        RuntimeAttachmentStore::new(bytes, store.clone(), RuntimeOwner::Session(session.clone()));
+    let facade = RuntimeAttachmentStore::new(
+        bytes,
+        store.clone(),
+        RuntimeOwner::Session(session.clone()),
+        lash_core::facade_support::AttachmentPolicy::standard(),
+    );
     let reference = facade.put(vec![4], image_meta()).await.unwrap();
     let mut current = state(session.as_str());
     current.session_graph.append_message(Message {
@@ -606,6 +613,7 @@ pub async fn session_referrer_waits_for_graph_retirement(h: AttachmentReferrerHa
                 lash_core::NoProgressBudget::bounded(12),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .unwrap();

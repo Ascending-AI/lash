@@ -276,6 +276,7 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
         let core = lash::LashCore::standard_builder(backend.clone())
             .serve_sessions(false)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -315,6 +316,7 @@ async fn delivered_values_stay_out_of_records_across_crash_and_resend() {
             backend.attachment_store(),
             backend.attachment_referrers(),
             lash_core::RuntimeOwner::Session(session_id),
+            lash_core::facade_support::AttachmentPolicy::standard(),
         );
         let mut input = lash::TurnInput::text("look at both pictures");
         for (label, bytes) in [

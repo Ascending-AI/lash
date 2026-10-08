@@ -49,12 +49,14 @@ async fn the_after_turn_note_commits_with_the_turn_after_the_one_it_summarizes()
         .serve_test_llm_profile(
             provider,
             lash::LlmProfileMetadata::builder(MODEL)
+                .cache_retention(lash::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
                 .build()
                 .expect("the model's metadata"),
         )
         .plugin(Arc::new(factory))
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

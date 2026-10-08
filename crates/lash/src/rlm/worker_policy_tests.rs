@@ -240,6 +240,7 @@ async fn facade_vm_segment_policy_reaches_engine_step_admission() {
                 crate::tools::ToolSourcePolicy::Tolerate,
                 crate::ExecutionBudgets::recommended(),
                 crate::DeltaCoalescing::recommended(),
+                crate::durability::DataRetentionConfig::standard(),
             ),
             true,
         )

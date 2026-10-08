@@ -645,7 +645,7 @@ fn request(stream_events: Option<LlmEventSender>) -> LlmRequest {
                     .context_window_tokens(128_000)
                     .capability(lash_core::LlmProfileCapability::default())
                     .extra_body(Default::default())
-                    .request_defaults(Default::default())
+                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),
@@ -690,7 +690,7 @@ fn responses_request() -> LlmRequest {
                     .context_window_tokens(128_000)
                     .capability(lash_core::LlmProfileCapability::default())
                     .extra_body(Default::default())
-                    .request_defaults(Default::default())
+                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),

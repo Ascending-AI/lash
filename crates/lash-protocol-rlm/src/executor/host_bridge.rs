@@ -1118,8 +1118,10 @@ mod mcp_media_tests {
         let stores = lash_sqlite_store::SqliteStoreSet::memory()
             .await
             .expect("SQLite stores");
-        let store =
-            lash_core::facade_support::RuntimeAttachmentStore::ephemeral(stores.attachment_store());
+        let store = lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
+            stores.attachment_store(),
+            lash_core::facade_support::AttachmentPolicy::standard(),
+        );
         let reference = store
             .put(
                 b"audio bytes".to_vec(),

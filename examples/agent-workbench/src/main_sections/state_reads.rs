@@ -92,6 +92,7 @@ pub(crate) fn state_store_request(
             lash::plugins::SessionToolAccess::ambient(),
         ),
         head: lash::persistence::SessionCreationHead::Config,
+        retention: lash::Retention::UntilGc,
     }
 }
 

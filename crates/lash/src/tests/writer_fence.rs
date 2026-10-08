@@ -98,9 +98,12 @@ async fn a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing(
 async fn a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing_on_sqlite_file() {
     let files = tempfile::tempdir().expect("SQLite store directory");
     let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(files.path().join("lash.db"))
-            .await
-            .expect("SQLite file stores"),
+        lash_sqlite_store::SqliteStoreSet::open(
+            files.path().join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite file stores"),
     );
     let location = stores.location().clone();
     a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing(
@@ -129,10 +132,13 @@ async fn a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing_on_post
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,
-        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
-            .await
-            .expect("SQLite attachment store")
-            .attachment_store(),
+        lash_sqlite_store::SqliteStoreSet::open(
+            (attachments.path()).join("attachments.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store(),
     ));
     let pool = storage.pool().clone();
     a_send_to_a_finalized_store_is_refused_typed_and_writes_nothing(

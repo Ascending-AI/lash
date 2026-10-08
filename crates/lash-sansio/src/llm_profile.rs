@@ -80,7 +80,7 @@ pub struct LlmProfileMetadata {
     pub capability: LlmProfileCapability,
     /// What this model's requests do where a request states nothing:
     /// recorded with the binding, so a transport change never alters it.
-    #[serde(default, skip_serializing_if = "LlmProfileRequestDefaults::is_default")]
+    /// It carries the host's prompt-cache choice, so it is always recorded.
     pub request_defaults: LlmProfileRequestDefaults,
 }
 
@@ -89,23 +89,34 @@ impl LlmProfileMetadata {
         LlmProfileMetadataBuilder::new(wire_model)
     }
 
-    pub fn new(wire_model: impl Into<String>, context_window_tokens: NonZeroUsize) -> Self {
+    /// `wire_model` with its context window and the prompt-cache lifetime
+    /// the host states for it ([`CacheRetention`]).
+    pub fn new(
+        wire_model: impl Into<String>,
+        context_window_tokens: NonZeroUsize,
+        cache_retention: CacheRetention,
+    ) -> Self {
         Self::with_limits(
             wire_model,
             LlmProfileLimits {
                 context_window_tokens,
                 output_tokens: OutputTokenLimits::default(),
             },
+            cache_retention,
         )
     }
 
-    pub fn with_limits(wire_model: impl Into<String>, limits: LlmProfileLimits) -> Self {
+    pub fn with_limits(
+        wire_model: impl Into<String>,
+        limits: LlmProfileLimits,
+        cache_retention: CacheRetention,
+    ) -> Self {
         Self {
             wire_model: wire_model.into(),
             extra_body: serde_json::Map::new(),
             limits,
             capability: LlmProfileCapability::default(),
-            request_defaults: LlmProfileRequestDefaults::default(),
+            request_defaults: LlmProfileRequestDefaults::new(cache_retention),
         }
     }
 
@@ -136,8 +147,9 @@ impl LlmProfileMetadata {
 
 /// Builder for host-supplied [`LlmProfileMetadata`].
 ///
-/// The context-window token budget is required; output capacity and
-/// capability metadata are absent when omitted. Setters follow the builder
+/// The context-window token budget and the prompt-cache lifetime
+/// ([`Self::cache_retention`]) are required; output capacity and capability
+/// metadata are absent when omitted. Setters follow the builder
 /// convention and therefore have no `with_` prefix.
 #[derive(Clone, Debug)]
 pub struct LlmProfileMetadataBuilder {
@@ -146,7 +158,10 @@ pub struct LlmProfileMetadataBuilder {
     output_token_capacity: Option<usize>,
     capability: LlmProfileCapability,
     extra_body: serde_json::Map<String, serde_json::Value>,
-    request_defaults: LlmProfileRequestDefaults,
+    expose_thinking: bool,
+    cache_retention: Option<CacheRetention>,
+    response_metadata_headers: Vec<String>,
+    response_metadata_body_paths: Vec<String>,
     default_output_token_cap: Option<u64>,
 }
 
@@ -158,7 +173,10 @@ impl LlmProfileMetadataBuilder {
             output_token_capacity: None,
             capability: LlmProfileCapability::default(),
             extra_body: serde_json::Map::new(),
-            request_defaults: LlmProfileRequestDefaults::default(),
+            expose_thinking: false,
+            cache_retention: None,
+            response_metadata_headers: Vec::new(),
+            response_metadata_body_paths: Vec::new(),
             default_output_token_cap: None,
         }
     }
@@ -184,14 +202,24 @@ impl LlmProfileMetadataBuilder {
         self
     }
 
+    /// Every request default at once, the prompt-cache lifetime included.
     pub fn request_defaults(mut self, request_defaults: LlmProfileRequestDefaults) -> Self {
-        self.request_defaults = request_defaults;
+        let LlmProfileRequestDefaults {
+            expose_thinking,
+            cache_retention,
+            response_metadata_headers,
+            response_metadata_body_paths,
+        } = request_defaults;
+        self.expose_thinking = expose_thinking;
+        self.cache_retention = Some(cache_retention);
+        self.response_metadata_headers = response_metadata_headers;
+        self.response_metadata_body_paths = response_metadata_body_paths;
         self
     }
 
     /// Surface the reasoning the provider streams in this model's responses.
     pub fn expose_thinking(mut self, expose_thinking: bool) -> Self {
-        self.request_defaults.expose_thinking = expose_thinking;
+        self.expose_thinking = expose_thinking;
         self
     }
 
@@ -201,23 +229,25 @@ impl LlmProfileMetadataBuilder {
         self
     }
 
-    /// The prompt-cache lifetime hint of this model's requests.
+    /// The prompt-cache lifetime of this model's requests: off, the
+    /// provider's default or the extended lifetime ([`CacheRetention`]).
+    /// Required: [`Self::build`] refuses a model whose host stated none.
     pub fn cache_retention(mut self, cache_retention: CacheRetention) -> Self {
-        self.request_defaults.cache_retention = cache_retention;
+        self.cache_retention = Some(cache_retention);
         self
     }
 
     /// The response header names (case-insensitive) this model's calls
     /// capture into `LlmResponse.response_metadata`.
     pub fn response_metadata_headers(mut self, headers: Vec<String>) -> Self {
-        self.request_defaults.response_metadata_headers = headers;
+        self.response_metadata_headers = headers;
         self
     }
 
     /// The JSON pointers this model's calls capture from response bodies and
     /// SSE events into `LlmResponse.response_metadata`.
     pub fn response_metadata_body_paths(mut self, body_paths: Vec<String>) -> Self {
-        self.request_defaults.response_metadata_body_paths = body_paths;
+        self.response_metadata_body_paths = body_paths;
         self
     }
 
@@ -225,6 +255,9 @@ impl LlmProfileMetadataBuilder {
         let context_window_tokens = self
             .context_window_tokens
             .ok_or(LlmProfileLimitsError::MissingContextWindowTokens)?;
+        let cache_retention = self
+            .cache_retention
+            .ok_or(LlmProfileLimitsError::MissingCacheRetention)?;
         Ok(LlmProfileMetadata::with_limits(
             self.wire_model,
             LlmProfileLimits {
@@ -235,10 +268,16 @@ impl LlmProfileMetadataBuilder {
                     self.default_output_token_cap,
                 )?,
             },
+            cache_retention,
         )
         .with_capability(self.capability)
         .with_extra_body(self.extra_body)
-        .with_request_defaults(self.request_defaults))
+        .with_request_defaults(LlmProfileRequestDefaults {
+            expose_thinking: self.expose_thinking,
+            cache_retention,
+            response_metadata_headers: self.response_metadata_headers,
+            response_metadata_body_paths: self.response_metadata_body_paths,
+        }))
     }
 }
 
@@ -401,6 +440,10 @@ pub struct LlmProfileLimits {
 pub enum LlmProfileLimitsError {
     #[error("a context-window token budget is required")]
     MissingContextWindowTokens,
+    #[error(
+        "a prompt-cache retention choice is required: state CacheRetention::None, Short or Long"
+    )]
+    MissingCacheRetention,
     #[error("context_window_tokens must be greater than zero")]
     ZeroContextWindowTokens,
     #[error("output_token_capacity must be greater than zero")]
@@ -505,10 +548,59 @@ mod tests {
 
     fn metadata() -> LlmProfileMetadata {
         LlmProfileMetadata::builder("provider/model")
+            .cache_retention(CacheRetention::Short)
             .context_window_tokens(8_192)
             .output_token_capacity(1_024)
             .build()
             .expect("valid metadata")
+    }
+
+    /// D-DEFAULTS2: a model's prompt-cache retention is the host's choice.
+    /// The builder refuses a model whose host stated none, and a stated
+    /// choice is recorded on the wire where a reopened record reads it back.
+    #[test]
+    fn a_profile_states_its_cache_retention_and_records_it() {
+        let unstated = LlmProfileMetadata::builder("provider/model")
+            .context_window_tokens(8_192)
+            .build();
+        assert_eq!(unstated, Err(LlmProfileLimitsError::MissingCacheRetention));
+
+        for (stated, wire) in [
+            (CacheRetention::None, "none"),
+            (CacheRetention::Short, "short"),
+            (CacheRetention::Long, "long"),
+        ] {
+            let metadata = LlmProfileMetadata::builder("provider/model")
+                .cache_retention(stated)
+                .context_window_tokens(8_192)
+                .build()
+                .expect("valid metadata");
+            let recorded = serde_json::to_value(&metadata).expect("metadata encodes");
+            assert_eq!(recorded["request_defaults"]["cache_retention"], wire);
+            assert_eq!(
+                serde_json::from_value::<LlmProfileMetadata>(recorded)
+                    .expect("the record decodes")
+                    .request_defaults
+                    .cache_retention,
+                stated
+            );
+        }
+    }
+
+    /// A record that names no cache retention is refused: reopening it
+    /// never invents the host's choice.
+    #[test]
+    fn a_recorded_profile_without_a_cache_retention_does_not_decode() {
+        let mut recorded = serde_json::to_value(metadata()).expect("metadata encodes");
+        recorded
+            .as_object_mut()
+            .expect("an object")
+            .remove("request_defaults");
+        serde_json::from_value::<LlmProfileMetadata>(recorded.clone())
+            .expect_err("a record with no request defaults is refused");
+        recorded["request_defaults"] = serde_json::json!({});
+        serde_json::from_value::<LlmProfileMetadata>(recorded)
+            .expect_err("request defaults with no cache retention are refused");
     }
 
     /// Recorded owners expose the recorded prompt budget, independently of
@@ -517,6 +609,7 @@ mod tests {
     fn recorded_profile_and_config_preserve_the_prompt_budget() {
         for prompt_budget in [1, 8_192, 200_000] {
             let metadata = LlmProfileMetadata::builder("provider/model")
+                .cache_retention(CacheRetention::Short)
                 .context_window_tokens(prompt_budget)
                 .output_token_capacity(1_024)
                 .build()
@@ -577,6 +670,7 @@ mod tests {
     #[test]
     fn model_metadata_builder_covers_limits_capability_and_requires_context_window() {
         let spec = LlmProfileMetadata::builder("provider/model")
+            .cache_retention(CacheRetention::Short)
             .context_window_tokens(200_000)
             .output_token_capacity(8_192)
             .capability(LlmProfileCapability {
@@ -599,11 +693,13 @@ mod tests {
 
         assert_eq!(
             LlmProfileMetadata::builder("missing-context")
+                .cache_retention(CacheRetention::Short)
                 .build()
                 .expect_err("context budget is required"),
             LlmProfileLimitsError::MissingContextWindowTokens
         );
         let context_error = LlmProfileMetadata::builder("bad-context")
+            .cache_retention(CacheRetention::Short)
             .context_window_tokens(0)
             .output_token_capacity(1)
             .build()
@@ -613,6 +709,7 @@ mod tests {
             LlmProfileLimitsError::ZeroContextWindowTokens
         );
         let output_error = LlmProfileMetadata::builder("bad-output")
+            .cache_retention(CacheRetention::Short)
             .context_window_tokens(1)
             .output_token_capacity(0)
             .build()

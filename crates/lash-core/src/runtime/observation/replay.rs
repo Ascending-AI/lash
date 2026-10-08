@@ -19,8 +19,8 @@ use crate::runtime::LashRuntime;
 use crate::runtime::RuntimeSessionState;
 
 const SESSION_CURSOR_PREFIX: &str = "lashsc2:";
-const DEFAULT_LIVE_REPLAY_CAPACITY: usize = 2048;
-const DEFAULT_LIVE_REPLAY_TTL: Duration = Duration::from_secs(120);
+const STANDARD_LIVE_REPLAY_CAPACITY: usize = 2048;
+const STANDARD_LIVE_REPLAY_TTL: Duration = Duration::from_secs(120);
 
 #[path = "replay/activity_spans.rs"]
 mod activity_spans;
@@ -706,9 +706,13 @@ pub trait LiveReplayStore: Send + Sync {
     async fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
 }
 
+/// What an [`InMemoryLiveReplayStore`] retains for reconnecting observers.
+/// The host states it; there is no default (D-DEFAULTS2).
 #[derive(Clone, Debug)]
 pub struct InMemoryLiveReplayStoreConfig {
+    /// The most recent events one session's window keeps.
     pub max_events_per_session: usize,
+    /// How long an event stays replayable.
     pub max_age: Duration,
     /// Maximum resident session entries across this store.
     pub max_sessions: usize,
@@ -716,11 +720,14 @@ pub struct InMemoryLiveReplayStoreConfig {
     pub max_retained_bytes: usize,
 }
 
-impl Default for InMemoryLiveReplayStoreConfig {
-    fn default() -> Self {
+impl InMemoryLiveReplayStoreConfig {
+    /// The standard retention: 2,048 events per session, replayable for 120
+    /// seconds, across at most 4,096 sessions and 64 MiB. No measurement
+    /// backs these values.
+    pub const fn standard() -> Self {
         Self {
-            max_events_per_session: DEFAULT_LIVE_REPLAY_CAPACITY,
-            max_age: DEFAULT_LIVE_REPLAY_TTL,
+            max_events_per_session: STANDARD_LIVE_REPLAY_CAPACITY,
+            max_age: STANDARD_LIVE_REPLAY_TTL,
             max_sessions: 4096,
             max_retained_bytes: 64 * 1024 * 1024,
         }
@@ -785,11 +792,13 @@ impl InMemoryLiveReplayStore {
             .expire(&self.config, self.clock.now(), usize::MAX)
     }
 
+    /// A store keeping `max_events_per_session` events for `max_age`, with
+    /// [`InMemoryLiveReplayStoreConfig::standard`]'s session and byte bounds.
     pub fn with_bounds(max_events_per_session: usize, max_age: Duration) -> Self {
         Self::new(InMemoryLiveReplayStoreConfig {
             max_events_per_session,
             max_age,
-            ..InMemoryLiveReplayStoreConfig::default()
+            ..InMemoryLiveReplayStoreConfig::standard()
         })
     }
 
@@ -817,12 +826,6 @@ impl InMemoryLiveReplayStore {
             #[cfg(any(test, feature = "testing"))]
             before_notification_gate: self.before_notification_gate.clone(),
         }
-    }
-}
-
-impl Default for InMemoryLiveReplayStore {
-    fn default() -> Self {
-        Self::new(InMemoryLiveReplayStoreConfig::default())
     }
 }
 

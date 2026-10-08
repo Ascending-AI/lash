@@ -91,7 +91,7 @@ pub enum EmbedError {
         unstated: lash_core::UnstatedSessionConfig,
     },
     #[error(
-        "commit budget is required; provide explicit byte and node limits with .commit_budget(...)"
+        "commit budget is required; provide explicit byte and node limits with .commit_budget(...).data_retention(crate::DataRetention::standard())"
     )]
     /// Returned when the runtime has no commit budget.
     MissingCommitBudget,
@@ -100,6 +100,13 @@ pub enum EmbedError {
     )]
     /// Returned when queued-work batching has not been configured.
     MissingQueuedWorkBatching,
+    #[error(
+        "data retention is required; state what the host keeps with .data_retention(...), for example DataRetention::standard()"
+    )]
+    /// Returned when the host stated no data retention: attachment bounds,
+    /// retained output, session revisions, live replay and process
+    /// observation have no default.
+    MissingDataRetention,
     #[error("session store operation failed: {0}")]
     Store(#[from] lash_core::StoreError),
     /// The durable store refused (ADR 0132): a fence, a mailbox rule or a
@@ -379,6 +386,7 @@ impl EmbedError {
             | Self::SessionTurnStartUnspecified { .. }
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
+            | Self::MissingDataRetention
             | Self::SessionCreationUnrecorded { .. }
             | Self::WorkCadence(_)
             | Self::RelayPolicy(_)
@@ -436,6 +444,7 @@ impl EmbedError {
             | Self::SessionTurnStartUnspecified { .. }
             | Self::MissingCommitBudget
             | Self::MissingQueuedWorkBatching
+            | Self::MissingDataRetention
             | Self::SessionCreationUnrecorded { .. }
             | Self::UnknownSession { .. }
             | Self::SessionAlreadyExists { .. }

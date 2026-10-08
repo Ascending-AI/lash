@@ -667,6 +667,10 @@ mod tests {
                 ))
             })
         }
+
+        fn retention_policy(&self) -> lash_core::OutputRetentionPolicy {
+            lash_core::OutputRetentionPolicy::STANDARD
+        }
     }
 
     fn context(

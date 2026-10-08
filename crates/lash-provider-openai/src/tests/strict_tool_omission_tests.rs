@@ -277,6 +277,7 @@ async fn run_case(
     let core = super::facade_turns::durable_core(
         "gpt-5.4",
         lash::LlmProfileMetadata::builder("gpt-5.4")
+            .cache_retention(lash::provider::CacheRetention::Short)
             .context_window_tokens(16_000)
             .build()
             .expect("valid model spec"),

@@ -617,9 +617,12 @@ mod artifact_cleanup_tests {
         use lash_core_execution::StoreSet as _;
         let memory = crate::SqliteStoreSet::memory().await.expect("memory store");
         let dir = tempfile::tempdir().expect("file root");
-        let file = crate::SqliteStoreSet::open(dir.path().join("lash.db"))
-            .await
-            .expect("file store");
+        let file = crate::SqliteStoreSet::open(
+            dir.path().join("lash.db"),
+            crate::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("file store");
         for set in [&memory, &file] {
             let referrer = ArtifactReferrer::HostPin(lash_core_execution::HostArtifactPin::mint());
             let ledger = set.artifact_cleanup();
@@ -704,9 +707,12 @@ mod artifact_cleanup_tests {
             .await
             .expect("open the memory store set");
         let dir = tempfile::tempdir().expect("file store set root");
-        let file = crate::SqliteStoreSet::open(dir.path().join("lash.db"))
-            .await
-            .expect("open the file store set");
+        let file = crate::SqliteStoreSet::open(
+            dir.path().join("lash.db"),
+            crate::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open the file store set");
         for set in [&memory, &file] {
             cleanup_arm_rolls_back_when_the_end_fence_fails_on(set).await;
         }

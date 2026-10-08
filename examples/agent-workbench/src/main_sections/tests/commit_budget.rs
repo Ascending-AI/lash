@@ -67,6 +67,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     let error = match LashCore::standard_builder(backend())
         .llm_profiles(profiles())
         .commit_budget(bounded)
+        .data_retention(lash::DataRetention::standard())
         .build(owner())
     {
         Ok(_) => panic!("the builder must not invent a queued-work action reserve"),
@@ -77,6 +78,7 @@ async fn commit_budget_is_explicit_host_policy_with_no_implicit_builder_fallback
     let core = LashCore::standard_builder(backend())
         .llm_profiles(profiles())
         .commit_budget(bounded)
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(batching)
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

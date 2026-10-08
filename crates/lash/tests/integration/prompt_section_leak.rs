@@ -203,6 +203,7 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
                     MODEL,
                     lash::RegisteredLlmProfile::new(
                         lash::LlmProfileMetadata::builder(MODEL)
+                            .cache_retention(lash::provider::CacheRetention::Short)
                             .context_window_tokens(200_000)
                             .build()
                             .expect("valid model"),
@@ -230,6 +231,7 @@ async fn section_text_never_enters_history_or_a_compaction_seed() {
             lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

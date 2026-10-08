@@ -9,7 +9,7 @@
 //! Three embedder patterns this enables:
 //!
 //! * **CLI interactive (single runtime, default):**
-//!   `RuntimeEnvironment::builder(RuntimeHostConfig::new(backend, commit_budget, batching,crate::ToolSourcePolicy::Tolerate)).build()`.
+//!   `RuntimeEnvironment::builder(RuntimeHostConfig::new(backend, commit_budget, batching,crate::ToolSourcePolicy::Tolerate, DataRetentionConfig::standard())).build()`.
 //!   The host config is built over one backend, which supplies every store
 //!   port and the effect host; the zero-infra backend is a SQLite memory
 //!   backend (ADR 0102).

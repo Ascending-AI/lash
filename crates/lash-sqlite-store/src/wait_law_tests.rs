@@ -66,9 +66,12 @@ mod file {
 
     async fn backend() -> (tempfile::TempDir, Backend) {
         let root = tempfile::tempdir().expect("a store root");
-        let set = SqliteStoreSet::open(root.path().join("lash.db"))
-            .await
-            .expect("open the file store set");
+        let set = SqliteStoreSet::open(
+            root.path().join("lash.db"),
+            crate::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open the file store set");
         (root, assemble(set))
     }
 

@@ -4,7 +4,10 @@ impl LashCoreBuilder {
     /// Assemble the runtime host config over the backend, which supplies its
     /// effect host, attachment store, process-env store and clock, then apply
     /// every runtime setting this builder carries over it.
-    pub(super) fn resolve_runtime_host_config(&mut self) -> Result<RuntimeHostConfig> {
+    pub(super) fn resolve_runtime_host_config(
+        &mut self,
+        data_retention: facade_support::DataRetentionConfig,
+    ) -> Result<RuntimeHostConfig> {
         let commit_budget = self
             .commit_budget
             .take()
@@ -32,6 +35,7 @@ impl LashCoreBuilder {
             tool_source_policy,
             execution_budgets,
             delta_coalescing,
+            data_retention,
         )
         .with_provider_file_cache(self.provider_file_cache);
         let core = self.apply_core_overrides(core);
@@ -46,20 +50,6 @@ impl LashCoreBuilder {
                 .attachment_store
                 .reconfigured_reclamation_retry(self.attachment_reclamation_retry),
         );
-        if let Some(max) = self.max_attachment_bytes.take() {
-            core = core.with_max_attachment_bytes(max);
-        }
-        if let Some(policy) = self.attachment_read_policy.take() {
-            core = core.with_attachment_read_policy(policy);
-        }
-        if let Some(expiry) = self.attachment_upload_expiry.take() {
-            core = core.with_attachment_upload_expiry_ms(
-                u64::try_from(expiry.as_millis()).unwrap_or(u64::MAX),
-            );
-        }
-        if let Some(policy) = self.output_retention.take() {
-            core = core.with_output_retention(policy);
-        }
         if let Some(runtime) = self.trace_runtime.take() {
             core.tracing = runtime;
         }
@@ -167,7 +157,9 @@ pub(super) mod tests {
             .trace_sink(first.clone())
             .telemetry(telemetry(metrics.clone()))
             .trace_sink(second.clone());
-        let config = builder.resolve_runtime_host_config().expect("trace config");
+        let config = builder
+            .resolve_runtime_host_config(facade_support::DataRetentionConfig::standard())
+            .expect("trace config");
         config
             .tracing
             .metrics()
@@ -252,7 +244,7 @@ pub(super) mod tests {
                 ..Default::default()
             });
         let config = builder
-            .resolve_runtime_host_config()
+            .resolve_runtime_host_config(facade_support::DataRetentionConfig::standard())
             .unwrap()
             .with_provider_file_uploaders(vec![uploader.clone()]);
         let store = &config.durability.attachment_store;
@@ -370,7 +362,7 @@ mod pacing_laws {
                 attempt: Duration::from_millis(21),
             });
         let resolved = configured
-            .resolve_runtime_host_config()
+            .resolve_runtime_host_config(facade_support::DataRetentionConfig::standard())
             .expect("valid policy");
         let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
             &backend,
@@ -389,7 +381,7 @@ mod pacing_laws {
             .relay_policy(policy);
         assert_eq!(
             reversed
-                .resolve_runtime_host_config()
+                .resolve_runtime_host_config(facade_support::DataRetentionConfig::standard())
                 .expect("policy")
                 .control
                 .relay_policy()
@@ -401,7 +393,7 @@ mod pacing_laws {
             ..policy
         });
         assert!(matches!(
-            invalid.resolve_runtime_host_config(),
+            invalid.resolve_runtime_host_config(facade_support::DataRetentionConfig::standard()),
             Err(EmbedError::RelayPolicy(_))
         ));
     }
@@ -420,7 +412,7 @@ mod pacing_laws {
         };
         let mut configured = builder(backend.clone()).commit_admission(selected);
         let policy = configured
-            .resolve_runtime_host_config()
+            .resolve_runtime_host_config(facade_support::DataRetentionConfig::standard())
             .expect("valid admission")
             .control
             .commit_admission;
@@ -461,7 +453,7 @@ mod pacing_laws {
             ..selected
         });
         assert!(matches!(
-            invalid.resolve_runtime_host_config(),
+            invalid.resolve_runtime_host_config(facade_support::DataRetentionConfig::standard()),
             Err(EmbedError::CommitAdmissionPolicy(_))
         ));
     }
@@ -541,7 +533,7 @@ mod pacing_laws {
             checkpoint_inputs: std::num::NonZeroUsize::MIN.saturating_add(2),
         });
         let resolved = configured
-            .resolve_runtime_host_config()
+            .resolve_runtime_host_config(facade_support::DataRetentionConfig::standard())
             .expect("runtime policy");
         assert_eq!(resolved.control.pacing.checkpoint_inputs.get(), 3);
         assert_eq!(

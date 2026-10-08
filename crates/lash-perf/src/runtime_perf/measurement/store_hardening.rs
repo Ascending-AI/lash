@@ -76,8 +76,11 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
             let sqlite_memory_stores = sqlite_memory_stores().await?;
             let memory_factory = sqlite_memory_stores.session_store_factory();
             let sqlite_root = make_temp_bench_dir("lash-runtime-perf-store-hardening")?;
-            let sqlite_stores =
-                lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("lash.db")).await?;
+            let sqlite_stores = lash_sqlite_store::SqliteStoreSet::open(
+                sqlite_root.join("lash.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await?;
             let sqlite_factory = sqlite_stores.session_store_factory();
             let mut config = lash_postgres_store::testing::work_pool_of(4);
             config.roles.work.min_connections = 1;
@@ -454,6 +457,7 @@ async fn measure_store_hardening_history_reads(
                         lash_core::NoProgressBudget::bounded(12),
                         lash_core::SessionToolAccess::ambient(),
                     ),
+                    retention: lash_core::Retention::UntilGc,
                 })
                 .await?;
             let mut state = load_store_hardening_state(store, &fork_session_id).await?;
@@ -592,6 +596,7 @@ pub(super) fn runtime_perf_session_create_request(
             lash_core::SessionToolAccess::ambient(),
         ),
         head: lash_core::SessionCreationHead::Config,
+        retention: lash_core::Retention::UntilGc,
     }
 }
 

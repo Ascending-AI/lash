@@ -9,6 +9,7 @@ async fn a_permanent_rlm_retention_refusal_is_typed_and_terminal() {
     let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
     let attachments = lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
         host.backend().attachment_store(),
+        lash_core::facade_support::AttachmentPolicy::standard(),
     )
     .with_max_attachment_bytes(Some(64));
     let value = serde_json::json!("x".repeat(900));

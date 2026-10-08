@@ -756,6 +756,7 @@ impl SessionGraphScenario {
                     &request.config.session_policy(),
                     crate::SessionToolAccess::ambient(),
                 ),
+                retention: crate::Retention::UntilGc,
             })
             .await;
         let receipt = match result {

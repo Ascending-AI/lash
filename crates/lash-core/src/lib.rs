@@ -160,6 +160,7 @@ pub mod facade_support {
     }
 
     pub use crate::attachments::AttachmentGcFence;
+    pub use crate::attachments::AttachmentPolicy;
     pub use crate::attachments::AttachmentReclamationPolicy;
     pub use crate::attachments::AttachmentReclamationReport;
     pub use crate::attachments::EmptyRootSetPolicy;
@@ -294,6 +295,7 @@ pub mod facade_support {
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
 
+    pub use crate::runtime::DataRetentionConfig;
     pub use crate::runtime::RuntimeEffectReplayTrace;
     pub use crate::runtime::RuntimeEnvironment;
     pub use crate::runtime::RuntimeEnvironmentBuilder;
@@ -439,9 +441,9 @@ pub mod sansio {
 }
 
 pub use attachments::{
-    AttachmentGcFence, AttachmentReadPolicy, AttachmentReclamationPolicy, AttachmentRootSet,
-    AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass, AttachmentStorePersistence,
-    EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
+    AttachmentGcFence, AttachmentPolicy, AttachmentReadPolicy, AttachmentReclamationPolicy,
+    AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
+    AttachmentStorePersistence, EmptyRootSetPolicy, StoredAttachment, StoredBlobRef,
 };
 pub use lash_core_execution::turn_outcome_from_tool_control;
 pub use lash_sansio::llm::attachment_delivery::ProviderFileScope;

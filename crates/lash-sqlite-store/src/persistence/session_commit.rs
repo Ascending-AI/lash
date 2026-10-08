@@ -653,10 +653,8 @@ pub(crate) fn apply_runtime_commit_conn(
         )
         .optional()
         .map_err(sqlite_error)?
-        .map_or(
-            Ok(lash_core_execution::Retention::default()),
-            |(kind, last_turns)| lash_core_execution::Retention::from_stored(&kind, last_turns),
-        )?;
+        .map(|(kind, last_turns)| lash_core_execution::Retention::from_stored(&kind, last_turns))
+        .transpose()?;
     if plan.head_changed()
         && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
     {
@@ -682,8 +680,9 @@ pub(crate) fn apply_runtime_commit_conn(
     )?;
     // `until_gc` releases nothing here and reads no pin. The
     // other policies release what this publication moved out
-    // of their window, once the run's terminal names it.
-    if retention.releases_at_commit() {
+    // of their window, once the run's terminal names it. A session with
+    // no metadata row recorded no policy and releases nothing either.
+    if retention.is_some_and(lash_core_execution::Retention::releases_at_commit) {
         crate::revisions::release_unretained_conn(tx, false, Some(&commit.session_id))?;
     }
     let mut result = plan.result(

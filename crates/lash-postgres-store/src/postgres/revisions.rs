@@ -69,20 +69,20 @@ pub(crate) async fn release_unretained_tx(
     Ok(released.len())
 }
 
-/// The retention policy of `session_id`; a session with no metadata row
-/// keeps the default.
+/// The retention policy recorded for `session_id`, or `None` for a session
+/// with no metadata row: it recorded no policy, and nothing stands in for
+/// one.
 pub(crate) async fn retention_tx(
     tx: &mut Tx<'_>,
     session_id: &SessionId,
-) -> Result<Retention, StoreError> {
+) -> Result<Option<Retention>, StoreError> {
     sqlx::query_as::<_, (String, Option<i64>)>(session_sql().meta.select_retention.sql())
         .bind(session_id.as_str())
         .fetch_optional(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?
-        .map_or(Ok(Retention::default()), |(kind, last_turns)| {
-            Retention::from_stored(&kind, last_turns)
-        })
+        .map(|(kind, last_turns)| Retention::from_stored(&kind, last_turns))
+        .transpose()
 }
 
 /// Refuse a session the catalog does not hold: a deletion tombstone answers
@@ -363,10 +363,11 @@ impl PostgresStore {
             .await
             .map_err(store_sqlx_error)?;
         // A policy that releases as the session commits releases what this
-        // pin alone held now; `until_gc` leaves it to the host's collection.
+        // pin alone held now; `until_gc` leaves it to the host's collection,
+        // and so does a session that recorded no policy.
         if retention_tx(&mut tx, session_id)
             .await?
-            .releases_at_commit()
+            .is_some_and(Retention::releases_at_commit)
         {
             release_unretained_tx(&mut tx, false, Some(session_id)).await?;
         }
@@ -381,7 +382,9 @@ impl PostgresStore {
         require_session_tx(&mut tx, session_id).await?;
         let retention = retention_tx(&mut tx, session_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(retention)
+        retention.ok_or_else(|| StoreError::SessionNotFound {
+            session_id: session_id.clone(),
+        })
     }
 
     pub(crate) async fn set_retention_in_catalog(

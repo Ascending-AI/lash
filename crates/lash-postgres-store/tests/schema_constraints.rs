@@ -172,74 +172,74 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
 
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind)
-         VALUES ('bad-relation', 'sibling')",
+        "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind)
+         VALUES ('bad-relation', 'sibling', 'until_gc')",
         "ck_session_meta_relation_kind",
     )
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind, parent_session_id,
                                         caused_by_kind)
-         VALUES ('bad-cause', 'child', 'parent', 'timer')",
+         VALUES ('bad-cause', 'child', 'until_gc', 'parent', 'timer')",
         "ck_session_meta_caused_by_kind",
     )
     .await;
     sqlx::query(
-        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind, parent_session_id,
                                         caused_by_kind, caused_by_effect_id)
-         VALUES ('effect-address-cause', 'child', 'parent', 'effect_address', '{}')",
+         VALUES ('effect-address-cause', 'child', 'until_gc', 'parent', 'effect_address', '{}')",
     )
     .execute(&mut connection)
     .await
     .expect("current effect-address discriminator is admitted");
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind, parent_session_id,
                                         caused_by_kind)
-         VALUES ('legacy-effect-cause', 'child', 'parent', 'effect')",
+         VALUES ('legacy-effect-cause', 'child', 'until_gc', 'parent', 'effect')",
         "ck_session_meta_caused_by_kind",
     )
     .await;
 
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind)
-         VALUES ('childless-child', 'child')",
+        "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind)
+         VALUES ('childless-child', 'child', 'until_gc')",
         "ck_session_meta_relation_family",
     )
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind, caused_by_kind,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind, caused_by_kind,
                                         caused_by_session_id, caused_by_turn_id)
-         VALUES ('caused-run', 'root', 'turn', 'cause-session', 'cause-turn')",
+         VALUES ('caused-run', 'root', 'until_gc', 'turn', 'cause-session', 'cause-turn')",
         "ck_session_meta_relation_family",
     )
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind, parent_session_id,
                                         caused_by_kind)
-         VALUES ('bare-discriminator', 'child', 'parent', 'turn')",
+         VALUES ('bare-discriminator', 'child', 'until_gc', 'parent', 'turn')",
         "ck_session_meta_caused_by_family",
     )
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind, parent_session_id,
                                         caused_by_kind, caused_by_session_id,
                                         caused_by_turn_id, caused_by_node_id)
-         VALUES ('crossed-family', 'child', 'parent', 'turn', 'cause-session',
+         VALUES ('crossed-family', 'child', 'until_gc', 'parent', 'turn', 'cause-session',
                  'cause-turn', 'stray-node')",
         "ck_session_meta_caused_by_family",
     )
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_session_meta (session_id, relation_kind, parent_session_id,
+        "INSERT INTO lash_session_meta (session_id, relation_kind, retention_kind, parent_session_id,
                                         caused_by_session_id)
-         VALUES ('kindless-payload', 'child', 'parent', 'cause-session')",
+         VALUES ('kindless-payload', 'child', 'until_gc', 'parent', 'cause-session')",
         "ck_session_meta_caused_by_family",
     )
     .await;

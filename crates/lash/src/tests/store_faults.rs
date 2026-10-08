@@ -80,9 +80,12 @@ async fn stores_over(storage: Storage) -> Stores {
         }
         Storage::File => {
             let files = tempfile::tempdir().expect("SQLite store directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(files.path().join("lash.db"))
-                .await
-                .expect("SQLite file stores");
+            let stores = lash_sqlite_store::SqliteStoreSet::open(
+                files.path().join("lash.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite file stores");
             let seams = stores.session_store_factory();
             Stores {
                 stores: Arc::new(stores),

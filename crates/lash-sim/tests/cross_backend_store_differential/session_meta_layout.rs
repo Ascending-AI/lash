@@ -505,8 +505,8 @@ fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLa
                   caused_by_kind, caused_by_session_id, caused_by_turn_id,
                   caused_by_effect_id, caused_by_call_id, caused_by_process_id,
                   caused_by_process_event_sequence, caused_by_node_id, source_session_id,
-                  source_node_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                  source_node_id, retention_kind)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'until_gc')",
                 rusqlite::params![
                     case.row.session_id.as_str(),
                     case.row.relation_kind,
@@ -588,8 +588,8 @@ async fn replace_postgres_session_meta_with_raw_rows(
               caused_by_kind, caused_by_session_id, caused_by_turn_id,
               caused_by_effect_id, caused_by_call_id, caused_by_process_id,
               caused_by_process_event_sequence, caused_by_node_id, source_session_id,
-              source_node_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+              source_node_id, retention_kind)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'until_gc')",
         )
         .bind(case.row.session_id.as_str())
         .bind(&case.row.relation_kind)
@@ -650,9 +650,12 @@ pub(super) async fn verify_independent_session_meta_layout(
     std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite metadata root");
     let sqlite_path = sqlite_case_root.join("lash.db");
     let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&sqlite_case_root.join("lash.db"))
-            .await
-            .expect("open SQLite metadata store"),
+        lash_sqlite_store::SqliteStore::open(
+            &sqlite_case_root.join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open SQLite metadata store"),
     );
     let postgres_factory = Arc::new(postgres.session_store_factory());
     delete_postgres_session_meta_rows(postgres.pool(), &cases).await;
@@ -672,6 +675,7 @@ pub(super) async fn verify_independent_session_meta_layout(
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         };
         sqlite_stores.push(
             admit_test_session(sqlite_factory.clone(), &request)

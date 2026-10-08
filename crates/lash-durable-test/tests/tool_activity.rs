@@ -596,6 +596,7 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
         };
         let core = lash::LashCore::standard_builder(backend)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -603,6 +604,7 @@ async fn a_durable_turn_streams_provider_deltas_before_its_committed_rows(tier: 
             .serve_test_llm_profile(
                 model,
                 lash_core::LlmProfileMetadata::builder(served::MODEL)
+                    .cache_retention(lash_core::provider::CacheRetention::Short)
                     .context_window_tokens(1_000_000)
                     .expose_thinking(expose_thinking)
                     .build()
@@ -918,7 +920,9 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
     const NAME: &str = "activity law: commit on the serving node";
     const SESSION: &str = "activity-two-nodes";
     let live: Arc<dyn LiveReplayStore> =
-        Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::default());
+        Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+            lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+        ));
     let gate = Gate::new(false);
     let Some(world) = world_with(tier, &gate, false, Some(Arc::clone(&live))).await else {
         return;
@@ -935,6 +939,7 @@ async fn a_commit_on_one_node_reaches_a_subscriber_attached_through_another(tier
         .serve_sessions(false)
         .live_replay_store(live)
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

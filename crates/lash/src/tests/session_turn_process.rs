@@ -17,6 +17,7 @@ fn request(model: &str) -> lash_core::ProcessStartRequest {
 /// resolves the key's metadata.
 fn started(model: &str, keyed: bool) -> lash_core::ProcessStartRequest {
     let metadata = lash_core::LlmProfileMetadata::builder(model)
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .expect("the model's metadata");

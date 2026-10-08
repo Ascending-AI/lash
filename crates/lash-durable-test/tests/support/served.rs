@@ -54,9 +54,12 @@ pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
         }
         Tier::SqliteFile => {
             let dir = tempfile::tempdir().expect("a temporary directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
-                .await
-                .expect("a file store set opens");
+            let stores = lash_sqlite_store::SqliteStoreSet::open(
+                dir.path().join("lash.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("a file store set opens");
             Some((Arc::new(stores), vec![Box::new(dir)]))
         }
         Tier::Postgres => {
@@ -77,6 +80,7 @@ pub async fn stores(tier: Tier) -> Option<(Arc<dyn StoreSet>, Keep)> {
                 &storage,
                 lash_sqlite_store::SqliteStoreSet::open(
                     (attachments.path()).join("attachments.db"),
+                    lash_sqlite_store::SqliteSynchronous::Normal,
                 )
                 .await
                 .expect("SQLite attachment store")
@@ -131,6 +135,7 @@ fn build(
 
 pub fn metadata() -> lash_core::LlmProfileMetadata {
     lash_core::LlmProfileMetadata::builder(MODEL)
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(1_000_000)
         .build()
         .expect("the model's metadata")
@@ -420,6 +425,7 @@ impl World {
         };
         let core = builder(&backend)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(batching)
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -494,6 +500,7 @@ impl World {
         self.core.shutdown().await.expect("the core shuts down");
         self.core = builder(&self.backend)
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())

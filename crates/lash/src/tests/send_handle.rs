@@ -79,6 +79,7 @@ async fn fixture_over_with_batching(
     let calls = Arc::new(AtomicUsize::new(0));
     let core = LashCore::standard_builder(backend)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(crate::DataRetention::standard())
         .queued_work_batching(batching)
         .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(crate::ExecutionBudgets::recommended())
@@ -750,6 +751,7 @@ async fn a_shift_never_runs_on_a_session_opened_to_observe() -> Result<()> {
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: lash_core::SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         },
     )
     .await?;

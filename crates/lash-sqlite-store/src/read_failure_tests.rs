@@ -263,7 +263,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
     let store = Arc::new(
         SqliteStore::open_at(
             &crate::location::DatabaseLocation::standalone_file(&path),
-            StoreOptions::default(),
+            StoreOptions::standard(crate::SqliteSynchronous::Normal),
             Arc::new(lash_core_execution::facade_support::SystemClock),
             lash_core_execution::FleetFormat::writable(),
             crate::testing::ConnectionHooks {
@@ -669,8 +669,8 @@ async fn malformed_durable_rows_surface_typed_corruption() {
         .expect("permit manufacturing a row the DDL now forbids");
     raw.execute(
         "INSERT INTO session_meta
-         (session_id, relation_kind, session_state_version)
-         VALUES ('corrupt', 'corrupt', ?1)",
+         (session_id, relation_kind, session_state_version, retention_kind)
+         VALUES ('corrupt', 'corrupt', ?1, 'until_gc')",
         [i64::from(
             lash_core_execution::store::CURRENT_SESSION_STATE_VERSION,
         )],

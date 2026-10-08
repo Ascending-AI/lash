@@ -33,7 +33,7 @@ static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 lash_conformance::tool_access_persistence_tests!({
     let dir = tempfile::tempdir().expect("tool-access SQLite tempdir");
-    let stores = SqliteStoreSet::open(dir.path().join("lash.db"))
+    let stores = SqliteStoreSet::open(dir.path().join("lash.db"), crate::SqliteSynchronous::Normal)
         .await
         .expect("open tool-access catalog");
     let catalog = stores.open_store().await.expect("open tool-access store");
@@ -210,6 +210,32 @@ fn queued_work_batches_reject_a_duplicate_source_key_insert() {
     );
 }
 
+/// D-DEFAULTS2: a file store set runs under the `synchronous` mode its host
+/// states, on the connection its writes commit through.
+#[tokio::test]
+async fn a_file_store_set_runs_under_the_synchronous_mode_its_host_states() {
+    for (stated, pragma) in [
+        (SqliteSynchronous::Off, 0),
+        (SqliteSynchronous::Normal, 1),
+        (SqliteSynchronous::Full, 2),
+    ] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stores = crate::SqliteStoreSet::open(dir.path().join("lash.db"), stated)
+            .await
+            .expect("open a file store set");
+        assert_eq!(stores.options().store.connection_policy.synchronous, stated);
+        let applied = stores
+            .process_env_store()
+            .conn
+            .call(|connection| {
+                connection.query_row("PRAGMA synchronous", [], |row| row.get::<_, i64>(0))
+            })
+            .await
+            .expect("read the pragma");
+        assert_eq!(applied, pragma, "{stated:?}");
+    }
+}
+
 #[tokio::test]
 async fn store_options_apply_connection_policy_on_connection_thread() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -224,7 +250,7 @@ async fn store_options_apply_connection_policy_on_connection_thread() {
                 synchronous: SqliteSynchronous::Full,
                 wal_autocheckpoint_pages: 17,
                 cache_size: -4096,
-                ..SqliteConnectionPolicy::default()
+                ..SqliteConnectionPolicy::standard(SqliteSynchronous::Full)
             },
         },
     )
@@ -296,9 +322,12 @@ async fn traced_session_list(store: &SqliteStore) -> (Vec<SessionView>, usize) {
 #[tokio::test]
 async fn session_listing_statement_count_is_session_count_invariant() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = SqliteStore::open(&dir.path().join("lash.db"))
-        .await
-        .expect("open catalog");
+    let store = SqliteStore::open(
+        &dir.path().join("lash.db"),
+        crate::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open catalog");
     let mut expected_relations = BTreeMap::new();
 
     for index in 0..8 {
@@ -332,6 +361,7 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                     lash_core_execution::SessionToolAccess::ambient(),
                 ),
                 head: lash_core_execution::SessionCreationHead::Config,
+                retention: lash_core_execution::Retention::UntilGc,
             })
             .await
             .expect("create session listing fixture");
@@ -430,6 +460,7 @@ async fn durable_state(
             head: lash_core_execution::SessionCreationHead::Config,
             pending_observer_intents: Vec::new(),
             owning_process_id: None,
+            retention: lash_core_execution::Retention::UntilGc,
         })
         .await
         .expect("admit SQLite test session");
@@ -567,7 +598,7 @@ async fn live_attachment_refs_aborts_on_unreadable_catalog() {
     let root = dir.path().join("sessions.db");
     std::fs::write(&root, b"corrupt not-a-db").expect("write corrupt");
 
-    let result = SqliteStore::open(&root).await;
+    let result = SqliteStore::open(&root, crate::SqliteSynchronous::Normal).await;
     assert!(
         result.is_err(),
         "an unreadable durable-core catalog must refuse open"
@@ -591,6 +622,7 @@ async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     };
     assert!(matches!(
         store.admit_session(&request).await.expect("admit session"),
@@ -616,7 +648,9 @@ async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
 async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().join("sessions");
-    let store = SqliteStore::open(&root).await.expect("open catalog");
+    let store = SqliteStore::open(&root, crate::SqliteSynchronous::Normal)
+        .await
+        .expect("open catalog");
     let request = SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -629,6 +663,7 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     };
 
     store
@@ -765,9 +800,12 @@ async fn sqlite_artifact_view_does_not_resurrect_artifact_reclaimed_by_another_h
 #[tokio::test]
 async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
     let dir = tempfile::tempdir().expect("admission tempdir");
-    let store = SqliteStore::open(&dir.path().join("lash.db"))
-        .await
-        .expect("open catalog");
+    let store = SqliteStore::open(
+        &dir.path().join("lash.db"),
+        crate::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open catalog");
     let request = |session_id: &str| SessionStoreCreateRequest {
         session_id: SessionId::fixture(session_id),
         relation: lash_core_execution::SessionRelation::Root,
@@ -780,6 +818,7 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
         head: lash_core_execution::SessionCreationHead::Config,
         pending_observer_intents: Vec::new(),
         owning_process_id: None,
+        retention: lash_core_execution::Retention::UntilGc,
     };
     let first = request("admission-a");
     let second = request("admission-b");
@@ -881,6 +920,7 @@ async fn a_session_delete_and_fork_answer_inline_on_the_store_connection() {
             lash_core::NoProgressBudget::bounded(12),
             lash_core_execution::SessionToolAccess::ambient(),
         ),
+        retention: lash_core_execution::Retention::UntilGc,
     };
     let mut forked = std::pin::pin!(store.fork_session(&request));
     assert!(

@@ -450,6 +450,7 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
                 lash_core::NoProgressBudget::bounded(12),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("fork at retained node");
@@ -488,6 +489,7 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
                 lash_core::NoProgressBudget::bounded(12),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("fork an inherited node through the child lineage");
@@ -536,6 +538,7 @@ async fn fork_at(
                 lash_core::NoProgressBudget::bounded(12),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("fork at a retained node");

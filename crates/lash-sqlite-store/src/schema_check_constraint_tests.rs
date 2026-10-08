@@ -69,47 +69,47 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
     );
     assert_check_rejects(
         &core,
-        "INSERT INTO session_meta (session_id, relation_kind) VALUES ('bad-relation', 'sibling')",
+        "INSERT INTO session_meta (session_id, relation_kind, retention_kind) VALUES ('bad-relation', 'sibling', 'until_gc')",
         "ck_session_meta_relation_kind",
     );
     assert_check_rejects(
         &core,
-        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind) VALUES ('bad-cause', 'child', 'parent', 'timer')",
+        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind, retention_kind) VALUES ('bad-cause', 'child', 'parent', 'timer', 'until_gc')",
         "ck_session_meta_caused_by_kind",
     );
     core.execute_batch(
-        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind, caused_by_effect_id) VALUES ('effect-address-cause', 'child', 'parent', 'effect_address', '{}')",
+        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind, caused_by_effect_id, retention_kind) VALUES ('effect-address-cause', 'child', 'parent', 'effect_address', '{}', 'until_gc')",
     )
     .expect("current effect-address discriminator is admitted");
     assert_check_rejects(
         &core,
-        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind) VALUES ('legacy-effect-cause', 'child', 'parent', 'effect')",
+        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind, retention_kind) VALUES ('legacy-effect-cause', 'child', 'parent', 'effect', 'until_gc')",
         "ck_session_meta_caused_by_kind",
     );
 
     assert_check_rejects(
         &core,
-        "INSERT INTO session_meta (session_id, relation_kind) VALUES ('childless-child', 'child')",
+        "INSERT INTO session_meta (session_id, relation_kind, retention_kind) VALUES ('childless-child', 'child', 'until_gc')",
         "ck_session_meta_relation_family",
     );
     assert_check_rejects(
         &core,
-        "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind, caused_by_session_id, caused_by_turn_id) VALUES ('caused-run', 'root', 'turn', 'cause-session', 'cause-turn')",
+        "INSERT INTO session_meta (session_id, relation_kind, caused_by_kind, caused_by_session_id, caused_by_turn_id, retention_kind) VALUES ('caused-run', 'root', 'turn', 'cause-session', 'cause-turn', 'until_gc')",
         "ck_session_meta_relation_family",
     );
     assert_check_rejects(
         &core,
-        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind) VALUES ('bare-discriminator', 'child', 'parent', 'turn')",
+        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind, retention_kind) VALUES ('bare-discriminator', 'child', 'parent', 'turn', 'until_gc')",
         "ck_session_meta_caused_by_family",
     );
     assert_check_rejects(
         &core,
-        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind, caused_by_session_id, caused_by_turn_id, caused_by_node_id) VALUES ('crossed-family', 'child', 'parent', 'turn', 'cause-session', 'cause-turn', 'stray-node')",
+        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_kind, caused_by_session_id, caused_by_turn_id, caused_by_node_id, retention_kind) VALUES ('crossed-family', 'child', 'parent', 'turn', 'cause-session', 'cause-turn', 'stray-node', 'until_gc')",
         "ck_session_meta_caused_by_family",
     );
     assert_check_rejects(
         &core,
-        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_session_id) VALUES ('kindless-payload', 'child', 'parent', 'cause-session')",
+        "INSERT INTO session_meta (session_id, relation_kind, parent_session_id, caused_by_session_id, retention_kind) VALUES ('kindless-payload', 'child', 'parent', 'cause-session', 'until_gc')",
         "ck_session_meta_caused_by_family",
     );
 

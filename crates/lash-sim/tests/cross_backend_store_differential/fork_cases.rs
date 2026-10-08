@@ -17,9 +17,12 @@ pub(super) async fn cross_owner_attachment_adoption(
     let factories: [Arc<dyn DeploymentStore>; 3] = [
         memory.session_store_factory(),
         Arc::new(
-            lash_sqlite_store::SqliteStore::open(&sqlite_root.join("cross-owner.db"))
-                .await
-                .expect("open SQLite cross-owner store"),
+            lash_sqlite_store::SqliteStore::open(
+                &sqlite_root.join("cross-owner.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("open SQLite cross-owner store"),
         ),
         Arc::new(postgres.session_store_factory()),
     ];
@@ -36,10 +39,13 @@ pub(super) async fn cross_owner_attachment_adoption(
                     .build()
                     .expect("runtime")
                     .block_on(async move {
-                        lash_sqlite_store::SqliteStoreSet::open(path)
-                            .await
-                            .expect("SQLite attachment store")
-                            .attachment_store()
+                        lash_sqlite_store::SqliteStoreSet::open(
+                            path,
+                            lash_sqlite_store::SqliteSynchronous::Normal,
+                        )
+                        .await
+                        .expect("SQLite attachment store")
+                        .attachment_store()
                     })
             })
             .join()
@@ -187,6 +193,7 @@ impl BackendRunner {
                             lash_core::NoProgressBudget::bounded(12),
                             lash_core::SessionToolAccess::ambient(),
                         ),
+                        retention: lash_core::Retention::UntilGc,
                     })
                     .await
                     .expect_err("existing fork target must be rejected");
@@ -225,6 +232,7 @@ impl BackendRunner {
                             lash_core::NoProgressBudget::bounded(12),
                             lash_core::SessionToolAccess::ambient(),
                         ),
+                        retention: lash_core::Retention::UntilGc,
                     })
                     .await
                     .expect("foreign lineage must not gate a retained revision");
@@ -265,6 +273,7 @@ impl BackendRunner {
                             lash_core::NoProgressBudget::bounded(12),
                             lash_core::SessionToolAccess::ambient(),
                         ),
+                        retention: lash_core::Retention::UntilGc,
                     })
                     .await
                     .expect("rewind must create its first branch");
@@ -305,6 +314,7 @@ impl BackendRunner {
                             lash_core::NoProgressBudget::bounded(12),
                             lash_core::SessionToolAccess::ambient(),
                         ),
+                        retention: lash_core::Retention::UntilGc,
                     })
                     .await
                     .expect("rewind must re-fork after deleting the superseded source");
@@ -397,9 +407,12 @@ pub(super) async fn selected_observer_intents(
         (memory.session_store_factory(), memory.process_registry()),
         (
             Arc::new(
-                lash_sqlite_store::SqliteStore::open(&root.join("lash.db"))
-                    .await
-                    .expect("open SQLite observer store"),
+                lash_sqlite_store::SqliteStore::open(
+                    &root.join("lash.db"),
+                    lash_sqlite_store::SqliteSynchronous::Normal,
+                )
+                .await
+                .expect("open SQLite observer store"),
             ),
             Arc::new(sqlite),
         ),
@@ -437,6 +450,7 @@ pub(super) async fn selected_observer_intents(
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         };
         let source_id = SessionId::fixture(format!("selected-history-{nonce}-{index}"));
         let source_request = SessionStoreCreateRequest {
@@ -446,6 +460,7 @@ pub(super) async fn selected_observer_intents(
             pending_observer_intents: Vec::new(),
             config: request.config.clone(),
             head: SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         };
         let source = admit_test_session(factory.clone(), &source_request)
             .await
@@ -469,6 +484,7 @@ pub(super) async fn selected_observer_intents(
                     &request.config.session_policy(),
                     lash_core::SessionToolAccess::ambient(),
                 ),
+                retention: lash_core::Retention::UntilGc,
             })
             .await
             .expect("fork the writer's history with exact intent");

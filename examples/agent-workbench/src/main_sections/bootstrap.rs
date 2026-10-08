@@ -39,7 +39,7 @@ struct MemoryLiveReplayConfig {
 
 impl MemoryLiveReplayConfig {
     fn resolve(self) -> AnyhowResult<lash::observe::InMemoryLiveReplayStoreConfig> {
-        let defaults = lash::observe::InMemoryLiveReplayStoreConfig::default();
+        let defaults = lash::observe::InMemoryLiveReplayStoreConfig::standard();
         let positive = |field: &str, value: Option<usize>, default: usize| match value {
             Some(0) => Err(anyhow!(
                 "{LIVE_REPLAY_CONFIG_ENV} `{field}` must be positive"
@@ -317,6 +317,7 @@ pub(crate) async fn workbench_core_builder(
         }
     }
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .data_retention(lash::DataRetention::standard())
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
     .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
     .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -707,12 +708,14 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // Deployment policy example. Choose these limits for the host's workload
     // before build(); session settings instead use recorded config commands.
     // let builder = builder
-    //     .output_retention(lash::attachments::OutputRetentionPolicy {
-    //         inline_limit_bytes: 64 * 1024, witness_bytes: 4 * 1024,
+    //     .data_retention(lash::DataRetention {
+    //         attachments: lash::persistence::AttachmentPolicy {
+    //             max_attachment_bytes: Some(32 * 1024 * 1024),
+    //             ..lash::persistence::AttachmentPolicy::standard()
+    //         },
+    //         session_revisions: lash::Retention::HeadOnly,
+    //         ..lash::DataRetention::standard()
     //     })
-    //     .max_attachment_bytes(Some(32 * 1024 * 1024))
-    //     .attachment_read_policy(lash::attachments::AttachmentReadPolicy::DEFAULT)
-    //     .attachment_upload_expiry(Duration::from_secs(24 * 60 * 60))
     //     .recovery_lease(lash::RecoveryLeaseConfig {
     //         generation_rank: 1, ..Default::default()
     //     })
@@ -720,9 +723,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     //         attempt: Duration::from_secs(30),
     //     })
     //     .execution_budgets(lash::ExecutionBudgets::recommended())
-    //     .process_observation_config(lash::process_observation::ProcessObservationConfig::default())
     //     .live_replay_store(Arc::new(lash::observe::InMemoryLiveReplayStore::new(
-    //         lash::observe::InMemoryLiveReplayStoreConfig::default(),
+    //         lash::observe::InMemoryLiveReplayStoreConfig::standard(),
     //     )))
     //     .trace_context(TraceContext::default());
     let core = build_workbench_core(

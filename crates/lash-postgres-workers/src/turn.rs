@@ -199,6 +199,7 @@ fn streamed(request: &LlmRequest, text: &str) -> LlmResponse {
 #[expect(clippy::expect_used, reason = "the model's metadata is a literal")]
 fn metadata() -> lash_core::LlmProfileMetadata {
     lash_core::LlmProfileMetadata::builder(MODEL)
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .expect("the model's metadata")
@@ -241,6 +242,7 @@ pub fn core(backend: &Backend, witness: Witness, hold: Hold) -> Result<lash::Las
     )
     .serve_sessions(false)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .data_retention(lash::DataRetention::standard())
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
     .execution_budgets(lash::ExecutionBudgets::recommended())

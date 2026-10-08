@@ -127,7 +127,7 @@ pub(super) async fn open_stores(
         .or_else(|| std::env::var_os("LASH_SQLITE_PATH").map(PathBuf::from));
     Ok(if let Some(path) = sqlite_path {
         Arc::new(
-            lash::sqlite::SqliteStoreSet::open(path)
+            lash::sqlite::SqliteStoreSet::open(path, lash::sqlite::SqliteSynchronous::Normal)
                 .await
                 .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?,
         )
@@ -141,10 +141,13 @@ pub(super) async fn open_stores(
         .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?;
         Arc::new(lash::postgres::PostgresStoreSet::new(
             &storage,
-            lash::sqlite::SqliteStoreSet::open(std::path::Path::new(".lashctl-attachments.db"))
-                .await
-                .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?
-                .attachment_store(),
+            lash::sqlite::SqliteStoreSet::open(
+                std::path::Path::new(".lashctl-attachments.db"),
+                lash::sqlite::SqliteSynchronous::Normal,
+            )
+            .await
+            .map_err(|error| CliError::new(Exit::Unexpected, error.to_string()))?
+            .attachment_store(),
         ))
     })
 }
@@ -163,6 +166,7 @@ impl Invocation {
         // starts no host turn, and does not install an HTTP handler endpoint.
         lash::LashCore::standard_builder(backend)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())

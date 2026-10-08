@@ -5,6 +5,7 @@ fn recorded_model() -> crate::LlmProfileConfig {
     crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
         crate::LlmProfileKey::new("trace-test"),
         crate::LlmProfileMetadata::builder("model")
+            .cache_retention(crate::provider::CacheRetention::Short)
             .context_window_tokens(128000)
             .build()
             .expect("valid profile"),

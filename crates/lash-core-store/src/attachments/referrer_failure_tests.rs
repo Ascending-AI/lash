@@ -245,6 +245,7 @@ fn probe(
             backend.clone(),
             referrers.clone(),
             RuntimeOwner::Session("referrers-failure-session".into()),
+            AttachmentPolicy::standard(),
         ),
         referrers,
         backend,

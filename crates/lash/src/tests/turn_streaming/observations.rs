@@ -40,7 +40,9 @@ impl PublishedCommits {
 
     fn unbounded() -> Arc<Self> {
         Self::over(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::default(),
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+            ),
         ))
     }
 
@@ -872,7 +874,7 @@ async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_event() -> Re
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
                 max_events_per_session: 1,
-                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard()
             },
         ),
     ));
@@ -979,7 +981,9 @@ struct FailingAppendReplayStore {
 impl FailingAppendReplayStore {
     fn new() -> Self {
         Self {
-            inner: lash_core::facade_support::InMemoryLiveReplayStore::default(),
+            inner: lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+            ),
         }
     }
 }
@@ -1369,11 +1373,15 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn incarnation_change_invalidates_cursor() {
-    let original = crate::observe::InMemoryLiveReplayStore::default();
+    let original = crate::observe::InMemoryLiveReplayStore::new(
+        crate::observe::InMemoryLiveReplayStoreConfig::standard(),
+    );
     let preserved = crate::observe::InMemoryLiveReplayStore::reopen_preserving_history(&original);
     lash_conformance::incarnation_change_invalidates_cursor(
         Arc::new(original),
-        Arc::new(crate::observe::InMemoryLiveReplayStore::default()),
+        Arc::new(crate::observe::InMemoryLiveReplayStore::new(
+            crate::observe::InMemoryLiveReplayStoreConfig::standard(),
+        )),
         Arc::new(preserved),
     )
     .await;
@@ -1455,7 +1463,7 @@ impl PausedCommitReplayStore {
         let inner = if boundary == PublicationBoundary::BeforeNotification {
             let notification_pause = Arc::clone(&pause);
             lash_core::facade_support::InMemoryLiveReplayStore::with_before_notification_gate_for_testing(
-                lash_core::facade_support::InMemoryLiveReplayStore::default(),
+                lash_core::facade_support::InMemoryLiveReplayStore::new(lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard()),
                 move |events| {
                     if Self::is_authoritative_events(events) {
                         notification_pause.pause();
@@ -1463,7 +1471,9 @@ impl PausedCommitReplayStore {
                 },
             )
         } else {
-            lash_core::facade_support::InMemoryLiveReplayStore::default()
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+            )
         };
         Self {
             inner,
@@ -1682,7 +1692,9 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
     let first_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::default(),
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+            ),
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core
@@ -1725,7 +1737,9 @@ async fn gap_replacement_then_continuation_after_unavailable_history() -> Result
     let second_core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .live_replay_store(Arc::new(
-            lash_core::facade_support::InMemoryLiveReplayStore::default(),
+            lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+            ),
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let second_session = second_core
@@ -1824,7 +1838,7 @@ async fn gap_replacement_then_continuation_after_trimmed_history() -> Result<()>
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
                 max_events_per_session: 1,
-                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard()
             },
         ),
     ))
@@ -1909,7 +1923,7 @@ async fn subscriber_lag_with_trimmed_suffix_forces_gap_then_continues() -> Resul
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
                 max_events_per_session: 1,
-                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard()
             },
         ),
     ))

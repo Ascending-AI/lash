@@ -65,7 +65,7 @@ fn replay_request_from_reopened_message(
                     .context_window_tokens(128_000)
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .request_defaults(Default::default())
+                    .cache_retention(crate::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),

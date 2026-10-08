@@ -75,19 +75,19 @@ impl std::fmt::Display for Target {
     }
 }
 
-/// What a session keeps besides its head and its pins. The host sets it; it
-/// is never part of the session's replayed config.
+/// What a session keeps besides its head and its pins. The host states it
+/// when the session is created and may change it afterwards; there is no
+/// default (D-DEFAULTS2), and it is never part of the session's replayed
+/// config.
 ///
 /// A pin always retains the revision it resolves to, and a session's head is
 /// always retained, whatever the policy.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "turns", rename_all = "snake_case")]
 pub enum Retention {
     /// Every revision stays forkable until the host collects
     /// ([`StoreMaintenance::gc_unreachable`](crate::store::StoreMaintenance::gc_unreachable)).
-    /// A collection keeps only the head and the pinned revisions. The
-    /// default.
-    #[default]
+    /// A collection keeps only the head and the pinned revisions.
     UntilGc,
     /// The revisions the last `n` terminal roots published are kept, through
     /// collections too. Only a root whose terminal commit published a
@@ -187,6 +187,10 @@ pub struct ForkSessionRequest {
     /// configuration alike (FIG-4594). It is the new
     /// session's own head, so its `config_revision` starts at `0`.
     pub config: crate::PersistedSessionConfig,
+    /// Which revisions the fork keeps besides its head and its pins, as
+    /// its creator states it. A fork records its own retention; it does not
+    /// inherit its source's.
+    pub retention: Retention,
 }
 
 impl RetainedRevision {

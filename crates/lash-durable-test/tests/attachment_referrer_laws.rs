@@ -362,6 +362,7 @@ async fn stores(tier: Tier, clock: Arc<dyn lash_core::Clock>) -> Option<(Arc<dyn
             let dir = tempfile::tempdir().expect("a temporary directory");
             let stores = lash_sqlite_store::SqliteStoreSet::open_with_clock(
                 dir.path().join("lash.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
                 clock,
             )
             .await
@@ -382,10 +383,13 @@ async fn stores(tier: Tier, clock: Arc<dyn lash_core::Clock>) -> Option<(Arc<dyn
             let attachments = tempfile::tempdir().expect("an attachment directory");
             let stores = lash_postgres_store::PostgresStoreSet::with_clock(
                 &storage,
-                lash::sqlite::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
-                    .await
-                    .expect("SQLite attachment store")
-                    .attachment_store(),
+                lash::sqlite::SqliteStoreSet::open(
+                    (attachments.path()).join("attachments.db"),
+                    lash::sqlite::SqliteSynchronous::Normal,
+                )
+                .await
+                .expect("SQLite attachment store")
+                .attachment_store(),
                 clock,
             );
             Some((
@@ -449,6 +453,7 @@ impl Law {
         )
         .serve_test_llm_profile(model(queue), served::metadata())
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -517,6 +522,7 @@ impl Law {
                     lash_core::ToolSourcePolicy::Tolerate,
                     lash::ExecutionBudgets::recommended(),
                     lash::DeltaCoalescing::recommended(),
+                    lash_core::facade_support::DataRetentionConfig::standard(),
                 ),
                 true,
             )
@@ -930,6 +936,7 @@ fn upload_store(
         law.backend.attachment_referrers(),
         lash_core::RuntimeOwner::Session(lash_core::SessionId::fixture(name)),
         Arc::clone(&law.clock) as Arc<dyn lash_core::Clock>,
+        lash_core::facade_support::AttachmentPolicy::standard(),
     )
     .with_upload_expiry_ms(expiry_ms)
 }

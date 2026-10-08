@@ -6,7 +6,7 @@ fn capturing_reading(headers: &[&str], body_paths: &[&str]) -> crate::provider::
         defaults: lash_core::provider::LlmProfileRequestDefaults {
             response_metadata_headers: headers.iter().map(ToString::to_string).collect(),
             response_metadata_body_paths: body_paths.iter().map(ToString::to_string).collect(),
-            ..Default::default()
+            ..lash_core::provider::LlmProfileRequestDefaults::new(lash_core::provider::CacheRetention::Short)
         },
     }
 }

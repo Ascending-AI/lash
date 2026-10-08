@@ -234,7 +234,7 @@ pub(super) fn projection_test_config(
                     .context_window_tokens(max_context_tokens.unwrap_or(128_000))
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .request_defaults(Default::default())
+                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),

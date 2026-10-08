@@ -104,6 +104,7 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
             crate::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: crate::Retention::UntilGc,
     }
 }
 
@@ -169,6 +170,7 @@ async fn fork(
                 lash_core::NoProgressBudget::bounded(12),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("create lineage conformance fork");
@@ -503,6 +505,7 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
                 lash_core::NoProgressBudget::bounded(12),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect_err("a deleted owner's pin holds nothing");

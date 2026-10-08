@@ -189,9 +189,12 @@ async fn backend(
         ),
         Tier::SqliteFile => {
             let root = tempfile::tempdir().expect("SQLite store directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(root.path().join("lash.db"))
-                .await
-                .expect("SQLite file stores");
+            let stores = lash_sqlite_store::SqliteStoreSet::open(
+                root.path().join("lash.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite file stores");
             (Arc::new(stores), vec![Box::new(root)])
         }
         Tier::Postgres => {
@@ -205,6 +208,7 @@ async fn backend(
                 &storage,
                 lash_sqlite_store::SqliteStoreSet::open(
                     (attachments.path()).join("attachments.db"),
+                    lash_sqlite_store::SqliteSynchronous::Normal,
                 )
                 .await
                 .expect("SQLite attachment store")
@@ -270,11 +274,13 @@ fn core(
         .serve_test_llm_profile(
             provider,
             lash::LlmProfileMetadata::builder("facade-host-wrappers")
+                .cache_retention(lash::provider::CacheRetention::Short)
                 .context_window_tokens(64_000)
                 .build()
                 .expect("model spec"),
         )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -388,7 +394,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
     let replay = Arc::new(InMemoryLiveReplayStore::new(
         InMemoryLiveReplayStoreConfig {
             max_sessions: 1,
-            ..InMemoryLiveReplayStoreConfig::default()
+            ..InMemoryLiveReplayStoreConfig::standard()
         },
     ));
     let provider = lash::testing::TestProvider::builder()
@@ -411,6 +417,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
                     "live-replay-bounds",
                     lash::RegisteredLlmProfile::new(
                         lash::LlmProfileMetadata::builder("live-replay-bounds")
+                            .cache_retention(lash::provider::CacheRetention::Short)
                             .context_window_tokens(64_000)
                             .build()
                             .expect("model"),
@@ -421,6 +428,7 @@ async fn eviction_law(backend: lash::Backend, tag: &str) -> LashCore {
         ))
         .live_replay_store(replay.clone())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

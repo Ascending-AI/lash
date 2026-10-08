@@ -97,6 +97,7 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
                 lash_core_execution::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
+            retention: lash_core_execution::Retention::UntilGc,
         })
         .await
         .expect("bind session to store");
@@ -163,9 +164,12 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
 async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
     let root = unique_temp_dir("metadata");
     let factory = std::sync::Arc::new(
-        SqliteStore::open(&catalog_uri(&root))
-            .await
-            .expect("open catalog"),
+        SqliteStore::open(
+            &catalog_uri(&root),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open catalog"),
     );
     let request = SessionStoreCreateRequest {
         owning_process_id: None,
@@ -187,6 +191,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     };
 
     let store = admit_store(&factory, &request).await.expect("create store");
@@ -238,9 +243,12 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
 async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let root = unique_temp_dir("delete-session");
     let factory = std::sync::Arc::new(
-        SqliteStore::open(&catalog_uri(&root))
-            .await
-            .expect("open catalog"),
+        SqliteStore::open(
+            &catalog_uri(&root),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open catalog"),
     );
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
@@ -259,6 +267,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     };
     let deleted_store = admit_store(&factory, &request(&SessionId::from("delete/me")))
         .await
@@ -337,9 +346,12 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
 async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let root = unique_temp_dir("global-node-id");
     let factory = std::sync::Arc::new(
-        SqliteStore::open(&catalog_uri(&root))
-            .await
-            .expect("open catalog"),
+        SqliteStore::open(
+            &catalog_uri(&root),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open catalog"),
     );
     let store_for = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
@@ -353,6 +365,7 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     };
     let first = admit_store(&factory, &store_for(&SessionId::from("first")))
         .await
@@ -438,9 +451,12 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
 async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let root = unique_temp_dir("leaf-scope");
     let factory = std::sync::Arc::new(
-        SqliteStore::open(&catalog_uri(&root))
-            .await
-            .expect("open catalog"),
+        SqliteStore::open(
+            &catalog_uri(&root),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open catalog"),
     );
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
@@ -454,6 +470,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     };
     let first = admit_store(&factory, &request(&SessionId::from("leaf-a")))
         .await
@@ -523,9 +540,12 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
 async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     let root = unique_temp_dir("maintenance-scope");
     let factory = std::sync::Arc::new(
-        SqliteStore::open(&catalog_uri(&root))
-            .await
-            .expect("open catalog"),
+        SqliteStore::open(
+            &catalog_uri(&root),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open catalog"),
     );
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
@@ -539,6 +559,7 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     };
     let first = admit_store(&factory, &request(&SessionId::from("maintenance-a")))
         .await
@@ -635,6 +656,7 @@ async fn commit_single_root_node(
                 lash_core_execution::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
+            retention: lash_core_execution::Retention::UntilGc,
         },
     )
     .await
@@ -663,9 +685,12 @@ async fn commit_single_root_node(
 async fn sqlite_delete_reclaims_a_pinned_leaf_with_its_session() {
     let root = unique_temp_dir("pinned-at-delete");
     let factory = std::sync::Arc::new(
-        SqliteStore::open(&catalog_uri(&root))
-            .await
-            .expect("open catalog"),
+        SqliteStore::open(
+            &catalog_uri(&root),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open catalog"),
     );
 
     let leaf = {
@@ -714,9 +739,12 @@ async fn sqlite_delete_reclaims_a_pinned_leaf_with_its_session() {
 async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete() {
     let root = unique_temp_dir("orphan-fork-ancestry");
     let factory = std::sync::Arc::new(
-        SqliteStore::open(&catalog_uri(&root))
-            .await
-            .expect("open catalog"),
+        SqliteStore::open(
+            &catalog_uri(&root),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open catalog"),
     );
 
     let parent_leaf = {
@@ -741,6 +769,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
                 &policy.clone(),
                 lash_core_execution::SessionToolAccess::ambient(),
             ),
+            retention: lash_core_execution::Retention::UntilGc,
         })
         .await
         .expect("fork at the parent's live tip");

@@ -277,20 +277,28 @@ fn read_gate(target: &DatabaseTarget) -> Arc<RwLock<()>> {
     gate
 }
 
-/// SQLite synchronous setting selected for a connection.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// SQLite's `synchronous` mode for a store's connections: what a commit
+/// waits for before it answers, and so what a power loss or operating-system
+/// crash can take back.
+///
+/// The host states it for every file store; there is no default
+/// (D-DEFAULTS2). The store runs in WAL mode, where the modes differ as
+/// SQLite documents (<https://www.sqlite.org/pragma.html#pragma_synchronous>,
+/// <https://www.sqlite.org/wal.html>). An application crash alone loses
+/// nothing in any mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SqliteSynchronous {
-    /// Do not wait for filesystem synchronization. This minimizes write
-    /// latency but gives up SQLite's protection against power-loss corruption;
-    /// use only when the deployment accepts that durability trade-off.
+    /// Never wait for the filesystem. Fastest writes, but a power loss or
+    /// operating-system crash can corrupt the database, not only lose recent
+    /// commits. For stores whose loss is acceptable.
     Off,
-    /// Synchronize at the normal durability/performance balance. This is the
-    /// default and is appropriate for the store's usual local deployment.
-    #[default]
+    /// Sync the WAL at checkpoints, not at each commit. The database stays
+    /// consistent through a power loss, but the commits since the last
+    /// checkpoint can be rolled back: a turn lash answered as committed may
+    /// be gone after the machine restarts.
     Normal,
-    /// Synchronize every committed transaction for the strongest power-loss
-    /// durability at the cost of higher write latency; use on deployments
-    /// where that durability guarantee outweighs throughput.
+    /// Sync the WAL at every commit. A commit that answered survives a power
+    /// loss, at the cost of one fsync per write transaction.
     Full,
 }
 
@@ -314,9 +322,8 @@ pub struct SqliteConnectionPolicy {
     /// caller; the default is 15 seconds, and change it when the deployment's
     /// write-lock duration or request deadline is materially different.
     pub busy_timeout: Duration,
-    /// Filesystem synchronization strength. `Normal` is the default; choose
-    /// `Full` when power-loss durability matters more than write latency, or
-    /// `Off` only when the deployment explicitly accepts weaker durability.
+    /// What a commit waits for, and so what a power loss can take back: see
+    /// [`SqliteSynchronous`]. Stated by the host; it has no default.
     pub synchronous: SqliteSynchronous,
     /// WAL pages written before SQLite attempts an automatic checkpoint. The
     /// default is SQLite's 1,000-page setting; `0` disables automatic
@@ -331,12 +338,6 @@ pub struct SqliteConnectionPolicy {
     pub cache_size: i32,
     /// Coordination, readonly readers and working batches.
     pub operational: crate::SqliteOperationalSettings,
-}
-
-impl Default for SqliteConnectionPolicy {
-    fn default() -> Self {
-        Self::standard(SqliteSynchronous::Normal)
-    }
 }
 
 impl SqliteConnectionPolicy {
@@ -586,10 +587,6 @@ impl SqliteConnection {
 
     /// Open (or create) `target`, applying WAL + busy-timeout PRAGMAs on the
     /// connection thread.
-    pub(crate) async fn open(target: &DatabaseTarget) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_policy(target, SqliteConnectionPolicy::default()).await
-    }
-
     pub(crate) async fn open_with_policy(
         target: &DatabaseTarget,
         policy: SqliteConnectionPolicy,
@@ -1104,7 +1101,7 @@ mod tests {
                 .enable_all()
                 .build()
                 .expect("opener runtime");
-            let mut options = crate::StoreOptions::default();
+            let mut options = crate::StoreOptions::standard(crate::SqliteSynchronous::Normal);
             options.connection_policy.busy_timeout = Duration::from_millis(1);
             options.connection_policy.operational.readonly_busy_timeout = Duration::from_millis(1);
             let opened = runtime.block_on(crate::SqliteStore::open_file_with_options_for_testing(
@@ -1177,7 +1174,7 @@ mod tests {
             &target,
             SqliteConnectionPolicy {
                 wal_autocheckpoint_pages: 16,
-                ..SqliteConnectionPolicy::default()
+                ..SqliteConnectionPolicy::standard(SqliteSynchronous::Normal)
             },
         )
         .await;
@@ -1222,9 +1219,12 @@ mod tests {
         let active_readers = Arc::new(AtomicUsize::new(0));
         let mut reader_tasks = Vec::new();
         for _ in 0..8 {
-            let connection = SqliteConnection::open(&target)
-                .await
-                .expect("open concurrent reader");
+            let connection = SqliteConnection::open_with_policy(
+                &target,
+                SqliteConnectionPolicy::standard(SqliteSynchronous::Normal),
+            )
+            .await
+            .expect("open concurrent reader");
             let keep_reading = Arc::clone(&keep_reading);
             let active_readers = Arc::clone(&active_readers);
             reader_tasks.push(tokio::spawn(async move {
@@ -1295,7 +1295,13 @@ mod tests {
         let target = DatabaseTarget::File(dir.path().join("core.db"));
         let mut connections = Vec::with_capacity(16);
         for _ in 0..16 {
-            connections.push(installed(&target, SqliteConnectionPolicy::default()).await);
+            connections.push(
+                installed(
+                    &target,
+                    SqliteConnectionPolicy::standard(SqliteSynchronous::Normal),
+                )
+                .await,
+            );
         }
         connections[0]
             .write(|tx| {

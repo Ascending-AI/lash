@@ -364,7 +364,12 @@ pub struct RuntimeHandle {
 
 impl RuntimeHandle {
     pub fn new(runtime: LashRuntime) -> Self {
-        Self::with_live_replay_store(runtime, Arc::new(InMemoryLiveReplayStore::default()))
+        Self::with_live_replay_store(
+            runtime,
+            Arc::new(InMemoryLiveReplayStore::new(
+                InMemoryLiveReplayStoreConfig::standard(),
+            )),
+        )
     }
 
     pub fn with_live_replay_store(
@@ -728,7 +733,7 @@ mod tests {
     impl FailCommittedLiveReplayStore {
         fn new() -> Self {
             Self {
-                inner: InMemoryLiveReplayStore::default(),
+                inner: InMemoryLiveReplayStore::new(InMemoryLiveReplayStoreConfig::standard()),
             }
         }
     }
@@ -799,6 +804,7 @@ mod tests {
                     crate::ToolSourcePolicy::Tolerate,
                     crate::ExecutionBudgets::recommended(),
                     crate::runtime::DeltaCoalescing::recommended(),
+                    crate::DataRetentionConfig::standard(),
                 ),
                 crate::testing::runtime_lease_owner(),
             )
@@ -809,6 +815,7 @@ mod tests {
                     crate::RecordedLlmProfile::mint(
                         crate::LlmProfileKey::from("test-model"),
                         crate::LlmProfileMetadata::builder("test-model")
+                            .cache_retention(crate::provider::CacheRetention::Short)
                             .context_window_tokens(1024)
                             .build()
                             .expect("model"),
@@ -863,6 +870,7 @@ mod tests {
                     crate::ToolSourcePolicy::Tolerate,
                     crate::ExecutionBudgets::recommended(),
                     crate::runtime::DeltaCoalescing::recommended(),
+                    crate::DataRetentionConfig::standard(),
                 ),
                 crate::testing::runtime_lease_owner(),
             )
@@ -873,6 +881,7 @@ mod tests {
                     crate::RecordedLlmProfile::mint(
                         crate::LlmProfileKey::from("test-model"),
                         crate::LlmProfileMetadata::builder("test-model")
+                            .cache_retention(crate::provider::CacheRetention::Short)
                             .context_window_tokens(1024)
                             .build()
                             .expect("model"),

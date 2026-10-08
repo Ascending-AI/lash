@@ -294,6 +294,7 @@ impl SessionBuilder {
                 .unwrap_or_default(),
             config,
             head: SessionCreationHead::Config,
+            retention: self.core.env.core.durability.session_retention,
         };
         let catalog = Arc::clone(&self.core.store_factory);
         // The insert's own answer decides: only the admission that created the

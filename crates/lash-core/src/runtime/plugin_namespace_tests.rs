@@ -52,6 +52,7 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
         crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
+        crate::DataRetentionConfig::standard(),
     );
     let current_factories = factories.clone();
     let runtime = crate::runtime::EmbeddedRuntimeBuilder::new(
@@ -384,6 +385,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
+        crate::DataRetentionConfig::standard(),
     ));
     let runtime_services = crate::RuntimeServices::new(
         child.clone(),
@@ -411,6 +413,7 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
         crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
+        crate::DataRetentionConfig::standard(),
     ));
     let runtime_services = crate::RuntimeServices::new(
         host.session(&SessionId::from("private-child")).unwrap(),

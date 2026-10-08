@@ -120,9 +120,12 @@ impl Deployment {
         Ok(match &self.database {
             Database::Sqlite(path) => (
                 Arc::new(
-                    lash_sqlite_store::SqliteStoreSet::open(path)
-                        .await
-                        .with_context(|| format!("open {}", path.display()))?,
+                    lash_sqlite_store::SqliteStoreSet::open(
+                        path,
+                        lash_sqlite_store::SqliteSynchronous::Normal,
+                    )
+                    .await
+                    .with_context(|| format!("open {}", path.display()))?,
                 ),
                 None,
             ),

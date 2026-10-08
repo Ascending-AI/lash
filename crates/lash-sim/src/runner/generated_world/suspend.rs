@@ -139,6 +139,7 @@ impl GeneratedRuntimeWorld {
         let observer = crate::invariants::ToolObserver::new(self.recorder.clone());
         let core = lash::LashCore::standard_builder(backend)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(world_queued_work_batching())
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())

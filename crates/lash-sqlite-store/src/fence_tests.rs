@@ -52,9 +52,12 @@ fn session_meta(id: &str) -> SessionMeta {
 
 async fn file_set() -> (tempfile::TempDir, SqliteStoreSet) {
     let root = tempfile::tempdir().expect("store root");
-    let set = SqliteStoreSet::open(root.path().join("lash.db"))
-        .await
-        .expect("open the store set");
+    let set = SqliteStoreSet::open(
+        root.path().join("lash.db"),
+        crate::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open the store set");
     (root, set)
 }
 
@@ -63,8 +66,8 @@ async fn file_set() -> (tempfile::TempDir, SqliteStoreSet) {
 const PROBES: [(&str, &str); 2] = [
     (
         "session_meta",
-        "INSERT INTO session_meta (session_id, relation_kind) \
-         VALUES ('fence-probe-' || (SELECT COUNT(*) FROM session_meta), 'root')",
+        "INSERT INTO session_meta (session_id, relation_kind, retention_kind) \
+         VALUES ('fence-probe-' || (SELECT COUNT(*) FROM session_meta), 'root', 'until_gc')",
     ),
     (
         "process_tombstones",
@@ -76,9 +79,12 @@ const PROBES: [(&str, &str); 2] = [
 
 /// A connection-level writer on the database, admitted by its installer.
 async fn writer(location: &SqliteLocation) -> SqliteConnection {
-    let connection = SqliteConnection::open(&location.target())
-        .await
-        .expect("open a writer connection");
+    let connection = SqliteConnection::open_with_policy(
+        &location.target(),
+        crate::SqliteConnectionPolicy::standard(crate::SqliteSynchronous::Normal),
+    )
+    .await
+    .expect("open a writer connection");
     ensure_versioned_schema(&connection)
         .await
         .expect("the installer admits the database");
@@ -298,7 +304,7 @@ async fn sqlite_finalize_waits_for_a_writer_paused_after_its_fence() {
         root.path().join("lash.db"),
         crate::SqliteStoreSetOptions {
             pauses: Some(pauses.clone()),
-            ..crate::SqliteStoreSetOptions::default()
+            ..crate::SqliteStoreSetOptions::standard(crate::SqliteSynchronous::Normal)
         },
         std::sync::Arc::new(lash_core_execution::facade_support::SystemClock),
     )

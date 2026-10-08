@@ -628,6 +628,7 @@ mod process_visibility_tests {
             crate::ToolSourcePolicy::Tolerate,
             crate::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),
+            crate::DataRetentionConfig::standard(),
         )
         .with_process_tool_visibility_filter(filter.clone());
         let env = crate::RuntimeEnvironment::builder(core)

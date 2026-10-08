@@ -273,9 +273,12 @@ impl BackendFaultLane {
                 .map_err(|error| format!("open SQLite memory fault store: {error}"))?
                 .session_store_factory()),
             BackendFaultKind::Sqlite => Ok(Arc::new(
-                lash_sqlite_store::SqliteStore::open(&case_root.join("store.db"))
-                    .await
-                    .map_err(|error| format!("open SQLite fault store: {error}"))?,
+                lash_sqlite_store::SqliteStore::open(
+                    &case_root.join("store.db"),
+                    lash_sqlite_store::SqliteSynchronous::Normal,
+                )
+                .await
+                .map_err(|error| format!("open SQLite fault store: {error}"))?,
             )),
             BackendFaultKind::Postgres => {
                 let lane = self
@@ -463,6 +466,7 @@ impl GeneratedBackendFaultHarness {
                     lash_core::SessionToolAccess::ambient(),
                 ),
                 head: SessionCreationHead::Config,
+                retention: lash_core::Retention::UntilGc,
             })
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;

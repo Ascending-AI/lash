@@ -195,6 +195,7 @@ impl Takeover {
         let mut builder = lash::LashCore::standard_builder(backend.clone())
             .serve_sessions(false)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -587,7 +588,7 @@ async fn a_resend_after_retention_trimmed_the_abandoned_attempt_gaps(dialect: Di
         inner: InMemoryLiveReplayStore::with_clock(
             InMemoryLiveReplayStoreConfig {
                 max_age: RETENTION,
-                ..InMemoryLiveReplayStoreConfig::default()
+                ..InMemoryLiveReplayStoreConfig::standard()
             },
             Arc::clone(&window) as _,
         ),
@@ -661,7 +662,9 @@ fn activity(label: &str) -> LiveReplayEventDraft {
 /// after it: the feed reports one gap and follows on to the next event,
 /// rather than gapping again from the resident's stale cursor.
 async fn an_invalidated_feed_gaps_once_and_follows_on(tier: served::Tier) {
-    let store: Arc<dyn LiveReplayStore> = Arc::new(InMemoryLiveReplayStore::default());
+    let store: Arc<dyn LiveReplayStore> = Arc::new(InMemoryLiveReplayStore::new(
+        InMemoryLiveReplayStoreConfig::standard(),
+    ));
     let shared = Arc::clone(&store);
     let Some(world) = served::World::new(tier, move |backend| {
         lash::LashCore::standard_builder(backend.clone()).live_replay_store(shared)

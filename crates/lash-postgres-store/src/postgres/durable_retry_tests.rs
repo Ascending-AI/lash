@@ -47,6 +47,7 @@ async fn admit(storage: &PostgresStorage, session: &lash_sansio::SessionId) {
             head: SessionCreationHead::Config,
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
+            retention: lash_core_execution::Retention::UntilGc,
         })
         .await
         .expect("the catalog admits the session");

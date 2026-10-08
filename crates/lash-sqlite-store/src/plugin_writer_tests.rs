@@ -52,9 +52,12 @@ fn raw(location: &SqliteLocation) -> Connection {
 
 async fn file_set() -> (tempfile::TempDir, SqliteStoreSet) {
     let root = tempfile::tempdir().expect("store root");
-    let set = SqliteStoreSet::open(root.path().join("lash.db"))
-        .await
-        .expect("open the store set");
+    let set = SqliteStoreSet::open(
+        root.path().join("lash.db"),
+        crate::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open the store set");
     (root, set)
 }
 

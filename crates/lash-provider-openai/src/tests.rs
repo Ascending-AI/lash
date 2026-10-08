@@ -276,6 +276,7 @@ fn route_headers_stay_out_of_the_persisted_session_config() {
     let provider = OpenAiCompatibleProvider::new("key", "https://example.test")
         .with_extra_headers(vec![("x-host-credential".into(), "header-sentinel".into())]);
     let metadata = lash_core::LlmProfileMetadata::builder("model")
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(1024)
         .extra_body(
             json!({"host_route":{"enabled":true}})

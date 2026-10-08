@@ -382,11 +382,13 @@ fn rlm_core_with_plugins(
         .serve_test_llm_profile(
             provider,
             lash::LlmProfileMetadata::builder("artifact-referrers")
+                .cache_retention(lash::provider::CacheRetention::Short)
                 .context_window_tokens(16_000)
                 .build()
                 .expect("model spec"),
         )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

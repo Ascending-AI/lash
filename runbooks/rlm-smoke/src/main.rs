@@ -473,9 +473,12 @@ async fn main() -> Result<()> {
     // One SQLite file store set under the data directory holds the sessions
     // and the compiled Lashlang artifacts; the durable engine runs every turn
     // over it.
-    let stores = lash::sqlite::SqliteStoreSet::open(args.data_dir.join("sessions.db"))
-        .await
-        .context("open the RLM smoke SQLite store set")?;
+    let stores = lash::sqlite::SqliteStoreSet::open(
+        args.data_dir.join("sessions.db"),
+        lash::sqlite::SqliteSynchronous::Normal,
+    )
+    .await
+    .context("open the RLM smoke SQLite store set")?;
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
         .build()
         .context("build the durable backend")?;
@@ -503,7 +506,7 @@ async fn main() -> Result<()> {
                 .register(
                     args.model.as_str(),
                     lash::RegisteredLlmProfile::new(
-                        lash::LlmProfileMetadata::builder(&args.model)
+                        lash::LlmProfileMetadata::builder(&args.model).cache_retention(lash::provider::CacheRetention::Short)
                             .context_window_tokens(200_000)
                             .expose_thinking(true)
                             .build()
@@ -515,6 +518,7 @@ async fn main() -> Result<()> {
         ))
         .tools(workspace.provider())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
         .trace_jsonl_path(&trace_path)
         .trace_level(lash::tracing::TraceLevel::Extended)

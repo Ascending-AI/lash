@@ -339,7 +339,9 @@ async fn regenerate_lashlang_format_fixture() {
             &path,
             lash_sqlite_store::SqliteStoreSetOptions {
                 process_id_mint: ProcessIdMint::sequential_for_testing(),
-                ..Default::default()
+                ..lash_sqlite_store::SqliteStoreSetOptions::standard(
+                    lash_sqlite_store::SqliteSynchronous::Normal,
+                )
             },
             Arc::clone(&clock) as _,
         )

@@ -481,6 +481,7 @@ async fn facade_final_value_execution_inner(
     );
     let mut builder = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -488,6 +489,7 @@ async fn facade_final_value_execution_inner(
         .serve_test_llm_profile(
             fixed_texts_provider(provider_kind, provider_responses),
             lash_core::LlmProfileMetadata::builder(provider_kind)
+                .cache_retention(lash_core::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
@@ -831,8 +833,9 @@ async fn agent_process_contract_core_with_options(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
-        .serve_test_llm_profile(fixed_texts_provider(provider_kind, provider_responses), lash_core::LlmProfileMetadata::builder(provider_kind)
+        .serve_test_llm_profile(fixed_texts_provider(provider_kind, provider_responses), lash_core::LlmProfileMetadata::builder(provider_kind).cache_retention(lash_core::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?);

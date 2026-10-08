@@ -485,6 +485,7 @@ fn durable_effect_core(
 ) -> Result<lash::LashCore, RuntimeBoundaryError> {
     lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -492,6 +493,7 @@ fn durable_effect_core(
         .serve_test_llm_profile(
             provider,
             lash_core::LlmProfileMetadata::builder(DURABLE_EFFECT_MODEL)
+                .cache_retention(lash_core::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
                 .build()
                 .map_err(|error| RuntimeBoundaryError::new(error.to_string()))?,

@@ -91,6 +91,7 @@ async fn openai_chat_runtime_respects_expose_thinking() {
         let core = super::facade_turns::durable_core(
             "provider/model",
             lash::LlmProfileMetadata::builder("provider/model")
+                .cache_retention(lash::provider::CacheRetention::Short)
                 .context_window_tokens(16_000)
                 .expose_thinking(expose_thinking)
                 .build()
@@ -130,6 +131,7 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
     let core = super::facade_turns::durable_core(
         "gpt-5.4",
         lash::LlmProfileMetadata::builder("gpt-5.4")
+            .cache_retention(lash::provider::CacheRetention::Short)
             .context_window_tokens(16_000)
             .expose_thinking(true)
             .build()

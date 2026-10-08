@@ -323,6 +323,7 @@ impl RuntimePerfStore {
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         };
         self.admit_session(&request).await?;
         Ok(Arc::new(self.clone()))

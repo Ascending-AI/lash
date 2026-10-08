@@ -162,7 +162,7 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     // Prime and reopen one coherent substrate.
     let options = SqliteStoreSetOptions {
         process_id_mint: lash_core_execution::ProcessIdMint::sequential_for_testing(),
-        ..SqliteStoreSetOptions::default()
+        ..SqliteStoreSetOptions::standard(lash_sqlite_store::SqliteSynchronous::Normal)
     };
     let priming = SqliteStoreSet::open_with_options_and_clock(
         root.join(DATABASE),

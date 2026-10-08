@@ -340,6 +340,7 @@ async fn a_cursor_survives_a_process_restart(tier: Tier) {
     let build = |backend: &lash::Backend, boot: &str| {
         lash::LashCore::standard_builder(backend.clone())
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())

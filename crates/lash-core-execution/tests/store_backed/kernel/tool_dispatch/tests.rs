@@ -161,6 +161,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
             crate::support::sqlite_memory_store_backend()
                 .await
                 .attachment_store(),
+            crate::AttachmentPolicy::standard(),
         )),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),

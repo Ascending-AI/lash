@@ -331,6 +331,7 @@ mod tests {
                 lash_core::RecordedLlmProfile::mint(
                     lash_core::LlmProfileKey::from("budget-unit-model"),
                     lash_core::LlmProfileMetadata::builder("budget-unit-model")
+                        .cache_retention(lash_core::provider::CacheRetention::Short)
                         .context_window_tokens(41_000)
                         .build()
                         .expect("model limits"),
@@ -380,6 +381,7 @@ mod tests {
                 lash_core::RecordedLlmProfile::mint(
                     lash_core::LlmProfileKey::from("realistic-41k-model"),
                     lash_core::LlmProfileMetadata::builder("realistic-41k-model")
+                        .cache_retention(lash_core::provider::CacheRetention::Short)
                         .context_window_tokens(41_000)
                         .build()
                         .expect("model limits"),
@@ -430,6 +432,7 @@ mod tests {
                 lash_core::RecordedLlmProfile::mint(
                     lash_core::LlmProfileKey::from("budget-unit-model"),
                     lash_core::LlmProfileMetadata::builder("budget-unit-model")
+                        .cache_retention(lash_core::provider::CacheRetention::Short)
                         .context_window_tokens(200_000)
                         .build()
                         .expect("model limits"),

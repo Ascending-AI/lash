@@ -5,6 +5,7 @@ fn persisted_state_hydrates_the_recorded_llm_profile_without_live_rebinding() {
     let recorded = crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
         crate::LlmProfileKey::new("stored-key"),
         lash_core_llm::llm_profile::LlmProfileMetadata::builder("stored-wire-model")
+            .cache_retention(lash_core_llm::provider::CacheRetention::Short)
             .context_window_tokens(4096)
             .build()
             .expect("model"),
@@ -237,6 +238,7 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
         crate::RecordedLlmProfile::mint(
             crate::LlmProfileKey::new("model"),
             lash_core_llm::llm_profile::LlmProfileMetadata::builder("model")
+                .cache_retention(lash_core_llm::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
                 .build()
                 .expect("model")

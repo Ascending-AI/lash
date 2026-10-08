@@ -212,6 +212,7 @@ impl Holding {
                 lash::LashCore::rlm_builder(backend.clone(), served::rlm(&backend, None, sim::workers(&clock)))
                     .serve_sessions(false)
                     .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+                    .data_retention(lash::DataRetention::standard())
                     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1)).tool_source_policy(lash_core::ToolSourcePolicy::Tolerate).execution_budgets(lash::ExecutionBudgets::recommended()).delta_coalescing(lash::DeltaCoalescing::recommended())
                     .serve_test_llm_profile(
                         served::model(Arc::clone(&self.scripts)),

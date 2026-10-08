@@ -17,13 +17,19 @@ use crate::location::validate_file_database_path;
 use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 
+/// The `synchronous` mode of the stores this crate's test-only constructors
+/// open: fixtures never outlive their process, so the mode decides nothing.
+#[cfg(any(test, feature = "testing"))]
+pub(crate) const FIXTURE_SYNCHRONOUS: crate::SqliteSynchronous = crate::SqliteSynchronous::Normal;
+
 impl SqliteStore {
     /// Open a named database file for fixtures that inspect or corrupt raw rows.
+    /// Fixture stores run under [`FIXTURE_SYNCHRONOUS`].
     #[cfg(any(test, feature = "testing"))]
     pub async fn open_file_for_testing(path: &Path) -> tokio_rusqlite::Result<Self> {
         Self::open_file_with_options_and_clock_for_testing(
             path,
-            StoreOptions::default(),
+            StoreOptions::standard(FIXTURE_SYNCHRONOUS),
             Arc::new(lash_core_execution::facade_support::SystemClock),
         )
         .await
@@ -34,8 +40,12 @@ impl SqliteStore {
         path: &Path,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_file_with_options_and_clock_for_testing(path, StoreOptions::default(), clock)
-            .await
+        Self::open_file_with_options_and_clock_for_testing(
+            path,
+            StoreOptions::standard(FIXTURE_SYNCHRONOUS),
+            clock,
+        )
+        .await
     }
 
     #[cfg(any(test, feature = "testing"))]
@@ -70,11 +80,15 @@ impl SqliteStore {
     }
 
     /// Open the database file at `path`, creating it with every table of the
-    /// deployment if it is absent.
-    pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
+    /// deployment if it is absent, under the `synchronous` mode the host
+    /// states ([`crate::SqliteSynchronous`]).
+    pub async fn open(
+        path: &Path,
+        synchronous: crate::SqliteSynchronous,
+    ) -> tokio_rusqlite::Result<Self> {
         Self::open_direct(
             path,
-            StoreOptions::default(),
+            StoreOptions::standard(synchronous),
             Arc::new(lash_core_execution::facade_support::SystemClock),
             "SqliteStore::open",
         )
@@ -83,11 +97,12 @@ impl SqliteStore {
 
     pub async fn open_with_clock(
         path: &Path,
+        synchronous: crate::SqliteSynchronous,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
         Self::open_direct(
             path,
-            StoreOptions::default(),
+            StoreOptions::standard(synchronous),
             clock,
             "SqliteStore::open_with_clock",
         )
@@ -156,7 +171,7 @@ impl SqliteStore {
         validate_file_database_path(path, "Store").map_err(sqlite_async_error)?;
         let store = Self::open_at(
             &DatabaseLocation::standalone_file(path),
-            StoreOptions::default(),
+            StoreOptions::standard(FIXTURE_SYNCHRONOUS),
             Arc::new(lash_core_execution::facade_support::SystemClock),
             writable,
             crate::testing::ConnectionHooks::default(),
@@ -234,7 +249,7 @@ impl SqliteStore {
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            options: StoreOptions::default(),
+            options: StoreOptions::standard(FIXTURE_SYNCHRONOUS),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
             #[cfg(test)]
             checkpoint_probe_count: AtomicUsize::new(0),

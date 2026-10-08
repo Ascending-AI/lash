@@ -124,7 +124,9 @@ struct FaultyReplay {
 impl FaultyReplay {
     fn new(hold_record: bool, refuse_commits: bool) -> Arc<Self> {
         Arc::new(Self {
-            inner: Default::default(),
+            inner: lash_core::facade_support::InMemoryLiveReplayStore::new(
+                lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+            ),
             hold_record,
             held: AtomicUsize::new(0),
             release: tokio::sync::Semaphore::new(0),

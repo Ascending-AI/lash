@@ -224,6 +224,7 @@ async fn runtime_for_config_settlement(
         lash_core::ToolSourcePolicy::Tolerate,
         lash_core::ExecutionBudgets::recommended(),
         lash_core::runtime::DeltaCoalescing::recommended(),
+        crate::DataRetentionConfig::standard(),
     )
     .with_clock(clock as Arc<dyn crate::Clock>);
     // The laws change the session's model: resolution mints the key through

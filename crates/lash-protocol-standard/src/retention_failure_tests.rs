@@ -63,10 +63,14 @@ async fn permanent_retention_refusals_settle(backend: Backend, ended: bool) {
                 backend.attachment_store(),
                 backend.attachment_referrers(),
                 RuntimeOwner::Process(process),
+                AttachmentPolicy::standard(),
             )
         } else {
-            RuntimeAttachmentStore::ephemeral(backend.attachment_store())
-                .with_max_attachment_bytes(Some(64))
+            RuntimeAttachmentStore::ephemeral(
+                backend.attachment_store(),
+                AttachmentPolicy::standard(),
+            )
+            .with_max_attachment_bytes(Some(64))
         }
         .with_output_retention(LIVE_POLICY),
     );
@@ -154,6 +158,7 @@ async fn transient_step_failure_never_becomes_text(backend: Backend) {
     let attachments = || {
         Arc::new(RuntimeAttachmentStore::ephemeral(
             backend.attachment_store(),
+            AttachmentPolicy::standard(),
         ))
     };
 
@@ -194,9 +199,12 @@ async fn sqlite_memory() -> (Backend, Box<dyn std::any::Any>) {
 async fn sqlite_file() -> (Backend, Box<dyn std::any::Any>) {
     let dir = tempfile::tempdir().expect("SQLite store directory");
     let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
-            .await
-            .expect("SQLite file stores"),
+        lash_sqlite_store::SqliteStoreSet::open(
+            dir.path().join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite file stores"),
     );
     (lash_conformance::backend_over(stores), Box::new(dir))
 }
@@ -214,10 +222,13 @@ async fn postgres() -> (Backend, Box<dyn std::any::Any>) {
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,
-        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
-            .await
-            .expect("SQLite attachment store")
-            .attachment_store(),
+        lash_sqlite_store::SqliteStoreSet::open(
+            (attachments.path()).join("attachments.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store(),
     ));
     (
         lash_conformance::backend_over(stores),

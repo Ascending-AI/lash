@@ -18,7 +18,9 @@ pub(super) fn observation_assistant_delta(
 async fn invalidated_live_observation_recovers_with_an_authoritative_snapshot() -> Result<()> {
     use futures_util::FutureExt as _;
     use lash_core::LiveReplayStore as _;
-    let replay = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::default());
+    let replay = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+        lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+    ));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         sqlite_memory_store_backend().await,
     ))

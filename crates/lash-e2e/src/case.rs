@@ -626,7 +626,13 @@ impl Case {
                     self.nodes.iter().all(|node| node.child.is_none()),
                     "the SQLite file is read only while no node serves it"
                 );
-                Arc::new(lash::sqlite::SqliteStoreSet::open(&self.store_file).await?)
+                Arc::new(
+                    lash::sqlite::SqliteStoreSet::open(
+                        &self.store_file,
+                        lash::sqlite::SqliteSynchronous::Normal,
+                    )
+                    .await?,
+                )
             }
             Store::Postgresql => {
                 let endpoints = lash::postgres::PostgresEndpoints::from_url(self.database_url()?)?;
@@ -643,6 +649,7 @@ impl Case {
                     &storage,
                     lash::sqlite::SqliteStoreSet::open(
                         (self.dir.join("reader-attachments")).join("attachments.db"),
+                        lash::sqlite::SqliteSynchronous::Normal,
                     )
                     .await?
                     .attachment_store(),

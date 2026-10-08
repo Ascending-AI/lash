@@ -190,6 +190,7 @@ fn seeded(seed: i64) -> lash_core::GenerationOptions {
 /// The model config the head records for `name`.
 fn head_model(name: &str) -> lash_core::LlmProfileConfig {
     let metadata = lash_core::LlmProfileMetadata::builder(name)
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(65_536)
         .build()
         .expect("a model's metadata");

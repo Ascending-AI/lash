@@ -29,7 +29,7 @@ pub async fn attachment_delivery_names_its_content(backend: Arc<dyn AttachmentSt
         .expect("deliver original");
     assert!(matches!(delivered, Delivery::Bytes(actual) if actual == bytes));
     assert_eq!(reference.id, lash_core::attachments::content_id(&bytes));
-    let runtime = RuntimeAttachmentStore::ephemeral(backend.clone());
+    let runtime = RuntimeAttachmentStore::ephemeral(backend.clone(), AttachmentPolicy::standard());
     assert_eq!(
         runtime.read(&reference).await.expect("explicit read"),
         bytes

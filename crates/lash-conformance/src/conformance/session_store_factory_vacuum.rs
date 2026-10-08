@@ -73,6 +73,7 @@ pub(super) async fn session_store_factory_delete_takes_the_sessions_pins(
                 &request.config.session_policy(),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect_err("a deleted session's pinned revision must not be forkable");

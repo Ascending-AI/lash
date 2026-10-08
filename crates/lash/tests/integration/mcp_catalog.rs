@@ -384,14 +384,18 @@ async fn make_stores(
                 .expect("SQLite memory"),
         ),
         Store::SqliteFile => Arc::new(
-            lash_sqlite_store::SqliteStoreSet::open(root.join("stores.db"))
-                .await
-                .expect("SQLite file"),
+            lash_sqlite_store::SqliteStoreSet::open(
+                root.join("stores.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite file"),
         ),
         Store::Postgres => Arc::new(PostgresStoreSet::new(
             storage.expect("PostgreSQL storage"),
             lash_sqlite_store::SqliteStoreSet::open(
                 (root.join("attachments")).join("attachments.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
             )
             .await
             .expect("SQLite attachment store")
@@ -503,6 +507,7 @@ async fn turn_witness(store: Store, failure_law: bool) {
                     "catalog-fixture",
                     lash::RegisteredLlmProfile::new(
                         lash::LlmProfileMetadata::builder("catalog-fixture")
+                            .cache_retention(lash::provider::CacheRetention::Short)
                             .context_window_tokens(16_000)
                             .build()
                             .expect("model"),
@@ -511,7 +516,13 @@ async fn turn_witness(store: Store, failure_law: bool) {
                 )
                 .expect("register the test model"),
         ))
-        .max_attachment_bytes(failure_law.then_some(1))
+        .data_retention(lash::DataRetention {
+            attachments: lash::persistence::AttachmentPolicy {
+                max_attachment_bytes: failure_law.then_some(1),
+                ..lash::persistence::AttachmentPolicy::standard()
+            },
+            ..lash::DataRetention::standard()
+        })
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)

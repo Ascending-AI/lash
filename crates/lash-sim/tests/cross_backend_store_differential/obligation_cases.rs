@@ -296,16 +296,22 @@ pub(super) async fn compare_obligation_ledgers(
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open the SQLite memory obligation store set");
-    let file = lash_sqlite_store::SqliteStoreSet::open(sqlite_root.join("obligation-ledgers.db"))
-        .await
-        .expect("open the SQLite file obligation store set");
+    let file = lash_sqlite_store::SqliteStoreSet::open(
+        sqlite_root.join("obligation-ledgers.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open the SQLite file obligation store set");
     let attachments = tempfile::tempdir().expect("attachment directory");
     let postgres_stores = lash_postgres_store::PostgresStoreSet::new(
         postgres,
-        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
-            .await
-            .expect("SQLite attachment store")
-            .attachment_store(),
+        lash_sqlite_store::SqliteStoreSet::open(
+            (attachments.path()).join("attachments.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store(),
     );
     let backends: [(&str, &dyn StoreSet); 3] = [
         ("sqlite-memory", &memory),

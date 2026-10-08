@@ -25,9 +25,12 @@ async fn stores(
         "sqlite_file" => {
             let directory = tempfile::tempdir().expect("SQLite test directory");
             let stores = Arc::new(
-                lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
-                    .await
-                    .expect("open SQLite store set"),
+                lash_sqlite_store::SqliteStoreSet::open(
+                    directory.path().join("lash.db"),
+                    lash_sqlite_store::SqliteSynchronous::Normal,
+                )
+                .await
+                .expect("open SQLite store set"),
             );
             (stores, vec![Box::new(directory)])
         }

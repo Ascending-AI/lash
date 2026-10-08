@@ -183,7 +183,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
         lash_core::facade_support::InMemoryLiveReplayStore::new(
             lash_core::facade_support::InMemoryLiveReplayStoreConfig {
                 max_events_per_session: 1,
-                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::default()
+                ..lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard()
             },
         ),
     ))

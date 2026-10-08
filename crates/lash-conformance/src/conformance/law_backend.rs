@@ -64,6 +64,7 @@ pub(crate) async fn law_session_store_with_config(
             relation: crate::SessionRelation::Root,
             config,
             head: crate::SessionCreationHead::Config,
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("admit the law's session on the backend under test");
@@ -115,6 +116,7 @@ impl StoreLawBackend {
             lash_core::ToolSourcePolicy::Tolerate,
             lash_core::ExecutionBudgets::recommended(),
             lash_core::runtime::DeltaCoalescing::recommended(),
+            crate::DataRetentionConfig::standard(),
         )
     }
 }

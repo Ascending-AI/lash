@@ -21,12 +21,13 @@ use lash_core_execution::Clock;
 
 use crate::location::{DatabaseLocation, MemoryAnchors, SqliteLocation};
 use crate::{
-    BuiltinBlobProfile, SqliteAttachmentStore, SqliteProcessRegistry, SqliteStore, StoreOptions,
+    BuiltinBlobProfile, SqliteAttachmentStore, SqliteProcessRegistry, SqliteStore,
+    SqliteSynchronous, StoreOptions,
 };
 
 /// Construction-time choices for a [`SqliteStoreSet`], which opens no effect
 /// journal and so has no effect-replay options.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct SqliteStoreSetOptions {
     /// Physical store observations; SQLite has no connection-pool wait to report.
     pub observer: lash_core_execution::facade_support::StoreObserver,
@@ -75,16 +76,32 @@ impl SqliteStoreSetOptions {
         }
     }
 
-    /// The options [`SqliteStoreSet::memory`] uses: uncompressed blobs,
-    /// since an in-memory catalog spends CPU, not disk, on compression.
-    pub fn memory() -> Self {
+    /// The standard options under the `synchronous` mode the host states:
+    /// [`StoreOptions::standard`], no store observer, random process ids and
+    /// the standard migration backup.
+    pub fn standard(synchronous: SqliteSynchronous) -> Self {
         Self {
-            store: StoreOptions {
-                blob_profile: BuiltinBlobProfile::LowLatency,
-                ..StoreOptions::default()
-            },
-            ..Self::default()
+            observer: lash_core_execution::facade_support::StoreObserver::default(),
+            store: StoreOptions::standard(synchronous),
+            process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            migration_backup: crate::SqliteMigrationBackup::standard(),
+            #[cfg(feature = "testing")]
+            pauses: None,
+            #[cfg(feature = "testing")]
+            inline_calls: false,
+            #[cfg(feature = "testing")]
+            migration_hook: None,
         }
+    }
+
+    /// The options [`SqliteStoreSet::memory`] uses: uncompressed blobs,
+    /// since an in-memory catalog spends CPU, not disk, on compression. An
+    /// in-memory database has no file to synchronize, so the `Normal` mode
+    /// these options carry decides nothing.
+    pub fn memory() -> Self {
+        let mut options = Self::standard(SqliteSynchronous::Normal);
+        options.store.blob_profile = BuiltinBlobProfile::LowLatency;
+        options
     }
 }
 
@@ -126,16 +143,25 @@ impl SqliteStoreSet {
     /// retired three-file layout refuses with
     /// [`CompatRefusal::RetiredSqliteLayout`](lash_core_execution::compat::CompatRefusal::RetiredSqliteLayout)
     /// in the error's source chain.
-    pub async fn open(path: impl AsRef<Path>) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_clock(path, system_clock()).await
+    ///
+    /// `synchronous` is the host's durability choice
+    /// ([`SqliteSynchronous`]): what a commit waits for, and so what a power
+    /// loss can take back.
+    pub async fn open(
+        path: impl AsRef<Path>,
+        synchronous: SqliteSynchronous,
+    ) -> tokio_rusqlite::Result<Self> {
+        Self::open_with_clock(path, synchronous, system_clock()).await
     }
 
-    /// The file store set at `path` on `clock`.
+    /// The file store set at `path` under `synchronous` on `clock`.
     pub async fn open_with_clock(
         path: impl AsRef<Path>,
+        synchronous: SqliteSynchronous,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_with_options_and_clock(path, SqliteStoreSetOptions::default(), clock).await
+        Self::open_with_options_and_clock(path, SqliteStoreSetOptions::standard(synchronous), clock)
+            .await
     }
 
     /// The file store set at `path` with explicit options and clock.
@@ -464,7 +490,7 @@ mod tests {
             held.push((path.clone(), std::fs::read(&path).expect("fixture bytes")));
         }
 
-        let error = SqliteStoreSet::open(root.path())
+        let error = SqliteStoreSet::open(root.path(), crate::SqliteSynchronous::Normal)
             .await
             .expect_err("a retired-layout directory must refuse");
         let tokio_rusqlite::Error::Error(rusqlite::Error::ToSqlConversionFailure(source)) = &error

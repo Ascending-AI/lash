@@ -15,9 +15,13 @@ async fn world(file: bool) -> (Option<tempfile::TempDir>, SqliteStoreSet, Arc<Te
     let clock = Arc::new(TestClock::new(1_000_000));
     if file {
         let root = tempfile::tempdir().expect("store root");
-        let set = SqliteStoreSet::open_with_clock(root.path().join("lash.db"), clock.clone())
-            .await
-            .expect("open the file store set");
+        let set = SqliteStoreSet::open_with_clock(
+            root.path().join("lash.db"),
+            crate::SqliteSynchronous::Normal,
+            clock.clone(),
+        )
+        .await
+        .expect("open the file store set");
         (Some(root), set, clock)
     } else {
         let set = SqliteStoreSet::memory_with_clock(clock.clone())

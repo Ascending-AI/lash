@@ -55,10 +55,10 @@ fn request(events: Arc<Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {
                 lash_sansio::llm_profile::LlmProfileMetadata::new(
                     "gemini-3.1-pro-preview".to_string(),
                     std::num::NonZeroUsize::MIN.saturating_add(127_999),
+                    lash_sansio::llm::capability::CacheRetention::Short,
                 )
                 .with_capability(lash_core::provider::LlmProfileCapability::default())
-                .with_extra_body(Default::default())
-                .with_request_defaults(Default::default()),
+                .with_extra_body(Default::default()),
             ),
         )
         .with_reasoning(Default::default()),

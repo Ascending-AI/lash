@@ -86,6 +86,7 @@ fn recorded(key: &str) -> RecordedLlmProfile {
     let metadata = lash_core_llm::llm_profile::LlmProfileMetadata::new(
         format!("{key}-wire"),
         std::num::NonZeroUsize::new(200_000).expect("non-zero window"),
+        lash_core_llm::provider::CacheRetention::Short,
     );
     let metadata = if key == "plain-model" {
         metadata

@@ -121,6 +121,7 @@ async fn every_applied_config_transaction_emits_a_lifecycle_event() -> Result<()
         )
     };
     let alt = lash_core::LlmProfileMetadata::builder("alt-model")
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(123_456)
         .build()
         .expect("valid model metadata");

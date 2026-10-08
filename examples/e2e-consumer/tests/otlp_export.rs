@@ -84,6 +84,7 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
     let stores = lash::sqlite::SqliteStoreSet::memory().await?;
     let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores)).build()?;
     let metadata = lash::LlmProfileMetadata::builder("otlp-fixture")
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(8192)
         .build()?;
     let registry = lash::LlmProfileRegistry::new().register(
@@ -95,6 +96,7 @@ async fn socket_outage_is_counted_and_shutdown_drains_acknowledged_export() -> R
             lash::LashCore::standard_builder(backend)
                 .llm_profiles(Arc::new(registry))
                 .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                .data_retention(lash::DataRetention::standard())
                 .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
                 .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
                 .execution_budgets(lash::ExecutionBudgets::recommended())

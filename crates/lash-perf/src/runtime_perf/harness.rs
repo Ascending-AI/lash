@@ -50,6 +50,7 @@ fn runtime_perf_owner() -> lash::persistence::LeaseOwnerIdentity {
 )]
 fn benchmark_llm_profile_spec() -> lash::LlmProfileMetadata {
     lash::LlmProfileMetadata::builder("mock-model")
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .expect("valid benchmark model spec")
@@ -62,6 +63,7 @@ trait ExplicitEphemeralFacets: Sized {
 impl ExplicitEphemeralFacets for lash::LashCoreBuilder {
     fn with_explicit_ephemeral_facets(self) -> Self {
         self.commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -1018,7 +1020,11 @@ pub(crate) async fn durable_sqlite_session_store_factory_without_commit_measurem
     Arc<dyn lash_core::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
 )> {
-    let sqlite = lash_sqlite_store::SqliteStoreSet::open(sessions_root.join("lash.db")).await?;
+    let sqlite = lash_sqlite_store::SqliteStoreSet::open(
+        sessions_root.join("lash.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await?;
     let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(
         sqlite.session_store_factory(),
     );
@@ -1048,9 +1054,12 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     let mut plugin_stack =
         runtime_perf_plugin_stack(scenario.uses_standard_compaction(), mode_id.is_standard());
     let stores: Arc<dyn lash_core::StoreSet> = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(root.join("lash.db"))
-            .await
-            .map_err(|err| anyhow::anyhow!(err.to_string()))?,
+        lash_sqlite_store::SqliteStoreSet::open(
+            root.join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .map_err(|err| anyhow::anyhow!(err.to_string()))?,
     );
     let (store_factory, store_metrics): (
         Arc<dyn lash_core::DeploymentStore>,
@@ -1134,6 +1143,7 @@ fn durable_benchmark_core(
     };
     let builder = builder
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

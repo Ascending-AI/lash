@@ -52,6 +52,7 @@ async fn assert_runtime_assembly_refuses_without_writes(
             crate::tools::ToolSourcePolicy::Tolerate,
             lash_core::ExecutionBudgets::recommended(),
             lash_core::runtime::DeltaCoalescing::recommended(),
+            lash_core::facade_support::DataRetentionConfig::standard(),
         );
         let result = if builder {
             Box::pin(
@@ -126,6 +127,7 @@ fn peer_core(backend: lash_core::Backend) -> LashCore {
     LashCore::standard_builder(backend)
         .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(crate::DataRetention::standard())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(crate::ExecutionBudgets::recommended())

@@ -133,7 +133,10 @@ async fn call(
     } else {
         original
     };
-    let deliveries = RuntimeAttachmentStore::ephemeral(backend);
+    let deliveries = RuntimeAttachmentStore::ephemeral(
+        backend,
+        lash_core::facade_support::AttachmentPolicy::standard(),
+    );
     let request = super::request(vec![LlmMessage::new(
         LlmRole::User,
         vec![LlmContentBlock::Attachment {

@@ -15,7 +15,7 @@ pub(super) fn request_with_capability(
                 .context_window_tokens(128_000)
                 .capability(llm_profile_capability)
                 .extra_body(Default::default())
-                .request_defaults(Default::default())
+                .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                 .build()
                 .expect("valid profile"),
             ),

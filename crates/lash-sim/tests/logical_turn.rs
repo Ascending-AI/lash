@@ -120,6 +120,7 @@ fn text_response(text: &str) -> LlmResponse {
 )]
 fn model() -> lash_core::LlmProfileMetadata {
     lash_core::LlmProfileMetadata::builder("logical-turn-sim")
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .expect("valid sim model")
@@ -196,7 +197,13 @@ fn standard_core_on(
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .max_attachment_bytes(max_attachment_bytes)
+        .data_retention(lash::DataRetention {
+            attachments: lash::persistence::AttachmentPolicy {
+                max_attachment_bytes,
+                ..lash::persistence::AttachmentPolicy::standard()
+            },
+            ..lash::DataRetention::standard()
+        })
         .trace_sink(trace)
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
@@ -292,6 +299,7 @@ async fn admitted_switch_is_seeded_queued_after_earlier_work_and_exactly_once() 
     let backend = engine.backend();
     let core = lash::LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -587,6 +595,7 @@ async fn assert_switch_chain(limit: usize, switches: usize, finishes: bool) {
             switch_count: limit + 1,
         }))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .delta_coalescing(lash::DeltaCoalescing::recommended())
@@ -757,6 +766,7 @@ finish({ baton: baton });
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -885,6 +895,7 @@ await control.continue_as({
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

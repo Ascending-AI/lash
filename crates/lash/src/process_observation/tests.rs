@@ -158,7 +158,7 @@ struct Fixture {
 
 impl Fixture {
     async fn new(name: &str, engine_owned: bool) -> Self {
-        Self::with_config(name, engine_owned, ProcessObservationConfig::default()).await
+        Self::with_config(name, engine_owned, ProcessObservationConfig::standard()).await
     }
 
     async fn with_config(name: &str, engine_owned: bool, config: ProcessObservationConfig) -> Self {
@@ -527,7 +527,9 @@ async fn l8_epoch_replacement_lag_and_trim_are_gaps_with_snapshots() {
     );
 
     // A restarted core has no route under the old epoch.
-    let restarted = Arc::new(ProcessObservationHub::default());
+    let restarted = Arc::new(ProcessObservationHub::new(
+        ProcessObservationConfig::standard(),
+    ));
     let mut after_restart = restarted
         .subscribe(
             Arc::clone(&fixture.registry),
@@ -544,7 +546,7 @@ async fn l8_epoch_replacement_lag_and_trim_are_gaps_with_snapshots() {
     // Trim: a one-item ring loses the cursor's successor.
     let small = ProcessObservationConfig {
         capacity: 1,
-        ..ProcessObservationConfig::default()
+        ..ProcessObservationConfig::standard()
     };
     let trimmed = Fixture::with_config("l8-trim", false, small).await;
     trimmed.live(1, 0);
@@ -577,7 +579,7 @@ async fn l8_epoch_replacement_lag_and_trim_are_gaps_with_snapshots() {
         ProcessObservationConfig {
             capacity: 8,
             ttl: Duration::ZERO,
-            ..ProcessObservationConfig::default()
+            ..ProcessObservationConfig::standard()
         },
     )
     .await;
@@ -858,7 +860,7 @@ async fn snapshot_acquisition_is_bounded_and_says_so() {
         ProcessObservationConfig {
             snapshot_page_budget: 1,
             snapshot_page_size: std::num::NonZeroUsize::new(2).expect("page size"),
-            ..ProcessObservationConfig::default()
+            ..ProcessObservationConfig::standard()
         },
     )
     .await;
@@ -953,7 +955,9 @@ async fn a_long_loops_observations_fold_in_batches_into_the_same_live_graph() {
 
 #[tokio::test]
 async fn finished_processes_release_their_hub_entries_without_subscribers() {
-    let hub = Arc::new(ProcessObservationHub::default());
+    let hub = Arc::new(ProcessObservationHub::new(
+        ProcessObservationConfig::standard(),
+    ));
     for index in 0..16 {
         let id = ProcessId::fixture(&format!("process:finished:{index}"));
         hub.append(&record(&id, 1, 0)).expect("start");
@@ -967,7 +971,7 @@ async fn idle_unfinished_processes_are_released_after_the_ttl() {
     let hub = Arc::new(ProcessObservationHub::new(ProcessObservationConfig {
         capacity: 8,
         ttl: Duration::from_millis(1),
-        ..ProcessObservationConfig::default()
+        ..ProcessObservationConfig::standard()
     }));
     for index in 0..8 {
         hub.append(&record(
@@ -996,9 +1000,12 @@ async fn idle_unfinished_processes_are_released_after_the_ttl() {
 async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
     let dir = tempfile::tempdir().expect("facade tempdir");
     let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(dir.path().join("lash.db"))
-            .await
-            .expect("open the file store set"),
+        lash_sqlite_store::SqliteStoreSet::open(
+            dir.path().join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open the file store set"),
     );
     lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
     let core = crate::tests::standard_core_over(lash_conformance::backend_over(stores));

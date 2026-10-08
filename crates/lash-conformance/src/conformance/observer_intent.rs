@@ -52,6 +52,7 @@ pub async fn fork_observer_transient_failure_retains_intent_until_publication(
                 crate::SessionToolAccess::ambient(),
             ),
             head: crate::SessionCreationHead::Config,
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("create fork session with pending observer intent");

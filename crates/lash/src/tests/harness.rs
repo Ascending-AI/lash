@@ -7,6 +7,7 @@ pub(crate) fn llm_profile_spec(
 ) -> lash_core::LlmProfileMetadata {
     let capability = capability_for_variant(variant.as_deref());
     lash_core::LlmProfileMetadata::builder(model)
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(context_window_tokens)
         .build()
         .expect("valid model spec")
@@ -71,10 +72,13 @@ pub(crate) async fn postgres_store_parts() -> (
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,
-        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
-            .await
-            .expect("SQLite attachment store")
-            .attachment_store(),
+        lash_sqlite_store::SqliteStoreSet::open(
+            (attachments.path()).join("attachments.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store(),
     ));
     (stores, database, attachments)
 }
@@ -116,10 +120,13 @@ pub(crate) async fn postgres_store_set() -> (Arc<dyn lash_core::StoreSet>, Box<d
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,
-        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
-            .await
-            .expect("SQLite attachment store")
-            .attachment_store(),
+        lash_sqlite_store::SqliteStoreSet::open(
+            (attachments.path()).join("attachments.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store(),
     )) as Arc<dyn lash_core::StoreSet>;
     (stores, Box::new((database, attachments, storage)))
 }
@@ -178,6 +185,7 @@ pub(crate) fn explicit_ephemeral_facets_with_budget(
 ) -> crate::core::LashCoreBuilder {
     builder
         .commit_budget(commit_budget)
+        .data_retention(crate::DataRetention::standard())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(crate::ExecutionBudgets::recommended())

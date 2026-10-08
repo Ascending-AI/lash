@@ -84,9 +84,12 @@ async fn double(tier: Tier) -> Option<Double> {
         }
         Tier::SqliteFile => {
             let root = tempfile::tempdir().expect("SQLite store directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(root.path().join("lash.db"))
-                .await
-                .expect("SQLite file stores");
+            let stores = lash_sqlite_store::SqliteStoreSet::open(
+                root.path().join("lash.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite file stores");
             Some(Double {
                 stores: Arc::new(stores),
                 _keep: vec![Box::new(root)],
@@ -103,6 +106,7 @@ async fn double(tier: Tier) -> Option<Double> {
                 &storage,
                 lash_sqlite_store::SqliteStoreSet::open(
                     (attachments.path()).join("attachments.db"),
+                    lash_sqlite_store::SqliteSynchronous::Normal,
                 )
                 .await
                 .expect("SQLite attachment store")
@@ -227,11 +231,13 @@ fn core(double: &Double, dialect: Arc<dyn Dialect>, script: &Script) -> LashCore
         .serve_test_llm_profile(
             provider,
             lash::LlmProfileMetadata::builder("seam-proof-dialect")
+                .cache_retention(lash::provider::CacheRetention::Short)
                 .context_window_tokens(64_000)
                 .build()
                 .expect("model spec"),
         )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

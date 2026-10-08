@@ -10,6 +10,7 @@ fn process_execution_env_identity_corpus() -> [(String, String); 2] {
             crate::LlmProfileConfig::new(crate::RecordedLlmProfile::mint(
                 crate::LlmProfileKey::new("rich-key"),
                 crate::LlmProfileMetadata::builder("model:rich")
+                    .cache_retention(crate::provider::CacheRetention::Short)
                     .context_window_tokens(8192)
                     .output_token_capacity(2048)
                     .build()

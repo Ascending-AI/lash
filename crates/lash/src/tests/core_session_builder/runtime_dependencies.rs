@@ -41,6 +41,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
         LashCore::rlm_builder(core_backend.clone(), rlm_factory(factory_backend))
             .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(crate::DataRetention::standard())
             .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
             .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
             .execution_budgets(crate::ExecutionBudgets::recommended())
@@ -79,6 +80,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     let clock = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
     let core = LashCore::standard_builder(store_backend_with_clock(clock).await)
         .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(crate::DataRetention::standard())
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(crate::ExecutionBudgets::recommended())
@@ -181,6 +183,7 @@ async fn fork_distinguishes_collected_revision_from_unknown_and_deleted_sources(
             lash_core::SessionToolAccess::ambient(),
         ),
         head: lash_core::SessionCreationHead::Config,
+        retention: lash_core::Retention::UntilGc,
     };
     let source = lash_core::runtime::admit_session_view(&factory, &source_request)
         .await
@@ -337,6 +340,7 @@ async fn fork_observer_selection_is_recoverable_and_selective() -> Result<()> {
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: lash_core::SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         },
     )
     .await
@@ -734,6 +738,7 @@ async fn duplicate_only_fork_intents_are_canonical(
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: lash_core::SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         },
     )
     .await?;
@@ -846,6 +851,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: lash_core::SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         },
     )
     .await?;
@@ -981,6 +987,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                     lash_core::SessionToolAccess::ambient(),
                 ),
                 head: lash_core::SessionCreationHead::Config,
+                retention: lash_core::Retention::UntilGc,
             },
         )
         .await?;
@@ -1114,6 +1121,7 @@ async fn a_fork_runs_under_its_branch_points_generation_not_what_the_host_passes
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: lash_core::SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         },
     )
     .await

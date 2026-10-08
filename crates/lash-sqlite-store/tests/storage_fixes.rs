@@ -235,9 +235,12 @@ fn concurrent_first_open_never_observes_an_unstamped_schema() {
 #[tokio::test]
 async fn process_record_is_a_root_without_registry_liveness() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let store = SqliteStore::open(&dir.path().join("sessions.db"))
-        .await
-        .expect("open catalog");
+    let store = SqliteStore::open(
+        &dir.path().join("sessions.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open catalog");
     let request = lash_core_execution::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -250,6 +253,7 @@ async fn process_record_is_a_root_without_registry_liveness() {
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     };
     store.admit_session(&request).await.expect("admit session");
     let attachment_id =

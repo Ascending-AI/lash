@@ -11,9 +11,12 @@ mod file {
 
     lash_conformance::process_change_horizon_tests!({
         let dir = tempfile::tempdir().expect("prune-horizon tempdir");
-        let backend = SqliteStoreSet::open(dir.path().join("lash.db"))
-            .await
-            .expect("open the prune-horizon file backend");
+        let backend = SqliteStoreSet::open(
+            dir.path().join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open the prune-horizon file backend");
         lash_core::testing::process_execution_env_fixture(backend.process_env_store().as_ref())
             .await;
         let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;

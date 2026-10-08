@@ -183,7 +183,13 @@ async fn oversized_tool_output_is_retained_before_it_enters_history(
 ) -> Result<()> {
     const SESSION: &str = "standard-output-retention";
     let core = explicit_ephemeral_facets(LashCore::standard_builder(backend.clone()))
-        .output_retention(POLICY)
+        .data_retention(crate::DataRetention {
+            attachments: crate::persistence::AttachmentPolicy {
+                output_retention: POLICY,
+                ..crate::persistence::AttachmentPolicy::standard()
+            },
+            ..crate::DataRetention::standard()
+        })
         .serve_test_llm_profile(tool_calling_provider(), mock_llm_profile_spec())
         .tools(Arc::new(RetentionTools))
         .plugin(Arc::new(StaticPluginFactory::new(
@@ -252,7 +258,13 @@ async fn oversized_rlm_print_and_final_value_are_retained_before_they_enter_hist
 ) -> Result<()> {
     const SESSION: &str = "rlm-output-retention";
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .output_retention(POLICY)
+        .data_retention(crate::DataRetention {
+            attachments: crate::persistence::AttachmentPolicy {
+                output_retention: POLICY,
+                ..crate::persistence::AttachmentPolicy::standard()
+            },
+            ..crate::DataRetention::standard()
+        })
         .serve_test_llm_profile(
             queued_text_provider(vec![typescript_block(
                 r#"
@@ -404,7 +416,13 @@ async fn oversized_rlm_print_and_final_value_are_retained_before_they_enter_hist
 async fn many_subcap_prints_in_one_step_land_one_bounded_archive_on_sqlite() -> Result<()> {
     let backend = sqlite_memory_store_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .output_retention(POLICY)
+        .data_retention(crate::DataRetention {
+            attachments: crate::persistence::AttachmentPolicy {
+                output_retention: POLICY,
+                ..crate::persistence::AttachmentPolicy::standard()
+            },
+            ..crate::DataRetention::standard()
+        })
         .serve_test_llm_profile(
             queued_text_provider(vec![
                 typescript_block(
@@ -506,7 +524,13 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
         })
         .collect();
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .output_retention(POLICY)
+        .data_retention(crate::DataRetention {
+            attachments: crate::persistence::AttachmentPolicy {
+                output_retention: POLICY,
+                ..crate::persistence::AttachmentPolicy::standard()
+            },
+            ..crate::DataRetention::standard()
+        })
         .serve_test_llm_profile(queued_text_provider(vec![
             typescript_block(r#"for (let i = 0; i < 200; i++) { print({index: i, text: "exact é🙂\nvalue", null: null, nested: [i, false]}); } finish(200);"#),
         ]), mock_llm_profile_spec())
@@ -550,7 +574,13 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
     drop(core);
 
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
-        .output_retention(POLICY)
+        .data_retention(crate::DataRetention {
+            attachments: crate::persistence::AttachmentPolicy {
+                output_retention: POLICY,
+                ..crate::persistence::AttachmentPolicy::standard()
+            },
+            ..crate::DataRetention::standard()
+        })
         .serve_test_llm_profile(queued_text_provider(vec![
             typescript_block(archive_reader_cell()),
             typescript_block(archive_reader_cell()),

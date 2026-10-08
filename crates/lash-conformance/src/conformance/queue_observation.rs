@@ -22,6 +22,7 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
                     crate::SessionToolAccess::ambient(),
                 ),
                 head: crate::SessionCreationHead::Config,
+                retention: crate::Retention::UntilGc,
             })
             .await
             .expect("create queue session");
@@ -53,7 +54,9 @@ pub async fn queue_head_read_failure_publishes_recoverable_gap(backend: crate::B
         ));
         let store = crate::store::SessionStore::new(recording.clone(), session_id.clone())
             .expect("valid view");
-        let replay = Arc::new(crate::facade_support::InMemoryLiveReplayStore::default());
+        let replay = Arc::new(crate::facade_support::InMemoryLiveReplayStore::new(
+            crate::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+        ));
         let cursor = replay.current_cursor(&session_id, revision);
         let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = replay
             .subscribe_after_cursor(&cursor)
@@ -230,7 +233,9 @@ pub async fn queue_publication_failure_preserves_committed_mutation(backend: cra
             .await
             .expect("accept input");
         let replay = Arc::new(FailingQueuePublication {
-            inner: Default::default(),
+            inner: crate::facade_support::InMemoryLiveReplayStore::new(
+                crate::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+            ),
             attempts: Default::default(),
         });
         let ops = crate::facade_support::DurableSessionOps::new(id.clone(), replay.clone());

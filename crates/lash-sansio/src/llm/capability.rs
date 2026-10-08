@@ -297,36 +297,39 @@ pub enum ReasoningEncoding {
 /// OpenAI Responses and Codex `prompt_cache_key`, and OpenAI
 /// `prompt_cache_retention`). Providers without a cache-control concept,
 /// such as direct Google, read the value but emit nothing for it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// How long a provider keeps this model's prompt prefix cached, and so what
+/// its cache writes cost and how long the provider retains the prompt.
+///
+/// The host states it for every model; there is no default (D-DEFAULTS2).
+/// Providers price the choices differently: a longer lifetime costs more per
+/// cache write and pays back only when the prefix is read again inside it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CacheRetention {
-    /// Do not emit any prompt-cache hints.
+    /// Off: no prompt-cache directive is sent.
     None,
-    /// Default Anthropic ephemeral window (5 minutes).
-    #[default]
+    /// Cache for the provider's default lifetime: the directive is sent with
+    /// no lifetime of its own (Anthropic's ephemeral window, 5 minutes).
     Short,
-    /// Extend to a 1-hour TTL where the API supports it.
+    /// Cache for the extended lifetime where the route supports one (a 1-hour
+    /// TTL on Anthropic's dialect, `24h` on OpenAI Responses); elsewhere as
+    /// [`Self::Short`].
     Long,
-}
-
-impl CacheRetention {
-    pub fn is_default(&self) -> bool {
-        matches!(self, CacheRetention::Short)
-    }
 }
 
 /// How a model's requests behave where a request states nothing (FIG-4374):
 /// host intent recorded with the model's metadata when a registry mints its
 /// binding, and carried on every request that model serves. A transport
 /// keeps only live concerns: its client, credentials, endpoint and limits.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LlmProfileRequestDefaults {
     /// Surface the reasoning the provider streams in responses.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub expose_thinking: bool,
-    /// Prompt-cache lifetime hint; see [`CacheRetention`].
-    #[serde(default, skip_serializing_if = "CacheRetention::is_default")]
+    /// The prompt-cache lifetime the host states for this model; see
+    /// [`CacheRetention`]. Required and always recorded: a record without it
+    /// names no choice and does not decode.
     pub cache_retention: CacheRetention,
     /// Response header names (case-insensitive) captured into
     /// `LlmResponse.response_metadata` as `header:<lowercased-name>` entries.
@@ -343,8 +346,15 @@ pub struct LlmProfileRequestDefaults {
 }
 
 impl LlmProfileRequestDefaults {
-    pub fn is_default(&self) -> bool {
-        *self == Self::default()
+    /// Request behavior under the prompt-cache lifetime the host states:
+    /// thinking is not exposed and no response metadata is captured.
+    pub fn new(cache_retention: CacheRetention) -> Self {
+        Self {
+            expose_thinking: false,
+            cache_retention,
+            response_metadata_headers: Vec::new(),
+            response_metadata_body_paths: Vec::new(),
+        }
     }
 }
 

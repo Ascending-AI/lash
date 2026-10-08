@@ -367,6 +367,7 @@ mod tests {
                     crate::ToolSourcePolicy::Tolerate,
                     crate::ExecutionBudgets::recommended(),
                     crate::runtime::DeltaCoalescing::recommended(),
+                    crate::DataRetentionConfig::standard(),
                 ),
                 crate::testing::runtime_lease_owner(),
             )
@@ -376,6 +377,7 @@ mod tests {
                 model: Some(crate::testing::test_llm_profile_config(
                     "test-model",
                     crate::LlmProfileMetadata::builder("test-model")
+                        .cache_retention(crate::provider::CacheRetention::Short)
                         .context_window_tokens(1024)
                         .build()
                         .expect("model"),

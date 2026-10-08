@@ -130,9 +130,12 @@ async fn event_release_differential_on_sqlite_memory_and_file() {
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite memory store set");
-    let file = lash_sqlite_store::SqliteStoreSet::open(directory.path().join("file.db"))
-        .await
-        .expect("SQLite file store set");
+    let file = lash_sqlite_store::SqliteStoreSet::open(
+        directory.path().join("file.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("SQLite file store set");
     lash_core::testing::process_execution_env_fixture(memory.process_env_store().as_ref()).await;
     lash_core::testing::process_execution_env_fixture(file.process_env_store().as_ref()).await;
     let (_, memory_releases) = release_observations(memory.process_registry().as_ref()).await;
@@ -655,17 +658,23 @@ async fn prepared_registration_scope_matches_across_backends() {
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .unwrap_or_else(|error| panic!("SQLite memory: {error}"));
-    let file = lash_sqlite_store::SqliteStoreSet::open(root.path().join("lash.db"))
-        .await
-        .unwrap_or_else(|error| panic!("SQLite file: {error}"));
+    let file = lash_sqlite_store::SqliteStoreSet::open(
+        root.path().join("lash.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("SQLite file: {error}"));
     let attachments =
         tempfile::tempdir().unwrap_or_else(|error| panic!("attachment root: {error}"));
     let pg = lash_postgres_store::PostgresStoreSet::new(
         &postgres,
-        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
-            .await
-            .expect("SQLite attachment store")
-            .attachment_store(),
+        lash_sqlite_store::SqliteStoreSet::open(
+            (attachments.path()).join("attachments.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store(),
     );
     let nonce = run_nonce();
     lash_core::testing::process_execution_env_fixture(memory.process_env_store().as_ref()).await;

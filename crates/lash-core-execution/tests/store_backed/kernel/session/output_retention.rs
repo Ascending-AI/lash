@@ -38,8 +38,11 @@ async fn an_oversized_failure_is_retained_behind_a_bounded_witness() {
     let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
         .session_id("retention-session")
         .attachment_store(Arc::new(
-            crate::RuntimeAttachmentStore::ephemeral(backend.attachment_store())
-                .with_output_retention(POLICY),
+            crate::RuntimeAttachmentStore::ephemeral(
+                backend.attachment_store(),
+                crate::AttachmentPolicy::standard(),
+            )
+            .with_output_retention(POLICY),
         ))
         .build()
         .into_runtime();
@@ -78,7 +81,7 @@ async fn an_oversized_failure_is_retained_behind_a_bounded_witness() {
         .attachment_store()
         .get(
             &retained.reference.id,
-            crate::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            crate::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
         .expect("the retained failure is stored");

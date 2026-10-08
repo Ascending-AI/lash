@@ -944,9 +944,12 @@ mod tests {
 
     async fn store() -> (tempfile::TempDir, SqliteStore) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let store = SqliteStore::open(&dir.path().join("artifact.db"))
-            .await
-            .expect("open store");
+        let store = SqliteStore::open(
+            &dir.path().join("artifact.db"),
+            crate::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open store");
         (dir, store)
     }
 

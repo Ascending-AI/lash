@@ -283,12 +283,19 @@ async fn send(url: bool, tools: bool) -> Sent {
         .serve_test_llm_profile(
             provider,
             lash_core::LlmProfileMetadata::builder(MODEL)
+                .cache_retention(lash_core::provider::CacheRetention::Short)
                 .context_window_tokens(100_000)
                 .build()
                 .unwrap(),
         )
         .tools(Arc::new(NestedMedia))
-        .max_attachment_bytes(Some(1024))
+        .data_retention(lash::DataRetention {
+            attachments: lash::persistence::AttachmentPolicy {
+                max_attachment_bytes: Some(1024),
+                ..lash::persistence::AttachmentPolicy::standard()
+            },
+            ..lash::DataRetention::standard()
+        })
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)

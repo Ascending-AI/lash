@@ -93,7 +93,9 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
                 stream_termination: StreamTermination::EofTolerated,
                 defaults: lash_core::provider::LlmProfileRequestDefaults {
                     expose_thinking: false,
-                    ..Default::default()
+                    ..lash_core::provider::LlmProfileRequestDefaults::new(
+                        lash_core::provider::CacheRetention::Short,
+                    )
                 },
             },
             None,
@@ -140,7 +142,9 @@ async fn extended_provider_trace_captures_exact_serialized_google_body_without_a
                 stream_termination: StreamTermination::EofTolerated,
                 defaults: lash_core::provider::LlmProfileRequestDefaults {
                     expose_thinking: false,
-                    ..Default::default()
+                    ..lash_core::provider::LlmProfileRequestDefaults::new(
+                        lash_core::provider::CacheRetention::Short,
+                    )
                 },
             },
             None,

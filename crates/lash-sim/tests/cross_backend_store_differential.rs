@@ -886,6 +886,7 @@ impl BackendRunner {
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         }
     }
 
@@ -917,6 +918,7 @@ impl BackendRunner {
         .expect("build differential lifecycle provider");
         lash::LashCore::standard_builder(self.lifecycle_backend.clone())
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
             .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -1049,6 +1051,7 @@ impl BackendRunner {
                             lash_core::NoProgressBudget::bounded(12),
                             lash_core::SessionToolAccess::ambient(),
                         ),
+                        retention: lash_core::Retention::UntilGc,
                     })
                     .await?;
                 Ok(None)
@@ -1137,6 +1140,7 @@ impl BackendRunner {
                         let concrete_factory = Arc::new(
                             lash_sqlite_store::SqliteStore::open_with_clock(
                                 &root.join("lash.db"),
+                                lash_sqlite_store::SqliteSynchronous::Normal,
                                 Arc::clone(&self.clock),
                             )
                             .await
@@ -1458,14 +1462,18 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
             lash_core::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core::Retention::UntilGc,
     };
 
     let sqlite_case_root = sqlite_root.join("storage-failure-mapping");
     let sqlite_path = sqlite_case_root.join("lash.db");
     let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteStore::open(&sqlite_case_root.join("lash.db"))
-            .await
-            .expect("open SQLite storage-failure fixture"),
+        lash_sqlite_store::SqliteStore::open(
+            &sqlite_case_root.join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open SQLite storage-failure fixture"),
     );
     let sqlite_store = admit_test_session(sqlite_factory.clone(), &create_request)
         .await
@@ -1613,6 +1621,7 @@ async fn runners_for_case_with_clock(
             lash_core::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: lash_core::Retention::UntilGc,
     };
     let expected_meta = SessionMeta {
         owning_process_id: Some(differential_process_owner_id()),
@@ -1645,7 +1654,9 @@ async fn runners_for_case_with_clock(
     let sqlite_backend = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
             sqlite_case_root.join("lash.db"),
-            lash_sqlite_store::SqliteStoreSetOptions::default(),
+            lash_sqlite_store::SqliteStoreSetOptions::standard(
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            ),
             Arc::clone(&clock),
         )
         .await
@@ -1690,6 +1701,7 @@ async fn runners_for_case_with_clock(
             postgres,
             lash_sqlite_store::SqliteStoreSet::open(
                 (sqlite_case_root.join("postgres-attachments")).join("attachments.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
             )
             .await
             .expect("SQLite attachment store")

@@ -237,10 +237,19 @@ impl SqliteProcessRegistry {
     ) -> tokio_rusqlite::Result<Self> {
         crate::location::validate_file_database_path(path, "SqliteProcessRegistry")?;
         let location = DatabaseLocation::standalone_file(path);
-        let conn = SqliteConnection::open(location.target()).await?;
+        let conn = SqliteConnection::open_with_policy(
+            location.target(),
+            crate::SqliteConnectionPolicy::standard(crate::lifecycle::FIXTURE_SYNCHRONOUS),
+        )
+        .await?;
         ensure_versioned_schema(&conn).await?;
         apply_pragmas(&conn).await?;
-        let store = crate::SqliteStore::open_with_clock(path, Arc::clone(&clock)).await?;
+        let store = crate::SqliteStore::open_with_clock(
+            path,
+            crate::lifecycle::FIXTURE_SYNCHRONOUS,
+            Arc::clone(&clock),
+        )
+        .await?;
         lash_core_execution::testing::process_execution_env_fixture(&store).await;
         Ok(Self::on_connection(conn, location, clock))
     }

@@ -758,6 +758,7 @@ impl Provider for TestProvider {
 /// other facts.
 pub fn test_llm_profile_metadata(wire_model: &str) -> crate::LlmProfileMetadata {
     crate::LlmProfileMetadata::builder(wire_model)
+        .cache_retention(crate::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .expect("valid test model metadata")

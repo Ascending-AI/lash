@@ -19,9 +19,12 @@ impl WorkbenchStores {
     }
 
     pub(crate) async fn open_sqlite(data_dir: &std::path::Path) -> AnyhowResult<Self> {
-        let stores = lash::sqlite::SqliteStoreSet::open(data_dir.join("lash-sessions.db"))
-            .await
-            .context("open the SQLite store set")?;
+        let stores = lash::sqlite::SqliteStoreSet::open(
+            data_dir.join("lash-sessions.db"),
+            lash::sqlite::SqliteSynchronous::Normal,
+        )
+        .await
+        .context("open the SQLite store set")?;
         Ok(Self {
             stores: Arc::new(stores),
             backend: "sqlite",
@@ -49,6 +52,7 @@ impl WorkbenchStores {
             &storage,
             lash::sqlite::SqliteStoreSet::open(
                 (data_dir.join("attachments")).join("attachments.db"),
+                lash::sqlite::SqliteSynchronous::Normal,
             )
             .await
             .context("open SQLite attachment storage")?

@@ -1751,10 +1751,14 @@ async fn mcp_law_tool_error_preserves_cause_and_attachment_roots() {
     let root = tempfile::tempdir().expect("attachment directory");
     let store = Arc::new(
         lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
-            lash_sqlite_store::SqliteStoreSet::open((root.path()).join("attachments.db"))
-                .await
-                .expect("SQLite attachment store")
-                .attachment_store(),
+            lash_sqlite_store::SqliteStoreSet::open(
+                (root.path()).join("attachments.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("SQLite attachment store")
+            .attachment_store(),
+            lash_core::facade_support::AttachmentPolicy::standard(),
         ),
     );
     let controller = lash_core::ActorContext::unavailable();

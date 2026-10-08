@@ -124,6 +124,7 @@ pub fn session_store_request(
                 crate::RecordedLlmProfile::mint(
                     crate::LlmProfileKey::new(model_id),
                     lash_core_llm::llm_profile::LlmProfileMetadata::builder(model_id)
+                        .cache_retention(lash_core_llm::provider::CacheRetention::Short)
                         .context_window_tokens(200_000)
                         .build()
                         .expect("valid conformance model"),
@@ -156,6 +157,7 @@ pub fn session_store_request_with_policy(
             crate::SessionToolAccess::ambient(),
         ),
         head: SessionCreationHead::Config,
+        retention: crate::store::Retention::UntilGc,
     }
 }
 

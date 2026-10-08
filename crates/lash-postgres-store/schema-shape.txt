@@ -415,7 +415,7 @@ table lash_session_meta
   column owning_process_id text nullable
   column parent_session_id text nullable
   column relation_kind text not-null
-  column retention_kind text not-null default
+  column retention_kind text not-null
   column retention_last_turns bigint nullable
   column session_id text not-null
   column session_state_version integer nullable

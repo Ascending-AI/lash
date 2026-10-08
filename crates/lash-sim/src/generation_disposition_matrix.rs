@@ -250,7 +250,7 @@ impl Dialect {
                             ..LlmProfileCapability::default()
                         })
                         .extra_body(Default::default())
-                        .request_defaults(Default::default())
+                        .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                         .build()
                         .expect("valid profile"),
                 ),
@@ -441,6 +441,7 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
     )
     .expect("runtime provider");
     let model = lash::LlmProfileMetadata::builder("openai/gpt-5.4")
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .output_token_capacity(2_048)
         .build()
@@ -450,6 +451,7 @@ async fn runtime_clamps_a_requested_cap_and_reports_the_reduced_wire_value() {
         .expect("sim engine");
     let core = lash::LashCore::standard_builder(engine.backend())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -540,6 +542,7 @@ async fn protocol_owned_stop_is_absent_from_the_wire_and_reported_suppressed() {
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

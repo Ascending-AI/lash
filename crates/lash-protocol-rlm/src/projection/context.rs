@@ -493,6 +493,7 @@ mod tests {
         let host = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
         let attachments = lash_core::facade_support::RuntimeAttachmentStore::ephemeral(
             host.backend().attachment_store(),
+            lash_core::facade_support::AttachmentPolicy::standard(),
         );
         let observations = vec![lash_core::Observation {
             text: "bounded preview".to_string(),

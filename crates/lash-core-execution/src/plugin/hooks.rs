@@ -82,9 +82,7 @@ pub trait ToolPresentationArtifacts: Send + Sync {
     /// The byte policy the boundary measures the folded return against. The
     /// recorded presentation journals it, so a replay under another policy
     /// serves the decision this one made.
-    fn retention_policy(&self) -> crate::OutputRetentionPolicy {
-        crate::OutputRetentionPolicy::DEFAULT
-    }
+    fn retention_policy(&self) -> crate::OutputRetentionPolicy;
 
     /// The refs retained so far, in retain order. The runtime journals them on
     /// the recorded presentation outcome; a step reads its own `retain_text`
@@ -102,7 +100,9 @@ pub trait ToolPresentationArtifacts: Send + Sync {
 
 /// A presentation context that retains nothing: `retain_text` answers a
 /// refusal, and the boundary fails the presentation with a typed retention
-/// failure rather than pretending a retention happened.
+/// failure rather than pretending a retention happened. It measures outputs
+/// against [`OutputRetentionPolicy::STANDARD`](crate::OutputRetentionPolicy::STANDARD),
+/// so an output a standard host would retain is refused here.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoPresentationArtifacts;
 
@@ -125,6 +125,10 @@ impl ToolPresentationArtifacts for NoPresentationArtifacts {
                 NO_PRESENTATION_ARTIFACTS.to_string(),
             ))
         })
+    }
+
+    fn retention_policy(&self) -> crate::OutputRetentionPolicy {
+        crate::OutputRetentionPolicy::STANDARD
     }
 }
 /// An after-turn observer: what it contributes before the turn commits.

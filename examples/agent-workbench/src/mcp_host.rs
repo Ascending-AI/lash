@@ -47,6 +47,7 @@ pub async fn factory(
                 lash::LlmProfileMetadata::new(
                     model,
                     std::num::NonZeroUsize::MIN.saturating_add(200_000 - 1),
+                    lash::provider::CacheRetention::Short,
                 ),
             )))
             .elicitation_handler(Arc::new(crate::mcp_policy::DemoElicitationHandler))

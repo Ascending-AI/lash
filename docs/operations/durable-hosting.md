@@ -74,9 +74,33 @@ let backend = DurableBackendBuilder::new(stores)
 let core = lash::LashCore::builder(backend)
     .execution_budgets(budgets)
     .delta_coalescing(lash::DeltaCoalescing::recommended())
+    .data_retention(lash::DataRetention {
+        session_revisions: lash::Retention::HeadOnly,
+        ..lash::DataRetention::standard()
+    })
     // providers, plugins, models, tracing ...
     .build(lash::persistence::LeaseOwnerIdentity::opaque(node_name, boot_id))?;
 ```
+
+### Retention the host states
+
+Lash has no default for what a host keeps. Each of these is required, and
+each may be stated as a bound or as its explicit unbounded or keep-everything
+value:
+
+| Decision | Where the host states it | Choices |
+| --- | --- | --- |
+| Attachment puts, reads, upload expiry and retained output | `LashCoreBuilder::data_retention`, `DataRetention::attachments` | A put bound or `None` for unbounded; read budgets; an upload expiry; the inline limit and witness size of retained output. |
+| Session revisions | `DataRetention::session_revisions` | `Retention::UntilGc`, `LastTurns(n)` or `HeadOnly`. Recorded with each session the core creates; `LashSession::set_retention` changes one session's. |
+| Live replay and process observation | `DataRetention::live_replay`, `DataRetention::process_observation` | Event, age, session and byte bounds. A host store installed with `live_replay_store` carries its own. |
+| Prompt-cache retention | `LlmProfileMetadata::builder(..).cache_retention(..)`, per model | `CacheRetention::None` (off), `Short` (the provider's default lifetime) or `Long` (the extended lifetime). Recorded with each session's model binding. |
+| SQLite durability | `SqliteStoreSet::open(path, synchronous)` | `SqliteSynchronous::Full` or `Normal` ([§3](#3-sqlite-is-one-file)); `Off` only for stores whose loss is acceptable. |
+
+`DataRetention::standard()` is the named preset a host may choose; its rustdoc
+lists every value, and no measurement backs them. A core built without
+`data_retention` refuses with `EmbedError::MissingDataRetention`, and a model
+whose metadata states no cache retention refuses with
+`LlmProfileLimitsError::MissingCacheRetention`.
 
 `build` validates the settings and refuses with `lash::durable::DurableBuildError`:
 
@@ -279,7 +303,14 @@ the process registry and the durability core, so one
 transaction commits rows of every family
 ([Deploying and upgrading](deploying-and-upgrading.md#choose-the-deployment-shape)).
 
-- Open it with `lash::sqlite::SqliteStoreSet::open(path)`. Tests use
+- Open it with `lash::sqlite::SqliteStoreSet::open(path, synchronous)`. The
+  host states the `synchronous` mode; there is no default.
+  `SqliteSynchronous::Full` syncs the log at every commit, so a commit that
+  answered survives a power loss. `SqliteSynchronous::Normal` syncs at
+  checkpoints: the database stays consistent through a power loss, but the
+  commits since the last checkpoint can be rolled back, so a turn lash
+  answered as committed may be gone after the machine restarts. A process
+  crash alone loses nothing in either mode. Tests use
   `SqliteStoreSet::memory()`.
 - **Several processes on one machine.** Any number of lash processes on one
   machine may open one file, each serving a node of its own, through the node

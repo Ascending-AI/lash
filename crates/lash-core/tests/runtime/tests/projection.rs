@@ -143,6 +143,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
                 lash_core::SessionToolAccess::ambient(),
             ),
             head: lash_core::SessionCreationHead::Config,
+            retention: lash_core::Retention::UntilGc,
         },
     )
     .await

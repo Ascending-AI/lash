@@ -467,15 +467,16 @@ async fn stored_reload(
     path: &std::path::Path,
     artifact: &lashlang::ModuleArtifact,
 ) -> LashlangArtifacts {
-    let publisher = lash_sqlite_store::SqliteStore::open(path)
-        .await
-        .expect("open the publishing store");
+    let publisher =
+        lash_sqlite_store::SqliteStore::open(path, lash_sqlite_store::SqliteSynchronous::Normal)
+            .await
+            .expect("open the publishing store");
     LashlangArtifacts::new(Arc::new(publisher))
         .publish_module_artifact(&crate::lib_tests::host_claim(), artifact)
         .await
         .expect("the mini artifact publishes");
     LashlangArtifacts::new(Arc::new(
-        lash_sqlite_store::SqliteStore::open(path)
+        lash_sqlite_store::SqliteStore::open(path, lash_sqlite_store::SqliteSynchronous::Normal)
             .await
             .expect("reopen the store"),
     ))

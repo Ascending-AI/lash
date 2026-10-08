@@ -201,9 +201,14 @@ impl ProcessObservationItem {
     }
 }
 
+/// What the process observation hub retains for live observers, and what
+/// one snapshot may read. The host states it; there is no default
+/// (D-DEFAULTS2).
 #[derive(Clone, Copy, Debug)]
 pub struct ProcessObservationConfig {
+    /// The most recent published items one process's ring keeps.
     pub capacity: usize,
+    /// How long an idle process's ring is kept.
     pub ttl: Duration,
     /// Durable pages one snapshot acquisition may read.
     pub snapshot_page_budget: usize,
@@ -211,14 +216,19 @@ pub struct ProcessObservationConfig {
     pub snapshot_page_size: std::num::NonZeroUsize,
 }
 
-impl Default for ProcessObservationConfig {
-    fn default() -> Self {
+impl ProcessObservationConfig {
+    /// The standard retention: a 2,048-item ring per process kept for 120
+    /// idle seconds, and snapshots of at most 64 durable pages of 256
+    /// events. No measurement backs these values.
+    pub const fn standard() -> Self {
         Self {
             capacity: 2048,
             ttl: Duration::from_secs(120),
             snapshot_page_budget: 64,
-            snapshot_page_size: std::num::NonZeroUsize::new(256)
-                .unwrap_or(std::num::NonZeroUsize::MIN),
+            snapshot_page_size: match std::num::NonZeroUsize::new(256) {
+                Some(size) => size,
+                None => std::num::NonZeroUsize::MIN,
+            },
         }
     }
 }
@@ -437,12 +447,6 @@ pub struct ProcessObservationHub {
     last_sweep: Mutex<Instant>,
     #[cfg(test)]
     snapshot_capture_pause: Mutex<Option<Arc<tests::SnapshotCapturePause>>>,
-}
-
-impl Default for ProcessObservationHub {
-    fn default() -> Self {
-        Self::new(ProcessObservationConfig::default())
-    }
 }
 
 impl ProcessObservationHub {

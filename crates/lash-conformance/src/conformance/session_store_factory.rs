@@ -1253,6 +1253,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             &source_request.config.session_policy(),
             crate::SessionToolAccess::ambient(),
         ),
+        retention: crate::Retention::UntilGc,
     };
     factory
         .fork_session(&delete_first_request)
@@ -1282,6 +1283,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
                 &source_request.config.session_policy(),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("an unpinned past turn forks before any collection");
@@ -1307,6 +1309,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
                 &source_request.config.session_policy(),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect_err("a revision the source never published must not fork");
@@ -1333,6 +1336,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             &source_request.config.session_policy(),
             crate::SessionToolAccess::ambient(),
         ),
+        retention: crate::Retention::UntilGc,
     };
     let forked = factory
         .fork_session(&fork_request)
@@ -1358,6 +1362,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
                 &source_request.config.session_policy(),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("fork relation lineage must not gate a retained revision");
@@ -1377,6 +1382,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
             relation: fork_request.relation.clone(),
             config: fork_request.config.clone(),
             head: crate::SessionCreationHead::Config,
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("open fork")
@@ -1464,6 +1470,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
                 &source_request.config.session_policy(),
                 crate::SessionToolAccess::ambient(),
             ),
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect_err("forking must reject a previously deleted target session id");

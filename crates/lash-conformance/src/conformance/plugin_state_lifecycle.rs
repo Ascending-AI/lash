@@ -97,6 +97,7 @@ pub(super) async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) 
         model: Some(crate::testing::test_llm_profile_config(
             "plugin-state-model",
             crate::LlmProfileMetadata::builder("plugin-state-model")
+                .cache_retention(lash_core::provider::CacheRetention::Short)
                 .context_window_tokens(4096)
                 .build()
                 .unwrap(),

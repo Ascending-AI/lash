@@ -30,10 +30,13 @@ impl AttachmentRootSet for UnsupportedAttachmentRoots {
 #[tokio::test]
 async fn unsupported_root_enumeration_aborts_sweep_and_preserves_blob() {
     let temp = tempfile::tempdir().expect("tempdir");
-    let backend = lash_sqlite_store::SqliteStoreSet::open((temp.path()).join("attachments.db"))
-        .await
-        .expect("SQLite attachment store")
-        .attachment_store();
+    let backend = lash_sqlite_store::SqliteStoreSet::open(
+        (temp.path()).join("attachments.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("SQLite attachment store")
+    .attachment_store();
     let reference = backend
         .put(
             b"fail-closed-live-blob".to_vec(),

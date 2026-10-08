@@ -283,9 +283,12 @@ async fn a_drained_nodes_sessions_resume_on_the_next_builds_node_on_sqlite_memor
 async fn a_drained_nodes_sessions_resume_on_the_next_builds_node_on_sqlite_file() {
     let directory = tempfile::tempdir().expect("SQLite test directory");
     let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
-            .await
-            .expect("open SQLite store set"),
+        lash_sqlite_store::SqliteStoreSet::open(
+            directory.path().join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open SQLite store set"),
     );
     a_drained_nodes_sessions_resume_on_the_next_builds_node(stores).await;
 }
@@ -305,10 +308,13 @@ async fn a_drained_nodes_sessions_resume_on_the_next_builds_node_on_postgres() {
     let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
     let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
         &storage,
-        lash_sqlite_store::SqliteStoreSet::open((attachments.path()).join("attachments.db"))
-            .await
-            .expect("SQLite attachment store")
-            .attachment_store(),
+        lash_sqlite_store::SqliteStoreSet::open(
+            (attachments.path()).join("attachments.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite attachment store")
+        .attachment_store(),
     ));
     a_drained_nodes_sessions_resume_on_the_next_builds_node(stores).await;
 }

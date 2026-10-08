@@ -198,9 +198,9 @@ async fn reading_a_hot_wal_database_leaves_its_bytes_untouched() {
         StoreOptions {
             connection_policy: SqliteConnectionPolicy {
                 wal_autocheckpoint_pages: 0,
-                ..SqliteConnectionPolicy::default()
+                ..SqliteConnectionPolicy::standard(crate::SqliteSynchronous::Normal)
             },
-            ..StoreOptions::default()
+            ..StoreOptions::standard(crate::SqliteSynchronous::Normal)
         },
     )
     .await

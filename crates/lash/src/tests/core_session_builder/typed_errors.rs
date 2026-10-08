@@ -14,9 +14,12 @@ async fn a_cold_open_refuses_a_head_without_identity_even_for_root() {
     let files = tempfile::tempdir().expect("SQLite directory");
     let path = files.path().join("lash.db");
     let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(&path)
-            .await
-            .expect("SQLite stores"),
+        lash_sqlite_store::SqliteStoreSet::open(
+            &path,
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("SQLite stores"),
     );
     let backend = lash_conformance::backend_over(stores);
     let build = || {
@@ -282,6 +285,7 @@ async fn a_native_cold_open_preserves_state_codec_refusals() {
 async fn a_core_without_a_tool_loss_choice_is_refused() {
     let builder = LashCore::standard_builder(sqlite_memory_store_backend().await)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(crate::DataRetention::standard())
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1));
     assert!(matches!(
         builder.build(crate::testing::runtime_lease_owner()),
@@ -372,6 +376,56 @@ async fn a_session_records_the_tool_authority_its_creator_states() {
             .config;
     assert_eq!(recorded.tool_access, restricted);
     core.shutdown().await.expect("shutdown");
+}
+
+/// D-DEFAULTS2: a host must state what it keeps; lash has no data retention
+/// of its own to fall back on.
+#[tokio::test]
+async fn a_core_without_a_data_retention_statement_is_refused() {
+    let builder = LashCore::standard_builder(sqlite_memory_store_backend().await)
+        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+        .tool_source_policy(crate::tools::ToolSourcePolicy::Tolerate)
+        .execution_budgets(crate::ExecutionBudgets::recommended())
+        .delta_coalescing(crate::DeltaCoalescing::recommended());
+    assert!(matches!(
+        builder.build(crate::testing::runtime_lease_owner()),
+        Err(EmbedError::MissingDataRetention)
+    ));
+}
+
+/// D-DEFAULTS2: the revision retention a host states is what each session
+/// it creates records, in the store that releases revisions by it.
+#[tokio::test]
+async fn a_created_session_records_the_revision_retention_its_host_states() {
+    let window = std::num::NonZeroU32::new(3).expect("three is nonzero");
+    for stated in [
+        crate::Retention::HeadOnly,
+        crate::Retention::LastTurns(window),
+        crate::Retention::UntilGc,
+    ] {
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(
+            sqlite_memory_store_backend().await,
+        ))
+        .data_retention(crate::DataRetention {
+            session_revisions: stated,
+            ..crate::DataRetention::standard()
+        })
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("a core under a stated retention");
+        let id = crate::SessionId::from("stated-retention");
+        core.session(id.clone())
+            .create(crate::SessionCreation::root(
+                crate::plugins::SessionToolAccess::ambient(),
+                mock_session_spec(),
+            ))
+            .await
+            .expect("create");
+        let session = core.session(id).open().await.expect("open");
+        assert_eq!(session.retention().await.expect("retention"), stated);
+        core.shutdown().await.expect("shutdown");
+    }
 }
 
 /// FIG-5431: a creator must choose the session's stall bound.

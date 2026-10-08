@@ -68,7 +68,7 @@ fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
                     .context_window_tokens(128_000)
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .request_defaults(Default::default())
+                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),
@@ -169,6 +169,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
     );
     let core = lash::LashCore::rlm_builder(backend, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -176,6 +177,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
         .serve_test_llm_profile(
             provider,
             lash_core::LlmProfileMetadata::builder("cache-regression-model")
+                .cache_retention(lash_core::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
                 .build()
                 .expect("cache regression model"),

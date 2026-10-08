@@ -270,9 +270,12 @@ async fn a_session_created_under_defaults_a_reopens_under_a_on_sqlite_memory() -
 async fn a_session_created_under_defaults_a_reopens_under_a_on_sqlite_file() -> Result<()> {
     let directory = tempfile::tempdir().expect("SQLite test directory");
     let stores = Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(directory.path().join("lash.db"))
-            .await
-            .expect("open SQLite store set"),
+        lash_sqlite_store::SqliteStoreSet::open(
+            directory.path().join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("open SQLite store set"),
     );
     a_session_created_under_defaults_a_reopens_under_a(stores).await
 }

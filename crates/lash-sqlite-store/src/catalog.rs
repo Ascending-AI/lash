@@ -16,6 +16,7 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
             relation: request.relation.clone(),
             pending_observer_intents: request.pending_observer_intents.clone(),
         };
+        let retention = request.retention;
         let created_at_ms = self.clock.timestamp_ms();
         let config = request.config.clone();
         self.conn
@@ -24,7 +25,13 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                 let outcome = (|| {
                     crate::persistence::ensure_session_not_deleted_conn(tx, &meta.session_id)?;
                     let inserted =
-                        session_meta::write_session_meta(tx, &meta, created_at_ms, fleet_format)?;
+                        session_meta::write_session_meta(
+                        tx,
+                        &meta,
+                        retention,
+                        created_at_ms,
+                        fleet_format,
+                    )?;
                     if inserted {
                         // The config's plugin namespaces are admitted against
                         // the fleet record's writer ranges before the head

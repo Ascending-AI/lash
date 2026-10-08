@@ -190,7 +190,7 @@ pub(crate) async fn retrieve_attachment(
         .attachment_store
         .get(
             &parsed_id,
-            lash::persistence::AttachmentReadPolicy::DEFAULT.max_blob_bytes,
+            lash::persistence::AttachmentReadPolicy::STANDARD.max_blob_bytes,
         )
         .await
     {

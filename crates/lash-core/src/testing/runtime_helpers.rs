@@ -541,6 +541,7 @@ pub async fn create_runtime_fixture_session_with_config(
                 config,
                 head: crate::SessionCreationHead::Config,
                 owning_process_id: None,
+                retention: crate::Retention::UntilGc,
             })
             .await?,
         crate::store::SessionAdmission::Created,
@@ -584,6 +585,7 @@ pub async fn recording_session_store(
                 crate::SessionToolAccess::ambient(),
             ),
             head: crate::SessionCreationHead::Config,
+            retention: crate::Retention::UntilGc,
         })
         .await
         .expect("create a session store from the backend catalog");
@@ -604,6 +606,7 @@ pub fn test_runtime_host_config(backend: &crate::Backend) -> RuntimeHostConfig {
         crate::ToolSourcePolicy::Tolerate,
         crate::ExecutionBudgets::recommended(),
         crate::runtime::DeltaCoalescing::recommended(),
+        DataRetentionConfig::standard(),
     )
 }
 

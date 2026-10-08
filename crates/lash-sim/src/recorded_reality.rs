@@ -80,7 +80,9 @@ fn request(model: &str, stream: bool, structured: bool) -> LlmRequest {
                             .capability(lash_core::LlmProfileCapability::default())
                             .extra_body(Default::default())
                             .request_defaults(lash_core::provider::LlmProfileRequestDefaults {
-                                ..Default::default()
+                                ..lash_core::provider::LlmProfileRequestDefaults::new(
+                                    lash_core::provider::CacheRetention::Short,
+                                )
                             })
                             .build()
                             .expect("valid profile");

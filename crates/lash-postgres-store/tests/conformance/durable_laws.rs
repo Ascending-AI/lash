@@ -51,6 +51,7 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
             lash_core_execution::SessionToolAccess::ambient(),
         ),
         head: lash_core_execution::SessionCreationHead::Config,
+        retention: lash_core_execution::Retention::UntilGc,
     }
 }
 
@@ -97,10 +98,13 @@ macro_rules! session_store_factory_fixture {
                 reset(storage.pool()).await;
                 (
                     Arc::new(storage.session_store_factory()) as Arc<dyn ConformanceDeployment>,
-                    lash_sqlite_store::SqliteStoreSet::open((root).join("attachments.db"))
-                        .await
-                        .expect("SQLite attachment store")
-                        .attachment_store()
+                    lash_sqlite_store::SqliteStoreSet::open(
+                        (root).join("attachments.db"),
+                        lash_sqlite_store::SqliteSynchronous::Normal,
+                    )
+                    .await
+                    .expect("SQLite attachment store")
+                    .attachment_store()
                         as Arc<dyn lash_core_execution::AttachmentStore>,
                 )
             })

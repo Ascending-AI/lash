@@ -320,6 +320,7 @@ pub(super) async fn fork_at_in_catalog(
             crate::session_meta::write_session_meta(
                 tx,
                 &session_meta,
+                request.retention,
 
                 created_at_ms,
                 fleet_format,

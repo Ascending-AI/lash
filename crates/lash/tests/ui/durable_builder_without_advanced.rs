@@ -5,15 +5,19 @@ async fn durable_core_without_advanced(
     data_dir: &Path,
 ) -> lash::Result<lash::LashCore> {
     let model = lash::LlmProfileMetadata::builder("compile-only")
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(4096)
         .build()
         .expect("valid model metadata");
 
     // A store set supplies durable ports to a test effect host.
     let stores = std::sync::Arc::new(
-        lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash.db"))
-            .await
-            .expect("sqlite store set"),
+        lash_sqlite_store::SqliteStoreSet::open(
+            data_dir.join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await
+        .expect("sqlite store set"),
     );
     let backend: lash::Backend = lash_conformance::backend_over(stores);
     // The RLM factory keeps its Lashlang artifacts in that same backend.
@@ -36,6 +40,7 @@ async fn durable_core_without_advanced(
                 .expect("one key registers"),
         ))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

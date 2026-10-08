@@ -10,11 +10,16 @@ use std::time::Duration;
 use crate::*;
 
 crate::live_replay_tests!({
-    let original = crate::InMemoryLiveReplayStore::default();
+    let original =
+        crate::InMemoryLiveReplayStore::new(crate::InMemoryLiveReplayStoreConfig::standard());
     let preserved = original.reopen_preserving_history();
     (
         (),
-        || Arc::new(crate::InMemoryLiveReplayStore::default()) as Arc<dyn LiveReplayStore>,
+        || {
+            Arc::new(crate::InMemoryLiveReplayStore::new(
+                crate::InMemoryLiveReplayStoreConfig::standard(),
+            )) as Arc<dyn LiveReplayStore>
+        },
         || {
             Arc::new(crate::InMemoryLiveReplayStore::with_bounds(
                 1,
@@ -30,7 +35,9 @@ crate::live_replay_tests!({
         Duration::from_millis(20),
         (
             Arc::new(original) as Arc<dyn LiveReplayStore>,
-            Arc::new(crate::InMemoryLiveReplayStore::default()) as Arc<dyn LiveReplayStore>,
+            Arc::new(crate::InMemoryLiveReplayStore::new(
+                crate::InMemoryLiveReplayStoreConfig::standard(),
+            )) as Arc<dyn LiveReplayStore>,
             Arc::new(preserved) as Arc<dyn LiveReplayStore>,
         ),
     )

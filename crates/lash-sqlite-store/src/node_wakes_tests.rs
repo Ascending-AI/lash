@@ -38,9 +38,10 @@ struct SqliteTier {
 impl SqliteTier {
     async fn open() -> Self {
         let dir = tempfile::tempdir().expect("a database directory");
-        let stores = SqliteStoreSet::open(dir.path().join("lash.db"))
-            .await
-            .expect("open the database file");
+        let stores =
+            SqliteStoreSet::open(dir.path().join("lash.db"), crate::SqliteSynchronous::Normal)
+                .await
+                .expect("open the database file");
         Self { stores, _dir: dir }
     }
 }
@@ -322,11 +323,12 @@ async fn run_child(role: &str, database: &Path) {
     let stores = if role == "hot" {
         SqliteStoreSet::open_with_clock(
             database,
+            crate::SqliteSynchronous::Normal,
             Arc::new(lash_core::testing::TestClock::new(STORE_TIME)),
         )
         .await
     } else {
-        SqliteStoreSet::open(database).await
+        SqliteStoreSet::open(database, crate::SqliteSynchronous::Normal).await
     }
     .expect("the child opens the database file");
     if role == "sweeper" {
@@ -415,6 +417,7 @@ async fn a_wake_crosses_processes_and_a_killed_process_is_reaped_by_its_lock() {
     let database = dir.path().join("lash.db");
     let stores = SqliteStoreSet::open_with_clock(
         &database,
+        crate::SqliteSynchronous::Normal,
         Arc::new(lash_core::testing::TestClock::new(STORE_TIME)),
     )
     .await

@@ -711,10 +711,10 @@ pub(crate) async fn apply_runtime_commit_tx(
             .fetch_optional(crate::observed_sql::executor(&mut ***tx))
             .await
             .map_err(store_sqlx_error)?
-            .map_or(
-                Ok(lash_core_execution::Retention::default()),
-                |(kind, last_turns)| lash_core_execution::Retention::from_stored(&kind, last_turns),
-            )?;
+            .map(|(kind, last_turns)| {
+                lash_core_execution::Retention::from_stored(&kind, last_turns)
+            })
+            .transpose()?;
     if plan.head_changed()
         && let Some(old_leaf_node_id) = plan.old_leaf_node_id()
     {
@@ -747,8 +747,9 @@ pub(crate) async fn apply_runtime_commit_tx(
     }
     // `until_gc` releases nothing here and reads no pin. The other
     // policies release what this publication moved out of their window,
-    // once the run's terminal names it.
-    if retention.releases_at_commit() {
+    // once the run's terminal names it. A session with no metadata row
+    // recorded no policy and releases nothing either.
+    if retention.is_some_and(lash_core_execution::Retention::releases_at_commit) {
         crate::revisions::release_unretained_tx(&mut *tx, false, Some(&commit.session_id)).await?;
     }
     let work_remaining = sqlx::query_scalar::<_, bool>(

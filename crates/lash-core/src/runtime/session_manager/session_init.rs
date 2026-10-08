@@ -426,6 +426,7 @@ async fn bind_session_store(
         config: crate::store::persisted_session_config_from_state(&plan.initial_runtime_state),
         head: crate::SessionCreationHead::Config,
         owning_process_id: plan.owning_process_id.clone(),
+        retention: current.host.core.durability.session_retention,
     };
     let creation_error = |error: crate::StoreError| {
         crate::PluginError::Session(session_creation_store_factory_error(
@@ -1080,6 +1081,7 @@ mod tests {
                 .into_handle()
         };
         let thinker = crate::LlmProfileMetadata::builder("thinker-wire")
+            .cache_retention(crate::provider::CacheRetention::Short)
             .context_window_tokens(64_000)
             .capability(crate::LlmProfileCapability {
                 reasoning: Some(crate::ReasoningCapability {

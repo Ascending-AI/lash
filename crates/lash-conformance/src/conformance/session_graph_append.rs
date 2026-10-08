@@ -192,6 +192,7 @@ async fn abandoned_branch_scenario(
             &source_request.config.session_policy(),
             crate::SessionToolAccess::ambient(),
         ),
+        retention: crate::Retention::UntilGc,
     };
     factory
         .fork_session(&branch_request)
@@ -204,6 +205,7 @@ async fn abandoned_branch_scenario(
         relation: branch_request.relation.clone(),
         config: branch_request.config.clone(),
         head: crate::SessionCreationHead::Config,
+        retention: crate::Retention::UntilGc,
     };
     let branch = factory
         .live_view_for(&branch_open_request)

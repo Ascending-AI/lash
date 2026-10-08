@@ -119,7 +119,7 @@ pub async fn file(path: impl AsRef<Path>, clock: Arc<SimClock>) -> SqliteStoreSe
     wait_out_renders(&clock);
     let options = SqliteStoreSetOptions {
         inline_calls: true,
-        ..SqliteStoreSetOptions::default()
+        ..SqliteStoreSetOptions::standard(lash_sqlite_store::SqliteSynchronous::Normal)
     };
     let stores = SqliteStoreSet::open_with_options_and_clock(path, options, clock)
         .await

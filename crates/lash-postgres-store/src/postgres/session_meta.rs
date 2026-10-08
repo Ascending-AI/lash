@@ -102,6 +102,7 @@ pub(crate) async fn load_recorded_lineage_tx(
 pub(crate) async fn write_session_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     meta: &SessionMeta,
+    retention: lash_core_execution::Retention,
     created_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<bool, StoreError> {
@@ -128,6 +129,8 @@ pub(crate) async fn write_session_meta_tx(
             )) as i32,
         )
         .bind(meta.owning_process_id.as_ref().map(ProcessId::as_str))
+        .bind(retention.kind())
+        .bind(retention.last_turns().map(i64::from))
         .execute(crate::observed_sql::executor(&mut **tx))
         .await
         .map_err(store_sqlx_error)?;

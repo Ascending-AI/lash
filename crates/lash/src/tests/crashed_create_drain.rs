@@ -65,9 +65,12 @@ pub(super) async fn stores_of(
         }
         Storage::SqliteFile => {
             let files = tempfile::tempdir().expect("a SQLite store directory");
-            let stores = lash_sqlite_store::SqliteStoreSet::open(files.path().join("lash.db"))
-                .await
-                .expect("open the SQLite file stores");
+            let stores = lash_sqlite_store::SqliteStoreSet::open(
+                files.path().join("lash.db"),
+                lash_sqlite_store::SqliteSynchronous::Normal,
+            )
+            .await
+            .expect("open the SQLite file stores");
             let seams = stores.session_store_factory();
             (Arc::new(stores), Box::new(files), seams)
         }
@@ -82,6 +85,7 @@ pub(super) async fn stores_of(
                 &storage,
                 lash_sqlite_store::SqliteStoreSet::open(
                     (attachments.path()).join("attachments.db"),
+                    lash_sqlite_store::SqliteSynchronous::Normal,
                 )
                 .await
                 .expect("SQLite attachment store")

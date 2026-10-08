@@ -68,6 +68,7 @@ pub(crate) fn decode_catalog_relation(
 pub(crate) fn write_session_meta(
     conn: &Connection,
     meta: &SessionMeta,
+    retention: lash_core_execution::Retention,
     created_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<bool, StoreError> {
@@ -95,6 +96,8 @@ pub(crate) fn write_session_meta(
                     lash_core_execution::store::CURRENT_SESSION_STATE_VERSION
                 )),
                 meta.owning_process_id.as_ref().map(ProcessId::as_str),
+                retention.kind(),
+                retention.last_turns().map(i64::from),
             ],
         )
         .map_err(sqlite_error)?;

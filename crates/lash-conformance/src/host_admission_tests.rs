@@ -121,7 +121,7 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
                     .context_window_tokens(128_000)
                     .capability(Default::default())
                     .extra_body(Default::default())
-                    .request_defaults(Default::default())
+                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                     .build()
                     .expect("valid profile"),
             ),

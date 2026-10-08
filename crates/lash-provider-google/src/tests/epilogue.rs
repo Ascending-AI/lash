@@ -14,6 +14,6 @@ async fn google_completion_epilogue_conformance() {
         };
         GoogleOAuthProvider::new(std::sync::Arc::new(lash_core::provider::ProviderToken::new("access")))
             .with_transport(Arc::new(EpilogueTransport::new(body, true, scenario)))
-            .execute_request("access", json!({"model":"gemini-test"}), Some(LlmEventSender::new(|_| {})), None, crate::provider::ResponseReading { stream_termination: StreamTermination::RequireTerminalEvidence, defaults: lash_core::provider::LlmProfileRequestDefaults { expose_thinking: false, ..Default::default() } }, None).await
+            .execute_request("access", json!({"model":"gemini-test"}), Some(LlmEventSender::new(|_| {})), None, crate::provider::ResponseReading { stream_termination: StreamTermination::RequireTerminalEvidence, defaults: lash_core::provider::LlmProfileRequestDefaults { expose_thinking: false, ..lash_core::provider::LlmProfileRequestDefaults::new(lash_core::provider::CacheRetention::Short) } }, None).await
     }).await;
 }

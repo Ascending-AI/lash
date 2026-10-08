@@ -248,6 +248,7 @@ async fn committed_factory_attachment() -> (
             crate::SessionToolAccess::ambient(),
         ),
         head: crate::SessionCreationHead::Config,
+        retention: crate::Retention::UntilGc,
     };
     let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
         .await
@@ -257,6 +258,7 @@ async fn committed_factory_attachment() -> (
         backend.clone(),
         Arc::new(PersistenceReferrersAdapter(Arc::clone(store.store()))),
         RuntimeOwner::Session(request.session_id.clone()),
+        AttachmentPolicy::standard(),
     );
     let reference = session
         .put(vec![8, 8, 1], meta())
@@ -566,6 +568,7 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
         Arc::clone(&backend),
         manifest.clone() as Arc<dyn AttachmentReferrers>,
         session_owner("healthy-sweep"),
+        AttachmentPolicy::standard(),
     );
     let live = session
         .put(vec![4, 2, 4, 9], meta())
@@ -617,11 +620,13 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
         backend.clone(),
         manifest_a.clone() as Arc<dyn AttachmentReferrers>,
         session_owner("session-a"),
+        AttachmentPolicy::standard(),
     );
     let session_b = RuntimeAttachmentStore::new(
         backend.clone(),
         manifest_b.clone() as Arc<dyn AttachmentReferrers>,
         session_owner("session-b"),
+        AttachmentPolicy::standard(),
     );
 
     // Two sessions put identical bytes: ONE physical blob. Each session
@@ -1008,6 +1013,7 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
             crate::SessionToolAccess::ambient(),
         ),
         head: crate::SessionCreationHead::Config,
+        retention: crate::Retention::UntilGc,
     };
     let store = crate::testing::runtime_helpers::create_session_store(&factory, &request)
         .await
@@ -1021,6 +1027,7 @@ async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
             attempts,
         }),
         RuntimeOwner::Session(session_id.clone()),
+        AttachmentPolicy::standard(),
     ));
     FencedFixture {
         factory,
@@ -1411,6 +1418,7 @@ async fn a_bound_execution_holds_its_puts_and_an_unbound_put_its_upload() {
             .attachment_store(),
         manifest.clone(),
         session_owner("session-1"),
+        AttachmentPolicy::standard(),
     ));
     let journal = crate::ExecutionScope::turn("session-1", "turn-1")
         .journal_identity()
@@ -1452,6 +1460,7 @@ async fn a_process_runtime_put_is_held_by_its_record() {
             .attachment_store(),
         manifest.clone(),
         RuntimeOwner::Process(process_id.clone()),
+        AttachmentPolicy::standard(),
     ));
     assert!(
         store
@@ -1491,7 +1500,7 @@ fn attachment_request(
                 .context_window_tokens(128_000)
                 .capability(Default::default())
                 .extra_body(Default::default())
-                .request_defaults(Default::default())
+                .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                 .build()
                 .expect("valid profile"),
             ),
@@ -1727,6 +1736,7 @@ fn a_manifest_write_leaves_the_caller_runtime_running() {
                     delay: std::time::Duration::from_millis(300),
                 }),
                 session_owner("runtime-liveness"),
+                AttachmentPolicy::standard(),
             );
             let reference = session
                 .put(vec![4, 2], meta())

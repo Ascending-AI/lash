@@ -282,9 +282,12 @@ async fn postgres_connection_residue_digest(
 #[tokio::test]
 async fn residue_digest_covers_a_planted_sqlite_table() {
     let root = tempfile::tempdir().expect("create the planted-table root");
-    lash_sqlite_store::SqliteStoreSet::open(root.path().join("lash.db"))
-        .await
-        .expect("open a fresh SQLite store set");
+    lash_sqlite_store::SqliteStoreSet::open(
+        root.path().join("lash.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .expect("open a fresh SQLite store set");
     let connection =
         rusqlite::Connection::open(root.path().join("lash.db")).expect("open the durable core");
     connection

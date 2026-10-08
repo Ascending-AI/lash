@@ -206,6 +206,7 @@ impl Deployment {
             .execution_budgets(lash::ExecutionBudgets::recommended())
             .delta_coalescing(lash::DeltaCoalescing::recommended())
             .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+            .data_retention(lash::DataRetention::standard())
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
             .serve_test_llm_profile(model(&self.offered), served::metadata())
             .build(lash::persistence::LeaseOwnerIdentity::opaque(

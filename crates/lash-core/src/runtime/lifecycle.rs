@@ -222,11 +222,8 @@ impl LashRuntime {
                     manifest,
                     crate::RuntimeOwner::Session(state.session_id.clone()),
                     Arc::clone(&host.core.clock),
+                    previous_attachment_store.policy(),
                 )
-                .with_max_attachment_bytes(previous_attachment_store.max_attachment_bytes())
-                .with_read_policy(previous_attachment_store.read_policy())
-                .with_upload_expiry_ms(previous_attachment_store.upload_expiry_ms())
-                .with_output_retention(previous_attachment_store.output_retention())
                 .with_reclamation_retry(previous_attachment_store.reclamation_retry()),
             );
             host.core.durability.attachment_store = scoped;
@@ -828,6 +825,7 @@ mod tests {
             crate::ToolSourcePolicy::Tolerate,
             crate::ExecutionBudgets::recommended(),
             crate::runtime::DeltaCoalescing::recommended(),
+            crate::DataRetentionConfig::standard(),
         ));
         let services = crate::RuntimeServices::new(
             plugins,
@@ -949,6 +947,7 @@ mod tests {
                 crate::SessionToolAccess::ambient(),
             ),
             head: crate::SessionCreationHead::Config,
+            retention: crate::Retention::UntilGc,
         };
         let backend = crate::testing::sqlite_memory_store_backend().await;
         let factory = backend.session_store_factory();
@@ -1031,6 +1030,7 @@ mod tests {
                     crate::SessionToolAccess::ambient(),
                 ),
                 head: crate::SessionCreationHead::Config,
+                retention: crate::Retention::UntilGc,
             },
         )
         .await

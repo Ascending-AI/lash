@@ -244,7 +244,10 @@ impl<'run> TestExecutionContextBuilder<'run> {
             dispatch_parent_invocation: None,
             runtime_parent_invocation: None,
             protocol_iteration: 0,
-            attachment_store: Arc::new(crate::RuntimeAttachmentStore::ephemeral(attachment_store)),
+            attachment_store: Arc::new(crate::RuntimeAttachmentStore::ephemeral(
+                attachment_store,
+                crate::AttachmentPolicy::standard(),
+            )),
             clock,
             plugin_factories: None,
             process_lineage: None,

@@ -58,6 +58,7 @@ pub fn core(
     )
     .serve_sessions(false)
     .commit_budget(lash::CommitBudget::bounded(64 * 1024 * 1024, 4096))
+    .data_retention(lash::DataRetention::standard())
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
     .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
     .execution_budgets(lash::ExecutionBudgets::recommended())
@@ -114,6 +115,7 @@ fn untimed_workers() -> lash::rlm::WorkerService {
 
 fn metadata() -> Result<lash_core::LlmProfileMetadata> {
     lash_core::LlmProfileMetadata::builder(MODEL)
+        .cache_retention(lash_core::provider::CacheRetention::Short)
         .context_window_tokens(1_000_000)
         .build()
         .map_err(|error| anyhow::anyhow!("the cell model's metadata: {error}"))

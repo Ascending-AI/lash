@@ -1474,10 +1474,10 @@ mod runtime_store;
 #[cfg(any(test, feature = "testing"))]
 pub use runtime_store::UnavailableAttachmentStore;
 pub use runtime_store::{
-    AttachmentExecutionBinding, AttachmentHolder, AttachmentReadPolicy,
+    AttachmentExecutionBinding, AttachmentHolder, AttachmentPolicy, AttachmentReadPolicy,
     AttachmentReclamationRetryPolicy, AttachmentReclamationRetryPolicyError,
-    DEFAULT_ATTACHMENT_UPLOAD_EXPIRY_MS, NoopAttachmentReferrers, PersistenceReferrersAdapter,
-    RuntimeAttachmentStore,
+    NoopAttachmentReferrers, PersistenceReferrersAdapter, RuntimeAttachmentStore,
+    STANDARD_ATTACHMENT_UPLOAD_EXPIRY_MS,
 };
 
 #[expect(

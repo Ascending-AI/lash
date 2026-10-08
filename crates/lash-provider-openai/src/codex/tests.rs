@@ -67,6 +67,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
             lash_sansio::llm_profile::RecordedLlmProfile::mint(
                 lash_sansio::llm_profile::LlmProfileKey::new("request-fixture"),
                 lash_sansio::llm_profile::LlmProfileMetadata::builder("gpt-5.4".to_string())
+                    .cache_retention(lash_sansio::llm::capability::CacheRetention::Short)
                     .context_window_tokens(128_000)
                     .build()
                     .expect("valid profile"),

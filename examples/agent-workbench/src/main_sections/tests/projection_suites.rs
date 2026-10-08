@@ -38,11 +38,13 @@ async fn durable_transcript_projection_fixture() -> Vec<crate::ChatRow> {
         .serve_test_llm_profile(
             provider,
             lash::LlmProfileMetadata::builder("transcript-projection-model")
+                .cache_retention(lash::provider::CacheRetention::Short)
                 .context_window_tokens(200_000)
                 .build()
                 .expect("the model's metadata"),
         )
         .commit_budget(lash::CommitBudget::bounded(16 * 1024 * 1024, 4096))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

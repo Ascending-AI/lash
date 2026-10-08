@@ -54,6 +54,7 @@ async fn every_tool_a_standard_workbench_turn_offers_projects_under_every_provid
         .expect("the durable backend builds");
     let core = LashCore::standard_builder(backend)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .data_retention(lash::DataRetention::standard())
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())

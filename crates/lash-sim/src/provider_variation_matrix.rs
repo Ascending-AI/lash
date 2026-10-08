@@ -911,7 +911,9 @@ fn matrix_request(
                             .extra_body(Default::default())
                             .request_defaults(lash_core::provider::LlmProfileRequestDefaults {
                                 expose_thinking: true,
-                                ..Default::default()
+                                ..lash_core::provider::LlmProfileRequestDefaults::new(
+                                    lash_core::provider::CacheRetention::Short,
+                                )
                             })
                             .build()
                             .expect("valid profile");

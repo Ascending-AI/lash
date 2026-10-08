@@ -537,6 +537,7 @@ impl LashCore {
             relation,
             pending_observer_intents,
             config,
+            retention: self.env.core.durability.session_retention,
         };
         let mut fork = store_factory
             .fork_session(&request)
@@ -635,13 +636,10 @@ pub struct LashCoreBuilder {
     backend: Backend,
     commit_budget: Option<facade_support::CommitBudget>,
     queued_work_batching: Option<facade_support::QueuedWorkBatchingConfig>,
-    max_attachment_bytes: Option<Option<u64>>,
-    attachment_read_policy: Option<lash_core::AttachmentReadPolicy>,
+    data_retention: Option<crate::DataRetention>,
     provider_file_uploaders: Vec<Arc<dyn lash_core::attachments::ProviderFileUploader>>,
     provider_file_cache: lash_core::attachments::ProviderFileCacheLimits,
     delivery_fetch_horizon: crate::attachments::DeliveryFetchHorizon,
-    attachment_upload_expiry: Option<std::time::Duration>,
-    output_retention: Option<lash_core::OutputRetentionPolicy>,
     // Core fields applied over the config the backend's ports assemble.
     trace_runtime: Option<lash_core::runtime::TraceRuntime>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
@@ -661,7 +659,6 @@ pub struct LashCoreBuilder {
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
     process_event_sinks: Vec<Arc<dyn facade_support::ProcessEventSink>>,
-    process_observation_config: crate::process_observation::ProcessObservationConfig,
     process_observation_work_limits: crate::process_observation::ProcessObservationWorkLimits,
     serves_sessions: bool,
     attachment_reclamation_retry: crate::persistence::AttachmentReclamationRetryPolicy,
@@ -705,13 +702,10 @@ impl LashCoreBuilder {
             backend,
             commit_budget: None,
             queued_work_batching: None,
-            max_attachment_bytes: None,
-            attachment_read_policy: None,
+            data_retention: None,
             provider_file_uploaders: Vec::new(),
             provider_file_cache: Default::default(),
             delivery_fetch_horizon: Default::default(),
-            attachment_upload_expiry: None,
-            output_retention: None,
             trace_runtime: None,
             trace_sink: None,
             #[cfg(feature = "otel-trace")]
@@ -730,7 +724,6 @@ impl LashCoreBuilder {
             process_tool_visibility_filter: None,
             live_replay_store: None,
             process_event_sinks: Vec::new(),
-            process_observation_config: Default::default(),
             process_observation_work_limits: Default::default(),
             serves_sessions: Self::STANDARD_SERVE_SESSIONS,
             attachment_reclamation_retry:
@@ -801,18 +794,21 @@ impl LashCoreBuilder {
         self
     }
 
-    /// The default `None` preserves unbounded attachment puts. `Some(max_bytes)`
-    /// rejects larger puts before the configured attachment backend is called.
-    /// This deployment limit is independent from [`Self::commit_budget`].
-    pub fn max_attachment_bytes(mut self, max_attachment_bytes: Option<u64>) -> Self {
-        self.max_attachment_bytes = Some(max_attachment_bytes);
-        self
-    }
-
-    /// Bound actual attachment reads and aggregate request materialization,
-    /// including provider encoding. Independent of put and history limits.
-    pub fn attachment_read_policy(mut self, policy: lash_core::AttachmentReadPolicy) -> Self {
-        self.attachment_read_policy = Some(policy);
+    /// State what this host keeps, how much of it and for how long
+    /// ([`DataRetention`](crate::DataRetention)): the attachment put bound,
+    /// read budgets and upload expiry, which outputs leave history for a
+    /// retained attachment, which revisions a session keeps, and what the
+    /// live replay buffer and the process observation hub hold. Required:
+    /// lash has no default for any of them, and
+    /// [`DataRetention::standard`](crate::DataRetention::standard) is the
+    /// named preset a host may choose.
+    ///
+    /// Each step that applies the retained-output policy journals it, and a
+    /// session records its revision retention when it is created, so a
+    /// changed statement applies to new work and never to what a replay
+    /// serves.
+    pub fn data_retention(mut self, data_retention: crate::DataRetention) -> Self {
+        self.data_retention = Some(data_retention);
         self
     }
 
@@ -844,28 +840,6 @@ impl LashCoreBuilder {
         limits: lash_core::attachments::ProviderFileCacheLimits,
     ) -> Self {
         self.provider_file_cache = limits;
-        self
-    }
-
-    /// How long an attachment put outside any turn stays held by its upload
-    /// before cleanup may reclaim it, unless a turn, process or session
-    /// acquires it first. Defaults to 24 hours.
-    pub fn attachment_upload_expiry(mut self, expiry: std::time::Duration) -> Self {
-        self.attachment_upload_expiry = Some(expiry);
-        self
-    }
-
-    /// The byte policy every output is measured against before it enters
-    /// session history (FIG-1643). A tool presentation, or an RLM print or
-    /// final value, longer than `inline_limit_bytes` is retained as a session
-    /// attachment, and history keeps a witness of at most `witness_bytes` and
-    /// the attachment's reference in its place. The default is
-    /// [`OutputRetentionPolicy::DEFAULT`](crate::attachments::OutputRetentionPolicy::DEFAULT).
-    ///
-    /// Each step that applies the policy journals it, so a changed policy
-    /// applies to new outputs and never to what a replay serves.
-    pub fn output_retention(mut self, policy: crate::attachments::OutputRetentionPolicy) -> Self {
-        self.output_retention = Some(policy);
         self
     }
 
@@ -1078,9 +1052,13 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure the bounded live replay buffer used by session observation
-    /// cursors. This is best-effort reconnect recovery only; durable state
-    /// still comes from the session store and [`SessionReadView`].
+    /// Replace the built-in live replay buffer used by session observation
+    /// cursors with the host's own store, which carries the retention the
+    /// host constructed it with;
+    /// [`DataRetention::live_replay`](crate::DataRetention::live_replay)
+    /// then configures nothing. This is best-effort reconnect recovery only;
+    /// durable state still comes from the session store and
+    /// [`SessionReadView`].
     pub fn live_replay_store(mut self, live_replay_store: Arc<dyn LiveReplayStore>) -> Self {
         self.live_replay_store = Some(live_replay_store);
         self
@@ -1124,12 +1102,21 @@ impl LashCoreBuilder {
         }
         let backend = self.backend.clone();
         let store_factory = backend.session_store_factory();
+        let data_retention = self
+            .data_retention
+            .take()
+            .ok_or(EmbedError::MissingDataRetention)?;
         let core = self
-            .resolve_runtime_host_config()?
+            .resolve_runtime_host_config(lash_core::facade_support::DataRetentionConfig {
+                attachments: data_retention.attachments,
+                session_revisions: data_retention.session_revisions,
+            })?
             .with_provider_file_uploaders(std::mem::take(&mut self.provider_file_uploaders));
         let process_observation_hub = Arc::new(
-            crate::process_observation::ProcessObservationHub::new(self.process_observation_config)
-                .with_work_limits(self.process_observation_work_limits),
+            crate::process_observation::ProcessObservationHub::new(
+                data_retention.process_observation,
+            )
+            .with_work_limits(self.process_observation_work_limits),
         );
         let observation_sink: Arc<dyn lash_trace::TraceSink> = process_observation_hub.clone();
         let observation_sink = match core.tracing.emitter().product_observer() {
@@ -1143,7 +1130,7 @@ impl LashCoreBuilder {
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(
                 InMemoryLiveReplayStore::with_clock(
-                    facade_support::InMemoryLiveReplayStoreConfig::default(),
+                    data_retention.live_replay,
                     Arc::clone(&core.clock),
                 )
                 .with_work_limits(core.observation_work_limits),
@@ -1259,16 +1246,6 @@ impl LashCoreBuilder {
         };
         core.node.ensure(&core);
         Ok(core)
-    }
-
-    /// Bounds of the process observation hub: its per-process ring capacity
-    /// and idle TTL, and the durable read budget of one snapshot.
-    pub fn process_observation_config(
-        mut self,
-        config: crate::process_observation::ProcessObservationConfig,
-    ) -> Self {
-        self.process_observation_config = config;
-        self
     }
 }
 
