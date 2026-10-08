@@ -640,8 +640,15 @@ impl SqliteConnection {
         let path = target.open_name();
         let inner = AsyncConnection::start(move || Connection::open(path)).await?;
         let pragmas = crate::connection_sql::open_pragmas(policy);
+        let setup_gate = Arc::clone(&gate);
         inner
             .call(move |c| {
+                // Journal setup must queue with schema installation and other
+                // in-process writers, just like BEGIN IMMEDIATE. SQLite's WAL
+                // transition can otherwise race their schema/header locks.
+                let _setup_gate = setup_gate
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 // Install the busy handler through the rusqlite API *before* the
                 // WAL conversion so ordinary write contention waits on it.
                 c.busy_timeout(policy.busy_timeout)?;
@@ -687,6 +694,8 @@ impl SqliteConnection {
     ) -> tokio_rusqlite::Result<Self> {
         operational.validate()?;
 
+        let gate = write_gate(target);
+        let setup_gate = Arc::clone(&gate);
         let uri = target.read_only_uri();
         let inner = AsyncConnection::start(move || {
             Connection::open_with_flags(
@@ -699,6 +708,12 @@ impl SqliteConnection {
         .await?;
         inner
             .call(move |c| {
+                // Even cache_size reads the database schema. A first opener
+                // must wait for an in-process installer or WAL transition
+                // before spending the read-only SQLite busy budget.
+                let _setup_gate = setup_gate
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 c.busy_timeout(operational.readonly_busy_timeout)?;
                 c.set_prepared_statement_cache_capacity(operational.statement_cache_capacity);
                 c.pragma_update(None, "cache_size", operational.readonly_cache_size)?;
@@ -709,7 +724,7 @@ impl SqliteConnection {
         Ok(Self {
             operational,
             inner,
-            write_gate: write_gate(target),
+            write_gate: gate,
             read_gate: read_gate(target),
             checkpoint: None,
             fence: WriterFence::new(),
@@ -1068,6 +1083,56 @@ fn flatten<T>(result: tokio_rusqlite::Result<rusqlite::Result<T>>) -> rusqlite::
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[test]
+    fn first_open_waits_for_in_process_schema_installation() {
+        let dir = tempfile::tempdir().expect("first-open directory");
+        let path = dir.path().join("core.db");
+        let target = DatabaseTarget::File(path.clone());
+        let gate = write_gate(&target);
+        let installing = gate.lock().expect("installer gate");
+        let mut installer = Connection::open(&path).expect("installer connection");
+        let tx = installer
+            .transaction_with_behavior(TransactionBehavior::Exclusive)
+            .expect("first schema transaction");
+        for statements in crate::schema::provisioning_statements() {
+            tx.execute_batch(statements).expect("uncommitted schema");
+        }
+        let (answer, result) = std::sync::mpsc::channel();
+        let opener = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("opener runtime");
+            let mut options = crate::StoreOptions::default();
+            options.connection_policy.busy_timeout = Duration::from_millis(1);
+            options.connection_policy.operational.readonly_busy_timeout = Duration::from_millis(1);
+            let opened = runtime.block_on(crate::SqliteStore::open_file_with_options_for_testing(
+                &path, options,
+            ));
+            answer.send(opened.map(|_| ())).expect("opener result");
+        });
+        // An in-process installer owns the gate longer than either SQLite
+        // busy budget. Another first open must queue there rather than spend
+        // its busy timeout inspecting an uncommitted schema.
+        let premature = result.recv_timeout(Duration::from_millis(100));
+        let waited = matches!(&premature, Err(std::sync::mpsc::RecvTimeoutError::Timeout));
+        crate::compat::provision(&tx, FleetFormat::writable()).expect("schema stamp");
+        crate::release_stamp::write(&tx).expect("release stamp");
+        tx.commit().expect("finish schema installation");
+        drop(installing);
+        opener.join().expect("opener thread");
+        let opened = match premature {
+            Ok(opened) => opened,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => result.recv().expect("queued open"),
+            Err(error) => panic!("opener disconnected: {error}"),
+        };
+        opened.expect("concurrent first open waits for the schema installer");
+        assert!(
+            waited,
+            "first open must wait until schema installation commits"
+        );
+    }
 
     /// A connection to a bare scratch database whose installer laid down only
     /// its `lash_compat` row, so its writes pass the fence.

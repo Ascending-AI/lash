@@ -209,7 +209,7 @@ pub use lash_core::async_trait;
 /// Store→engine delivery obligations (ADR 0109): what a stalled obligation
 /// reports, and how this deployment competes for the recovery leader lease.
 pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};
-pub mod pacing;
+mod pacing;
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
     TurnCancelUndeliveredInputPolicy,
@@ -1189,7 +1189,6 @@ pub mod runtime {
     pub use lash_core::engine::{EngineRefusal, RefusalClass};
     pub use lash_core::runtime::ProcessDefinitionLocalExecution;
     pub use lash_core::runtime::SessionTurnAdmission;
-    pub use lash_core::runtime::obligations::relay::{RelayPolicy, RelayPolicyError};
     pub use lash_core::runtime::{CompactionBase, PresentationBinding, ToolPresentation};
     pub use lash_core::tool_dispatch::ToolAttemptLineage;
     /// The cancellation policy pinned in a Run-owned source descriptor.
@@ -1229,17 +1228,15 @@ pub mod runtime {
     pub use lash_core::runtime::{
         AdmittedDirectSend, AdmittedScope, AssembledTurn, AssistantResponseHookEvents,
         AssistantResponsePlan, AssistantStreamHookState, CheckpointAdmittedSet,
-        CommitAdmissionPolicy, CommitAdmissionPolicyError, DirectCompletionClient, EffectAddress,
-        EmbeddedRuntimeHost, EventSink, ExecutionScope, LlmRequestSpec, LlmStreamRecord,
-        NoopEventSink, NoopTurnActivitySink, PollPacing, ProcessCommand, ProcessEffectOutcome,
-        ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution, RuntimeControlConfig,
-        RuntimeDurabilityConfig, RuntimeEffectCommand, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind,
-        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeInvocation,
-        RuntimePacingPolicy, RuntimeProviderConfig, SleepSpec, TraceEmitter, TraceRuntime,
-        TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
-        WorkCadencePolicy,
+        DirectCompletionClient, EffectAddress, EmbeddedRuntimeHost, EventSink, ExecutionScope,
+        LlmRequestSpec, LlmStreamRecord, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
+        ProcessEffectOutcome, ProcessListSelection, RunAggregateWakePolicy, RuntimeAttribution,
+        RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectInvocation,
+        RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+        RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder, RuntimeError,
+        RuntimeErrorCode, RuntimeInvocation, RuntimeProviderConfig, SleepSpec, TraceEmitter,
+        TraceRuntime, TurnCancelWait, TurnContext, TurnPrelude, TurnPreludeRef, WorkCadenceError,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the
