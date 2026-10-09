@@ -72,6 +72,8 @@ PACKAGE_DEPS = {
         "normal": {
             "anyhow": "//third-party/rust:p0011",
             "axum": "//third-party/rust:p0021",
+            "chrono": "//third-party/rust:p0044",
+            "futures_util": "//third-party/rust:p0127",
             "lash": "//crates/lash:lash",
             "opentelemetry_sdk": "//third-party/rust:p0223",
             "reqwest": "//third-party/rust:p0277",

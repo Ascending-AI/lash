@@ -52,3 +52,4 @@ mod telemetry;
 mod tools;
 mod waits;
 mod workbench;
+mod workflows;

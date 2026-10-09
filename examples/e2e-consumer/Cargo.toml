@@ -10,9 +10,11 @@ description = "Executing external Lash consumer for real-host contract acceptanc
 workspace = true
 
 [dependencies]
-lash = { workspace = true, features = ["sqlite", "postgres", "testing", "otel-trace"] }
+lash = { workspace = true, features = ["sqlite", "postgres", "testing", "otel-trace", "rlm"] }
 anyhow = { workspace = true }
 axum = "0.8"
+chrono = { workspace = true }
+futures-util = { workspace = true }
 opentelemetry_sdk = { version = "0.33", features = ["metrics"] }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }

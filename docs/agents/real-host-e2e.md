@@ -8,7 +8,7 @@ facade over the case's store.
 
 ## The catalogue
 
-`scripts/lash-e2e-manifest.json` owns scenario selection. It lists S01–S37
+`scripts/lash-e2e-manifest.json` owns scenario selection. It lists S01–S38
 except S19 and S20, which exercised the OS-worker process engine lash no
 longer ships (FIG-5158). For each scenario it lists the named laws and
 risks, owner lanes, store/leg/channel/variant permutations, required
@@ -35,9 +35,9 @@ use file SQLite; S30 uses memory SQLite. Full and release select the same
 deterministic catalogue; the paid live-provider cases S35/S36 are a separate
 `live` tier.
 
-On 2026-10-08 the release catalogue holds 132 rows:
-- 92 are `ready`.
-- 20 are `retired`: S10, S13, S24, S33 and S09's before-intent variant. Their
+On 2026-10-08 the release catalogue holds 134 rows:
+- 86 are `ready`.
+- 28 are `retired`: S10, S13, S24, S33 and S09's before-intent variant. Their
   subjects went with the Run journal (FIG-5174) or with build generations and
   finalize (FIG-5200).
 - 20 are `held`: L13 (FIG-5193) re-scopes S22, S23, S31 and S32, so a release
@@ -67,6 +67,7 @@ scenario family:
 | `browser` | S29 |
 | `telemetry` | S34 |
 | `feeds` | S37 |
+| `workflows` | S38 |
 
 Every case is an ignored test that refuses without its runner's
 environment, so a plain `kiln test` of the target passes nothing off as
@@ -80,6 +81,9 @@ against the digest the runner built and records it as a case artifact.
 
 - `Host::Consumer` is `examples/e2e-consumer`, a host built from the public
   facade alone. Its fixture scripts the provider's steps and the tool bodies.
+  For S38 it boots in workflow mode instead: the RLM protocol, two host tools,
+  and routes that open, edit, publish, run and follow a workflow through
+  `lash::workflow`.
 - `Host::Workbench` is `examples/agent-workbench` with its `e2e-tools`
   feature. The feature adds host-side fixtures and routes only:
   - the H2 scripted provider and tool bodies;

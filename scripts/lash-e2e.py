@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "scripts/lash-e2e-manifest.json"
 SMOKE = {"S01", "S02", "S17", "S18", "S26", "S30"}
 # S19/S20 exercised the OS-worker engine lash no longer ships (FIG-5158).
-CATALOGUE = {f"S{i:02}" for i in range(1, 38)} - {"S19", "S20"}
+CATALOGUE = {f"S{i:02}" for i in range(1, 39)} - {"S19", "S20"}
 AUDITS = {"F04", "Z0A", "Z0P", "Z01", "Z02", "Z03", "Z04", "Z05"}
 GATES = {"phase_a", "facade", "schema"}
 COUNTS = ("selected", "executed", "passed", "failed", "not_run")
@@ -58,7 +58,7 @@ def load_manifest(path: Path = MANIFEST) -> dict:
     scenarios = manifest["scenarios"]
     require(isinstance(scenarios, list), "scenarios must be a list")
     ids = [row["id"] for row in scenarios]
-    require(len(ids) == len(set(ids)) and set(ids) == CATALOGUE, "manifest must name S01–S37, less the retired S19/S20, exactly once")
+    require(len(ids) == len(set(ids)) and set(ids) == CATALOGUE, "manifest must name S01–S38, less the retired S19/S20, exactly once")
     require(set(manifest["release_audits"]) == AUDITS, "release audits are incomplete")
     require(set(manifest["release_gates"]) == GATES, "release gates are incomplete")
     for scenario in scenarios:

@@ -25,6 +25,7 @@ mod fixture;
 mod scenario;
 mod telemetry;
 mod telemetry_scenario;
+mod workflow;
 
 #[derive(Clone)]
 struct Host {
@@ -348,9 +349,11 @@ async fn main() -> Result<()> {
         .context("build the durable backend")?;
     let controls = Arc::new(fixture::Controls::default());
     let case = scenario::Fixture::from_env("E2E_CONSUMER_FIXTURE")?;
-    let scenario = match std::env::var("E2E_CONSUMER_SCENARIO").ok().as_deref() {
-        None => None,
-        Some("S34") => Some(telemetry_scenario::Scenario::default()),
+    let (scenario, workflows) = match std::env::var("E2E_CONSUMER_SCENARIO").ok().as_deref() {
+        None => (None, false),
+        Some("S34") => (Some(telemetry_scenario::Scenario::default()), false),
+        // The workflow host: lash's VM process engine and the workflow routes.
+        Some("S38") => (None, true),
         Some(scenario) => anyhow::bail!("unsupported consumer scenario {scenario}"),
     };
     let provider = match (&scenario, &case) {
@@ -373,7 +376,15 @@ async fn main() -> Result<()> {
     let trace = std::env::var_os("E2E_CONSUMER_TRACE")
         .map(PathBuf::from)
         .unwrap_or_else(|| root.join("trace.jsonl"));
-    let builder = LashCore::standard_builder(backend)
+    // The consumer's own tools are a standard-protocol surface; the workflow
+    // host declares its tools with the bindings a workflow calls them by.
+    let builder = if workflows {
+        workflow::builder(backend)?
+    } else {
+        LashCore::standard_builder(backend)
+            .plugin(Arc::new(fixture::ConsumerPlugin(controls.clone())))
+    };
+    let builder = builder
         .llm_profiles(Arc::new(profiles))
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .data_retention(lash::DataRetention::standard())
@@ -381,7 +392,6 @@ async fn main() -> Result<()> {
         .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
-        .plugin(Arc::new(fixture::ConsumerPlugin(controls.clone())))
         .trace_sink(Arc::new(lash::tracing::JsonlTraceSink::new(trace)))
         .trace_level(lash::tracing::TraceLevel::Extended)
         .telemetry_content(lash::tracing::TelemetryContent::Captured);
@@ -459,6 +469,11 @@ async fn main() -> Result<()> {
         let app = match scenario {
             Some(scenario) => app.merge(scenario.router(stores.clone())),
             None => app,
+        };
+        let app = if workflows {
+            app.merge(workflow::router(core.clone()))
+        } else {
+            app
         };
         let listener = tokio::net::TcpListener::bind(http_addr).await?;
         axum::serve(listener, app)

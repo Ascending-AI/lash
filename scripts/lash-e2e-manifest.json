@@ -4748,6 +4748,84 @@
       "observable": "The turn runs on B, then resumes on A from committed state alone (the replay tripwire counts no hidden replay); both nodes' snapshots are one durable head; every A feed converges on the durable rows once and in order. With the process-local memory live replay store, B's live activity reaches B's feed and never A's, and A converges through the durable head, reporting the span it never held once as an unavailable replay gap (FIG-5399). With the shared PostgreSQL live replay store (FIG-5101), A's feeds carry B's live activity before commit, one attempt reset retracts B's abandoned attempt before A's own streams, and no replay gap is reported (FIG-5366).",
       "arc_guards": [],
       "host": "workbench"
+    },
+    {
+      "id": "S38",
+      "title": "a generated workflow is edited, published, run and shown across a handover",
+      "owner": "W8",
+      "rules": [],
+      "risks": [
+        "R2",
+        "R5"
+      ],
+      "dependencies": "Base, PG, FIG-5574 workflow publication, FIG-5575 typed edits and correspondence, FIG-5576 execution overlay, FIG-5621 inline process definitions",
+      "setup": "Two consumer nodes in workflow mode over one store. The host loads a checked-in generated workflow (try/catch, a closure, a nested loop with an async tool wait, a process it defines inline and starts) as a typed document, publishes it, edits the try region and the inner loop through typed edits, publishes again, and starts one run of each definition.",
+      "fault": "With both runs parked on a review inside the inner loop, SIGKILL the node that owns them; the second node takes both over.",
+      "observable": "The facade reads the published document back with no source text or opaque node. The publication's correspondence retains every old node and reports the two new ones as authored and as a clone. After the kill each run still names its own definition, and a follower attached on the second node gets the run's document without an execution start, marks its coverage incomplete, and by the end shows each site's occurrences, loop iterations and branch choices as the order's lines decide them. Both runs finish with the output of the definition they were admitted under, and every tool body ran once.",
+      "arc_guards": [],
+      "host": "consumer",
+      "cases": [
+        {
+          "variant": "default",
+          "store": "sqlite_file",
+          "leg": "resume",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "nodes": 2,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "commits",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "workflows::s38_generated_workflow_is_edited_published_run_and_shown_across_a_handover_resume"
+          }
+        },
+        {
+          "variant": "default",
+          "store": "postgresql",
+          "leg": "resume",
+          "channel": "rlm",
+          "tiers": [
+            "full",
+            "release"
+          ],
+          "nodes": 2,
+          "binaries": [
+            "host",
+            "vm_worker"
+          ],
+          "artifacts": [
+            "commits",
+            "store",
+            "host",
+            "trace",
+            "cleanup",
+            "junit",
+            "provenance"
+          ],
+          "state": "ready",
+          "hold_reason": null,
+          "registration": {
+            "label": "//crates/lash-e2e:e2e__test",
+            "test": "workflows::s38_generated_workflow_is_edited_published_run_and_shown_across_a_handover_postgresql_resume"
+          }
+        }
+      ]
     }
   ],
   "release_audits": {

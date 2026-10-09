@@ -1025,6 +1025,8 @@ version = "0.0.0-dev"
 dependencies = [
  "anyhow",
  "axum",
+ "chrono",
+ "futures-util",
  "lash-runtime",
  "opentelemetry_sdk",
  "reqwest",
