@@ -1,14 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::Duration;
 
 use lash::LashCore;
 use lash::process::*;
-use lash::tracing::{TraceEvent, TraceLanguageExecutionPayload};
+use lash::tracing::TraceLanguageExecutionPayload;
 use lash::vm::{LinkedModule, ProcessRef};
 use lash::workflow::{WorkflowDocument, WorkflowRead};
 use tokio::sync::mpsc;
+use tokio_stream::StreamExt as _;
 
 use crate::{DisplayDelta, DisplayState, RunEvent, RunStatus};
 
@@ -196,93 +195,62 @@ impl PreparedRun {
         sender: mpsc::Sender<Result<RunEvent, RunError>>,
         host: Arc<crate::display::HostTools>,
     ) -> Result<(), RunError> {
-        // Subscribe before reading the graph: the live route buffers what the
-        // process publishes while lash reads its workflow.
-        let mut live = core
-            .processes()
-            .subscribe_observation(&process, None)
-            .await?;
+        let observed = core.processes().observe(&process);
+        let snapshot = observed.snapshot().await?;
+        // The feed retains everything published while the workflow is read.
+        let mut feed = observed.subscribe_and_recover(snapshot.cursor);
         let mut overlay = Overlay {
             view: RunView::read(&core, &process, self.workflow_version).await?,
-            process: process.clone(),
+            process,
             sequence: 0,
             display: DisplayState::default(),
             completed_calls: BTreeMap::new(),
             delivered: BTreeSet::new(),
             host,
-            observed: BTreeSet::new(),
         };
-        if let Some(item) = live.recv().await.map_err(lash::EmbedError::from)? {
-            for event in overlay.observation(item) {
+        let (events, terminal) = overlay.snapshot(snapshot.read_view)?;
+        for event in events {
+            if sender.send(Ok(event)).await.is_err() {
+                return Ok(());
+            }
+        }
+        if terminal {
+            return Ok(());
+        }
+        loop {
+            let item = tokio::select! {
+                _ = sender.closed() => return Ok(()),
+                item = feed.next() => item,
+            };
+            let Some(item) = item else {
+                return Err(RunError::Invalid(
+                    "the process observation feed ended".into(),
+                ));
+            };
+            let (events, terminal) = match item? {
+                ProcessObservationStreamItem::Event(event) => match &event.payload {
+                    ProcessObservationEventPayload::LanguageExecution(observation) => {
+                        (overlay.language_observation(&observation.execution)?, false)
+                    }
+                    ProcessObservationEventPayload::Committed { event } => (
+                        overlay.durable(event)?,
+                        matches!(event.fact, ProcessLifecycleFact::Terminal { .. }),
+                    ),
+                },
+                ProcessObservationStreamItem::Gap { observation, .. } => {
+                    // A gap retires provisional bindings. Applied display operations
+                    // remain host state; retained effect evidence rebuilds bindings.
+                    overlay.completed_calls.clear();
+                    overlay.snapshot(observation.read_view)?
+                }
+            };
+            for event in events {
                 if sender.send(Ok(event)).await.is_err() {
                     return Ok(());
                 }
             }
-        }
-        let mut from = ProcessEventsFrom::Start(process.clone());
-        let mut poll = tokio::time::interval(Duration::from_millis(25));
-        loop {
-            let page = core
-                .processes()
-                .events(
-                    from.clone(),
-                    NonZeroUsize::new(128)
-                        .ok_or_else(|| RunError::Invalid("zero page bound".into()))?,
-                    ProcessEventQueryMode::Full,
-                )
-                .await?;
-            let ProcessEventReadOutcome::Retained(page_events) = page.outcome else {
-                return Err(RunError::Invalid(
-                    "the process event history is unavailable".into(),
-                ));
-            };
-            let ProcessEventPageEvents::Full(events) = page_events.events else {
-                return Err(RunError::Invalid(
-                    "the process event feed returned a Lite page".into(),
-                ));
-            };
-            for event in events {
-                let terminal = matches!(&event.fact, ProcessLifecycleFact::Terminal { .. });
-                if terminal {
-                    // The final snapshot catches call bindings and pure-node transitions
-                    // published while the durable reader drained its last page.
-                    let mut final_view = core
-                        .processes()
-                        .subscribe_observation(&process, None)
-                        .await?;
-                    if let Some(item) = final_view.recv().await.map_err(lash::EmbedError::from)? {
-                        for event in overlay.observation(item) {
-                            if sender.send(Ok(event)).await.is_err() {
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-                for projected in overlay.durable(&event)? {
-                    if sender.send(Ok(projected)).await.is_err() {
-                        return Ok(());
-                    }
-                }
-                if terminal {
-                    return Ok(());
-                }
-            }
-            if let Some(cursor) = page.cursor {
-                from = ProcessEventsFrom::After(cursor);
-            }
-            if matches!(page_events.more, ProcessEventPageMore::More { .. }) {
-                continue;
-            }
-            tokio::select! {
-                _ = sender.closed() => return Ok(()),
-                _ = poll.tick() => {},
-                item = live.recv() => {
-                    if let Some(item) = item.map_err(lash::EmbedError::from)? {
-                        for event in overlay.observation(item) {
-                            if sender.send(Ok(event)).await.is_err() { return Ok(()); }
-                        }
-                    }
-                }
+            if terminal {
+                return Ok(());
             }
         }
     }
@@ -296,7 +264,6 @@ struct Overlay {
     completed_calls: BTreeMap<String, String>,
     delivered: BTreeSet<String>,
     host: Arc<crate::display::HostTools>,
-    observed: BTreeSet<String>,
 }
 
 impl Overlay {
@@ -326,37 +293,10 @@ impl Overlay {
         let mut events = Vec::new();
         match &event.fact {
             ProcessLifecycleFact::EffectOutcome(occurrence) => {
-                if !self.view.nodes.contains(&occurrence.node_id) {
-                    return Err(RunError::Invalid(format!(
-                        "process event names a node outside the saved execution map: {}",
-                        occurrence.node_id
-                    )));
-                }
-                let status = match occurrence.outcome_class {
-                    ProcessEffectOutcomeClass::Success => RunStatus::Succeeded,
-                    ProcessEffectOutcomeClass::Failure | ProcessEffectOutcomeClass::Cancelled => {
-                        RunStatus::Failed
-                    }
-                };
-                events.push(self.event(
-                    occurrence.node_id.clone(),
-                    status,
-                    DisplayDelta::default(),
-                    occurrence.code.as_ref().map(ToString::to_string),
-                ));
+                events.extend(self.effect(occurrence)?);
+                events.extend(self.deliver_display()?);
             }
-            ProcessLifecycleFact::Waiting { wait } => {
-                let mut event = self.event(
-                    self.view.root_node.clone(),
-                    RunStatus::Waiting,
-                    DisplayDelta::default(),
-                    None,
-                );
-                if let WaitKind::Call { call_id, .. } = &wait.kind {
-                    event.approval_key = self.host.approval_key(&self.process, call_id.as_str());
-                }
-                events.push(event);
-            }
+            ProcessLifecycleFact::Waiting { wait } => events.push(self.waiting(wait)),
             ProcessLifecycleFact::Terminal { outcome, .. } => {
                 let status = if outcome.status() == TerminalProcessStatus::Completed {
                     RunStatus::Succeeded
@@ -374,6 +314,46 @@ impl Overlay {
             _ => {}
         }
         Ok(events)
+    }
+
+    fn effect(&mut self, occurrence: &ProcessEffectOccurrence) -> Result<Vec<RunEvent>, RunError> {
+        if !self.view.nodes.contains(&occurrence.node_id) {
+            return Err(RunError::Invalid(format!(
+                "process event names a node outside the saved execution map: {}",
+                occurrence.node_id
+            )));
+        }
+        let status = match occurrence.outcome_class {
+            ProcessEffectOutcomeClass::Success => {
+                if let Some(call) = &occurrence.call_id {
+                    self.completed_calls
+                        .insert(call.to_string(), occurrence.node_id.clone());
+                }
+                RunStatus::Succeeded
+            }
+            ProcessEffectOutcomeClass::Failure | ProcessEffectOutcomeClass::Cancelled => {
+                RunStatus::Failed
+            }
+        };
+        Ok(vec![self.event(
+            occurrence.node_id.clone(),
+            status,
+            DisplayDelta::default(),
+            occurrence.code.as_ref().map(ToString::to_string),
+        )])
+    }
+
+    fn waiting(&mut self, wait: &WaitState) -> RunEvent {
+        let mut event = self.event(
+            self.view.root_node.clone(),
+            RunStatus::Waiting,
+            DisplayDelta::default(),
+            None,
+        );
+        if let WaitKind::Call { call_id, .. } = &wait.kind {
+            event.approval_key = self.host.approval_key(&self.process, call_id.as_str());
+        }
+        event
     }
 
     fn deliver_display(&mut self) -> Result<Vec<RunEvent>, RunError> {
@@ -396,47 +376,61 @@ impl Overlay {
         Ok(events)
     }
 
-    fn observation(&mut self, item: ProcessObservationItem) -> Vec<RunEvent> {
-        let payloads = match item {
-            ProcessObservationItem::Event { record, .. } => match record.event {
-                TraceEvent::LanguageExecution { event, .. } => vec![event],
-                _ => Vec::new(),
-            },
-            ProcessObservationItem::Snapshot { snapshot, .. }
-            | ProcessObservationItem::Gap { snapshot, .. } => snapshot
-                .live
-                .graph
-                .map(|graph| {
-                    graph
-                        .history
-                        .into_iter()
-                        .map(|record| record.event)
-                        .collect()
-                })
-                .unwrap_or_default(),
-            ProcessObservationItem::Committed { .. } => Vec::new(),
+    fn snapshot(&mut self, view: ProcessReadView) -> Result<(Vec<RunEvent>, bool), RunError> {
+        let ProcessReadView::Retained(view) = view else {
+            return Err(RunError::Invalid(
+                "the process is no longer retained".into(),
+            ));
         };
         let mut events = Vec::new();
-        for observed in payloads {
-            if observed.identity.source_identity != self.view.definition
-                || !self.observed.insert(observed.event_key.clone())
-            {
-                continue;
-            }
-            if let Some(event) = self.language(observed.payload) {
-                events.push(event);
+        for node in view.effects.report.nodes() {
+            for occurrence in &node.occurrences {
+                events.extend(self.effect(occurrence)?);
             }
         }
-        match self.deliver_display() {
-            Ok(delivered) => events.extend(delivered),
-            Err(error) => events.push(self.event(
-                self.view.root_node.clone(),
-                RunStatus::Failed,
-                DisplayDelta::default(),
-                Some(error.to_string()),
-            )),
+        events.extend(self.deliver_display()?);
+        let status = match view.process.status() {
+            ProcessStatus::Completed => RunStatus::Succeeded,
+            ProcessStatus::Failed | ProcessStatus::Cancelled | ProcessStatus::Abandoned => {
+                RunStatus::Failed
+            }
+            ProcessStatus::Waiting => RunStatus::Waiting,
+            _ => RunStatus::Started,
+        };
+        let terminal = matches!(status, RunStatus::Succeeded | RunStatus::Failed);
+        if status == RunStatus::Waiting {
+            for wait in view.process.waits() {
+                events.push(self.waiting(wait));
+            }
+        } else {
+            events.push(
+                self.event(
+                    self.view.root_node.clone(),
+                    status,
+                    DisplayDelta::default(),
+                    view.process
+                        .terminal()
+                        .filter(|_| status == RunStatus::Failed)
+                        .map(|outcome| format!("{outcome:?}")),
+                ),
+            );
         }
-        events
+        Ok((events, terminal))
+    }
+
+    fn language_observation(
+        &mut self,
+        observed: &lash::tracing::TraceLanguageExecution,
+    ) -> Result<Vec<RunEvent>, RunError> {
+        if observed.identity.source_identity != self.view.definition {
+            return Ok(Vec::new());
+        }
+        let mut events = self
+            .language(observed.payload.clone())
+            .into_iter()
+            .collect::<Vec<_>>();
+        events.extend(self.deliver_display()?);
+        Ok(events)
     }
 
     fn language(&mut self, payload: TraceLanguageExecutionPayload) -> Option<RunEvent> {
@@ -600,7 +594,6 @@ mod tests {
             completed_calls: BTreeMap::new(),
             delivered: BTreeSet::new(),
             host: Arc::new(crate::display::HostTools::default()),
-            observed: BTreeSet::new(),
         };
         let event = ObservedProcessEvent {
             sequence: 1,

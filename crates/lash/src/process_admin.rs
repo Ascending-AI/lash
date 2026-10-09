@@ -35,23 +35,6 @@ pub struct Processes {
 }
 
 impl Processes {
-    /// Observe one exact process lifetime through its process cursor.
-    ///
-    /// Without a cursor the first item is a snapshot. With one, the
-    /// subscription resumes after it when this core's live route still bridges
-    /// it; otherwise the first item is a gap with a snapshot and a new cursor.
-    pub async fn subscribe_observation(
-        &self,
-        process_id: &ProcessId,
-        cursor: Option<&crate::process_observation::ProcessCursor>,
-    ) -> Result<crate::process_observation::ProcessObservationSubscription> {
-        Ok(self
-            .core
-            .process_observation_hub
-            .subscribe(self.registry(), process_id, cursor)
-            .await?)
-    }
-
     /// Read a retained tool call by the typed id on its process effect
     /// occurrence. Reads committed round outcomes, including after reopening
     /// the deployment; it runs no engine, tool, hook or current catalog lookup.

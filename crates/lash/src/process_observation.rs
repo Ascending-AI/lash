@@ -1,8 +1,8 @@
 //! One process cursor across durable history and the live hub (FIG-3571 §E).
 //!
 //! A [`ProcessCursor`] pages a process's durable event history through
-//! [`crate::Processes::events`] and resumes its live observation through
-//! [`crate::Processes::subscribe_observation`]. The hub carries two kinds of
+//! [`crate::Processes::events`]. Hosts observe through
+//! [`crate::Processes::observe`]. The remaining hub carries two kinds of
 //! evidence per process, in one ordered ring:
 //!
 //! - live execution observations (trace records), best-effort, and
