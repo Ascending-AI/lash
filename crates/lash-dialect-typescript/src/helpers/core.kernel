@@ -323,11 +323,14 @@ body {
       if same(hint, "string") {
         set order = ["toString", "valueOf"]
       }
-      let own = false
       for name in order {
+        if record.contains(value, name) {} else {
+          # Ordinary objects inherit valueOf (returns the receiver) and
+          # toString (returns the tag). An own non-callable shadows either.
+          if same(name, "toString") { return "[object Object]" }
+        }
         let method = record.get(value, name)
         if same(kind(method), "closure") {
-          set own = true
           let none = []
           let outcome = apply method(value, none)
           let primitive = invoke ts.is_primitive(outcome)
@@ -336,10 +339,7 @@ body {
           }
         }
       }
-      if own {
-        throw error.new("type_error", "Cannot convert object to primitive value", null)
-      }
-      return "[object Object]"
+      throw error.new("type_error", "Cannot convert object to primitive value", null)
     }
     if same(k, "error") {
       return text.concat(value.kind, text.concat(": ", value.message))

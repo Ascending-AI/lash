@@ -550,3 +550,19 @@ fn unshift_without_arguments_does_not_traverse_the_receiver() {
         ]),
     );
 }
+
+/// OrdinaryToPrimitive searches inherited defaults in hint order, but an
+/// explicitly shadowed non-callable method is skipped rather than restored.
+#[test]
+fn ordinary_to_primitive_uses_defaults_only_for_missing_methods() {
+    assert_finished(
+        execute(
+            "const text = String({valueOf() { return 1; }}); const number = Number({valueOf() { return {}; }}); let refused = false; try { Number({valueOf: undefined, toString: undefined}); } catch (e) { refused = e.name === 'TypeError'; } finish([text, Number.isNaN(number), refused]);",
+        ),
+        Datum::List(vec![
+            Datum::Text("[object Object]".into()),
+            Datum::Bool(true),
+            Datum::Bool(true),
+        ]),
+    );
+}
