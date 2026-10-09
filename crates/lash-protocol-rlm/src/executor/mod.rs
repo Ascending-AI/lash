@@ -350,6 +350,7 @@ async fn link_cell(
             source: code.to_owned(),
             effects: boundary.signatures(),
             bindings: names,
+            functions: session.functions(),
         })
         .await;
     let (document, annotations) = match lowered {
@@ -749,7 +750,14 @@ async fn run_cell(
                 // made of its copy is not the session's.
                 left.variables
                     .retain(|name, _| !projected.contains(name.as_str()));
-                let bindings = state.settle_cell(document, left, finished.not_carried);
+                let bindings = state.settle_cell(session::CellLeft {
+                    document: &host.entries.document,
+                    identity: document,
+                    annotations: annotations.as_ref(),
+                    bindings: left,
+                    not_carried: finished.not_carried,
+                    closures: finished.closures,
+                });
                 // `main` that ran to its end without a `finish` answered
                 // nothing: the cell completed. A `finish` gave the turn its
                 // answer.

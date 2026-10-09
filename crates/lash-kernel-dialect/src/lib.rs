@@ -16,6 +16,7 @@ mod diagnostic;
 mod dialect;
 mod imperative;
 mod library;
+mod saved;
 mod source;
 
 #[cfg(test)]
@@ -24,6 +25,10 @@ mod tests;
 pub use diagnostic::{Diagnostic, DiagnosticKind, Span};
 pub use dialect::{Environment, FrontEnd, Lowered, Package, Printer};
 pub use library::{Library, LibraryError, NamedLibrary};
+pub use saved::{
+    CaptureRefusal, Left, NotSaved, SavedFunction, Unusable, WRITTEN, Written, closure_of, install,
+    save,
+};
 pub use source::{SourceError, define_functions};
 
 pub use imperative::{

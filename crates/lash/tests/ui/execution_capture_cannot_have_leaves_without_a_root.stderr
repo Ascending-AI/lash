@@ -3,3 +3,10 @@ error[E0574]: expected struct, variant or union type, found enum `Capture`
   |
 5 |     let _ = Capture {
   |             ^^^^^^^ not a struct, variant or union type
+  |
+help: consider importing one of these variants instead
+  |
+1 + use lash::dialect::NotSaved::Capture;
+  |
+1 + use lash::dialect::Unusable::Capture;
+  |

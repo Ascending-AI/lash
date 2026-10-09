@@ -171,11 +171,26 @@ fn rlm_core_with_queue(fixture: &Fixture, queue: Arc<Mutex<VecDeque<LlmResponse>
     rlm_core_with_plugins(fixture, queue, Vec::new())
 }
 
-#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
 fn rlm_core_with_plugins(
     fixture: &Fixture,
     queue: Arc<Mutex<VecDeque<LlmResponse>>>,
     plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+) -> LashCore {
+    rlm_core_with_lifetime(
+        fixture,
+        queue,
+        plugins,
+        lash_core::lifetime::session_or_starter,
+    )
+}
+
+/// A core whose model-started processes take `lifetime`.
+#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
+fn rlm_core_with_lifetime(
+    fixture: &Fixture,
+    queue: Arc<Mutex<VecDeque<LlmResponse>>>,
+    plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+    lifetime: fn(&lash_core::StartCx) -> lash_core::Lifetime,
 ) -> LashCore {
     let provider = lash::testing::TestProvider::builder()
         .kind("artifact-referrers")
@@ -219,9 +234,7 @@ fn rlm_core_with_plugins(
         .execution_budgets(lash::ExecutionBudgets::recommended())
         .delta_coalescing(lash::DeltaCoalescing::recommended())
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
-                lash_core::lifetime::session_or_starter,
-            ),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lifetime),
         ))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             lash::persistence::LeaseOwnerId::new("artifact-referrers-worker"),
@@ -986,6 +999,82 @@ async fn created_definition_is_reclaimed_after_session_deletion(backend: Backend
     }
 }
 
+/// FIG-5772: a saved function started as a process outlives the cell and
+/// the session that started it. One cell binds a function, which the
+/// session keeps as a saved function; a later cell starts it with
+/// `processes.start`, which declares it in that cell's document under an
+/// entry of its own; the session is deleted while the process sleeps, and
+/// the process still finishes with the function's result.
+async fn a_saved_function_started_as_a_process_finishes_after_its_session_is_deleted(
+    backend: Backend,
+) {
+    let fixture = Fixture::new(backend).await;
+    let responses = Arc::new(Mutex::new(VecDeque::from(vec![
+        response(
+            "const factor = 2;\nasync function work(n: number) { await sleep(1500); return n * factor; }\nfinish('bound');",
+        ),
+        response(
+            "const run = await processes.start({ definition: work, args: { n: 21 } }); finish(run);",
+        ),
+    ])));
+    let core = rlm_core_with_lifetime(
+        &fixture,
+        Arc::clone(&responses),
+        Vec::new(),
+        lash_core::lifetime::detached,
+    );
+    let session_id = "saved-function-process";
+    let session = created_session(&core, session_id)
+        .await
+        .open()
+        .await
+        .expect("session");
+    let bound = session
+        .send(TurnInput::text("bind the function"))
+        .output()
+        .await
+        .expect("defining turn");
+    assert!(bound.is_success(), "the defining turn: {bound:?}");
+    let started = session
+        .send(TurnInput::text("start it as a process"))
+        .output()
+        .await
+        .expect("starting turn");
+    assert!(started.is_success(), "the starting turn: {started:?}");
+    let handle = last_cell_finish(&started).expect("the cell answers with the handle");
+    let process_id = handle
+        .get("process_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|id| lash_core::ProcessId::parse(id).ok())
+        .unwrap_or_else(|| panic!("a process handle names its process: {handle}"));
+    drop(session);
+
+    let administration = core.session_administration().await;
+    let deletion = LashCore::delete_session(
+        administration
+            .delete_context(session_id)
+            .expect("delete context"),
+    )
+    .await;
+    assert!(
+        matches!(deletion, Ok(lash::SessionDeletion::Requested { .. })),
+        "the delete runs in the call: {deletion:?}"
+    );
+
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        core.processes().await_output(&process_id),
+    )
+    .await
+    .expect("the process settles")
+    .expect("the output reads");
+    let lash_core::ProcessAwaitOutput::Settled { output } = output else {
+        panic!("the process settles with an output: {output:?}");
+    };
+    assert!(output.is_success(), "the process finishes: {output:?}");
+    assert_eq!(output.value_for_projection(), serde_json::json!(42.0));
+}
+
 /// This test crate's one path to a session that may not exist yet
 /// (FIG-4112): only `create` creates, so this creates `session_id` with the
 /// core's config unless the catalog already holds it, then hands back the
@@ -1062,7 +1151,8 @@ tiered!(
     uncarried_frame_switch_loses_an_uncarried_definition,
     host_pin_keeps_a_definition_across_an_uncarried_switch,
     created_definition_survives_cold_reopen_and_starts_by_value,
-    created_definition_is_reclaimed_after_session_deletion
+    created_definition_is_reclaimed_after_session_deletion,
+    a_saved_function_started_as_a_process_finishes_after_its_session_is_deleted
 );
 
 tiered_ignored!(

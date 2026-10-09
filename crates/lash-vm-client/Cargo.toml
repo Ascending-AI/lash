@@ -33,6 +33,7 @@ tokio = { workspace = true, features = ["rt", "sync"] }
 lash-vm-protocol = { workspace = true }
 lash-sansio = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-dialect = { workspace = true }
 lash-kernel-vm = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 rmp-serde = { workspace = true }

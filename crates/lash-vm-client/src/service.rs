@@ -20,6 +20,9 @@ pub enum Request {
         source: String,
         effects: BTreeMap<EffectName, Signature>,
         bindings: BTreeSet<Name>,
+        /// The functions the session holds: the document declares the
+        /// ones the source names.
+        functions: BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
     },
     /// Print `document` (its JSON encoding) as source in `dialect`.
     Print {

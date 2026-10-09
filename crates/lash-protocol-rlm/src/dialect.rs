@@ -809,6 +809,15 @@ impl DialectSession {
         self.state.patch_globals(patch, protected_names).await
     }
 
+    /// Holds the saved functions a session is created with.
+    pub(crate) async fn seed_functions(
+        &mut self,
+        functions: &serde_json::Map<String, serde_json::Value>,
+        protected_names: &BTreeSet<String>,
+    ) -> Result<(), SessionError> {
+        self.state.seed_functions(functions, protected_names).await
+    }
+
     /// The bound-variable prompt: the session's bindings, each a value a
     /// cell left. A binding that was not carried (`K-SES-003`) is listed by
     /// name with why it is not bound, so the listing names every name an
@@ -825,15 +834,30 @@ impl DialectSession {
             .bindings()
             .not_carried()
             .iter()
-            .filter(|name| !exclude.contains(name.as_str()))
-            .map(|name| {
-                (
-                    name.to_string(),
-                    format!(
-                        "not bound: it held a function or a task, which does not outlive its {noun}"
-                    ),
-                )
-            })
+            .filter(|(name, _)| !exclude.contains(name.as_str()))
+            .map(|(name, why)| (name.to_string(), format!("not bound: {why}")))
+            // A saved function is listed with its signature and the cell
+            // whose end froze what it reads.
+            .chain(
+                self.state
+                    .bindings()
+                    .held_functions()
+                    .iter()
+                    .filter(|(name, _)| !exclude.contains(name.as_str()))
+                    .map(|(name, held)| {
+                        let signature = held
+                            .function
+                            .written
+                            .as_ref()
+                            .and_then(|written| written.signature.as_deref())
+                            .unwrap_or("(...)");
+                        let frozen = match held.cell {
+                            Some(cell) => format!("captures frozen at {noun} {cell}"),
+                            None => "captures frozen before this session".to_owned(),
+                        };
+                        (name.to_string(), format!("function {signature}; {frozen}"))
+                    }),
+            )
             .collect::<Vec<_>>();
         let cache = Arc::clone(&self.bound_variable_render_cache);
         let renderer = self.services.code_renderer.clone();

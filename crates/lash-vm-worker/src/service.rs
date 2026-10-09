@@ -21,7 +21,8 @@ pub(crate) fn perform(
             source,
             effects,
             bindings,
-        } => match embedding.lower(&dialect, &source, &effects, &bindings) {
+            functions,
+        } => match embedding.lower(&dialect, &source, &effects, &bindings, &functions) {
             None => Response::UnknownDialect { dialect },
             Some(Ok(lowered)) => Response::Lowered {
                 document: encoded(lowered.document.to_json())?,

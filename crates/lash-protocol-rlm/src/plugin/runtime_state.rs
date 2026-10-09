@@ -295,6 +295,11 @@ impl RlmRuntimeState {
                         )
                         .await?;
                 }
+                if !seed.functions.is_empty() {
+                    execution
+                        .seed_functions(&seed.functions, &protected_names)
+                        .await?;
+                }
             }
             RlmProtocolEvent::RlmAssistantContent(_)
             | RlmProtocolEvent::RlmTrajectoryEntry(_)
@@ -1067,6 +1072,39 @@ mod tests {
                     .expect("prompt facts")
                     .bound_variables;
                 assert!(prompt.contains(r#"- `scratch_note` = "after execution""#));
+            });
+    }
+
+    /// FIG-5772: the bindings inventory lists a saved function with its
+    /// signature and the cell whose end froze what it reads.
+    #[test]
+    fn a_saved_function_is_listed_with_its_signature_and_the_cell_that_froze_it() {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(async {
+                let state = RlmRuntimeState::new_for_tests().expect("runtime state");
+                let render = crate::testing::recorded_test_render();
+                execute_cell(
+                    &state,
+                    cell("const rate = 2;\nfunction scale(value: number): number { return value * rate; }"),
+                )
+                .await
+                .expect("execute code");
+
+                let prompt = state
+                    .prompt_facts(Some(&render), None, true)
+                    .await
+                    .expect("prompt facts")
+                    .bound_variables;
+                assert!(
+                    prompt.contains("`scale`")
+                        && prompt.contains(
+                            "function (value: number) => number; captures frozen at cell 1"
+                        ),
+                    "{prompt}"
+                );
             });
     }
 

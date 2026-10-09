@@ -262,8 +262,9 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         let mut entries = Vec::with_capacity(names.len());
         for (index, (field, value)) in names.iter().zip(values).enumerate() {
-            let value = match self.process_arrow(value) {
-                Some(function) if index == at => self.lower_process(None, function)?,
+            let value = match (self.process_arrow(value), self.saved_process(value)) {
+                (Some(function), _) if index == at => self.lower_process(None, function)?,
+                (None, Some(saved)) if index == at => self.lower_saved_process(&saved)?,
                 _ => {
                     let value = self.lower_expr(value)?;
                     self.pin(value)
@@ -301,7 +302,8 @@ impl Lowerer<'_> {
                     property,
                     ast::ObjectProperty::KeyValue(ast::PropertyKey::Static(name), value)
                         if name == super::process::DEFINITION_PROPERTY
-                            && self.process_arrow(value).is_some()
+                            && (self.process_arrow(value).is_some()
+                                || self.saved_process(value).is_some())
                 )
             }) {
                 return self.lower_object_with_process(&names, &values, at);

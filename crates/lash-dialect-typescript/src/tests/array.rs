@@ -66,6 +66,7 @@ fn drive(source: &str, expected: &[Vec<Datum>]) -> End {
         library: &kernel.library,
         effects: &super::machine::effects(),
         bindings: &BTreeSet::new(),
+        functions: &std::collections::BTreeMap::new(),
     };
     let lowered =
         crate::lower(source, &environment).unwrap_or_else(|error| panic!("{error}\n{source}"));

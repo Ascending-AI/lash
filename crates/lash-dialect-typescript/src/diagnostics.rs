@@ -58,7 +58,7 @@ pub enum DiagnosticCode {
     TemporalDeadZone,
     UnknownBinding,
     AssignConst,
-    FunctionNotPersisted,
+    SavedFunctionUnusable,
     NonLiftableCapture,
     ProcessParamTypeUnsupported,
     ProcessReturnTypeUnsupported,
@@ -136,7 +136,7 @@ impl DiagnosticCode {
         Self::TemporalDeadZone,
         Self::UnknownBinding,
         Self::AssignConst,
-        Self::FunctionNotPersisted,
+        Self::SavedFunctionUnusable,
         Self::NonLiftableCapture,
         Self::ProcessParamTypeUnsupported,
         Self::ProcessReturnTypeUnsupported,
@@ -249,8 +249,8 @@ impl DiagnosticCode {
             Self::MutualRecursionUnsupported => {
                 "restructure the functions so one calls the other, or drive the recursion with an explicit work list"
             }
-            Self::FunctionNotPersisted => {
-                "define the function again in this cell; keep data, not functions, in session globals"
+            Self::SavedFunctionUnusable => {
+                "define the function again in this cell, using only what this session offers"
             }
             Self::NonLiftableCapture => "pass the value to the process through its `run` arguments",
             Self::ProcessParamTypeUnsupported => {
@@ -346,7 +346,7 @@ impl DiagnosticCode {
             | Self::LoneSurrogateLiteralUnsupported
             | Self::DeclareUnsupported
             | Self::MutualRecursionUnsupported
-            | Self::FunctionNotPersisted
+            | Self::SavedFunctionUnusable
             | Self::NonLiftableCapture
             | Self::DateImmutable
             // Stricter than ECMA-262 exactly where `tsc --strict` rejects
@@ -445,7 +445,7 @@ impl DiagnosticCode {
             Self::TemporalDeadZone => "TS_TEMPORAL_DEAD_ZONE",
             Self::UnknownBinding => "TS_UNKNOWN_BINDING",
             Self::AssignConst => "TS_ASSIGN_CONST",
-            Self::FunctionNotPersisted => "TS_FUNCTION_NOT_PERSISTED",
+            Self::SavedFunctionUnusable => "TS_SAVED_FUNCTION_UNUSABLE",
             Self::NonLiftableCapture => "TS_NON_LIFTABLE_CAPTURE",
             Self::ProcessParamTypeUnsupported => "TS_PROCESS_PARAM_TYPE_UNSUPPORTED",
             Self::ProcessReturnTypeUnsupported => "TS_PROCESS_RETURN_TYPE_UNSUPPORTED",
@@ -900,8 +900,8 @@ mod tests {
                 "function second(n) { return n; } function first(n) { return second(n); } first(1); const work = [1]; while (work.length) work.pop();",
             ),
             (
-                FunctionNotPersisted,
-                "function read(value) { return value; } const invoice = read(1); globalThis.invoice;",
+                SavedFunctionUnusable,
+                "function read(value) { return value; } const invoice = read(1); invoice;",
             ),
             (
                 NonLiftableCapture,

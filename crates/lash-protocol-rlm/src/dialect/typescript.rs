@@ -103,7 +103,7 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     // Every key of every value is written out — in the row itself where the
     // record is small enough, in the `Schema:` block otherwise — so there is
     // never a reason to write one from memory.
-    not_carried_repair: "Define the function again in this cell, or await the task and keep its result; keep data, not functions or pending work, in session variables.",
+    not_carried_repair: "Bind the function to a top-level name of its own so it is kept, or define it again in this cell; await a task and keep its result.",
     unjoined_task_repair: "Await every promise before the cell ends: `await` it, or collect them with `await Promise.all([...])`. A cell does not leave work running behind it.",
     field_miss_rule: "Never write a field name you haven't seen in the key sets below — guessed field names silently produce zeros rather than errors. If a name is not listed, it does not exist on that value.",
 };
@@ -229,7 +229,7 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
     };
     let sleep = "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call is cancelled.";
     let host_api = format!(
-        r#"Built-in names, including `{finish_name}`, cannot be reused by top-level bindings. Top-level bindings persist across executions as data. A function or a pending promise does not outlive the cell that created it: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so define the function again where it is used and keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
+        r#"Built-in names, including `{finish_name}`, cannot be reused by top-level bindings. Top-level bindings persist across executions as data. A function bound to a top-level name persists too, as a copy: what it reads from outside itself is frozen when its cell ends, so a later change to a top-level variable is not seen by it, and a change it makes to one is not kept. A pending promise does not outlive the cell that created it, nor does a function that holds one: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
 `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `new Promise(...)` are not supported.
 

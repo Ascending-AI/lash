@@ -161,6 +161,7 @@ fn a_missing_helper_is_named() {
         library: &library,
         effects: &effects,
         bindings: &bindings,
+        functions: &std::collections::BTreeMap::new(),
     };
     let diagnostic = crate::lower("print(1)\n", &environment).expect_err("an empty library");
     assert_eq!(diagnostic.code, Code::LibraryMissing.as_str());

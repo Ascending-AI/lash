@@ -8,6 +8,37 @@ use super::{BindingKind, FunctionFrame, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
 
 impl Lowerer<'_> {
+    /// What the source wrote of `function`: its signature as text, and the
+    /// signature a host starts it under when every parameter is a plain
+    /// name of a durable type.
+    pub(super) fn written(&self, function: &ast::Function) -> serde_json::Value {
+        let text = |span: crate::SourceSpan| self.source.get(span.start..span.end).unwrap_or("");
+        let mut params = Vec::with_capacity(function.params.len());
+        for param in &function.params {
+            params.push(match param {
+                ast::Pattern::Ident(name, Some(annotation)) => {
+                    format!("{name}: {}", text(annotation.span))
+                }
+                ast::Pattern::Ident(name, None) => name.clone(),
+                ast::Pattern::Rest(_) => "...rest".to_owned(),
+                _ => "_".to_owned(),
+            });
+        }
+        let mut signature = format!("({})", params.join(", "));
+        if let Some(annotation) = &function.return_ty {
+            signature.push_str(" => ");
+            signature.push_str(text(annotation.span));
+        }
+        let mut written = serde_json::Map::new();
+        written.insert("signature".to_owned(), signature.into());
+        if let Ok(start) = self.process_signature(function)
+            && let Ok(start) = serde_json::to_value(start)
+        {
+            written.insert("start".to_owned(), start);
+        }
+        serde_json::Value::Object(written)
+    }
+
     /// A function's value. Inside its own body a named function expression
     /// is reachable by its name.
     pub(super) fn lower_function(&mut self, function: &ast::Function) -> Lowering<Operand> {
@@ -80,7 +111,11 @@ impl Lowerer<'_> {
         });
         self.span = outer_span;
         self.functions.pop();
-        let closure = self.emit_closure(vec![this, args], body?);
+        let body = body?;
+        if self.in_cell_code() {
+            self.written = Some(self.written(function));
+        }
+        let closure = self.emit_closure(vec![this, args], body);
         Ok(Operand {
             atom: closure.atom,
             ty: self.facts.function(function.return_ty.as_ref()),

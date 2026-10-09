@@ -243,6 +243,7 @@ fn lower(source: &str) -> Result<Lowered, lash_dialect_typescript::Diagnostic> {
         library: library(),
         effects: &effects,
         bindings: &bindings,
+        functions: &std::collections::BTreeMap::new(),
     };
     lash_dialect_typescript::lower(source, &environment)
 }
@@ -434,6 +435,7 @@ pub(crate) fn printing_relowers(relative: &str) -> bool {
         library: library(),
         effects: &effects,
         bindings: &bindings,
+        functions: &std::collections::BTreeMap::new(),
     };
     let Ok(original) = lash_dialect_typescript::lower(&source, &environment) else {
         return false;

@@ -18,6 +18,11 @@ pub struct Environment<'a> {
     pub effects: &'a BTreeMap<EffectName, Signature>,
     /// The session bindings in scope when `main` starts (`K-SES-001`).
     pub bindings: &'a BTreeSet<Name>,
+    /// The functions the session holds, by the binding each is called
+    /// through. A front end declares the ones the source names in the
+    /// document it lowers ([`crate::install`]); every name here is also one
+    /// of `bindings`.
+    pub functions: &'a BTreeMap<Name, crate::SavedFunction>,
 }
 
 /// A source text as a kernel program.

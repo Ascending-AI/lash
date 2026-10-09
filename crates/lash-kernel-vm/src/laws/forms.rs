@@ -690,6 +690,27 @@ main {
         finished.not_carried,
         [Name::new("callback"), Name::new("nested")]
     );
+    // Neither reaches a task, so each is left as the run held it: the
+    // closure as the expression it was made from.
+    assert_eq!(
+        finished
+            .closures
+            .variables
+            .keys()
+            .map(Name::as_str)
+            .collect::<Vec<_>>(),
+        ["callback", "nested"]
+    );
+    let Value::Closure(callback) = &finished.closures.variables[&Name::new("callback")] else {
+        panic!("callback is a closure");
+    };
+    assert_eq!(
+        finished.closures.objects[callback],
+        Object::Closure(lash_kernel_doc::ClosureObject {
+            site: lash_kernel_doc::Site::new(lash_kernel_doc::Unit::Main, [4, 0]),
+            captures: Vec::new(),
+        })
+    );
     let bindings = finished.bindings;
     assert_eq!(
         bindings.variables.keys().collect::<Vec<_>>(),

@@ -7,8 +7,14 @@
 //! as its start, and takes what that cell leaves.
 //!
 //! A binding that reaches a closure or a task handle is not carried
-//! (`K-SES-003`): the run's end names it, and the session remembers the
-//! name so a later cell that reads it is told why it is gone.
+//! (`K-SES-003`). A function a cell bound to a name of its own is kept
+//! instead as a saved function: its code and the variables it read, frozen
+//! as data when the cell ended (`lash_kernel_dialect::SavedFunction`). The
+//! session holds those beside its bindings, a later cell that names one
+//! has it declared in its own document, and in that cell the binding is a
+//! reference to the declaration. Any other such binding is dropped, and
+//! the session remembers its name and the reason, so a later cell that
+//! reads it is told why it is gone.
 //!
 //! The state is saved in the kernel's parked-run terms
 //! (`lash-kernel-state`): a header and one fragment per session binding,
@@ -27,8 +33,10 @@ use lash_core::plugin::{
     EXECUTION_STATE_LEAF_MIN_BODY_BYTES, ExecutionLeafName, ExecutionStateCapture,
     HydratedExecutionState, LeafChange,
 };
+use lash_kernel_dialect::{NotSaved, SavedFunction};
 use lash_kernel_doc::{
-    DocumentId, Identity, KERNEL_VERSION, Name, NumberPolicy, Object, ObjectId, Value,
+    Annotations, Document, DocumentId, Identity, KERNEL_VERSION, Name, NumberPolicy, Object,
+    ObjectId, Value,
 };
 use lash_kernel_state::{Baseline, ParkedRun, Root, Run, SavedFragment};
 use lash_kernel_vm::Bindings;
@@ -56,56 +64,186 @@ pub(crate) struct SessionBindings {
     /// changes only when the binding does.
     slots: BTreeMap<Name, u32>,
     next_slot: u32,
-    /// The bindings a cell left that were not carried (`K-SES-003`), until
-    /// a later cell binds the name again.
-    not_carried: BTreeSet<Name>,
+    /// The bindings a cell left that were not carried (`K-SES-003`), each
+    /// with why, until a later cell binds the name again.
+    not_carried: BTreeMap<Name, NotSaved>,
+    /// The functions the session holds, by the binding each is called
+    /// through.
+    functions: BTreeMap<Name, HeldFunction>,
+    /// How many cells have left this session their bindings.
+    cells: u64,
     /// The document of the cell that last left these bindings.
     document: Option<DocumentId>,
+}
+
+/// Whether `dialect`'s front end declares the saved functions a cell names
+/// (`lash_kernel_dialect::install`). The Python front end does not yet, so
+/// a Python session keeps no function between cells.
+fn declares_saved_functions(dialect: &str) -> bool {
+    dialect == "typescript"
+}
+
+/// A saved function as a session holds it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HeldFunction {
+    pub(crate) function: SavedFunction,
+    /// The session's cell, counted from one, whose end froze the
+    /// function's captures. `None` for a function the session was created
+    /// with.
+    pub(crate) cell: Option<u64>,
+}
+
+/// What a finished cell left a session.
+pub(super) struct CellLeft<'a> {
+    pub document: &'a Document,
+    pub identity: DocumentId,
+    pub annotations: Option<&'a Annotations>,
+    /// `main`'s top-level bindings that are data.
+    pub bindings: Bindings,
+    /// The ones the run's end did not carry, and of those the ones that
+    /// reach a closure and no task.
+    pub not_carried: Vec<Name>,
+    pub closures: Bindings,
 }
 
 impl SessionBindings {
     /// The bindings a cell's machine starts with.
     pub(crate) fn start(&self) -> Bindings {
+        let mut variables = self.variables.clone();
+        // A saved function is, in a cell, a reference to its declaration
+        // in that cell's document.
+        for name in self.functions.keys() {
+            variables.insert(name.clone(), Value::Function(name.clone()));
+        }
         Bindings {
-            variables: self.variables.clone(),
+            variables,
             objects: self.objects.clone(),
         }
     }
 
-    /// Every name in scope when a cell's `main` starts: the bindings the
-    /// session holds. A name it lost to `K-SES-003` is not among them.
+    /// Every name in scope when a cell's `main` starts: the bindings and
+    /// the functions the session holds. A name it lost to `K-SES-003` is
+    /// not among them.
     pub(crate) fn names(&self) -> BTreeSet<Name> {
-        self.variables.keys().cloned().collect()
+        self.variables
+            .keys()
+            .chain(self.functions.keys())
+            .cloned()
+            .collect()
     }
 
-    pub(crate) fn not_carried(&self) -> &BTreeSet<Name> {
+    /// The functions a cell is lowered against.
+    pub(crate) fn functions(&self) -> BTreeMap<Name, SavedFunction> {
+        self.functions
+            .iter()
+            .map(|(name, held)| (name.clone(), held.function.clone()))
+            .collect()
+    }
+
+    pub(crate) fn held_functions(&self) -> &BTreeMap<Name, HeldFunction> {
+        &self.functions
+    }
+
+    pub(crate) fn not_carried(&self) -> &BTreeMap<Name, NotSaved> {
         &self.not_carried
     }
 
-    /// Takes what the cell of `document` left: `left` are `main`'s
-    /// top-level bindings, `not_carried` the ones the run's end dropped.
-    /// Answers what that did to the bindings, every name.
-    pub(crate) fn settle(
+    /// Takes what a cell left. A binding that holds a function whose
+    /// captures are data or other saved functions becomes a saved
+    /// function; a binding still bound to the reference it started as
+    /// keeps the function it names. Where the session's dialect declares
+    /// no saved function (`declares_saved`), none is saved. Answers what
+    /// that did to the bindings, every name: a saved function is a binding
+    /// like any other.
+    pub(super) fn settle(
         &mut self,
-        document: DocumentId,
-        left: Bindings,
-        not_carried: Vec<Name>,
+        cell: CellLeft<'_>,
+        declares_saved: bool,
     ) -> lash_core::BindingChanges {
-        self.document = Some(document);
+        self.document = Some(cell.identity);
+        self.cells += 1;
+        let held: BTreeSet<Name> = self.functions.keys().cloned().collect();
+        let (saved, refused) = if declares_saved {
+            lash_kernel_dialect::save(
+                lash_kernel_dialect::Left {
+                    document: cell.document,
+                    carried: &cell.bindings.variables,
+                    carried_objects: &cell.bindings.objects,
+                    closures: &cell.closures.variables,
+                    closure_objects: &cell.closures.objects,
+                    not_carried: &cell.not_carried,
+                    annotations: cell.annotations,
+                },
+                &held,
+            )
+        } else {
+            let refused = cell
+                .not_carried
+                .iter()
+                .map(|name| {
+                    let why = if cell.closures.variables.contains_key(name) {
+                        NotSaved::Dialect
+                    } else {
+                        NotSaved::Task
+                    };
+                    (name.clone(), why)
+                })
+                .collect();
+            (BTreeMap::new(), refused)
+        };
+        let mut left = cell.bindings;
+        let mut functions = BTreeMap::new();
+        left.variables.retain(|name, value| {
+            let Value::Function(target) = &*value else {
+                return true;
+            };
+            // A reference to a saved function is that function, under
+            // whichever name holds it now.
+            let Some(held) = self.functions.get(target) else {
+                return true;
+            };
+            let function = if name == target {
+                held.function.clone()
+            } else {
+                held.function.renamed(name)
+            };
+            functions.insert(
+                name.clone(),
+                HeldFunction {
+                    function,
+                    cell: held.cell,
+                },
+            );
+            false
+        });
+        for (name, function) in saved {
+            functions.insert(
+                name,
+                HeldFunction {
+                    function,
+                    cell: Some(self.cells),
+                },
+            );
+        }
         self.not_carried
-            .retain(|name| !left.variables.contains_key(name));
+            .retain(|name, _| !left.variables.contains_key(name) && !functions.contains_key(name));
         let before = Bindings {
             variables: std::mem::take(&mut self.variables),
             objects: std::mem::take(&mut self.objects),
         };
+        let before_functions = std::mem::replace(&mut self.functions, functions);
         self.adopt(left);
-        let dropped: BTreeSet<Name> = not_carried.into_iter().collect();
         let mut changes = lash_core::BindingChanges {
-            not_carried: dropped.iter().map(ToString::to_string).collect(),
+            not_carried: refused.keys().map(ToString::to_string).collect(),
             ..Default::default()
         };
         for (name, value) in &self.variables {
             match before.variables.get(name) {
+                // The name held a function and now holds data.
+                None if before_functions.contains_key(name) => {
+                    changes.changed.push(name.to_string());
+                }
                 None => changes.added.push(name.to_string()),
                 Some(was)
                     if binding_data(was, &before.objects) != binding_data(value, &self.objects) =>
@@ -115,14 +253,54 @@ impl SessionBindings {
                 Some(_) => {}
             }
         }
+        for (name, held) in &self.functions {
+            match before_functions.get(name) {
+                Some(was) if was.function == held.function => {}
+                None if !before.variables.contains_key(name) => {
+                    changes.added.push(name.to_string());
+                }
+                _ => changes.changed.push(name.to_string()),
+            }
+        }
+        changes.added.sort();
+        changes.changed.sort();
         changes.removed = before
             .variables
             .keys()
-            .filter(|name| !self.variables.contains_key(*name) && !dropped.contains(*name))
+            .chain(before_functions.keys())
+            .filter(|name| {
+                !self.variables.contains_key(*name)
+                    && !self.functions.contains_key(*name)
+                    && !refused.contains_key(*name)
+            })
             .map(ToString::to_string)
             .collect();
-        self.not_carried.extend(dropped);
+        self.not_carried.extend(refused);
         changes
+    }
+
+    /// Holds `function` under `name`, as a session is created with it.
+    fn hold(&mut self, name: Name, function: SavedFunction) {
+        let function = if function.name == name {
+            function
+        } else {
+            function.renamed(&name)
+        };
+        self.not_carried.remove(&name);
+        let mut left = Bindings {
+            variables: self.variables.clone(),
+            objects: self.objects.clone(),
+        };
+        if left.variables.remove(&name).is_some() {
+            self.adopt(left);
+        }
+        self.functions.insert(
+            name,
+            HeldFunction {
+                function,
+                cell: None,
+            },
+        );
     }
 
     /// Replaces the bindings with `left`, renumbering its objects: each is
@@ -179,7 +357,7 @@ impl SessionBindings {
 
     /// Binds `name` to a host's JSON `value`, decoded by `numbers`.
     fn seed(&mut self, name: &str, value: &serde_json::Value, numbers: NumberPolicy) {
-        let mut left = self.start();
+        let mut left = self.data();
         let mut next = left
             .objects
             .keys()
@@ -193,17 +371,29 @@ impl SessionBindings {
         let value = crate::cell_value::bind_json(value, numbers, &mut allocate, &mut left.objects);
         left.variables.insert(Name::new(name), value);
         self.not_carried.remove(&Name::new(name));
+        self.functions.remove(&Name::new(name));
         self.adopt(left);
     }
 
+    /// The session's data bindings alone.
+    fn data(&self) -> Bindings {
+        Bindings {
+            variables: self.variables.clone(),
+            objects: self.objects.clone(),
+        }
+    }
+
     fn remove(&mut self, names: &BTreeSet<String>) -> bool {
-        let mut left = self.start();
-        let before = left.variables.len() + self.not_carried.len();
+        let mut left = self.data();
+        let before = left.variables.len() + self.not_carried.len() + self.functions.len();
         left.variables
             .retain(|name, _| !names.contains(name.as_str()));
         self.not_carried
-            .retain(|name| !names.contains(name.as_str()));
-        let changed = left.variables.len() + self.not_carried.len() != before;
+            .retain(|name, _| !names.contains(name.as_str()));
+        self.functions
+            .retain(|name, _| !names.contains(name.as_str()));
+        let changed =
+            left.variables.len() + self.not_carried.len() + self.functions.len() != before;
         if changed {
             self.adopt(left);
         }
@@ -371,8 +561,14 @@ pub(super) struct RlmSnapshotRoot {
     /// The slot each binding's objects are numbered in.
     slots: BTreeMap<String, u32>,
     next_slot: u32,
-    /// The bindings a cell left that were not carried (`K-SES-003`).
-    not_carried: BTreeSet<String>,
+    /// The bindings a cell left that were not carried (`K-SES-003`), each
+    /// with why.
+    not_carried: BTreeMap<String, NotSaved>,
+    /// The functions the session holds, by binding
+    /// (`lash_vm_runtime::KERNEL_SAVED_FUNCTION_VERSION`).
+    functions: BTreeMap<String, HeldFunction>,
+    /// How many cells have left the session their bindings.
+    cells: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -478,14 +674,62 @@ impl RlmExecutionState {
     }
 
     /// Takes what a finished cell left (see [`SessionBindings::settle`]).
-    pub(super) fn settle_cell(
-        &mut self,
-        document: DocumentId,
-        left: Bindings,
-        not_carried: Vec<Name>,
-    ) -> lash_core::BindingChanges {
+    pub(super) fn settle_cell(&mut self, cell: CellLeft<'_>) -> lash_core::BindingChanges {
         self.capture_dirty = true;
-        self.bindings.settle(document, left, not_carried)
+        self.bindings
+            .settle(cell, declares_saved_functions(&self.dialect))
+    }
+
+    /// The functions the session holds, in the form another session is
+    /// created with ([`Self::seed_functions`]).
+    #[cfg(test)]
+    pub(crate) fn saved_functions(&self) -> serde_json::Map<String, serde_json::Value> {
+        self.bindings
+            .functions
+            .iter()
+            .filter_map(|(name, held)| {
+                Some((name.to_string(), serde_json::to_value(&held.function).ok()?))
+            })
+            .collect()
+    }
+
+    /// Holds each of `functions` under its key, as a session is created
+    /// with them. Every one is read before any is held; none is checked
+    /// against what this session offers until a cell uses it.
+    ///
+    /// # Errors
+    ///
+    /// A value that is not a saved function, or a key a read-only host
+    /// binding holds.
+    pub async fn seed_functions(
+        &mut self,
+        functions: &serde_json::Map<String, serde_json::Value>,
+        protected_names: &BTreeSet<String>,
+    ) -> Result<(), SessionError> {
+        let mut read = Vec::with_capacity(functions.len());
+        for (key, value) in functions {
+            if key == HISTORY_BINDING || protected_names.contains(key) {
+                return Err(SessionError::Protocol(format!(
+                    "`{key}` is a read-only projected host binding; choose a different name for the saved function"
+                )));
+            }
+            let function: SavedFunction =
+                serde_json::from_value(value.clone()).map_err(|error| {
+                    SessionError::Protocol(format!("`{key}` is not a saved function: {error}"))
+                })?;
+            if function.definition().is_none() {
+                return Err(SessionError::Protocol(format!(
+                    "`{key}` is not a saved function: its document does not declare `{}`",
+                    function.name
+                )));
+            }
+            read.push((Name::new(key.as_str()), function));
+        }
+        for (name, function) in read {
+            self.bindings.hold(name, function);
+            self.capture_dirty = true;
+        }
+        Ok(())
     }
 
     pub fn execution_state_dirty(&self) -> bool {
@@ -700,8 +944,15 @@ impl RlmExecutionState {
                 .bindings
                 .not_carried
                 .iter()
-                .map(ToString::to_string)
+                .map(|(name, why)| (name.to_string(), why.clone()))
                 .collect(),
+            functions: self
+                .bindings
+                .functions
+                .iter()
+                .map(|(name, held)| (name.to_string(), held.clone()))
+                .collect(),
+            cells: self.bindings.cells,
         };
         let leaf_keys = root_leaf_keys(&root.bindings);
         let encoded = serde_json::to_vec(&root).map_err(|error| encode(&error))?;
@@ -816,7 +1067,17 @@ impl RlmExecutionState {
                 .map(|(name, slot)| (Name::new(name), slot))
                 .collect(),
             next_slot: parsed.next_slot,
-            not_carried: parsed.not_carried.into_iter().map(Name::new).collect(),
+            not_carried: parsed
+                .not_carried
+                .into_iter()
+                .map(|(name, why)| (Name::new(name), why))
+                .collect(),
+            functions: parsed
+                .functions
+                .into_iter()
+                .map(|(name, held)| (Name::new(name), held))
+                .collect(),
+            cells: parsed.cells,
             document: Some(parked.run.document),
         };
         // The history binding is the projection's; a stored state never

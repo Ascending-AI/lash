@@ -74,6 +74,7 @@ fn lower_against(
         library: library(),
         effects,
         bindings: &bindings,
+        functions: &std::collections::BTreeMap::new(),
     };
     let lowered = crate::lower(source, &environment)?;
     if let Err(invalid) = validate_document(&lowered.document, library()) {

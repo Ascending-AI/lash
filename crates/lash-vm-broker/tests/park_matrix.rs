@@ -246,6 +246,7 @@ impl Machine for FanOut {
                 finish: true,
                 bindings: Bindings::default(),
                 not_carried: Vec::new(),
+                closures: Bindings::default(),
             })));
         }
         Ok(Step::Parked(park))

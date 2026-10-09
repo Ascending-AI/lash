@@ -12,6 +12,11 @@ pub(crate) enum ProjectionTransportError {
 pub struct RlmSeed {
     pub projected: lash_rlm_types::RlmProjectedSeedSnapshot,
     pub globals: serde_json::Map<String, Value>,
+    /// The saved functions the session is created with, by the binding
+    /// each is called through: each value is a kernel saved function
+    /// (`lash_kernel_dialect::SavedFunction`) as JSON. Each is checked
+    /// against what the new session offers when a cell first uses it.
+    pub functions: serde_json::Map<String, Value>,
 }
 
 impl RlmSeed {
@@ -46,13 +51,14 @@ impl RlmSeed {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.globals.is_empty() && self.projected.is_empty()
+        self.globals.is_empty() && self.projected.is_empty() && self.functions.is_empty()
     }
 
     pub fn into_event_body(self) -> lash_rlm_types::RlmSeedPluginBody {
         lash_rlm_types::RlmSeedPluginBody {
             globals: self.globals,
             projected: self.projected,
+            functions: self.functions,
         }
     }
 }

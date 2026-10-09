@@ -138,7 +138,13 @@ fn the_workbench_typescript_tutorials_lower() {
     let effects = workbench_effects().signatures();
     let lower = |program: &str| {
         embedding
-            .lower("typescript", program, &effects, &Default::default())
+            .lower(
+                "typescript",
+                program,
+                &effects,
+                &Default::default(),
+                &Default::default(),
+            )
             .expect("the TypeScript dialect is installed")
     };
     let programs = typescript_prompt_programs();

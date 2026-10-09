@@ -112,6 +112,7 @@ fn roundtrip(document: &k::Document, registry: &Arc<k::FunctionRegistry>, librar
         library,
         effects: &document.manifest.effects,
         bindings: &bindings,
+        functions: &std::collections::BTreeMap::new(),
     };
     let lowered =
         crate::lower(&source, &environment).unwrap_or_else(|error| panic!("{error}\n{source}"));
@@ -347,6 +348,7 @@ fn reserved_operations_obey_the_kernel_statement_rule() {
         library,
         effects: &effects,
         bindings: &bindings,
+        functions: &std::collections::BTreeMap::new(),
     };
     let lowered = crate::lower(
         "let x = k.add(k.int(\"1\"), k.float(\"2.0\")); k.finish(k.tuple(x, k.absent));",

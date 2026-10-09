@@ -58,17 +58,9 @@ impl Lowerer<'_> {
         self.in_main() && self.lifting.is_none()
     }
 
-    /// Lifts the process `function` to an entry named `name`, or by a
-    /// generated name, and gives the reference to it.
-    pub(super) fn lower_process(
-        &mut self,
-        name: Option<&str>,
-        function: &ast::Function,
-    ) -> Lowering<Operand> {
-        let entry = match name {
-            Some(name) if !self.declared.contains_key(&Name::new(name)) => Name::new(name),
-            _ => self.fresh("process"),
-        };
+    /// The signature a host starts `function` under: each parameter a
+    /// plain name of a durable type.
+    pub(super) fn process_signature(&self, function: &ast::Function) -> Lowering<Signature> {
         let mut params = Vec::with_capacity(function.params.len());
         for param in &function.params {
             let ast::Pattern::Ident(name, annotation) = param else {
@@ -98,6 +90,129 @@ impl Lowerer<'_> {
             )?,
             None => Type::Any,
         };
+        Ok(Signature { params, result })
+    }
+
+    /// The saved function `expr` names, if it is one a host may start and
+    /// the host offers the process effects.
+    pub(super) fn saved_process(&self, expr: &ast::Expr) -> Option<Name> {
+        let ast::Expr::Ident(name, _) = expr else {
+            return None;
+        };
+        let bound = self
+            .scopes
+            .iter()
+            .any(|scope| scope.bindings.contains_key(name));
+        let name = Name::new(name.as_str());
+        let startable = self
+            .saved
+            .get(&name)
+            .and_then(|saved| saved.written.as_ref())
+            .is_some_and(|written| written.start.is_some());
+        (!bound
+            && startable
+            && self.lifting.is_none()
+            && self
+                .effects
+                .keys()
+                .any(|effect| effect.as_str().starts_with(PROCESS_EFFECTS)))
+        .then_some(name)
+    }
+
+    /// Declares an entry that runs the saved function `name` under the
+    /// signature it is started with, and gives the reference to it. The
+    /// entry calls the function as a cell would, and waits for what it
+    /// returns.
+    pub(super) fn lower_saved_process(&mut self, name: &Name) -> Lowering<Operand> {
+        let Some(Signature { params, result }) = self
+            .saved
+            .get(name)
+            .and_then(|saved| saved.written.as_ref())
+            .and_then(|written| written.start.clone())
+        else {
+            unreachable!("`saved_process` answered for a function a host may start");
+        };
+        let entry = self.fresh(&format!("{name}_process"));
+        let args = self.fresh("args");
+        let returned = self.fresh("returned");
+        let value = self.fresh("value");
+        let wait = self.function("ts.await")?;
+        let same = self.function("same")?;
+        let body = vec![
+            Stmt::Let {
+                name: args.clone(),
+                value: lash_kernel_doc::Rhs::Expr(Expr::List(
+                    params
+                        .iter()
+                        .map(|param| Expr::Variable(param.name.clone()))
+                        .collect(),
+                )),
+            },
+            Stmt::Let {
+                name: returned.clone(),
+                value: lash_kernel_doc::Rhs::Action(Action::Call {
+                    callee: Callee::Declared(name.clone()),
+                    args: vec![Atom::Literal(Literal::Absent), Atom::Variable(args)],
+                }),
+            },
+            Stmt::Let {
+                name: value.clone(),
+                value: lash_kernel_doc::Rhs::Action(Action::Call {
+                    callee: Callee::Library(wait),
+                    args: vec![Atom::Variable(returned)],
+                }),
+            },
+            // A process that returns nothing ends with null.
+            Stmt::If {
+                condition: Expr::Call {
+                    function: same,
+                    args: vec![
+                        Expr::Variable(value.clone()),
+                        Expr::Literal(Literal::Absent),
+                    ],
+                },
+                then_block: vec![Stmt::Return {
+                    value: Expr::Literal(Literal::Null),
+                }],
+                else_block: Vec::new(),
+            },
+            Stmt::Return {
+                value: Expr::Variable(value),
+            },
+        ];
+        self.saved_used.insert(name.clone());
+        self.declared.insert(
+            entry.clone(),
+            lash_kernel_doc::Function {
+                params: params.iter().map(|param| param.name.clone()).collect(),
+                body,
+            },
+        );
+        self.entries
+            .insert(entry.clone(), Signature { params, result });
+        Ok(Operand {
+            atom: Atom::Literal(Literal::Function(entry)),
+            ty: Ty::Unknown,
+        })
+    }
+
+    /// Lifts the process `function` to an entry named `name`, or by a
+    /// generated name, and gives the reference to it.
+    pub(super) fn lower_process(
+        &mut self,
+        name: Option<&str>,
+        function: &ast::Function,
+    ) -> Lowering<Operand> {
+        let entry = match name {
+            Some(name)
+                if !self.declared.contains_key(&Name::new(name))
+                    && !self.saved.contains_key(&Name::new(name)) =>
+            {
+                Name::new(name)
+            }
+            _ => self.fresh("process"),
+        };
+        let Signature { params, result } = self.process_signature(function)?;
 
         // The body is lowered with none of the cell in scope.
         let outer: HashSet<String> = self

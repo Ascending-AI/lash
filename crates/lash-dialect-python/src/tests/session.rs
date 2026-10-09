@@ -102,6 +102,7 @@ fn restored_session_bindings_cannot_mask_builtins() {
                 library: machine::library(),
                 effects: &BTreeMap::new(),
                 bindings: &bindings,
+                functions: &std::collections::BTreeMap::new(),
             },
         )
         .expect_err("reject an old reserved binding");

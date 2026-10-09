@@ -88,6 +88,7 @@ fn lower_with(
             library: library(),
             effects,
             bindings,
+            functions: &std::collections::BTreeMap::new(),
         },
     )
 }

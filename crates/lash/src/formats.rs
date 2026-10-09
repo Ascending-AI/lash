@@ -75,7 +75,8 @@ pub use lash_protocol_rlm::{
 pub use lash_sansio::TURN_CHECKPOINT_SCHEMA_VERSION;
 #[cfg(feature = "rlm")]
 pub use lash_vm_runtime::{
-    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, LASH_KERNEL_VERSION,
+    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,
+    LASH_KERNEL_VERSION,
 };
 
 /// One durable format whose version decides whether stored bytes open under
@@ -131,6 +132,9 @@ pub enum DurableFormat {
     /// A parked kernel run: the state a code cell or a process body resumes
     /// from, stamped with the kernel version it was parked under.
     KernelParkedState,
+    /// A saved function: a function a session keeps between cells, held in
+    /// the RLM snapshot and given to a session at its creation.
+    KernelSavedFunction,
     /// The RLM snapshot envelope stored behind a checkpoint component.
     RlmSnapshotEnvelope,
     /// The RLM driver state parked in the protocol driver-state slot.
@@ -191,6 +195,7 @@ impl DurableFormat {
             DurableFormat::RuntimeCommitReceipt => "runtime commit receipt",
             DurableFormat::KernelDocument => "kernel document",
             DurableFormat::KernelParkedState => "kernel parked state",
+            DurableFormat::KernelSavedFunction => "kernel saved function",
             DurableFormat::RlmSnapshotEnvelope => "RLM snapshot envelope",
             DurableFormat::RlmDriverState => "RLM driver state",
             DurableFormat::Engine(format) => format.name,
@@ -227,6 +232,7 @@ impl DurableFormat {
             DurableFormat::RuntimeCommitReceipt => UpgradePolicy::Migrate,
             DurableFormat::KernelDocument => UpgradePolicy::Coexist,
             DurableFormat::KernelParkedState => UpgradePolicy::Coexist,
+            DurableFormat::KernelSavedFunction => UpgradePolicy::Migrate,
             DurableFormat::RlmSnapshotEnvelope => UpgradePolicy::Migrate,
             DurableFormat::RlmDriverState => UpgradePolicy::Migrate,
             DurableFormat::Engine(format) => format.upgrade_policy,
@@ -442,6 +448,14 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         },
         #[cfg(feature = "rlm")]
         DurableFormatEntry {
+            format: DurableFormat::KernelSavedFunction,
+            version: FormatVersion::Counter(KERNEL_SAVED_FUNCTION_VERSION),
+            owning_crate: "lash-vm-runtime",
+            constant: "KERNEL_SAVED_FUNCTION_VERSION",
+            probe: FormatProbe::Comparable,
+        },
+        #[cfg(feature = "rlm")]
+        DurableFormatEntry {
             format: DurableFormat::RlmSnapshotEnvelope,
             version: FormatVersion::Counter(RLM_SNAPSHOT_VERSION),
             owning_crate: "lash-protocol-rlm",
@@ -499,6 +513,7 @@ pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
         use lash_core::durable_port::FormatSurface;
         vec![
             FormatSurface::new("kernel-parked-state", KERNEL_PARKED_STATE_VERSION),
+            FormatSurface::new("kernel-saved-function", KERNEL_SAVED_FUNCTION_VERSION),
             FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
         ]
     }

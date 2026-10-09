@@ -269,6 +269,7 @@ fn start_with_bindings(source: &str, values: Bindings) -> (KernelMachine, String
         library,
         effects: &effects,
         bindings: &bindings,
+        functions: &std::collections::BTreeMap::new(),
     };
     let lowered = crate::lower(source, &environment).unwrap_or_else(|error| panic!("{error}"));
     let text = lash_kernel_doc::print_document(&lowered.document);

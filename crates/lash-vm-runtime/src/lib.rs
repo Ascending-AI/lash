@@ -22,7 +22,8 @@ pub use binding::{
 };
 pub use boundary::{BoundaryError, HostBoundary, HostEffect, type_of_schema};
 pub use formats::{
-    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, LASH_KERNEL_VERSION,
+    KERNEL_DOCUMENT_SCHEMA_VERSION, KERNEL_PARKED_STATE_VERSION, KERNEL_SAVED_FUNCTION_VERSION,
+    LASH_KERNEL_VERSION,
 };
 pub use host::ParentHost;
 pub use projection::{ProjectionCatalog, ProjectionProvider, ProjectionRefusal};

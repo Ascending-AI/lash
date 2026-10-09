@@ -262,6 +262,12 @@ pub struct Finished {
     /// The session bindings that were not carried because they reach a
     /// closure or a task handle (`K-SES-003`).
     pub not_carried: Vec<Name>,
+    /// Those of `not_carried` that reach no task handle, as the run left
+    /// them: each one's value and the objects it reaches, with every
+    /// closure as the expression it was made from and the variables it
+    /// shares. No later run starts from these; an embedder reads them to
+    /// keep a function as a value of its own.
+    pub closures: Bindings,
 }
 
 /// A run that ended in an error (`K-TASK-018`, `K-BND-001`).

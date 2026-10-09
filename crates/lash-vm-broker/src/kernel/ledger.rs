@@ -311,6 +311,10 @@ pub enum RecordedEnd {
         variables: BTreeMap<Name, Value>,
         objects: Vec<(ObjectId, Object)>,
         not_carried: Vec<Name>,
+        /// The not-carried bindings that reach no task, with the objects
+        /// they reach, closures among them.
+        closure_variables: BTreeMap<Name, Value>,
+        closure_objects: Vec<(ObjectId, Object)>,
     },
     Failed {
         reason: Datum,
@@ -361,6 +365,13 @@ impl RecordedEnd {
                     .map(|(id, object)| (*id, object.clone()))
                     .collect(),
                 not_carried: finished.not_carried.clone(),
+                closure_variables: finished.closures.variables.clone(),
+                closure_objects: finished
+                    .closures
+                    .objects
+                    .iter()
+                    .map(|(id, object)| (*id, object.clone()))
+                    .collect(),
             },
             End::Failed(reason) => Self::Failed {
                 reason: reason.clone(),
@@ -406,6 +417,8 @@ impl RecordedEnd {
                 variables,
                 objects,
                 not_carried,
+                closure_variables,
+                closure_objects,
             } => End::Finished(Finished {
                 result,
                 finish,
@@ -414,6 +427,10 @@ impl RecordedEnd {
                     objects: objects.into_iter().collect(),
                 },
                 not_carried,
+                closures: Bindings {
+                    variables: closure_variables,
+                    objects: closure_objects.into_iter().collect(),
+                },
             }),
             Self::Failed { reason } => End::Failed(reason),
             Self::Uncaught { error } => End::Error(RunError::Uncaught(error)),

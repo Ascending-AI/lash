@@ -2681,6 +2681,7 @@ dependencies = [
  "lash-internal-sansio",
  "lash-internal-vm-broker",
  "lash-internal-vm-protocol",
+ "lash-kernel-dialect",
  "lash-kernel-doc",
  "lash-kernel-vm",
  "libc",

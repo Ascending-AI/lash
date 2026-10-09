@@ -168,6 +168,7 @@ pub fn rlm_session_projection_extension(
             crate::RlmSeed {
                 projected: projected.clone(),
                 globals: serde_json::Map::new(),
+                functions: serde_json::Map::new(),
             },
             fleet,
         )

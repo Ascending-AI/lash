@@ -35,13 +35,13 @@ fn objects_of(value: &Value, out: &mut Vec<ObjectId>) {
 }
 
 /// The machine's heap as a save reads it.
-struct HeapView<'a> {
-    heap: &'a Heap,
-    exe: &'a Executable,
+pub(in crate::machine) struct HeapView<'a> {
+    pub(in crate::machine) heap: &'a Heap,
+    pub(in crate::machine) exe: &'a Executable,
 }
 
 impl HeapView<'_> {
-    fn data(&self, object: &Obj) -> Option<Object> {
+    pub(in crate::machine) fn data(&self, object: &Obj) -> Option<Object> {
         Some(match object {
             Obj::List(items) => Object::List(items.clone()),
             Obj::Map(table) => Object::Map(

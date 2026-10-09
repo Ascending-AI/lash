@@ -71,6 +71,7 @@ fn every_admitted_conformance_document_preserves_observations_when_printed_and_l
                     library: &library,
                     effects,
                     bindings: &bindings,
+                    functions: &std::collections::BTreeMap::new(),
                 };
                 let source = crate::print(&document).map_err(|e| e.to_string())?;
                 let lowered = crate::lower(&source, &environment).map_err(|e| e.to_string())?;

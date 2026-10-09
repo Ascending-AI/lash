@@ -13,7 +13,7 @@
 mod capture;
 mod restore;
 
-pub(super) use capture::{export, save};
+pub(super) use capture::{HeapView, export, save};
 pub(super) use restore::import;
 
 use crate::compile::{Action, Executable, Rhs, Stmt, StmtId};

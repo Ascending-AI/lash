@@ -198,6 +198,7 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
                 library: embedding.library(),
                 effects: &effects,
                 bindings: &bindings,
+                functions: &std::collections::BTreeMap::new(),
             },
         ) {
             let code = format!("{:?}", error.code);

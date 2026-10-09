@@ -35,3 +35,17 @@ const _: () = assert!(KERNEL_DOCUMENT_SCHEMA_VERSION == lash_kernel_doc::KERNEL_
 pub const KERNEL_PARKED_STATE_VERSION: u32 = 1;
 
 const _: () = assert!(KERNEL_PARKED_STATE_VERSION == lash_kernel_doc::KERNEL_VERSION);
+
+/// A saved function: a function a session keeps between cells, as its code
+/// (a kernel document that declares it) and the captures frozen with it.
+/// The RLM session snapshot holds one per binding, and a session is created
+/// with them as an input. Its document states the kernel version it was
+/// written in, and a kernel migration rewrites each stored one.
+///
+/// version_guard(
+///     shapes(path = "crates/lash-kernel-dialect/src/saved.rs", cover(SavedFunction)),
+/// )
+/// version_surface = "migrate"
+pub const KERNEL_SAVED_FUNCTION_VERSION: u32 = 1;
+
+const _: () = assert!(KERNEL_SAVED_FUNCTION_VERSION == lash_kernel_doc::KERNEL_VERSION);

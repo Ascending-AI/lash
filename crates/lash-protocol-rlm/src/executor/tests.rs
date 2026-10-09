@@ -13,6 +13,8 @@ use super::RlmExecutionState;
 use crate::CellDialect;
 use crate::testing::{DurableHost, cell_context, cell_services, python_workers, run_cell};
 
+mod saved_functions;
+
 const SESSION: &str = "cell-laws";
 const TURN: &str = "turn-1";
 
@@ -489,8 +491,9 @@ async fn a_deferred_tool_granted_to_a_cell_is_callable_after_a_restart() {
 
 /// FIG-5766: a cell's response says what its committed transition did to
 /// the session's bindings, by name. A binding the cell left alone is in no
-/// list, a closure the session does not carry (`K-SES-003`) is named as not
-/// carried, and a cell that failed committed nothing and reports nothing,
+/// list, a function bound to a name of its own is saved and so is added
+/// like any binding, data that holds a function (`K-SES-003`) is named as
+/// not carried, and a cell that failed committed nothing and reports nothing,
 /// whatever it assigned before it failed.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cell_reports_the_bindings_its_committed_transition_changed() {
@@ -519,16 +522,16 @@ async fn a_cell_reports_the_bindings_its_committed_transition_changed() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
         &services,
-        "const rows = [kept.length];\ncount = 2;\nconst increment = (value) => value + 1;",
+        "const rows = [kept.length];\ncount = 2;\nconst increment = (value) => value + 1;\nconst held = { call: increment };",
     )
     .await;
     assert!(second.error().is_none(), "{:?}", second.error());
     assert_eq!(
         *second.bindings,
         lash_core::BindingChanges {
-            added: vec!["rows".to_owned()],
+            added: vec!["increment".to_owned(), "rows".to_owned()],
             changed: vec!["count".to_owned()],
-            not_carried: vec!["increment".to_owned()],
+            not_carried: vec!["held".to_owned()],
             ..Default::default()
         }
     );
@@ -658,7 +661,7 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
         &mut state,
         cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
         &services,
-        "const format = (value) => value;",
+        "const work = async () => 1;\nconst format = work();\nawait format;",
     )
     .await;
     assert!(first.error().is_none(), "{:?}", first.error());
@@ -680,7 +683,10 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
     assert!(failure.message.contains("Error"), "{}", failure.message);
 
     // K-SES-003 requires both the unbound-variable kind and exact data.
-    let dropped = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("format")]);
+    let dropped = std::collections::BTreeMap::from([(
+        lash_kernel_doc::Name::new("format"),
+        lash_kernel_dialect::NotSaved::Task,
+    )]);
     for (kind, binding, expected) in [
         ("unbound_variable", "format", true),
         ("unbound_variable", "other", false),
@@ -700,6 +706,7 @@ async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
                 observation,
                 crate::feedback::CellObservation::BindingNotCarried {
                     binding: "format".to_owned(),
+                    why: lash_kernel_dialect::NotSaved::Task.to_string(),
                 }
             );
         } else {

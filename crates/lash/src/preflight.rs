@@ -271,6 +271,10 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: a parked run is its execution's snapshot row, refused when the \
              activation resumes it rather than at rest",
         ),
+        DurableFormat::KernelSavedFunction => SurfaceRelation::Unwalkable(
+            "no surface of its own: a saved function is a field of the RLM snapshot root, which \
+             the session execution state's walk decodes",
+        ),
         DurableFormat::RlmSnapshotEnvelope => SurfaceRelation::Walk {
             surface: DurableSurface::SessionExecutionState,
             primary: true,

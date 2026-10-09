@@ -47,8 +47,9 @@ impl Embedding {
     }
 
     /// Lowers `source` as the installed dialect `dialect` does for a cell:
-    /// against this embedding's library, the effects a host offers and the
-    /// session bindings in scope. `None` when no such dialect is installed.
+    /// against this embedding's library, the effects a host offers, the
+    /// session bindings in scope and the functions the session holds.
+    /// `None` when no such dialect is installed.
     ///
     /// A host calls it to learn whether text it shows or stores lowers,
     /// without a worker or a session.
@@ -58,6 +59,7 @@ impl Embedding {
         source: &str,
         effects: &BTreeMap<EffectName, Signature>,
         bindings: &BTreeSet<Name>,
+        functions: &BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
     ) -> Option<Result<Lowered, Diagnostic>> {
         let package = self.dialects.get(dialect)?;
         Some(package.front_end.lower(
@@ -66,6 +68,7 @@ impl Embedding {
                 library: &self.library,
                 effects,
                 bindings,
+                functions,
             },
         ))
     }

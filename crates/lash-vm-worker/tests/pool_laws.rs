@@ -227,6 +227,7 @@ fn a_typescript_cell_lowered_in_the_worker_parks_and_resumes() {
         )]
         .into(),
         bindings: Default::default(),
+        functions: Default::default(),
     };
     let mut worker = checkout(&pool);
     let response = worker

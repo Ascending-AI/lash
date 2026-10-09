@@ -51,6 +51,12 @@ impl Lowerer<'_> {
         _span: Option<SourceSpan>,
     ) -> Lowering<Operand> {
         let body = self.closure(function)?;
+        // The function the source wrote is the one that starts the task,
+        // not the closure of its body.
+        if let Some(note) = self.buf.notes.last_mut() {
+            note.written = None;
+        }
+        let written = self.in_cell_code().then(|| self.written(function));
         let this = self.fresh("this");
         let args = self.fresh("args");
         let params = vec![this.clone(), args.clone()];
@@ -62,6 +68,7 @@ impl Lowerer<'_> {
             });
             Ok(())
         })?;
+        self.written = written;
         Ok(self.emit_closure(params, block))
     }
 

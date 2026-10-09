@@ -177,6 +177,8 @@ impl Operand {
 pub(crate) struct Note {
     pub(crate) span: Option<SourceSpan>,
     pub(crate) label: Option<NodeLabel>,
+    /// What the function the statement binds is, as its source wrote it.
+    pub(crate) written: Option<serde_json::Value>,
     /// The notes of the statement's blocks, in the order a walk of its
     /// children meets them.
     pub(crate) blocks: Vec<Vec<Note>>,
@@ -275,6 +277,13 @@ pub(crate) struct Lowerer<'a> {
     /// While a process body is lowered: the cell's names, none of which the
     /// body may read.
     lifting: Option<HashSet<String>>,
+    /// The functions the session holds, and the ones the source names: the
+    /// document declares those.
+    saved: &'a BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
+    saved_used: BTreeSet<Name>,
+    /// What the closure just emitted is, as its source wrote it, until the
+    /// statement that binds it takes it.
+    written: Option<serde_json::Value>,
 }
 
 /// Session names are checked before either source or saved state can mask a built-in.
@@ -335,6 +344,9 @@ pub(crate) fn lower(
         declared: BTreeMap::new(),
         entries: BTreeMap::new(),
         lifting: None,
+        saved: environment.functions,
+        saved_used: BTreeSet::new(),
+        written: None,
     };
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);
@@ -349,6 +361,29 @@ pub(crate) fn lower(
     document.entries = lowerer.entries;
     document.manifest.functions = reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
+    if !lowerer.saved_used.is_empty() {
+        // The saved functions the source names are declared in the cell's
+        // own document, with what they require.
+        let catalog: &dyn FunctionCatalog = environment.library;
+        lash_kernel_dialect::install(
+            &mut document,
+            environment.functions,
+            &lowerer.saved_used,
+            environment.effects,
+            &|function| catalog.definition(function).is_some(),
+        )
+        .map_err(|unusable| {
+            Diagnostic::new(
+                DiagnosticCode::SavedFunctionUnusable,
+                unusable.to_string(),
+                None,
+            )
+        })?;
+        document.manifest.functions = reachable(
+            std::mem::take(&mut document.manifest.functions),
+            environment.library,
+        );
+    }
     let annotations = annotate::annotations(&document, &main.notes, source)?;
     Ok(Lowered {
         document,
@@ -417,12 +452,17 @@ impl Lowerer<'_> {
     /// Ends a scope, declaring at its start every variable that had to
     /// exist before its declaration ran.
     fn pop_scope(&mut self) {
+        // A variable of `main`'s own scope is a session binding, declared
+        // ahead of its declaration or not.
+        let session_scope = self.scopes.len() == 1 && self.in_main();
         let Some(scope) = self.scopes.pop() else {
             unreachable!("a scope is open");
         };
         debug_assert_eq!(scope.kernel_depth, self.kernel_depth);
         for (offset, (name, value)) in scope.predeclare.into_iter().enumerate() {
-            self.note_private(&name);
+            if !session_scope {
+                self.note_private(&name);
+            }
             self.buf.stmts.insert(
                 scope.start + offset,
                 Stmt::Let {
@@ -539,10 +579,14 @@ impl Lowerer<'_> {
             if let Some(captured) = self.captured(name) {
                 return Err(captured);
             }
-            return Ok(self
-                .session
-                .contains(&Name::new(name))
-                .then(|| Name::new(name)));
+            let session = Name::new(name);
+            if !self.session.contains(&session) {
+                return Ok(None);
+            }
+            if self.saved.contains_key(&session) {
+                self.saved_used.insert(session.clone());
+            }
+            return Ok(Some(session));
         };
         let kernel = binding.kernel.clone();
         if binding.live {
@@ -656,6 +700,7 @@ impl Lowerer<'_> {
         self.buf.notes.push(Note {
             span: self.span,
             label: None,
+            written: None,
             blocks,
         });
     }
@@ -752,7 +797,15 @@ impl Lowerer<'_> {
             },
             vec![body.notes],
         );
+        self.note_written();
         Operand::variable(name, Ty::Unknown)
+    }
+
+    /// Hands the last statement what is known of the function it binds.
+    fn note_written(&mut self) {
+        if let (Some(written), Some(note)) = (self.written.take(), self.buf.notes.last_mut()) {
+            note.written = Some(written);
+        }
     }
 
     pub(crate) fn let_expr(&mut self, value: Expr, ty: Ty) -> Operand {
@@ -890,19 +943,27 @@ impl Lowerer<'_> {
     /// the value when it is the last one emitted.
     fn bind(&mut self, name: Name, value: Operand) {
         let (rhs, blocks) = match self.take_binding_of(&value) {
-            Some((rhs, note)) => (rhs, note.blocks),
+            Some((rhs, note)) => {
+                self.written = note.written;
+                (rhs, note.blocks)
+            }
             None => (Rhs::Expr(value.expr()), Vec::new()),
         };
         self.push(Stmt::Let { name, value: rhs }, blocks);
+        self.note_written();
     }
 
     /// Assigns `value` to a place whose parts are already atoms.
     fn store(&mut self, place: Place, value: Operand) {
         let (rhs, blocks) = match self.take_binding_of(&value) {
-            Some((rhs, note)) => (rhs, note.blocks),
+            Some((rhs, note)) => {
+                self.written = note.written;
+                (rhs, note.blocks)
+            }
             None => (Rhs::Expr(value.expr()), Vec::new()),
         };
         self.push(Stmt::Assign { place, value: rhs }, blocks);
+        self.note_written();
     }
 
     /// Drops the name of a value nothing reads: the statement that computed

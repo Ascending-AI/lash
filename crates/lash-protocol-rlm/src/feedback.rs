@@ -20,9 +20,10 @@
 //! it structurally in [`lash_core::CellFailure`]. This module renders that typed
 //! value for the model; it does not encode or recover type information in prose.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use lash_core::{CellDefect, CellFailure, CellFailureKind};
+use lash_kernel_dialect::NotSaved;
 use lash_kernel_doc::{Annotations, Datum, Name, Site, TaskIdentity};
 use lash_kernel_vm::{Bound, BoundExceeded, RunError};
 use lash_vm_client::service::DialectRefusal;
@@ -49,7 +50,11 @@ pub(crate) enum CellObservation {
     Refused(DialectRefusal),
     /// The cell used a binding an earlier cell left that reached a function
     /// or a task, which no cell carries to the next (`K-SES-003`).
-    BindingNotCarried { binding: String },
+    BindingNotCarried {
+        binding: String,
+        /// Why it was not kept, as a clause.
+        why: String,
+    },
     /// A value no `catch` took ended the cell.
     Uncaught(Datum),
     /// The cell ended with tasks unfinished, or failed unobserved
@@ -74,16 +79,17 @@ impl CellObservation {
     /// How a run's error ended the cell. An uncaught unbound-variable error
     /// that names a binding the session lost to `K-SES-003` is that rule's
     /// refusal.
-    pub(crate) fn of_run_error(error: RunError, not_carried: &BTreeSet<Name>) -> Self {
+    pub(crate) fn of_run_error(error: RunError, not_carried: &BTreeMap<Name, NotSaved>) -> Self {
         match error {
             RunError::Uncaught(value) => {
                 if let Datum::Error(error) = &value
                     && error.kind == "unbound_variable"
                     && let Datum::Text(binding) = &error.data
-                    && not_carried.contains(&Name::new(binding.as_str()))
+                    && let Some(why) = not_carried.get(&Name::new(binding.as_str()))
                 {
                     Self::BindingNotCarried {
                         binding: binding.clone(),
+                        why: why.to_string(),
                     }
                 } else {
                     Self::Uncaught(value)
@@ -165,10 +171,10 @@ impl CellObservation {
                     message,
                 )
             }
-            Self::BindingNotCarried { binding } => CellFailure::new(
+            Self::BindingNotCarried { binding, why } => CellFailure::new(
                 CellFailureKind::Program,
                 format!(
-                    "{SESSION_BINDING_NOT_CARRIED}: `{binding}` was bound by an earlier {noun} to a value that holds a function or a task, and neither outlives the {noun} that created it, so `{binding}` is not bound here. {repair}",
+                    "{SESSION_BINDING_NOT_CARRIED}: `{binding}` was bound by an earlier {noun} and was not kept: {why}. So `{binding}` is not bound here. {repair}",
                     noun = vocabulary.cell_noun,
                     repair = vocabulary.not_carried_repair,
                 ),
@@ -457,7 +463,7 @@ mod tests {
             let End::Error(error) = end.into_end() else {
                 panic!("bound error");
             };
-            let observation = CellObservation::of_run_error(error, &BTreeSet::new());
+            let observation = CellObservation::of_run_error(error, &BTreeMap::new());
             let prompts = crate::CellDialect::typescript().prompts();
             let failure =
                 observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());

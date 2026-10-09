@@ -206,6 +206,7 @@ impl KernelMachine {
             finish,
             bindings: Bindings::default(),
             not_carried: Vec::new(),
+            closures: Bindings::default(),
         };
         if !self.session_cell {
             return finished;
@@ -221,10 +222,55 @@ impl KernelMachine {
                         finished.bindings.objects.insert(id, object);
                     }
                 }
-                None => finished.not_carried.push(name.clone()),
+                None => {
+                    finished.not_carried.push(name.clone());
+                    if let Some(objects) = self.reach_closures(value) {
+                        finished
+                            .closures
+                            .variables
+                            .insert(name.clone(), value.clone());
+                        finished.closures.objects.extend(objects);
+                    }
+                }
             }
         }
         finished
+    }
+
+    /// The objects a value reaches, closures and the variables they share
+    /// among them, or `None` when it reaches a task handle.
+    fn reach_closures(&self, value: &Value) -> Option<BTreeMap<ObjectId, Object>> {
+        let view = super::parked::HeapView {
+            heap: &self.heap,
+            exe: &self.exe,
+        };
+        let mut objects = BTreeMap::new();
+        let mut pending = Vec::new();
+        named(value, &mut pending)?;
+        while let Some(id) = pending.pop() {
+            if objects.contains_key(&id) {
+                continue;
+            }
+            let object = view.data(self.heap.get(id)?)?;
+            match &object {
+                Object::List(items) | Object::Set(items) => items
+                    .iter()
+                    .try_for_each(|item| named(item, &mut pending))?,
+                Object::Record(fields) => fields
+                    .iter()
+                    .try_for_each(|(_, value)| named(value, &mut pending))?,
+                Object::Map(entries) => entries.iter().try_for_each(|(key, value)| {
+                    named(key, &mut pending)?;
+                    named(value, &mut pending)
+                })?,
+                Object::Closure(closure) => {
+                    pending.extend(closure.captures.iter().map(|(_, cell)| *cell));
+                }
+                Object::Variable(value) => named(value, &mut pending)?,
+            }
+            objects.insert(id, object);
+        }
+        Some(objects)
     }
 
     /// The objects a value reaches, as data, or `None` when it reaches a
@@ -282,6 +328,24 @@ fn carried(value: &Value, pending: &mut Vec<ObjectId>) -> Option<()> {
             .iter()
             .try_for_each(|member| carried(member, pending)),
         Value::Error(error) => carried(&error.data, pending),
+        other => {
+            pending.extend(other.object());
+            Some(())
+        }
+    }
+}
+
+/// Adds the objects a value names, closures among them, or `None` when it
+/// names a task.
+fn named(value: &Value, pending: &mut Vec<ObjectId>) -> Option<()> {
+    match value {
+        Value::Task(_) | Value::Ref(Identity::Task(_)) => None,
+        Value::Ref(Identity::Object(id)) => {
+            pending.push(*id);
+            Some(())
+        }
+        Value::Tuple(members) => members.iter().try_for_each(|member| named(member, pending)),
+        Value::Error(error) => named(&error.data, pending),
         other => {
             pending.extend(other.object());
             Some(())
