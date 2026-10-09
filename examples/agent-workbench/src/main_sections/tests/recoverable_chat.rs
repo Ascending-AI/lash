@@ -703,7 +703,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
                     Ok(match call {
                         0 => {
                             let mut response = text_response(
-                                "<typescript>\nprint(\"durable execution disclosure\");\n</typescript>",
+                                "<typescript>\nconsole.log(\"durable execution disclosure\");\n</typescript>",
                             );
                             response.parts.insert(
                                 0,
