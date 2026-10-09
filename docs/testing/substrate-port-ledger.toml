@@ -74,30 +74,41 @@ path = "crates/lash-durable-test/src/fencing.rs::the_fencing_laws_hold_at_every_
 [planned."F2"]
 owner = "L4"
 law = "across every crash cut the engine starts no Once body twice, and a start without an outcome folds to Interrupted"
+path = "crates/lash-sim/tests/crash_matrix.rs::a_tool_round_cut_at_every_label_runs_no_once_body_twice"
+note = "every crash-matrix cell checks F2 (crates/lash-sim/src/crash_matrix/invariants.rs::once); the CellKilled case folds a started body without an outcome to Interrupted"
 
 [planned."F3"]
 owner = "L4"
 law = "a process-start tool cut at every label yields exactly one process row or none, never an outcome without its process"
+path = "crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome"
 
 [planned."NR-1"]
 owner = "V0"
 law = "every admitted identity with a committed outcome executed its body exactly once in total (ADR 0132 §2)"
+path = "crates/lash-sim/src/crash_matrix/invariants.rs::once"
+note = "checked in every cell of every crash-matrix case, on SQLite memory, a SQLite file and PostgreSQL"
 
 [planned."NR-4"]
 owner = "V0"
 law = "the resume path performs zero outcome lookups on behalf of re-running code; loading is one fold per actor (ADR 0132 §2)"
+path = "crates/lash-sim/src/crash_matrix/invariants.rs::no_replay"
+note = "checked in every cell of every crash-matrix case, on SQLite memory, a SQLite file and PostgreSQL; the Tripwire counts outcome lookups"
 
 [planned."K1"]
 owner = "L5"
 law = "completion keys are unforgeable: a recomputed, kind-flipped or foreign-secret key is refused and writes nothing"
+path = "crates/lash-core-execution/src/runtime/actor/wait_laws.rs::k1_a_key_that_is_not_an_issued_wait_id_is_refused_and_writes_nothing"
+note = "FIG-5217 made a completion key its wait id, so a recomputed or foreign-secret key is a key that is not an issued wait id; run over each dialect by wait_law_tests.rs"
 
 [planned."T1"]
 owner = "L5"
 law = "a waiting actor past its deadline is claimed and settles TimedOut(WaitDeadline), durable before any reaction"
+path = "crates/lash-core-execution/src/runtime/actor/wait_laws.rs::a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll"
 
 [planned."R1"]
 owner = "L5"
 law = "the first resolution of a wait wins (resolve, cancel or timeout); every later one is refused and changes nothing"
+path = "crates/lash-core-execution/src/runtime/actor/wait_laws.rs::the_first_resolution_wins"
 
 [planned."C1"]
 owner = "L6"
@@ -6035,7 +6046,7 @@ lane = "L10a"
 laws = [
   "restate_before_llm_refusal_is_a_recorded_failed_turn_that_replays_once",
 ]
-disposition = "covered-by:crates/lash/src/tests/failure_settlement.rs"
+disposition = "covered-by:row:crates/lash/src/tests/failure_settlement.rs"
 status = "deleted"
 
 [[row]]
