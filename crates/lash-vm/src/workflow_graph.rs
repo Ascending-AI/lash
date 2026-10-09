@@ -1,13 +1,41 @@
-//! The workflow graph's typed document: value types, deterministic node
-//! identity, and structured execution-site descriptors.
+//! The workflow document: a total, typed view of the semantic IR.
 //!
-//! The graph is deliberately a semantic, canonical view rather than a CST:
-//! comments and authored formatting are discarded. Hosts own graph mutation,
-//! drafts, layout, and versioning.
+//! A [`WorkflowGraph`] holds every construct of the program it projects as
+//! typed IR. Nothing in it is source text and nothing is opaque: a `try`, a
+//! `throw` and a nested scope are regions with typed children like every
+//! other statement, and an expression the graph does not decompose travels as
+//! its [`Expr`]. The document is the program:
+//! [`workflow_program_from_graph`] rebuilds exactly the IR
+//! [`WorkflowGraphProjector`] read, with no dialect involved.
 //!
-//! Projection from IR lives here, beside the IR (ADR 0100 R8), and names no
-//! source syntax: a dialect injects the text of opaque statements. Printing a
-//! graph back to source and parsing edited node text belong to the dialect
+//! # Authority
+//!
+//! A document has two kinds of field.
+//!
+//! *Authoritative* fields are the program: the ordered `nodes` of each body
+//! and its [`WorkflowBodyForm`], each node's `kind` payload (bindings,
+//! targets, expressions, arguments, child bodies), a labelled node's `name`
+//! and `description` with `name_source`, the declarations with their
+//! parameters, types, origins and wrappers, and `private_bindings`.
+//!
+//! *Derived* fields are read views a projection computes from those: node and
+//! process ids, edges, `available_variables`, `outputs`, `type_facets`,
+//! `execution_sites`, `source_span`, a derived node's `name`, and
+//! `source_identity`. Reconstruction never reads them, so editing one changes
+//! nothing; [`WorkflowGraph::rederive`] recomputes them all from the
+//! authoritative fields. An edited document is a draft: it names no admitted
+//! source identity until it is admitted again.
+//!
+//! # Addresses
+//!
+//! A node is named by its [`WorkflowNodeId`], unique within its document and
+//! minted from the node's owner and structural path. An expression inside a
+//! node is named by a [`WorkflowSlotPath`] of [`crate::ExprSlot`] segments
+//! from the node's statement ([`workflow_node_statement`]): one typed step
+//! per child role, for every expression role of every IR variant. A path
+//! stops at the statements of a child body, which are nodes of their own.
+//!
+//! Source text is a lens over the document, never part of it
 //! (`lash_typescript::workflow_graph` for TypeScript).
 
 /// version_surface = "coexist"
@@ -28,11 +56,16 @@ use crate::ast::{
 };
 use crate::span::Span;
 
+mod body;
 mod execution_sites;
 mod facets;
 mod ownership;
 mod projection;
+mod reconstruction;
+#[cfg(test)]
+mod totality_tests;
 
+pub use body::{WorkflowBodyForm, WorkflowCompletionGroup};
 pub use execution_sites::execution_sites;
 pub use facets::*;
 pub use ownership::{
@@ -40,9 +73,24 @@ pub use ownership::{
     WorkflowProjection, WorkflowStatement, statement_list,
 };
 pub use projection::{
-    NoStatementText, WorkflowGraphProjector, WorkflowStatementText, else_if_chain,
-    workflow_graph_from_artifact, workflow_graph_from_program,
+    WorkflowGraphProjector, else_if_chain, workflow_graph_from_artifact,
+    workflow_graph_from_program,
 };
+pub use reconstruction::{
+    WorkflowGraphError, workflow_node_statement, workflow_program_from_graph,
+};
+
+/// The interpretation of the semantic IR a workflow document carries: the
+/// variants of [`Expr`] and of the graph's regions, the meaning of each child
+/// slot, scoping and evaluation order (see `ast_slots.rs`). A document stamps
+/// the interpretation it was written under, and a reader that does not
+/// implement it refuses the document when it opens it rather than reading
+/// its contents under different rules.
+///
+/// version_guard(items(WORKFLOW_IR_VERSION, admit_ir_version))
+/// version_surface = "coexist"
+/// format_outside_manifest = "the semantic interpretation of a derived document: a reader refuses another interpretation and reprojects from the module, so no stored state is reopened under it"
+pub const WORKFLOW_IR_VERSION: u32 = 1;
 
 /// Version of the serialized workflow graph contract. Version 15 closes the
 /// execution-site kind vocabulary; v14 graph documents are refused. Version 16
@@ -142,6 +190,9 @@ impl std::fmt::Display for WorkflowNodeId {
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 pub struct WorkflowGraph {
     pub schema_version: u32,
+    /// The interpretation of the semantic IR this document's regions and
+    /// expressions are written under ([`WORKFLOW_IR_VERSION`]).
+    pub ir_version: u32,
     /// The definition identity of the admitted module artifact this graph
     /// projects ([`crate::ModuleArtifact::source_identity`]), which the
     /// module's traces carry too. A draft projected from source that has not
@@ -152,12 +203,39 @@ pub struct WorkflowGraph {
     pub source_identity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facet_schema_version: Option<u32>,
+    /// The main-level bindings that are the front end's own slots rather
+    /// than session-visible names ([`crate::Program::private_bindings`]).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub private_bindings: BTreeSet<AstString>,
     #[serde(default)]
     pub declarations: Vec<WorkflowDeclaration>,
     pub main: WorkflowSubgraph,
 }
 
 impl WorkflowGraph {
+    /// Refuses a document written under an IR interpretation this build does
+    /// not implement.
+    pub fn admit_ir_version(found: u32) -> Result<(), WorkflowIrVersionRefusal> {
+        if found == WORKFLOW_IR_VERSION {
+            Ok(())
+        } else {
+            Err(WorkflowIrVersionRefusal {
+                found,
+                supported: WORKFLOW_IR_VERSION,
+            })
+        }
+    }
+
+    /// The canonical draft of this document: its authoritative content
+    /// reconstructed to IR and projected again, so every derived view (ids,
+    /// edges, available variables, outputs, execution sites) is recomputed
+    /// from that content alone. The draft names no source identity and
+    /// carries no spans or facets; admission supplies those.
+    pub fn rederive(&self) -> Result<Self, WorkflowGraphError> {
+        let program = workflow_program_from_graph(self)?;
+        Ok(workflow_graph_from_program(&program))
+    }
+
     /// Admit a document stamp against the decoder-backed read window under
     /// `fleet_format`. Derived graphs have no lift: the fleet pin is readable
     /// during a roll, and after finalize an older graph must be regenerated.
@@ -208,6 +286,13 @@ impl WorkflowGraph {
             .ok_or(WorkflowGraphDecodeError::InvalidSchemaVersion)?;
         Self::admit_schema_version_for_fleet(found, fleet_format)
             .map_err(WorkflowGraphDecodeError::UnsupportedSchemaVersion)?;
+        let ir_version = value
+            .get("ir_version")
+            .ok_or(WorkflowGraphDecodeError::MissingIrVersion)?
+            .as_u64()
+            .and_then(|version| u32::try_from(version).ok())
+            .ok_or(WorkflowGraphDecodeError::InvalidIrVersion)?;
+        Self::admit_ir_version(ir_version)?;
         let facets_are_current = value
             .get("facet_schema_version")
             .and_then(serde_json::Value::as_u64)
@@ -235,8 +320,10 @@ impl WorkflowGraph {
         }
         Ok(Self {
             schema_version: wire.schema_version,
+            ir_version: wire.ir_version,
             source_identity: wire.source_identity,
             facet_schema_version: wire.facet_schema_version,
+            private_bindings: wire.private_bindings,
             declarations: wire.declarations,
             main: wire.main,
         })
@@ -585,6 +672,16 @@ pub struct WorkflowGraphVersionRefusal {
     pub reads: lash_core_execution::store::ReadWindow,
 }
 
+/// The IR interpretation that refused a workflow document.
+#[derive(Clone, Copy, Debug, Error, PartialEq, Eq)]
+#[error(
+    "unsupported workflow IR interpretation {found}; this build implements {supported}; reproject from the module"
+)]
+pub struct WorkflowIrVersionRefusal {
+    pub found: u32,
+    pub supported: u32,
+}
+
 /// A refusal from the version-first [`WorkflowGraph`] JSON decoder.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -595,6 +692,12 @@ pub enum WorkflowGraphDecodeError {
     InvalidSchemaVersion,
     #[error(transparent)]
     UnsupportedSchemaVersion(#[from] WorkflowGraphVersionRefusal),
+    #[error("workflow graph document is missing `ir_version`")]
+    MissingIrVersion,
+    #[error("workflow graph document has a non-u32 `ir_version`")]
+    InvalidIrVersion,
+    #[error(transparent)]
+    UnsupportedIrVersion(#[from] WorkflowIrVersionRefusal),
     #[error("invalid workflow graph document: {0}")]
     Document(#[source] serde_json::Error),
 }
@@ -603,10 +706,13 @@ pub enum WorkflowGraphDecodeError {
 #[serde(deny_unknown_fields)]
 struct WorkflowGraphWire {
     schema_version: u32,
+    ir_version: u32,
     #[serde(default)]
     source_identity: Option<String>,
     #[serde(default)]
     facet_schema_version: Option<u32>,
+    #[serde(default)]
+    private_bindings: BTreeSet<AstString>,
     #[serde(default)]
     declarations: Vec<WorkflowDeclaration>,
     main: WorkflowSubgraph,
@@ -647,7 +753,53 @@ pub struct WorkflowProcess {
     #[serde(default, skip_serializing_if = "ProcessOrigin::is_declared")]
     #[serde(deserialize_with = "deserialize_strict")]
     pub origin: ProcessOrigin,
+    /// The failure wrapper around the authored run body, when the process
+    /// body has one ([`crate::StructuralRole::ProcessWrapper`]). `body` is
+    /// then the run function's body; without a wrapper it is the whole
+    /// process body.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrapper: Option<Box<WorkflowProcessWrapper>>,
     pub body: WorkflowSubgraph,
+}
+
+/// The process failure wrapper, without the run body it wraps: the run
+/// function finishes the process with its value, and the catch fails the
+/// process with what the body throws.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowProcessWrapper {
+    /// The run function's own name, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<AstString>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub js_name: Option<AstString>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receiver: Option<AstString>,
+    /// The run function's parameters, bound to `arguments` in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub params: Vec<AstString>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub captures: Vec<AstString>,
+    /// The builtin the run call goes through, when it does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driver: Option<WorkflowRunDriver>,
+    /// The arguments the run call passes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(deserialize_with = "deserialize_strict")]
+    pub arguments: Vec<Expr>,
+    /// The binding the wrapper's catch fails the process with.
+    pub catch_binding: AstString,
+}
+
+/// A builtin that drives a process's run function: it receives the function
+/// first, then `arguments`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowRunDriver {
+    pub builtin: AstString,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(deserialize_with = "deserialize_strict")]
+    pub arguments: Vec<Expr>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -660,10 +812,23 @@ pub enum WorkflowNodeNameSource {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowSubgraph {
+    /// How the IR spells this ordered body.
+    #[serde(default)]
+    pub form: WorkflowBodyForm,
+    /// The body's statements, in execution order.
     #[serde(default)]
     pub nodes: Vec<WorkflowNode>,
+    /// Derived: sequence follows `nodes` order and data dependencies follow
+    /// the bindings the nodes' expressions read.
     #[serde(default)]
     pub edges: Vec<WorkflowEdge>,
+}
+
+impl WorkflowSubgraph {
+    /// Whether the body is a statement list rather than one bare statement.
+    pub fn is_statement_list(&self) -> bool {
+        !matches!(self.form, WorkflowBodyForm::Statement)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -740,16 +905,36 @@ pub enum WorkflowNodeKind {
         expression: Expr,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         update: Option<crate::UpdateOperator>,
+        /// Set when the update is a member assignment that pins its
+        /// reference base before evaluating the value
+        /// ([`crate::StructuralRole::AttributeAssign`]): the slots it pins
+        /// them in. `target` is then one member step of a variable.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pinned: Option<WorkflowPinnedSlots>,
     },
     Terminal {
         terminal: WorkflowTerminalKind,
         #[serde(deserialize_with = "deserialize_strict")]
         expression: Expr,
     },
-    Container(WorkflowContainer),
-    Opaque {
-        source: String,
+    /// Throws `value`: control transfers to the nearest enclosing catch, or
+    /// fails the process when there is none.
+    Throw {
+        #[serde(deserialize_with = "deserialize_strict")]
+        value: Expr,
     },
+    Container(WorkflowContainer),
+}
+
+/// The slots a pinned member assignment evaluates through, in evaluation
+/// order: the reference base, a computed index, then the assigned value.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowPinnedSlots {
+    pub base: AstString,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<AstString>,
+    pub result: AstString,
 }
 
 /// One call or effect argument in graph order.
@@ -945,45 +1130,105 @@ pub enum WorkflowTerminalKind {
     Fail,
 }
 
+/// A statement that owns ordered child bodies.
+///
+/// `binding` is the target the container's value is assigned to, when the
+/// statement is an assignment of it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "container_kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowContainer {
+    /// Evaluates `condition`, then runs exactly one branch.
     If {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[serde(deserialize_with = "deserialize_strict")]
         binding: Option<AssignTarget>,
         #[serde(deserialize_with = "deserialize_strict")]
         condition: Expr,
-        /// Whether the source's then branch is a statement block rather than a value expression.
-        then_is_block: bool,
-        /// Whether the source's else branch is a block rather than a direct value or `else if`.
-        else_is_block: bool,
         then_graph: Box<WorkflowSubgraph>,
         else_graph: Box<WorkflowSubgraph>,
     },
-    /// An iteration: the IR's element binding, iterable and bind, exactly as
-    /// the loop runs them. A dialect's printer reads its authored loop header
-    /// back off these fields.
+    /// An iteration, exactly as the loop runs it: for each element of
+    /// `iterable`, bind it to `element`, run `bind`, then run `body`.
     For {
-        binding: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
+        binding: Option<AssignTarget>,
+        /// The binding each element is assigned to.
+        element: String,
         /// The element binding's authored name, outside execution identity.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        authored_binding: Option<String>,
+        authored_element: Option<String>,
         #[serde(deserialize_with = "deserialize_strict")]
         iterable: Expr,
+        /// The generated statements that bind the element into the names the
+        /// body reads, when the front end needs any.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[serde(deserialize_with = "deserialize_strict")]
         bind: Option<Expr>,
         body: Box<WorkflowSubgraph>,
     },
     While {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
+        binding: Option<AssignTarget>,
         #[serde(deserialize_with = "deserialize_strict")]
         condition: Expr,
         body: Box<WorkflowSubgraph>,
     },
+    /// A structured exception scope: `body` runs; a throw inside it runs
+    /// `catch` with the thrown value bound; `finally` runs on every exit
+    /// from either.
+    Try {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
+        binding: Option<AssignTarget>,
+        body: Box<WorkflowSubgraph>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        catch: Option<WorkflowCatch>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        finally: Option<Box<WorkflowSubgraph>>,
+    },
+    /// An authored nested statement scope.
+    Scope {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "deserialize_strict")]
+        binding: Option<AssignTarget>,
+        body: Box<WorkflowSubgraph>,
+    },
+}
+
+/// The catch clause of a [`WorkflowContainer::Try`]: `binding` names the
+/// thrown value inside `body`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WorkflowCatch {
+    pub binding: String,
+    pub body: Box<WorkflowSubgraph>,
 }
 
 impl WorkflowContainer {
+    /// The target the container's value is assigned to, if any.
+    pub fn binding(&self) -> Option<&AssignTarget> {
+        match self {
+            Self::If { binding, .. }
+            | Self::For { binding, .. }
+            | Self::While { binding, .. }
+            | Self::Try { binding, .. }
+            | Self::Scope { binding, .. } => binding.as_ref(),
+        }
+    }
+
+    /// The name a loop's body reads its element by: the one name `bind`
+    /// copies the element into when that is all it does, else the element
+    /// binding itself. A derived view for display; `None` for other
+    /// containers.
+    pub fn loop_element_name(&self) -> Option<&str> {
+        let Self::For { element, bind, .. } = self else {
+            return None;
+        };
+        Some(projection::copied_binding(element, bind.as_ref()).unwrap_or(element.as_str()))
+    }
+
     pub fn child_subgraphs(&self) -> impl Iterator<Item = (&'static str, &WorkflowSubgraph)> {
         let children = match self {
             Self::If {
@@ -993,10 +1238,21 @@ impl WorkflowContainer {
             } => [
                 Some(("then", then_graph.as_ref())),
                 Some(("else", else_graph.as_ref())),
+                None,
             ],
-            Self::For { body, .. } | Self::While { body, .. } => {
-                [Some(("body", body.as_ref())), None]
+            Self::For { body, .. } | Self::While { body, .. } | Self::Scope { body, .. } => {
+                [Some(("body", body.as_ref())), None, None]
             }
+            Self::Try {
+                body,
+                catch,
+                finally,
+                ..
+            } => [
+                Some(("body", body.as_ref())),
+                catch.as_ref().map(|catch| ("catch", catch.body.as_ref())),
+                finally.as_deref().map(|finally| ("finally", finally)),
+            ],
         };
         children.into_iter().flatten()
     }
@@ -1012,10 +1268,21 @@ impl WorkflowContainer {
             } => [
                 Some(("then", then_graph.as_mut())),
                 Some(("else", else_graph.as_mut())),
+                None,
             ],
-            Self::For { body, .. } | Self::While { body, .. } => {
-                [Some(("body", body.as_mut())), None]
+            Self::For { body, .. } | Self::While { body, .. } | Self::Scope { body, .. } => {
+                [Some(("body", body.as_mut())), None, None]
             }
+            Self::Try {
+                body,
+                catch,
+                finally,
+                ..
+            } => [
+                Some(("body", body.as_mut())),
+                catch.as_mut().map(|catch| ("catch", catch.body.as_mut())),
+                finally.as_deref_mut().map(|finally| ("finally", finally)),
+            ],
         };
         children.into_iter().flatten()
     }

@@ -45,6 +45,10 @@ pub enum WorkflowBodySlot {
     Then,
     Else,
     LoopBody,
+    TryBody,
+    Catch,
+    Finally,
+    Scope,
 }
 
 /// One visible statement, in authored order.
@@ -63,6 +67,8 @@ pub struct WorkflowStatement<'a> {
 /// One ordered list of visible statements.
 #[derive(Clone, Debug)]
 pub struct WorkflowBody<'a> {
+    /// The body expression the statements were read from.
+    pub expr: &'a Expr,
     pub slot: Option<WorkflowBodySlot>,
     /// The rooted AST path of the body expression.
     pub ast_path: AstPath,
@@ -236,6 +242,7 @@ fn collect_body<'a>(
         })
         .collect();
     WorkflowBody {
+        expr: expression,
         slot,
         ast_path: ast_path.clone(),
         statements,
@@ -288,6 +295,37 @@ fn collect_statement<'a>(
             &value_ast.child(1),
             &child_path(&value_path, 1),
             Some(WorkflowBodySlot::LoopBody),
+            paths,
+        )),
+        // A `try` and an authored scope are regions of statements like a
+        // branch or a loop body: each of their bodies is per statement.
+        Expr::Try(scope) => {
+            let mut regions: Vec<(&'a Expr, WorkflowBodySlot)> =
+                vec![(&scope.body, WorkflowBodySlot::TryBody)];
+            if let Some(catch) = &scope.catch {
+                regions.push((&catch.body, WorkflowBodySlot::Catch));
+            }
+            if let Some(finally) = &scope.finally {
+                regions.push((finally, WorkflowBodySlot::Finally));
+            }
+            for (index, (region, slot)) in (0u32..).zip(regions) {
+                bodies.push(collect_body(
+                    region,
+                    &value_ast.child(index),
+                    &child_path(&value_path, index),
+                    Some(slot),
+                    paths,
+                ));
+            }
+        }
+        Expr::Role {
+            role: StructuralRole::Scope,
+            expr,
+        } => bodies.push(collect_body(
+            expr,
+            &value_ast.child(0),
+            &child_path(&value_path, 0),
+            Some(WorkflowBodySlot::Scope),
             paths,
         )),
         _ => {}

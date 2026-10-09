@@ -441,6 +441,9 @@ fn inspect(
         exports: artifact.exports().clone(),
         source_identity: artifact.source_identity(),
         processes,
-        graph: lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText),
+        graph: lash_vm::workflow_graph_from_artifact(artifact),
     })
 }
+
+#[cfg(test)]
+mod inspection_tests;

@@ -18,7 +18,7 @@ use lash_typescript::workflow_graph::{
 use lash_vm::{
     LashVmHostCatalog, LashVmHostEnvironment, TypeExpr, TypeField, VariableVersion,
     WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument,
-    WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind,
+    WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdgeKind,
     WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide, WorkflowNode,
     WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowSlotPath,
     WorkflowSlotPathSegment, WorkflowSubgraph, reconcile, workflow_call_to_ir, workflow_slot_value,
@@ -307,8 +307,10 @@ fn workflow_graph_decode_refuses_unknown_fields_in_nested_non_facet_payloads() {
 
     let function_graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        ir_version: lash_vm::WORKFLOW_IR_VERSION,
         source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
+        private_bindings: Default::default(),
         declarations: vec![WorkflowDeclaration::Function(lash_vm::FunctionDecl {
             name: "describe".into(),
             params: vec![lash_vm::FunctionParam {
@@ -537,8 +539,10 @@ fn workflow_graph_ir_json_golden_is_exact() {
 fn workflow_graph_refuses_unknown_type_expr_variant() {
     let graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        ir_version: lash_vm::WORKFLOW_IR_VERSION,
         source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
+        private_bindings: Default::default(),
         declarations: vec![WorkflowDeclaration::Function(lash_vm::FunctionDecl {
             name: "name".into(),
             params: vec![],
@@ -560,8 +564,10 @@ fn workflow_graph_refuses_unknown_type_expr_variant() {
 fn workflow_graph_refuses_unknown_fields_inside_type_expr_payloads() {
     let graph = WorkflowGraph {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+        ir_version: lash_vm::WORKFLOW_IR_VERSION,
         source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
+        private_bindings: Default::default(),
         declarations: vec![WorkflowDeclaration::Function(lash_vm::FunctionDecl {
             name: "record".into(),
             params: vec![],
@@ -598,34 +604,29 @@ finish(choice);
     let graph = workflow_graph_from_source(&canonical).expect("canonical source projects");
 
     let WorkflowNodeKind::Container(WorkflowContainer::If {
-        then_is_block,
-        else_is_block,
+        then_graph,
+        else_graph,
         ..
     }) = &graph.main.nodes[0].kind
     else {
         panic!("expected expression-if container")
     };
-    assert!(!then_is_block);
-    assert!(!else_is_block);
+    assert!(!then_graph.is_statement_list());
+    assert!(!else_graph.is_statement_list());
 
     let WorkflowNodeKind::Container(WorkflowContainer::If {
-        then_is_block,
-        else_is_block,
+        then_graph,
         else_graph,
         ..
     }) = &graph.main.nodes[1].kind
     else {
         panic!("expected statement-if container")
     };
-    assert!(*then_is_block);
-    assert!(!else_is_block);
+    assert!(then_graph.is_statement_list());
     assert!(matches!(
         else_graph.nodes.as_slice(),
         [WorkflowNode {
-            kind: WorkflowNodeKind::Container(WorkflowContainer::If {
-                then_is_block: true,
-                ..
-            }),
+            kind: WorkflowNodeKind::Container(WorkflowContainer::If { .. }),
             ..
         }]
     ));
@@ -646,7 +647,7 @@ fn canonicalization_discards_comments() {
 }
 
 #[test]
-fn validate_and_render_agree_on_every_graph_failure_class() {
+fn validate_and_render_agree_on_every_document_failure_class() {
     let fixture = || {
         workflow_graph_from_source(
             "const child = async () => { return 1; };\nconst value = 1;\nfinish(value);\n",
@@ -657,33 +658,26 @@ fn validate_and_render_agree_on_every_graph_failure_class() {
     let mut unsupported_schema = fixture();
     unsupported_schema.schema_version -= 1;
 
+    let mut unsupported_ir = fixture();
+    unsupported_ir.ir_version += 1;
+
     let mut duplicate_node_id = fixture();
     duplicate_node_id.main.nodes[1].id = duplicate_node_id.main.nodes[0].id.clone();
 
-    let mut unknown_node_reference = fixture();
-    unknown_node_reference.main.edges.push(WorkflowEdge {
-        id: "dangling".to_string(),
-        from: unknown_node_reference.main.nodes[0].id.clone(),
-        to: WorkflowNodeId::new("missing".to_string()),
-        kind: WorkflowEdgeKind::Sequence,
-    });
-
     let mut invalid_node_payload = fixture();
-    let expression = invalid_node_payload
+    let terminal = invalid_node_payload
         .main
         .nodes
         .iter_mut()
         .find_map(|node| match &mut node.kind {
-            WorkflowNodeKind::Data { expression, .. } => Some(expression),
+            WorkflowNodeKind::Terminal { terminal, .. } => Some(terminal),
             _ => None,
         })
-        .expect("fixture contains a data node");
-    *expression = lash_vm::Expr::SleepFor(Box::new(lash_vm::Expr::Number(1.0)));
+        .expect("fixture contains a terminal node");
+    *terminal = lash_vm::WorkflowTerminalKind::Fail;
 
-    let mut invalid_opaque_source = fixture();
-    invalid_opaque_source.main.nodes[0].kind = WorkflowNodeKind::Opaque {
-        source: "let =".to_string(),
-    };
+    let mut invalid_body_form = fixture();
+    invalid_body_form.main.form = lash_vm::WorkflowBodyForm::Statement;
 
     let mut duplicate_process_name = fixture();
     let process = duplicate_process_name
@@ -694,13 +688,10 @@ fn validate_and_render_agree_on_every_graph_failure_class() {
         .clone();
     duplicate_process_name.declarations.push(process);
 
-    let mut canonical_source = fixture();
-    canonical_source.main.nodes[0].name_source = WorkflowNodeNameSource::Label;
-    canonical_source.main.nodes[0].name = "Close */ me".into();
-
-    let mut rendered_source_invalid =
-        workflow_graph_from_source("finish(1);\n").expect("final-parse fixture projects");
-    let terminal = rendered_source_invalid
+    // A program the IR itself refuses: a return outside any function.
+    let mut invalid_program =
+        workflow_graph_from_source("finish(1);\n").expect("terminal fixture projects");
+    let terminal = invalid_program
         .main
         .nodes
         .iter_mut()
@@ -713,13 +704,12 @@ fn validate_and_render_agree_on_every_graph_failure_class() {
 
     let cases = [
         ("unsupported_schema_version", unsupported_schema),
+        ("unsupported_ir_version", unsupported_ir),
         ("duplicate_node_id", duplicate_node_id),
-        ("unknown_node_reference", unknown_node_reference),
         ("invalid_node_payload", invalid_node_payload),
-        ("invalid_opaque_source", invalid_opaque_source),
+        ("invalid_body_form", invalid_body_form),
         ("duplicate_process_name", duplicate_process_name),
-        ("canonical_source", canonical_source),
-        ("rendered_source_invalid", rendered_source_invalid),
+        ("invalid_program", invalid_program),
     ];
     for (expected_code, graph) in cases {
         let validation_error = validate(&graph).expect_err(expected_code);
@@ -731,6 +721,52 @@ fn validate_and_render_agree_on_every_graph_failure_class() {
     }
 }
 
+/// FIG-5572: sourceability belongs to the lens, not to the document. A
+/// program this lens cannot spell is still a valid, complete document; the
+/// lens refuses it with its own typed error.
+#[test]
+fn a_document_the_lens_cannot_spell_validates_and_is_refused_by_the_lens_alone() {
+    let mut graph =
+        workflow_graph_from_source("const value = 1;\nfinish(value);\n").expect("fixture projects");
+    graph.main.nodes[0].name_source = WorkflowNodeNameSource::Label;
+    graph.main.nodes[0].name = "Close */ me".into();
+
+    validate(&graph).expect("the document is a valid program");
+    lash_vm::workflow_program_from_graph(&graph).expect("the document reconstructs");
+    for refusal in [
+        workflow_graph_to_source(&graph).expect_err("the printer has no spelling"),
+        lash_typescript::workflow_graph::source_view(&graph)
+            .map(|view| view.source)
+            .expect_err("the lens has no view"),
+    ] {
+        assert!(matches!(refusal, GraphRenderError::CanonicalSource(_)));
+        assert_eq!(refusal.code(), "canonical_source");
+    }
+}
+
+/// FIG-5572: a source view is the canonical text of one document with spans
+/// keyed by that document's own node ids, whoever minted them.
+#[test]
+fn a_source_view_addresses_the_documents_own_nodes() {
+    let source = "const value = 1;\ntry {\n  console.log(value);\n} catch (error) {\n  console.log(error);\n}\nfinish(value);\n";
+    let canonical = canonical(source);
+    let mut graph = workflow_graph_from_source(&canonical).expect("fixture projects");
+    for (index, node) in graph.main.nodes.iter_mut().enumerate() {
+        node.id = WorkflowNodeId::new(format!("node:host-{index}"));
+        node.source_span = None;
+    }
+    let view = lash_typescript::workflow_graph::source_view(&graph).expect("the lens has a view");
+    assert_eq!(view.source, canonical);
+    assert_eq!(view.source_identity, None);
+    let text = |index: usize| {
+        let span = view.spans[&WorkflowNodeId::new(format!("node:host-{index}"))];
+        &view.source[span.start..span.end]
+    };
+    assert_eq!(text(0), "let value = 1;");
+    assert!(text(1).starts_with("try {") && text(1).ends_with('}'));
+    assert_eq!(text(2), "finish(value)");
+}
+
 #[test]
 fn missing_and_null_container_children_fail_at_decode() {
     let empty = || Box::new(WorkflowSubgraph::default());
@@ -739,8 +775,6 @@ fn missing_and_null_container_children_fail_at_decode() {
             WorkflowContainer::If {
                 binding: None,
                 condition: ir("true"),
-                then_is_block: true,
-                else_is_block: true,
                 then_graph: empty(),
                 else_graph: empty(),
             },
@@ -750,8 +784,6 @@ fn missing_and_null_container_children_fail_at_decode() {
             WorkflowContainer::If {
                 binding: None,
                 condition: ir("true"),
-                then_is_block: true,
-                else_is_block: true,
                 then_graph: empty(),
                 else_graph: empty(),
             },
@@ -759,8 +791,9 @@ fn missing_and_null_container_children_fail_at_decode() {
         ),
         (
             WorkflowContainer::For {
-                authored_binding: None,
-                binding: "item".to_string(),
+                binding: None,
+                authored_element: None,
+                element: "item".to_string(),
                 iterable: ir("[]"),
                 bind: None,
                 body: empty(),
@@ -769,7 +802,24 @@ fn missing_and_null_container_children_fail_at_decode() {
         ),
         (
             WorkflowContainer::While {
+                binding: None,
                 condition: ir("false"),
+                body: empty(),
+            },
+            "body",
+        ),
+        (
+            WorkflowContainer::Try {
+                binding: None,
+                body: empty(),
+                catch: None,
+                finally: None,
+            },
+            "body",
+        ),
+        (
+            WorkflowContainer::Scope {
+                binding: None,
                 body: empty(),
             },
             "body",
@@ -1479,7 +1529,7 @@ finish(1);
 }
 
 #[test]
-fn effectful_composites_are_typed_and_never_opaque() {
+fn effectful_composites_are_typed_computations() {
     let source = r#"const child = async () => {
     return 1;
   };
@@ -1502,11 +1552,6 @@ finish(indexed);
             .iter()
             .map(|node| &node.kind)
             .collect::<Vec<_>>()
-    );
-    assert!(
-        !graph
-            .nodes()
-            .any(|node| matches!(node.kind, WorkflowNodeKind::Opaque { .. }))
     );
     assert_lens_laws(source);
 }

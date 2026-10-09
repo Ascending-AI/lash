@@ -137,7 +137,11 @@ The executable expression `inputs: 1 + 1` instead uses
 `{"kind": "expr", "value": "(1 + 1)"}`. An object's keys never decide its
 kind. Null uses `{"kind": "null", "value": null}`. Untagged values are rejected.
 This is an in-place contract change; the schema version stays unchanged.
-An opaque node is edited through `data.source` as one complete statement.
+A `try`, a `throw` and a nested block are typed regions of Lash's workflow
+document. This host has no form for them, so it shows each as an `opaque`
+node: `data.source` is the region's canonical TypeScript, one complete
+statement, and an edit of it is parsed back into the typed region. Untouched
+text leaves the region's IR exactly as it was.
 
 The adapter renders structured expression slots as canonical TypeScript text:
 
@@ -185,7 +189,7 @@ The editable surface is:
 - `data.fields` literal values.
 - `data.binding`, `data.target`, `data.expression`, `data.condition`,
   `data.iterable`, and `data.clauses` canonical Lash VM text where present.
-- Opaque `data.source`.
+- `data.source` on an `opaque` node.
 - `nodes`, `edges`, `roots`, and `children[].nodeIds` for delete/reorder edits.
 
 The structured text fields and their render-time validation are:
@@ -230,11 +234,12 @@ Invalid graph edits return HTTP `422`:
 }
 ```
 
-Typed render codes are `unsupported_schema_version`, `duplicate_node_id`,
-`unknown_node_reference`, `missing_required_child`, `invalid_node_payload`,
-`invalid_expression`, `invalid_assignment_target`, `invalid_opaque_source`,
-`duplicate_process_name`, `process_origin_mismatch`, `canonical_source`, and
-`rendered_source_invalid`.
+Typed render codes are `unsupported_schema_version`, `unsupported_ir_version`,
+`duplicate_node_id`, `missing_required_child`, `invalid_node_payload`,
+`invalid_body_form`, `invalid_expression`, `invalid_assignment_target`,
+`duplicate_process_name`, `process_origin_mismatch`, `invalid_program`, and
+`canonical_source`. An `opaque` node whose `data.source` is not exactly one
+valid statement is an `invalid_node_payload`.
 Malformed host DTO structure uses
 `invalid_graph_document`. A stale save returns HTTP `409` with
 `version_conflict`.

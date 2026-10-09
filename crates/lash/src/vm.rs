@@ -99,23 +99,22 @@ pub mod ir {
     pub use lash_vm::Span;
     pub use lash_vm::{
         AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BindingVisibility, CatchClause,
-        CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr, ExprFolder, ExprVisitor,
-        FunctionDecl, FunctionExpr, FunctionParam, InvalidAst, LIFTED_PROCESS_NAME_PREFIX,
-        LabelMetadata, MAX_AST_NESTING_DEPTH, MethodKey, NestingTooDeep, OperandLogicalOp,
-        ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessParam,
-        ProcessSignature as VmProcessSignature, ProcessSignatureError, ProcessType, Program,
-        ResourceRefExpr, StructuralRole, TryExpr, TypeExpr, TypeField, UnionMembers,
+        CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr, ExprFolder, ExprSlot,
+        ExprSlotVisitor, ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst,
+        LIFTED_PROCESS_NAME_PREFIX, LabelMetadata, MAX_AST_NESTING_DEPTH, MethodKey,
+        NestingTooDeep, OperandLogicalOp, ProcessDecl, ProcessLiteralExpr, ProcessOrigin,
+        ProcessParam, ProcessSignature as VmProcessSignature, ProcessSignatureError, ProcessType,
+        Program, ResourceRefExpr, StructuralRole, TryExpr, TypeExpr, TypeField, UnionMembers,
         check_ast_nesting_depth, fold_expr_children, format_type_expr, lifted_process_identity,
-        process_wrapper_run_path, validate_ast, walk_expr,
+        process_wrapper_run_path, validate_ast, walk_expr, walk_expr_slots,
     };
     pub use lash_vm::{
         AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts,
-        ExprChildren, ExprChildrenMut, UpdateOperator,
+        ExprChildren, ExprChildrenMut, ProcessWrapperParts, UpdateOperator,
     };
     pub use lash_vm::{
-        ListedStatement, NoStatementText, WorkflowBody, WorkflowBodySlot, WorkflowGraphProjector,
-        WorkflowStatement, WorkflowStatementText, else_if_chain, statement_list,
-        workflow_graph_from_artifact, workflow_graph_from_program,
+        ListedStatement, WorkflowBody, WorkflowBodySlot, WorkflowGraphProjector, WorkflowStatement,
+        else_if_chain, statement_list, workflow_graph_from_artifact, workflow_graph_from_program,
     };
     pub use lash_vm::{
         VariableVersion, WorkflowArgument, WorkflowContainer, WorkflowDeclaration,

@@ -13,8 +13,37 @@
 //! The lash_vm engine's is built in and answers a [`WorkflowDocument`]; an
 //! engine with none, or with a document of another type, reads
 //! [`WorkflowRead::Unsupported`].
+//!
+//! # The document
+//!
+//! A [`WorkflowGraph`] is a total typed document of one program: every
+//! admitted construct is a typed node or region and no node carries source
+//! text. `workflow_graph_from_program` and `workflow_graph_from_artifact`
+//! (in `lash::vm::ir`) project a program to its document; [`workflow_program_from_graph`]
+//! reconstructs the program exactly. Neither direction involves a source
+//! dialect, so a host reads, changes and validates a workflow without
+//! printing or parsing TypeScript. `lash::typescript::workflow_graph` is an
+//! optional source view of the same document.
+//!
+//! The document stamps the interpretation of the IR it was written under
+//! ([`WORKFLOW_IR_VERSION`]); a document this build does not read is a typed
+//! refusal ([`WorkflowIrVersionRefusal`]) when it is opened, never a partial
+//! read.
+//!
+//! A place inside the document is a `(WorkflowNodeId, WorkflowSlotPath)`
+//! pair. The slot path is a sequence of `ExprSlot`s from the statement
+//! [`workflow_node_statement`] rebuilds for the node, and every `Expr`
+//! variant names its slots exhaustively, in evaluation order, through
+//! `Expr::slots`.
+//!
+//! The IR the document carries (`Expr`, its slots, declarations and types)
+//! is `lash::vm::ir`; this module is the document itself.
 
-pub use lash_vm::WorkflowGraph;
+pub use lash_vm::{
+    WORKFLOW_IR_VERSION, WorkflowBodyForm, WorkflowCatch, WorkflowCompletionGroup, WorkflowGraph,
+    WorkflowGraphError, WorkflowIrVersionRefusal, WorkflowPinnedSlots, WorkflowProcessWrapper,
+    WorkflowRunDriver, workflow_node_statement, workflow_program_from_graph,
+};
 pub use lash_vm_runtime::WorkflowDocument;
 
 use crate::persistence::ArtifactName;

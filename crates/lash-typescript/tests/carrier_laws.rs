@@ -24,8 +24,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod goldens;
 
 use lash_typescript::workflow_graph::{
-    TypeScriptStatementText, workflow_graph_from_artifact, workflow_graph_from_source,
-    workflow_graph_to_source,
+    workflow_graph_from_artifact, workflow_graph_from_source, workflow_graph_to_source,
 };
 use lash_vm::testing::harness::test_environment;
 use lash_vm::{
@@ -225,8 +224,8 @@ fn l3_alpha_renaming_private_binders_preserves_node_ids() {
         );
         let renamed = alpha_rename(&program, &private);
         assert_ne!(program, renamed, "the corpus source has private binders");
-        let original = lash_vm::workflow_graph_from_program(&program, &TypeScriptStatementText);
-        let alpha = lash_vm::workflow_graph_from_program(&renamed, &TypeScriptStatementText);
+        let original = lash_vm::workflow_graph_from_program(&program);
+        let alpha = lash_vm::workflow_graph_from_program(&renamed);
         let ids = |graph: &WorkflowGraph| {
             graph
                 .nodes()

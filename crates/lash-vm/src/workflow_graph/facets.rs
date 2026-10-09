@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::{Span, WorkflowNodeId};
-use crate::ast::{AstPath, AstString, Expr, TypeExpr};
+use crate::ast::{AstPath, AstString, Expr, ExprSlot, TypeExpr};
 use crate::linker::{LinkError, WorkflowLinkAnalysis};
 
 /// Version of the optional, derived workflow type-facet contract. Version 4
@@ -44,7 +44,15 @@ pub struct WorkflowExpectedArgument {
     pub ty: TypeExpr,
 }
 
-/// An unambiguous address for one input location inside a workflow node.
+/// An unambiguous address for one expression inside a workflow node.
+///
+/// Two spellings share the type. A *structural* path is made only of
+/// [`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots
+/// of the node's statement ([`super::workflow_node_statement`]), so it reaches
+/// every expression role of every IR variant; the empty path is the statement
+/// itself. A *call-argument* path starts at a receiver call's argument
+/// (`call`, `arg`, then record fields and list indexes) and is what type
+/// facets name their expected arguments by.
 ///
 /// The serialized list is authoritative. [`Display`](std::fmt::Display) is a
 /// derived spelling for text-only host contracts; field names use JSON string
@@ -65,6 +73,28 @@ impl WorkflowSlotPath {
             WorkflowSlotPathSegment::Call(call),
             WorkflowSlotPathSegment::Arg(argument),
         ])
+    }
+
+    /// The structural path through `slots`, from a node's statement.
+    pub fn structural(slots: impl IntoIterator<Item = ExprSlot>) -> Self {
+        Self(
+            slots
+                .into_iter()
+                .map(WorkflowSlotPathSegment::Expr)
+                .collect(),
+        )
+    }
+
+    /// The typed child slots of a structural path, or `None` when the path
+    /// is a call-argument path.
+    pub fn expr_slots(&self) -> Option<Vec<ExprSlot>> {
+        self.0
+            .iter()
+            .map(|segment| match segment {
+                WorkflowSlotPathSegment::Expr(slot) => Some(*slot),
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn push(&mut self, segment: WorkflowSlotPathSegment) {
@@ -93,6 +123,7 @@ impl std::fmt::Display for WorkflowSlotPath {
                     write!(formatter, "[{quoted}]")?;
                 }
                 WorkflowSlotPathSegment::Index(item) => write!(formatter, "[{item}]")?,
+                WorkflowSlotPathSegment::Expr(slot) => write!(formatter, "/{slot}")?,
             }
         }
         Ok(())
@@ -109,6 +140,8 @@ pub enum WorkflowSlotPathSegment {
     Arg(u32),
     Field(AstString),
     Index(u32),
+    /// One typed child slot of the IR expression reached so far.
+    Expr(ExprSlot),
 }
 
 /// Resolves a typed slot address against the authoritative expression IR.
@@ -117,6 +150,9 @@ pub enum WorkflowSlotPathSegment {
 /// exactly one receiver call. A path with a `call` segment uses depth-first IR
 /// walk order, matching facet derivation.
 pub fn workflow_slot_value<'a>(expression: &'a Expr, path: &WorkflowSlotPath) -> Option<&'a Expr> {
+    if let Some(slots) = path.expr_slots() {
+        return expression.at_slots(&slots);
+    }
     let mut segments = path.segments().iter();
     let first = segments.next()?;
     let mut calls = Vec::new();

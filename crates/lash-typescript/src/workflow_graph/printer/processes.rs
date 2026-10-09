@@ -36,7 +36,7 @@ impl<'p> Printer<'p> {
             "const {} = async ({}){} => ",
             self.binding_identifier("process binding", binding)?,
             params.join(", "),
-            process_return_annotation(super::super::authored_return_type(&process.origin))?,
+            process_return_annotation(authored_return_type(&process.origin))?,
         ));
         let mut run_bound = authored_params(process)
             .iter()
@@ -61,6 +61,18 @@ impl<'p> Printer<'p> {
 
 /// A process's authored parameters: a lifted literal's hidden start arguments
 /// are not among them.
+/// The settled output annotation the source declared for a process.
+fn authored_return_type(origin: &lash_vm::ProcessOrigin) -> Option<&TypeExpr> {
+    match origin {
+        // TypeScript authors literals. A native declaration has always rendered
+        // without a TypeScript return annotation, with its output inferred again.
+        lash_vm::ProcessOrigin::Declared => None,
+        lash_vm::ProcessOrigin::Lifted {
+            declared_return_ty, ..
+        } => declared_return_ty.as_ref(),
+    }
+}
+
 pub(super) fn authored_params(process: &ProcessDecl) -> &[lash_vm::ProcessParam] {
     let hidden = match &process.origin {
         lash_vm::ProcessOrigin::Lifted { hidden_params, .. } => *hidden_params as usize,

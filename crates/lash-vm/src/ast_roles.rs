@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 use super::{
-    AssignPathStep, AstPath, AstString, CatchClause, CoercingBinaryOp, Declaration, Expr,
-    InvalidAst, Program, TryExpr,
+    AssignPathStep, AssignTarget, AstPath, AstString, CatchClause, CoercingBinaryOp, Declaration,
+    Expr, FunctionExpr, InvalidAst, Program, TryExpr,
 };
 
 /// The origin of a [`super::ProcessDecl`].
@@ -180,6 +180,12 @@ impl StructuralRole {
 /// The authored parts of a [`StructuralRole::AttributeAssign`] block.
 #[derive(Clone, Copy, Debug)]
 pub struct AttributeAssignParts<'a> {
+    /// The slot the role pins its reference base in.
+    pub base: &'a AstString,
+    /// The slot the role pins a computed index in, when the step is one.
+    pub key: Option<&'a AstString>,
+    /// The slot the role holds the assigned value in.
+    pub result: &'a AstString,
     /// The object whose attribute is written.
     pub object: &'a Expr,
     /// The written attribute: a field name, or an index expression.
@@ -325,11 +331,83 @@ impl<'a> AttributeAssignParts<'a> {
             return None;
         }
         Some(Self {
+            base,
+            key: key_name,
+            result: &result_target.root,
             object,
             step,
             value,
             value_index: if key.is_some() { 2 } else { 1 },
             update,
+        })
+    }
+
+    /// Builds the role block [`Self::of`] reads these parts from.
+    ///
+    /// `index` is the computed index of an indexed step, pinned in `key`; a
+    /// field step has neither. `value` is the whole assigned value, which for
+    /// an update reads the pinned attribute (see [`Self::update_value`]).
+    pub fn build(
+        base: AstString,
+        key: Option<(AstString, Expr)>,
+        result: AstString,
+        object: Expr,
+        field: Option<AstString>,
+        value: Expr,
+    ) -> Option<Expr> {
+        let assign = |root: &AstString, expr: Expr| Expr::Assign {
+            target: AssignTarget::variable(root.clone()),
+            expr: Box::new(expr),
+        };
+        let mut items = vec![assign(&base, object)];
+        let step = match (field, key) {
+            (Some(field), None) => AssignPathStep::Field(field),
+            (None, Some((key, index))) => {
+                items.push(assign(&key, index));
+                AssignPathStep::Index(Expr::Variable(key))
+            }
+            _ => return None,
+        };
+        items.push(assign(&result, value));
+        items.push(Expr::Assign {
+            target: AssignTarget {
+                root: base,
+                steps: vec![step],
+            },
+            expr: Box::new(Expr::Variable(result.clone())),
+        });
+        items.push(Expr::Variable(result));
+        Some(Expr::Role {
+            role: StructuralRole::AttributeAssign,
+            expr: Box::new(Expr::Block(items)),
+        })
+    }
+
+    /// The value of a compound update: the pinned attribute's current value
+    /// combined with `operand` by `operator`.
+    pub fn update_value(
+        base: &AstString,
+        key: Option<&AstString>,
+        field: Option<&AstString>,
+        operator: UpdateOperator,
+        operand: Expr,
+    ) -> Option<Expr> {
+        let pinned = Box::new(Expr::Variable(base.clone()));
+        let current = match (field, key) {
+            (Some(field), None) => Expr::Field {
+                target: pinned,
+                field: field.clone(),
+            },
+            (None, Some(key)) => Expr::Index {
+                target: pinned,
+                index: Box::new(Expr::Variable(key.clone())),
+            },
+            _ => return None,
+        };
+        Some(Expr::CoercingBinary {
+            left: Box::new(current),
+            op: operator.coercing_op(),
+            right: Box::new(operand),
         })
     }
 }
@@ -428,6 +506,87 @@ impl<'a> CollectionTransformParts<'a> {
             callback,
             operands,
         })
+    }
+}
+
+/// The parts of a [`StructuralRole::ProcessWrapper`]'s wrapped `Try` around
+/// the authored run body.
+#[derive(Clone, Copy, Debug)]
+pub struct ProcessWrapperParts<'a> {
+    /// The run function; its body is the authored process body.
+    pub run: &'a FunctionExpr,
+    /// The builtin that drives the run function and its further arguments,
+    /// when the run call goes through one.
+    pub driver: Option<(&'a AstString, &'a [Expr])>,
+    /// The arguments the run call passes.
+    pub arguments: &'a [Expr],
+    /// The binding the wrapper's catch fails the process with.
+    pub catch_binding: &'a AstString,
+}
+
+impl<'a> ProcessWrapperParts<'a> {
+    /// Reads the parts of a process wrapper's `Try`, or `None` when it does
+    /// not have the role's shape.
+    pub fn of(wrapper: &'a Expr) -> Option<Self> {
+        process_wrapper_run_path(wrapper)?;
+        let Expr::Try(scope) = wrapper else {
+            return None;
+        };
+        let catch = scope.catch.as_ref()?;
+        let Expr::Finish(call) = scope.body.as_ref() else {
+            return None;
+        };
+        let Expr::Call { function, args } = call.as_ref() else {
+            return None;
+        };
+        let (run, driver) = match function.as_ref() {
+            Expr::Function(run) => (run.as_ref(), None),
+            Expr::BuiltinCall { name, args } => match args.split_first() {
+                Some((Expr::Function(run), rest)) => (run.as_ref(), Some((name, rest))),
+                _ => return None,
+            },
+            _ => return None,
+        };
+        Some(Self {
+            run,
+            driver,
+            arguments: args,
+            catch_binding: &catch.binding,
+        })
+    }
+
+    /// Builds the wrapper role [`Self::of`] reads these parts from, around
+    /// `run`.
+    pub fn build(
+        run: FunctionExpr,
+        driver: Option<(AstString, Vec<Expr>)>,
+        arguments: Vec<Expr>,
+        catch_binding: AstString,
+    ) -> Expr {
+        let run = Expr::Function(Box::new(run));
+        let function = match driver {
+            None => run,
+            Some((name, rest)) => {
+                let mut args = Vec::with_capacity(rest.len() + 1);
+                args.push(run);
+                args.extend(rest);
+                Expr::BuiltinCall { name, args }
+            }
+        };
+        Expr::Role {
+            role: StructuralRole::ProcessWrapper,
+            expr: Box::new(Expr::Try(Box::new(TryExpr {
+                body: Box::new(Expr::Finish(Box::new(Expr::Call {
+                    function: Box::new(function),
+                    args: arguments,
+                }))),
+                catch: Some(CatchClause {
+                    binding: catch_binding.clone(),
+                    body: Box::new(Expr::Fail(Box::new(Expr::Variable(catch_binding)))),
+                }),
+                finally: None,
+            }))),
+        }
     }
 }
 

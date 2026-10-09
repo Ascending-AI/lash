@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use lash_typescript::workflow_graph::{
     GraphRenderError, typescript_program_source, workflow_graph_from_artifact,
-    workflow_graph_to_source_in_session,
+    workflow_graph_to_source,
 };
 
 use super::corpora::{self, CorpusProgram};
@@ -77,8 +77,7 @@ fn round_trip(program: &CorpusProgram) -> Result<Trip, String> {
     let linked = lash_typescript::link(&program.source, &environment)
         .map_err(|error| format!("does not admit: {error}"))?;
     // The lens's canonical text is the printer's spelling of the admitted
-    // program; a program the printer cannot spell is refused here, typed,
-    // before the graph carries the refusal as an opaque node's placeholder.
+    // program; a program the printer cannot spell is refused here, typed.
     // That text is itself a print of the admitted program (the one node
     // spans address), so it re-admits to the same module as well.
     let canonical = match typescript_program_source(linked.artifact.ir()) {
@@ -89,7 +88,24 @@ fn round_trip(program: &CorpusProgram) -> Result<Trip, String> {
         return Ok(Trip::Violates(violation));
     }
     let graph = workflow_graph_from_artifact(&linked.artifact);
-    let printed = match workflow_graph_to_source_in_session(&graph, &program.globals) {
+    // The document is the admitted program: reconstruction is IR-owned and
+    // exact, whether or not the lens can spell the result (FIG-5572).
+    // The programs are compared as printed: a `NaN` literal is the same
+    // literal on both sides and is never equal to itself as a number.
+    match lash_vm::workflow_program_from_graph(&graph) {
+        Ok(rebuilt) if format!("{rebuilt:?}") == format!("{:?}", linked.artifact.ir()) => {}
+        Ok(_) => {
+            return Ok(Trip::Violates(
+                "the admitted document reconstructs to a different program".to_string(),
+            ));
+        }
+        Err(error) => {
+            return Ok(Trip::Violates(format!(
+                "the admitted document does not reconstruct: {error}"
+            )));
+        }
+    }
+    let printed = match workflow_graph_to_source(&graph) {
         Ok(printed) => printed,
         Err(GraphRenderError::CanonicalSource(error)) => {
             return Ok(Trip::Refused(error.to_string()));

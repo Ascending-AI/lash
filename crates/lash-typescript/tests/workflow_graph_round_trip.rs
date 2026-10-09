@@ -1,6 +1,6 @@
 //! The workflow-graph lens's print → reparse → admit round trip over the
 //! shapes FIG-3635 and FIG-3663 found open: hoisted `var` declarations
-//! beside function declarations, and opaque nodes that read the session's
+//! beside function declarations, and statements that read the session's
 //! globals.
 
 use std::collections::BTreeSet;
@@ -9,7 +9,6 @@ use lash_typescript::parse;
 use lash_typescript::workflow_graph::{
     TypeScriptSourceError, parse_typescript_expression, typescript_expression_source,
     typescript_program_source, workflow_graph_from_source, workflow_graph_to_source,
-    workflow_graph_to_source_in_session,
 };
 use lash_vm::WorkflowNodeKind;
 
@@ -382,12 +381,9 @@ fn property_presence_queries_round_trip() {
     );
 }
 
-/// The language-neutral IR projection, with TypeScript opaque-statement text.
+/// The language-neutral IR projection.
 fn workflow_graph_from_program(program: &lash_vm::Program) -> lash_vm::WorkflowGraph {
-    lash_vm::workflow_graph_from_program(
-        program,
-        &lash_typescript::workflow_graph::TypeScriptStatementText,
-    )
+    lash_vm::workflow_graph_from_program(program)
 }
 
 /// Every lens law over one fixture.
@@ -426,44 +422,27 @@ fn template_literals_round_trip_their_cooked_escapes() {
 }
 
 #[test]
-fn opaque_statements_read_session_globals() {
-    // FIG-3663: an opaque statement may read a session global the program
-    // itself linked against — the corpus's Test262 cells throw
-    // `Test262Error`, which the session bound before the cell ran.
+fn a_throw_reading_a_session_global_renders_without_the_session() {
+    // FIG-3663: a statement may read a session global the program itself
+    // linked against; the corpus's Test262 cells throw `Test262Error`, which
+    // the session bound before the cell ran. FIG-5572: the throw is a typed
+    // node, so rendering it parses nothing and needs no session.
     let globals: BTreeSet<String> = ["Test262Error".to_string()].into_iter().collect();
     let program = lash_typescript::parse_with_globals("throw Test262Error(\"no\");\n", &globals)
         .expect("source parses against the session");
     let graph = workflow_graph_from_program(&program);
-    let rendered = workflow_graph_to_source_in_session(&graph, &globals)
-        .expect("the graph renders against the session's globals");
-    assert_eq!(rendered, "throw Test262Error(\"no\");\n");
-    assert!(
-        workflow_graph_to_source(&graph).is_err(),
-        "without the session's globals the opaque source still refuses"
+    assert!(matches!(
+        graph.main.nodes[0].kind,
+        WorkflowNodeKind::Throw { .. }
+    ));
+    assert_eq!(
+        lash_vm::workflow_program_from_graph(&graph).expect("the document reconstructs"),
+        program
     );
-}
-
-#[test]
-fn opaque_statements_reject_globals_the_program_cannot_see() {
-    // The session's globals add the names the cell linked against, no more:
-    // an opaque statement that reads anything else still fails its reparse.
-    let globals: BTreeSet<String> = ["Test262Error".to_string()].into_iter().collect();
-    let program = lash_typescript::parse_with_globals("throw Test262Error(\"no\");\n", &globals)
-        .expect("source parses against the session");
-    let mut graph = workflow_graph_from_program(&program);
-    let source = graph
-        .main
-        .nodes
-        .iter_mut()
-        .find_map(|node| match &mut node.kind {
-            WorkflowNodeKind::Opaque { source } => Some(source),
-            _ => None,
-        })
-        .expect("the program projects an opaque node");
-    *source = "throw NotBoundHere(\"no\");".to_string();
-    let error = workflow_graph_to_source_in_session(&graph, &globals)
-        .expect_err("a name in neither the node nor the session refuses");
-    assert_eq!(error.code(), "invalid_opaque_source");
+    assert_eq!(
+        workflow_graph_to_source(&graph).expect("the graph renders"),
+        "throw Test262Error(\"no\");\n"
+    );
 }
 
 #[test]

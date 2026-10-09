@@ -327,7 +327,7 @@ fn assert_map_is_the_compiled_inventory(
 
 /// The node of `artifact`'s view whose payload names `marker`.
 fn node_naming(artifact: &lash_vm::ModuleArtifact, marker: &str) -> String {
-    let graph = lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText);
+    let graph = lash_vm::workflow_graph_from_artifact(artifact);
     let quoted = format!("\"{marker}\"");
     let matching = graph
         .nodes()

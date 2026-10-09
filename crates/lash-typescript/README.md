@@ -925,9 +925,8 @@ rule live under `tests/test262/`.
 
 Workflow graph validation and rendering use the same version admission as
 `WorkflowGraph::decode_json_value_for_fleet`. For a graph read from a store,
-pass its fleet epoch to `validate_for_fleet`,
-`workflow_graph_to_source_for_fleet`, or
-`workflow_graph_to_source_in_session_for_fleet`. The variants without a fleet
+pass its fleet epoch to `validate_for_fleet` or
+`workflow_graph_to_source_for_fleet`. The variants without a fleet
 argument use the build's current epoch. During a roll the fleet's predecessor
 pin remains readable; after finalize an older derived graph is refused and
 must be regenerated from its module. A version refusal carries the found

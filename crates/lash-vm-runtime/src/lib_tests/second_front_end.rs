@@ -391,7 +391,7 @@ fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
 
     let main_sites = compiled_sites(&output.artifact, lash_vm::Entry::Main);
     let main_map = map_sites(&trace_lashlang_main_map(
-        &lash_vm::workflow_graph_from_artifact(&output.artifact, &lash_vm::NoStatementText),
+        &lash_vm::workflow_graph_from_artifact(&output.artifact),
     ));
     assert!(!main_sites.is_empty());
     assert_eq!(
@@ -403,7 +403,7 @@ fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
     let worker_sites = compiled_sites(&output.artifact, lash_vm::Entry::Process(&worker_ref));
     let worker_map = map_sites(
         &trace_lashlang_process_map(
-            &lash_vm::workflow_graph_from_artifact(&output.artifact, &lash_vm::NoStatementText),
+            &lash_vm::workflow_graph_from_artifact(&output.artifact),
             &worker,
         )
         .expect("worker map"),
@@ -436,7 +436,7 @@ fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
         !output.artifact.ir().private_bindings.is_empty(),
         "the front end marks its temporaries private"
     );
-    let graph = lash_vm::workflow_graph_from_artifact(&output.artifact, &lash_vm::NoStatementText);
+    let graph = lash_vm::workflow_graph_from_artifact(&output.artifact);
     assert!(
         graph.nodes().any(|node| matches!(
             node.kind,
@@ -510,13 +510,7 @@ async fn a_second_front_end_keeps_its_sites_across_relink_and_stored_reload() {
         compiled_sites(&first.artifact, lash_vm::Entry::Process(&worker_ref))
     );
     assert_eq!(
-        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(
-            reloaded,
-            &lash_vm::NoStatementText
-        )),
-        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(
-            &first.artifact,
-            &lash_vm::NoStatementText
-        ))
+        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(reloaded)),
+        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(&first.artifact))
     );
 }

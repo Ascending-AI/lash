@@ -48,17 +48,17 @@ pub use artifact::{
 };
 pub use ast::{
     AssignPathStep, AssignTarget, AstPath, AstRoot, AstString, BindingVisibility, CatchClause,
-    CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr, ExprFolder, ExprVisitor, FunctionDecl,
-    FunctionExpr, FunctionParam, InvalidAst, LIFTED_PROCESS_NAME_PREFIX, LabelMetadata,
-    MAX_AST_NESTING_DEPTH, MethodKey, NestingTooDeep, OperandLogicalOp, ProcessDecl,
+    CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr, ExprFolder, ExprSlot, ExprSlotVisitor,
+    ExprVisitor, FunctionDecl, FunctionExpr, FunctionParam, InvalidAst, LIFTED_PROCESS_NAME_PREFIX,
+    LabelMetadata, MAX_AST_NESTING_DEPTH, MethodKey, NestingTooDeep, OperandLogicalOp, ProcessDecl,
     ProcessLiteralExpr, ProcessOrigin, ProcessParam, ProcessSignature, ProcessSignatureError,
     ProcessType, Program, ResourceRefExpr, StructuralRole, TryExpr, TypeExpr, TypeField,
     UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
-    lifted_process_identity, process_wrapper_run_path, validate_ast, walk_expr,
+    lifted_process_identity, process_wrapper_run_path, validate_ast, walk_expr, walk_expr_slots,
 };
 pub use ast::{
     AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts, ExprChildren,
-    ExprChildrenMut, UpdateOperator,
+    ExprChildrenMut, ProcessWrapperParts, UpdateOperator,
 };
 
 /// Names of every source Lash VM builtin, in registry order.
@@ -218,9 +218,11 @@ pub use tracking::{
 };
 
 pub use workflow_graph::{
-    ListedStatement, NoStatementText, WorkflowBody, WorkflowBodySlot, WorkflowGraphProjector,
-    WorkflowStatement, WorkflowStatementText, else_if_chain, statement_list,
-    workflow_graph_from_artifact, workflow_graph_from_program,
+    ListedStatement, WORKFLOW_IR_VERSION, WorkflowBody, WorkflowBodyForm, WorkflowBodySlot,
+    WorkflowCatch, WorkflowCompletionGroup, WorkflowGraphError, WorkflowGraphProjector,
+    WorkflowIrVersionRefusal, WorkflowPinnedSlots, WorkflowProcessWrapper, WorkflowRunDriver,
+    WorkflowStatement, else_if_chain, statement_list, workflow_graph_from_artifact,
+    workflow_graph_from_program, workflow_node_statement, workflow_program_from_graph,
 };
 pub use workflow_graph::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,

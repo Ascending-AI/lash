@@ -4,8 +4,8 @@
 use crate::testing::ast_builders as b;
 use crate::testing::harness::link_labeled;
 use crate::{
-    AstPath, Expr, InvalidAst, NoStatementText, Program, StructuralRole, WorkflowNodeKind,
-    validate_ast, workflow_graph_from_program,
+    AstPath, Expr, InvalidAst, Program, StructuralRole, WorkflowNodeKind, validate_ast,
+    workflow_graph_from_program,
 };
 
 use super::WorkflowProjection;
@@ -84,7 +84,7 @@ fn a_completion_wrapped_statement_is_the_statement_it_wraps() {
             b::block(vec![b::assign("total", b::num(1.0)), b::var("total")]),
         ),
     ]);
-    let graph = workflow_graph_from_program(&program, &NoStatementText);
+    let graph = workflow_graph_from_program(&program);
     assert!(
         matches!(
             graph.main.nodes[1].kind,
@@ -110,7 +110,7 @@ fn an_attribute_assignment_projects_its_authored_target() {
         ),
     ]);
     validate_ast(&program).expect("the attribute assignment has its role's shape");
-    let graph = workflow_graph_from_program(&program, &NoStatementText);
+    let graph = workflow_graph_from_program(&program);
     let WorkflowNodeKind::StateUpdate { target, .. } = &graph.main.nodes[1].kind else {
         panic!("expected a state update: {:?}", graph.main.nodes[1].kind);
     };

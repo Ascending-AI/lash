@@ -182,13 +182,10 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
     // The projection is language-neutral and lives beside the IR (ADR 0100
     // R8): this witness is direct IR — `@label` and a list comprehension have
     // no TypeScript form — and projects with no dialect in the graph.
-    let graph = lash_vm::workflow_graph_from_program(&program, &lash_vm::NoStatementText);
-    let trace_graph =
-        lash_vm::workflow_graph_from_artifact(&output.artifact, &lash_vm::NoStatementText);
-    let trace_map = trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(
-        &output.artifact,
-        &lash_vm::NoStatementText,
-    ));
+    let graph = lash_vm::workflow_graph_from_program(&program);
+    let trace_graph = lash_vm::workflow_graph_from_artifact(&output.artifact);
+    let trace_map =
+        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(&output.artifact));
     assert_eq!(
         Some(output.artifact.source_identity()),
         trace_graph.source_identity,

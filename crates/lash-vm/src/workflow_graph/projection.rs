@@ -2,8 +2,8 @@
 //!
 //! The projector reads structure only from the one ownership walk
 //! ([`WorkflowProjection`]) and the IR's forms and structural roles. It names
-//! no source syntax: the one piece of dialect text a graph carries, an opaque
-//! statement's source, comes from an injected [`WorkflowStatementText`].
+//! no source syntax and drops nothing: every statement becomes a node whose
+//! payload is typed IR, and `reconstruction` rebuilds the program from them.
 
 /// version_surface = "coexist"
 /// version_guard(items(LASH_WORKFLOW_EDGE_DOMAIN_VERSION, edge))
@@ -13,58 +13,34 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{
     AssignTarget, AstPath, AttributeAssignParts, AttributeStep, Declaration, Expr, LabelMetadata,
-    ProcessDecl, ProcessLiteralExpr, ProcessOrigin, Program, StructuralRole,
+    ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessWrapperParts, Program, StructuralRole,
 };
 use crate::linker::WorkflowLinkAnalysis;
 use crate::span::Span;
 
 use super::{
-    VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
-    WorkflowBody, WorkflowBodySlot, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
-    WorkflowEdgeKind, WorkflowEffectKind, WorkflowGraph, WorkflowNode, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowOwnership, WorkflowProcess,
-    WorkflowProjection, WorkflowStatement, WorkflowSubgraph, WorkflowTerminalKind, execution_sites,
-    projected_node_type_facets, statement_list, workflow_call_from_ir, workflow_effect_from_ir,
-    workflow_node_id,
+    VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_IR_VERSION,
+    WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowBody, WorkflowBodyForm, WorkflowBodySlot,
+    WorkflowCatch, WorkflowContainer, WorkflowDeclaration, WorkflowEdge, WorkflowEdgeKind,
+    WorkflowEffectKind, WorkflowGraph, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+    WorkflowNodeNameSource, WorkflowOwnership, WorkflowPinnedSlots, WorkflowProcess,
+    WorkflowProcessWrapper, WorkflowProjection, WorkflowRunDriver, WorkflowStatement,
+    WorkflowSubgraph, WorkflowTerminalKind, execution_sites, projected_node_type_facets,
+    statement_list, workflow_call_from_ir, workflow_effect_from_ir, workflow_node_id,
 };
-
-/// A dialect's source text for one opaque statement.
-///
-/// Opaque nodes carry a statement the graph does not decompose, as the text a
-/// host shows and edits. The dialect that owns that text supplies it.
-pub trait WorkflowStatementText {
-    /// `available` names the identifiers bound before the statement runs.
-    fn statement_text(&self, statement: &Expr, available: &[String]) -> String;
-}
-
-/// Renders no opaque text: for consumers that read identity, structure and
-/// execution sites only, such as the runtime's trace maps.
-pub struct NoStatementText;
-
-impl WorkflowStatementText for NoStatementText {
-    fn statement_text(&self, _statement: &Expr, _available: &[String]) -> String {
-        String::new()
-    }
-}
 
 /// Projects `program` as a draft graph, before any admission: it claims no
 /// source identity.
-pub fn workflow_graph_from_program(
-    program: &Program,
-    text: &dyn WorkflowStatementText,
-) -> WorkflowGraph {
-    WorkflowGraphProjector::new(program).project(text)
+pub fn workflow_graph_from_program(program: &Program) -> WorkflowGraph {
+    WorkflowGraphProjector::new(program).project()
 }
 
 /// Projects an admitted module artifact: the graph of exactly the program the
 /// artifact executes, carrying the artifact's source identity.
-pub fn workflow_graph_from_artifact(
-    artifact: &crate::ModuleArtifact,
-    text: &dyn WorkflowStatementText,
-) -> WorkflowGraph {
+pub fn workflow_graph_from_artifact(artifact: &crate::ModuleArtifact) -> WorkflowGraph {
     WorkflowGraphProjector::new(artifact.ir())
         .with_source_identity(artifact.source_identity())
-        .project(text)
+        .project()
 }
 
 /// A configurable IR projection.
@@ -114,10 +90,9 @@ impl<'a> WorkflowGraphProjector<'a> {
         self
     }
 
-    pub fn project(&self, text: &dyn WorkflowStatementText) -> WorkflowGraph {
+    pub fn project(&self) -> WorkflowGraph {
         let session = Session {
             projector: self,
-            text,
             fleet_format: self.fleet_format,
         };
         session.project()
@@ -126,7 +101,6 @@ impl<'a> WorkflowGraphProjector<'a> {
 
 struct Session<'p, 'a> {
     projector: &'p WorkflowGraphProjector<'a>,
-    text: &'p dyn WorkflowStatementText,
     fleet_format: lash_core_execution::FleetFormat,
 }
 
@@ -169,7 +143,9 @@ impl Session<'_, '_> {
                 .writer_version(lash_core_execution::surface_format!(
                     WORKFLOW_GRAPH_SCHEMA_VERSION
                 )),
+            ir_version: WORKFLOW_IR_VERSION,
             source_identity: self.projector.source_identity.clone(),
+            private_bindings: program.private_bindings.clone(),
             facet_schema_version: self.projector.analysis.map(|_| {
                 self.fleet_format
                     .writer_version(lash_core_execution::surface_format!(
@@ -212,6 +188,7 @@ impl Session<'_, '_> {
             params: process.params.clone(),
             return_ty: process.return_ty.clone(),
             origin: process.origin.clone(),
+            wrapper: process_wrapper(&process.body),
             body: self.project_body(
                 projection.body(),
                 &owner,
@@ -251,6 +228,7 @@ impl Session<'_, '_> {
                 declared_return_ty: literal.return_ty.clone(),
                 hidden_params: u32::try_from(literal.hidden_args.len()).unwrap_or(u32::MAX),
             },
+            wrapper: process_wrapper(&literal.body),
             body: self.project_body(
                 projection.body(),
                 &owner,
@@ -267,7 +245,10 @@ impl Session<'_, '_> {
         ownership: &WorkflowOwnership,
         versions: &mut VersionState,
     ) -> WorkflowSubgraph {
-        let mut subgraph = WorkflowSubgraph::default();
+        let mut subgraph = WorkflowSubgraph {
+            form: WorkflowBodyForm::of(body.expr),
+            ..WorkflowSubgraph::default()
+        };
         let mut previous_effect: Option<WorkflowNodeId> = None;
         for statement in &body.statements {
             let node = self.project_node(statement, owner, ownership, versions);
@@ -394,7 +375,7 @@ impl Session<'_, '_> {
         ownership: &WorkflowOwnership,
         versions: &mut VersionState,
     ) -> (WorkflowNodeKind, String, Vec<VariableVersion>) {
-        if let Some((target, value, update)) = attribute_assignment(expression) {
+        if let Some((target, value, update, pinned)) = attribute_assignment(expression) {
             let name = format!("update {}", target.root);
             let outputs = vec![versions.allocate(target.root.as_str())];
             return (
@@ -402,6 +383,7 @@ impl Session<'_, '_> {
                     target,
                     expression: value.clone(),
                     update,
+                    pinned: Some(pinned),
                 },
                 name,
                 outputs,
@@ -410,60 +392,44 @@ impl Session<'_, '_> {
         let (binding, value) = assignment_parts(expression);
         if let Expr::Assign { target, expr } = expression
             && (!target.is_simple() || versions.is_known(target.root.as_str()))
-            && !matches!(
-                expr.as_ref(),
-                Expr::If { .. } | Expr::For { .. } | Expr::While { .. }
-            )
+            && !owns_bodies(expr)
         {
             return (
                 WorkflowNodeKind::StateUpdate {
                     target: target.clone(),
                     expression: expr.as_ref().clone(),
                     update: None,
+                    pinned: None,
                 },
                 format!("update {}", target.root),
                 vec![versions.allocate(target.root.as_str())],
             );
         }
-        let empty = WorkflowBody {
-            slot: None,
-            ast_path: statement.ast_path.clone(),
-            statements: Vec::new(),
+        let child = |slot, versions: &mut VersionState| match statement.body(slot) {
+            Some(body) => self.project_body(body, owner, ownership, versions),
+            None => WorkflowSubgraph::default(),
         };
-        let body_in = |slot| statement.body(slot).unwrap_or(&empty);
+        let assigned_in = |slots: &[WorkflowBodySlot]| {
+            let mut assigned = BTreeSet::new();
+            for slot in slots {
+                if let Some(body) = statement.body(*slot) {
+                    collect_statement_roots(body, &mut assigned);
+                }
+            }
+            assigned
+        };
         match value {
-            Expr::If {
-                condition,
-                then_block,
-                else_block,
-            } => {
+            Expr::If { condition, .. } => {
                 let mut then_versions = versions.clone();
                 let mut else_versions = versions.clone();
-                let then_graph = self.project_body(
-                    body_in(WorkflowBodySlot::Then),
-                    owner,
-                    ownership,
-                    &mut then_versions,
-                );
-                let else_graph = self.project_body(
-                    body_in(WorkflowBodySlot::Else),
-                    owner,
-                    ownership,
-                    &mut else_versions,
-                );
+                let then_graph = child(WorkflowBodySlot::Then, &mut then_versions);
+                let else_graph = child(WorkflowBodySlot::Else, &mut else_versions);
                 let mut outputs = assignment_output(binding.as_ref(), versions);
                 outputs.extend(versions.merge_outputs(&then_versions, &else_versions));
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::If {
-                        binding: binding.clone(),
+                        binding,
                         condition: condition.as_ref().clone(),
-                        then_is_block: is_statement_block(then_block),
-                        // A missing `else` is an empty statement list, and an
-                        // `else if` chain is a list holding one statement `if`
-                        // — which is the chain, not a block branch.
-                        else_is_block: (is_statement_block(else_block)
-                            || matches!(else_block.as_ref(), Expr::Absent))
-                            && else_if_chain(else_block).is_none(),
                         then_graph: Box::new(then_graph),
                         else_graph: Box::new(else_graph),
                     }),
@@ -472,11 +438,10 @@ impl Session<'_, '_> {
                 )
             }
             Expr::For {
-                binding: loop_binding,
+                binding: element,
                 iterable,
                 bind,
                 body: _,
-
                 authored_binding,
             } => {
                 // The names the body reads: the bind's, when the loop binds
@@ -485,7 +450,7 @@ impl Session<'_, '_> {
                 match bind {
                     Some(bind) => collect_assigned_roots(bind, &mut visible),
                     None => {
-                        visible.insert(loop_binding.to_string());
+                        visible.insert(element.to_string());
                     }
                 }
                 let mut body_versions = versions.clone();
@@ -493,31 +458,31 @@ impl Session<'_, '_> {
                     body_versions.shadow(name);
                 }
                 let mut scoped = visible;
-                scoped.insert(loop_binding.to_string());
+                scoped.insert(element.to_string());
+                let copied = copied_binding(element, bind.as_deref());
                 if let Some(authored) = authored_binding {
-                    if let Some(identity) = copied_binding(loop_binding, bind.as_deref()) {
+                    if let Some(identity) = copied {
                         body_versions.display_binding(authored.as_str(), identity);
                     } else if bind.is_none() {
-                        body_versions.display_binding(authored.as_str(), loop_binding.as_str());
+                        body_versions.display_binding(authored.as_str(), element.as_str());
                     }
                 }
-                let loop_body = body_in(WorkflowBodySlot::LoopBody);
-                let body_graph = self.project_body(loop_body, owner, ownership, &mut body_versions);
-                let outputs = loop_outputs(loop_body, &scoped, versions);
-                // A bind that only copies the element into one name is that
-                // name's binding: the container names it directly, and only a
-                // bind that does more (a destructuring) travels as IR.
-                let (binding, bind) = match copied_binding(loop_binding, bind.as_deref()) {
-                    Some(authored) => (authored.to_string(), None),
-                    None => (loop_binding.to_string(), bind.as_deref().cloned()),
-                };
-                let name = format!("for {binding}");
+                let body_graph = child(WorkflowBodySlot::LoopBody, &mut body_versions);
+                let mut outputs = assignment_output(binding.as_ref(), versions);
+                outputs.extend(
+                    assigned_in(&[WorkflowBodySlot::LoopBody])
+                        .into_iter()
+                        .filter(|variable| !scoped.contains(variable))
+                        .map(|variable| versions.allocate(&variable)),
+                );
+                let name = format!("for {}", copied.unwrap_or(element.as_str()));
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::For {
-                        authored_binding: authored_binding.as_ref().map(ToString::to_string),
                         binding,
+                        element: element.to_string(),
+                        authored_element: authored_binding.as_ref().map(ToString::to_string),
                         iterable: iterable.as_ref().clone(),
-                        bind,
+                        bind: bind.as_deref().cloned(),
                         body: Box::new(body_graph),
                     }),
                     name,
@@ -526,11 +491,16 @@ impl Session<'_, '_> {
             }
             Expr::While { condition, .. } => {
                 let mut body_versions = versions.clone();
-                let loop_body = body_in(WorkflowBodySlot::LoopBody);
-                let body_graph = self.project_body(loop_body, owner, ownership, &mut body_versions);
-                let outputs = loop_outputs(loop_body, &BTreeSet::new(), versions);
+                let body_graph = child(WorkflowBodySlot::LoopBody, &mut body_versions);
+                let mut outputs = assignment_output(binding.as_ref(), versions);
+                outputs.extend(
+                    assigned_in(&[WorkflowBodySlot::LoopBody])
+                        .into_iter()
+                        .map(|variable| versions.allocate(&variable)),
+                );
                 (
                     WorkflowNodeKind::Container(WorkflowContainer::While {
+                        binding,
                         condition: condition.as_ref().clone(),
                         body: Box::new(body_graph),
                     }),
@@ -538,7 +508,64 @@ impl Session<'_, '_> {
                     outputs,
                 )
             }
-            Expr::Finish(_) => (
+            Expr::Try(scope) => {
+                let body = child(WorkflowBodySlot::TryBody, &mut versions.clone());
+                let catch = scope.catch.as_ref().map(|catch| {
+                    let mut catch_versions = versions.clone();
+                    catch_versions.shadow(catch.binding.as_str());
+                    WorkflowCatch {
+                        binding: catch.binding.to_string(),
+                        body: Box::new(child(WorkflowBodySlot::Catch, &mut catch_versions)),
+                    }
+                });
+                let finally = scope
+                    .finally
+                    .as_ref()
+                    .map(|_| Box::new(child(WorkflowBodySlot::Finally, &mut versions.clone())));
+                let mut outputs = assignment_output(binding.as_ref(), versions);
+                let caught = scope.catch.as_ref().map(|catch| catch.binding.as_str());
+                outputs.extend(
+                    assigned_in(&[
+                        WorkflowBodySlot::TryBody,
+                        WorkflowBodySlot::Catch,
+                        WorkflowBodySlot::Finally,
+                    ])
+                    .into_iter()
+                    .filter(|variable| Some(variable.as_str()) != caught)
+                    .map(|variable| versions.allocate(&variable)),
+                );
+                (
+                    WorkflowNodeKind::Container(WorkflowContainer::Try {
+                        binding,
+                        body: Box::new(body),
+                        catch,
+                        finally,
+                    }),
+                    "try".to_string(),
+                    outputs,
+                )
+            }
+            Expr::Role {
+                role: StructuralRole::Scope,
+                ..
+            } => {
+                let body = child(WorkflowBodySlot::Scope, &mut versions.clone());
+                let mut outputs = assignment_output(binding.as_ref(), versions);
+                outputs.extend(
+                    assigned_in(&[WorkflowBodySlot::Scope])
+                        .into_iter()
+                        .map(|variable| versions.allocate(&variable)),
+                );
+                (
+                    WorkflowNodeKind::Container(WorkflowContainer::Scope {
+                        binding,
+                        body: Box::new(body),
+                    }),
+                    "block".to_string(),
+                    outputs,
+                )
+            }
+            Expr::Finish(_) if binding.is_none() => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Finish,
                     expression: value.clone(),
@@ -546,7 +573,7 @@ impl Session<'_, '_> {
                 "finish".to_string(),
                 Vec::new(),
             ),
-            Expr::Fail(_) => (
+            Expr::Fail(_) if binding.is_none() => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Fail,
                     expression: value.clone(),
@@ -556,7 +583,7 @@ impl Session<'_, '_> {
             ),
             // A function body ends by returning, and in a process body that
             // return is the process's finish.
-            Expr::FunctionReturn(_) => (
+            Expr::FunctionReturn(_) if binding.is_none() => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Finish,
                     expression: value.clone(),
@@ -564,23 +591,13 @@ impl Session<'_, '_> {
                 "return".to_string(),
                 Vec::new(),
             ),
-            // Statement shapes the graph does not decompose travel as their
-            // dialect's own text, so a host still sees what was authored.
-            Expr::Try(_)
-            | Expr::Throw(_)
-            | Expr::Role {
-                role: StructuralRole::Scope,
-                ..
-            } => {
-                let available = versions.known.iter().cloned().collect::<Vec<_>>();
-                (
-                    WorkflowNodeKind::Opaque {
-                        source: self.text.statement_text(value, &available),
-                    },
-                    opaque_name(value).to_string(),
-                    Vec::new(),
-                )
-            }
+            Expr::Throw(thrown) if binding.is_none() => (
+                WorkflowNodeKind::Throw {
+                    value: thrown.as_ref().clone(),
+                },
+                "throw".to_string(),
+                Vec::new(),
+            ),
             _ if is_pure_value(value) && binding.is_some() => {
                 let outputs = assignment_output(binding.as_ref(), versions);
                 (
@@ -660,7 +677,12 @@ fn expr_at<'p>(program: &'p Program, path: &AstPath) -> Option<&'p Expr> {
 /// value or, for a compound update, the operand and operator.
 fn attribute_assignment(
     expression: &Expr,
-) -> Option<(AssignTarget, &Expr, Option<crate::UpdateOperator>)> {
+) -> Option<(
+    AssignTarget,
+    &Expr,
+    Option<crate::UpdateOperator>,
+    WorkflowPinnedSlots,
+)> {
     let Expr::Role {
         role: StructuralRole::AttributeAssign,
         expr,
@@ -687,7 +709,60 @@ fn attribute_assignment(
         },
         value,
         update,
+        WorkflowPinnedSlots {
+            base: parts.base.clone(),
+            key: parts.key.cloned(),
+            result: parts.result.clone(),
+        },
     ))
+}
+
+/// Whether a statement's value is a region that owns child bodies, as the
+/// ownership walk reads it.
+fn owns_bodies(value: &Expr) -> bool {
+    matches!(
+        value,
+        Expr::If { .. }
+            | Expr::For { .. }
+            | Expr::While { .. }
+            | Expr::Try(_)
+            | Expr::Role {
+                role: StructuralRole::Scope,
+                ..
+            }
+    )
+}
+
+fn process_wrapper(body: &Expr) -> Option<Box<WorkflowProcessWrapper>> {
+    WorkflowProcessWrapper::of(body).map(Box::new)
+}
+
+impl WorkflowProcessWrapper {
+    /// The failure wrapper around a process body's authored run body, if the
+    /// body has one.
+    pub fn of(body: &Expr) -> Option<Self> {
+        let Expr::Role {
+            role: StructuralRole::ProcessWrapper,
+            expr,
+        } = body
+        else {
+            return None;
+        };
+        let parts = ProcessWrapperParts::of(expr)?;
+        Some(Self {
+            name: parts.run.name.clone(),
+            js_name: parts.run.js_name.clone(),
+            receiver: parts.run.receiver.clone(),
+            params: parts.run.params.clone(),
+            captures: parts.run.captures.clone(),
+            driver: parts.driver.map(|(builtin, arguments)| WorkflowRunDriver {
+                builtin: builtin.clone(),
+                arguments: arguments.to_vec(),
+            }),
+            arguments: parts.arguments.to_vec(),
+            catch_binding: parts.catch_binding.clone(),
+        })
+    }
 }
 
 /// A body position that holds statements rather than one value expression.
@@ -717,7 +792,7 @@ pub fn else_if_chain(expression: &Expr) -> Option<&Expr> {
 
 /// The one name a bind copies the loop element into, when that is all the
 /// bind does.
-fn copied_binding<'e>(binding: &str, bind: Option<&'e Expr>) -> Option<&'e str> {
+pub(super) fn copied_binding<'e>(binding: &str, bind: Option<&'e Expr>) -> Option<&'e str> {
     let Some(Expr::Block(items)) = bind else {
         return None;
     };
@@ -916,27 +991,12 @@ fn assignment_output(
         .unwrap_or_default()
 }
 
-/// The variables a loop body writes that outlive one iteration: the roots of
-/// its assignment statements, at any depth of its visible hierarchy, minus the
-/// names the loop binds itself.
-fn loop_outputs(
-    body: &WorkflowBody<'_>,
-    scoped: &BTreeSet<String>,
-    versions: &mut VersionState,
-) -> Vec<VariableVersion> {
-    let mut assigned = BTreeSet::new();
-    collect_statement_roots(body, &mut assigned);
-    assigned
-        .into_iter()
-        .filter(|variable| !scoped.contains(variable))
-        .map(|variable| versions.allocate(&variable))
-        .collect()
-}
-
+/// The roots of a body's assignment statements, at any depth of its visible
+/// hierarchy: the variables it writes that outlive it.
 fn collect_statement_roots(body: &WorkflowBody<'_>, assigned: &mut BTreeSet<String>) {
     for statement in &body.statements {
         let (_, expression) = peel_label(statement.expr);
-        if let Some((target, _, _)) = attribute_assignment(expression) {
+        if let Some((target, _, _, _)) = attribute_assignment(expression) {
             assigned.insert(target.root.to_string());
         } else if let Expr::Assign { target, .. } = expression {
             assigned.insert(target.root.to_string());
@@ -1048,20 +1108,5 @@ fn awaits(expression: &Expr) -> bool {
         Expr::Function(_) | Expr::ProcessLiteral(_) => false,
         Expr::BuiltinCall { name, .. } if name.as_str() == "__lash_vm_await_pending" => true,
         _ => expression.children().any(awaits),
-    }
-}
-
-fn opaque_name(expression: &Expr) -> &'static str {
-    match expression {
-        Expr::Try(_) => "try",
-        Expr::Throw(_) => "throw",
-        Expr::FunctionReturn(_) => "return",
-        Expr::Break => "break",
-        Expr::Continue => "continue",
-        Expr::Role {
-            role: StructuralRole::Scope,
-            ..
-        } => "block",
-        _ => "statement",
     }
 }

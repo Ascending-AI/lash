@@ -1073,6 +1073,134 @@
         }
       ]
     },
+    "ExprSlot": {
+      "description": "The role one child expression plays in its parent [`Expr`].",
+      "oneOf": [
+        {
+          "enum": [
+            "condition",
+            "then",
+            "else",
+            "iterable",
+            "receiver",
+            "callee",
+            "this",
+            "catch",
+            "finally",
+            "target",
+            "index",
+            "left",
+            "right"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A statement of a block or an element of a list.",
+          "properties": {
+            "item": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "item"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The value of a record entry, by entry position.",
+          "properties": {
+            "entry": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "entry"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "inner",
+          "description": "The expression a label or a structural role wraps.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A dynamic index of an assignment target's path, by position.",
+          "properties": {
+            "assign_index": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "assign_index"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "value",
+          "description": "The value an assignment stores.",
+          "type": "string"
+        },
+        {
+          "const": "bind",
+          "description": "The generated statements that bind a loop element to authored names.",
+          "type": "string"
+        },
+        {
+          "const": "body",
+          "description": "The body of a loop, a function, a process literal or a `try`.",
+          "type": "string"
+        },
+        {
+          "const": "input",
+          "description": "The input of a host descriptor constructor.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A call argument, by position.",
+          "properties": {
+            "arg": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "arg"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "operand",
+          "description": "The single operand of a unary form.",
+          "type": "string"
+        },
+        {
+          "const": "method_key",
+          "description": "The computed member a method call reads its callee from.",
+          "type": "string"
+        },
+        {
+          "const": "items",
+          "description": "The collection a map intrinsic reads.",
+          "type": "string"
+        },
+        {
+          "const": "function",
+          "description": "The callback a map intrinsic applies.",
+          "type": "string"
+        }
+      ]
+    },
     "FunctionDecl": {
       "description": "A user-defined pure synchronous function.\n\nA function is the language's only reusable *synchronous* abstraction:\n`process` is durable and asynchronous, so shared pure logic previously had\nto be inlined at every use. The declaration is deliberately narrower than\n`process`: parameters and the return type are both mandatory, and the linker\nrejects every effect inside the body. That ban is what keeps effect identity\nuntouched \u2014 every effect stays at a stable top-level syntactic site, so\ncall-site exactly-once identity and continuation snapshots see no new shape.",
       "properties": {
@@ -1779,6 +1907,117 @@
         }
       ]
     },
+    "WorkflowBodyForm": {
+      "description": "The IR spelling of a body whose statements are a subgraph's nodes.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A block of the statements.",
+          "properties": {
+            "form": {
+              "const": "block",
+              "type": "string"
+            },
+            "groups": {
+              "items": {
+                "$ref": "#/$defs/WorkflowCompletionGroup"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "form"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A statement list closed by a completion value\n([`StructuralRole::Completion`]): the statements run in order and the\nlist evaluates to `value`, a pure expression that is no statement.",
+          "properties": {
+            "form": {
+              "const": "completion",
+              "type": "string"
+            },
+            "groups": {
+              "items": {
+                "$ref": "#/$defs/WorkflowCompletionGroup"
+              },
+              "type": "array"
+            },
+            "value": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "form",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The body is its one statement, with no list around it.",
+          "properties": {
+            "form": {
+              "const": "statement",
+              "type": "string"
+            }
+          },
+          "required": [
+            "form"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowCatch": {
+      "additionalProperties": false,
+      "description": "The catch clause of a [`WorkflowContainer::Try`]: `binding` names the\nthrown value inside `body`.",
+      "properties": {
+        "binding": {
+          "type": "string"
+        },
+        "body": {
+          "$ref": "#/$defs/WorkflowSubgraph"
+        }
+      },
+      "required": [
+        "binding",
+        "body"
+      ],
+      "type": "object"
+    },
+    "WorkflowCompletionGroup": {
+      "additionalProperties": false,
+      "description": "A run of consecutive statements that the IR holds as one nested statement\nlist closed by its own completion value: the statement a front end gave a\nvalue. It covers the nodes `start .. start + len` of its body; groups are\nordered, never overlap, and nest through `groups`, whose ranges lie inside\nthis one. A group may cover no statement at all.",
+      "properties": {
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/WorkflowCompletionGroup"
+          },
+          "type": "array"
+        },
+        "len": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "$ref": "#/$defs/Expr"
+        }
+      },
+      "required": [
+        "start",
+        "len",
+        "value"
+      ],
+      "type": "object"
+    },
     "WorkflowDeclaration": {
       "oneOf": [
         {
@@ -1830,6 +2069,17 @@
                   "type": "null"
                 }
               ]
+            },
+            "wrapper": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkflowProcessWrapper"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The failure wrapper around the authored run body, when the process\nbody has one ([`crate::StructuralRole::ProcessWrapper`]). `body` is\nthen the run function's body; without a wrapper it is the whole\nprocess body."
             }
           },
           "required": [
@@ -2248,6 +2498,17 @@
               "const": "state_update",
               "type": "string"
             },
+            "pinned": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkflowPinnedSlots"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Set when the update is a member assignment that pins its\nreference base before evaluating the value\n([`crate::StructuralRole::AttributeAssign`]): the slots it pins\nthem in. `target` is then one member step of a variable."
+            },
             "target": {
               "$ref": "#/$defs/AssignTarget"
             },
@@ -2292,6 +2553,25 @@
         },
         {
           "additionalProperties": false,
+          "description": "Throws `value`: control transfers to the nearest enclosing catch, or\nfails the process when there is none.",
+          "properties": {
+            "kind": {
+              "const": "throw",
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/Expr"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Evaluates `condition`, then runs exactly one branch.",
           "properties": {
             "binding": {
               "anyOf": [
@@ -2313,38 +2593,28 @@
             "else_graph": {
               "$ref": "#/$defs/WorkflowSubgraph"
             },
-            "else_is_block": {
-              "description": "Whether the source's else branch is a block rather than a direct value or `else if`.",
-              "type": "boolean"
-            },
             "kind": {
               "const": "container",
               "type": "string"
             },
             "then_graph": {
               "$ref": "#/$defs/WorkflowSubgraph"
-            },
-            "then_is_block": {
-              "description": "Whether the source's then branch is a statement block rather than a value expression.",
-              "type": "boolean"
             }
           },
           "required": [
             "condition",
             "container_kind",
             "else_graph",
-            "else_is_block",
             "kind",
-            "then_graph",
-            "then_is_block"
+            "then_graph"
           ],
           "type": "object"
         },
         {
           "additionalProperties": false,
-          "description": "An iteration: the IR's element binding, iterable and bind, exactly as\nthe loop runs them. A dialect's printer reads its authored loop header\nback off these fields.",
+          "description": "An iteration, exactly as the loop runs it: for each element of\n`iterable`, bind it to `element`, run `bind`, then run `body`.",
           "properties": {
-            "authored_binding": {
+            "authored_element": {
               "description": "The element binding's authored name, outside execution identity.",
               "type": [
                 "string",
@@ -2359,16 +2629,28 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "The generated statements that bind the element into the names the\nbody reads, when the front end needs any."
             },
             "binding": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "body": {
               "$ref": "#/$defs/WorkflowSubgraph"
             },
             "container_kind": {
               "const": "for",
+              "type": "string"
+            },
+            "element": {
+              "description": "The binding each element is assigned to.",
               "type": "string"
             },
             "iterable": {
@@ -2380,9 +2662,9 @@
             }
           },
           "required": [
-            "binding",
             "body",
             "container_kind",
+            "element",
             "iterable",
             "kind"
           ],
@@ -2391,6 +2673,16 @@
         {
           "additionalProperties": false,
           "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "body": {
               "$ref": "#/$defs/WorkflowSubgraph"
             },
@@ -2416,18 +2708,87 @@
         },
         {
           "additionalProperties": false,
+          "description": "A structured exception scope: `body` runs; a throw inside it runs\n`catch` with the thrown value bound; `finally` runs on every exit\nfrom either.",
           "properties": {
-            "kind": {
-              "const": "opaque",
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "body": {
+              "$ref": "#/$defs/WorkflowSubgraph"
+            },
+            "catch": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkflowCatch"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "container_kind": {
+              "const": "try",
               "type": "string"
             },
-            "source": {
+            "finally": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/WorkflowSubgraph"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "container",
               "type": "string"
             }
           },
           "required": [
-            "kind",
-            "source"
+            "body",
+            "container_kind",
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An authored nested statement scope.",
+          "properties": {
+            "binding": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AssignTarget"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "body": {
+              "$ref": "#/$defs/WorkflowSubgraph"
+            },
+            "container_kind": {
+              "const": "scope",
+              "type": "string"
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            }
+          },
+          "required": [
+            "body",
+            "container_kind",
+            "kind"
           ],
           "type": "object"
         }
@@ -2463,6 +2824,93 @@
       },
       "type": "object"
     },
+    "WorkflowPinnedSlots": {
+      "additionalProperties": false,
+      "description": "The slots a pinned member assignment evaluates through, in evaluation\norder: the reference base, a computed index, then the assigned value.",
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "base",
+        "result"
+      ],
+      "type": "object"
+    },
+    "WorkflowProcessWrapper": {
+      "additionalProperties": false,
+      "description": "The process failure wrapper, without the run body it wraps: the run\nfunction finishes the process with its value, and the catch fails the\nprocess with what the body throws.",
+      "properties": {
+        "arguments": {
+          "description": "The arguments the run call passes.",
+          "items": {
+            "$ref": "#/$defs/Expr"
+          },
+          "type": "array"
+        },
+        "captures": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "catch_binding": {
+          "description": "The binding the wrapper's catch fails the process with.",
+          "type": "string"
+        },
+        "driver": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowRunDriver"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The builtin the run call goes through, when it does."
+        },
+        "js_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The run function's own name, when it has one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "description": "The run function's parameters, bound to `arguments` in order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "receiver": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "catch_binding"
+      ],
+      "type": "object"
+    },
     "WorkflowResultStep": {
       "description": "Ordered wrappers around a call or effect, from the operation outwards.",
       "enum": [
@@ -2471,8 +2919,27 @@
       ],
       "type": "string"
     },
+    "WorkflowRunDriver": {
+      "additionalProperties": false,
+      "description": "A builtin that drives a process's run function: it receives the function\nfirst, then `arguments`.",
+      "properties": {
+        "arguments": {
+          "items": {
+            "$ref": "#/$defs/Expr"
+          },
+          "type": "array"
+        },
+        "builtin": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "builtin"
+      ],
+      "type": "object"
+    },
     "WorkflowSlotPath": {
-      "description": "An unambiguous address for one input location inside a workflow node.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts; field names use JSON string\nquoting so they cannot collide with structural indexes or separators.",
+      "description": "An unambiguous address for one expression inside a workflow node.\n\nTwo spellings share the type. A *structural* path is made only of\n[`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots\nof the node's statement ([`super::workflow_node_statement`]), so it reaches\nevery expression role of every IR variant; the empty path is the statement\nitself. A *call-argument* path starts at a receiver call's argument\n(`call`, `arg`, then record fields and list indexes) and is what type\nfacets name their expected arguments by.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts; field names use JSON string\nquoting so they cannot collide with structural indexes or separators.",
       "items": {
         "$ref": "#/$defs/WorkflowSlotPathSegment"
       },
@@ -2534,6 +3001,19 @@
             "index"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One typed child slot of the IR expression reached so far.",
+          "properties": {
+            "expr": {
+              "$ref": "#/$defs/ExprSlot"
+            }
+          },
+          "required": [
+            "expr"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2542,13 +3022,22 @@
       "properties": {
         "edges": {
           "default": [],
+          "description": "Derived: sequence follows `nodes` order and data dependencies follow\nthe bindings the nodes' expressions read.",
           "items": {
             "$ref": "#/$defs/WorkflowEdge"
           },
           "type": "array"
         },
+        "form": {
+          "$ref": "#/$defs/WorkflowBodyForm",
+          "default": {
+            "form": "block"
+          },
+          "description": "How the IR spells this ordered body."
+        },
         "nodes": {
           "default": [],
+          "description": "The body's statements, in execution order.",
           "items": {
             "$ref": "#/$defs/WorkflowNode"
           },
@@ -2643,8 +3132,22 @@
         "null"
       ]
     },
+    "ir_version": {
+      "description": "The interpretation of the semantic IR this document's regions and\nexpressions are written under ([`WORKFLOW_IR_VERSION`]).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
     "main": {
       "$ref": "#/$defs/WorkflowSubgraph"
+    },
+    "private_bindings": {
+      "description": "The main-level bindings that are the front end's own slots rather\nthan session-visible names ([`crate::Program::private_bindings`]).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
     },
     "schema_version": {
       "enum": [
@@ -2664,6 +3167,7 @@
   },
   "required": [
     "schema_version",
+    "ir_version",
     "main"
   ],
   "title": "WorkflowGraph",

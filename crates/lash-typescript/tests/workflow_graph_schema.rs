@@ -67,7 +67,9 @@ finish(values);
             WorkflowNodeKind::Container(WorkflowContainer::If { .. }) => "if",
             WorkflowNodeKind::Container(WorkflowContainer::For { .. }) => "for",
             WorkflowNodeKind::Container(WorkflowContainer::While { .. }) => "while",
-            WorkflowNodeKind::Opaque { .. } => "opaque",
+            WorkflowNodeKind::Container(WorkflowContainer::Try { .. }) => "try",
+            WorkflowNodeKind::Container(WorkflowContainer::Scope { .. }) => "scope",
+            WorkflowNodeKind::Throw { .. } => "throw",
         })
         .collect::<BTreeSet<_>>();
     assert_eq!(
@@ -82,7 +84,7 @@ finish(values);
             "if",
             "for",
             "while",
-            "opaque",
+            "try",
         ])
     );
     assert!(

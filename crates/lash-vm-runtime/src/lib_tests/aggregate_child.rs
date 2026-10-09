@@ -355,10 +355,8 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         environment: &environment,
     })
     .expect("loop branch compiles");
-    let execution_map = trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(
-        &output.artifact,
-        &lash_vm::NoStatementText,
-    ));
+    let execution_map =
+        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(&output.artifact));
     let arm = |title: &str| {
         execution_map
             .nodes

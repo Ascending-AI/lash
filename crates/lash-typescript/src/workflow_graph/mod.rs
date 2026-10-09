@@ -1,27 +1,23 @@
-//! The workflow-graph lens: projection, validation, and the canonical
-//! TypeScript text surface.
+//! The TypeScript lens over a workflow document.
 //!
-//! The graph's value types live in `lash_vm`, which names no source syntax.
-//! Everything that renders or parses text lives here, because TypeScript is
-//! the only cell language and the lens's canonical text is TypeScript.
+//! A [`WorkflowGraph`] is a complete typed IR document owned by `lash_vm`:
+//! it is projected, reconstructed and validated there, with no source text.
+//! This module is the optional TypeScript view of one: it lowers source into
+//! a document, prints a document's program as canonical TypeScript
+//! ([`source_view`]), and parses the text of a single edited field. A
+//! document this lens cannot spell is still a valid document; the lens
+//! refuses it with a typed [`GraphRenderError`], and the graph is unaffected.
 //!
-//! The graph is deliberately a semantic, canonical view rather than a CST:
-//! comments and authored formatting are discarded. Hosts own graph mutation,
-//! drafts, layout, and versioning; this module owns projection, validation,
-//! deterministic identity, and canonical rendering.
-//!
-//! A node's `source_span` addresses this lens's canonical TypeScript output,
-//! which is the source text a host receives. It does not address the author's
-//! pre-canonical formatting.
+//! The lens's text is canonical: comments and authored formatting are
+//! discarded, and a node's `source_span` addresses the canonical output, not
+//! the author's formatting.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use lash_vm::{
-    AssignTarget, Declaration, Expr, LabelMetadata, LashVmHostEnvironment, ProcessDecl, Program,
-    WorkflowContainer, WorkflowDeclaration, WorkflowGraph, WorkflowGraphProjector,
-    WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowNodeNameSource, WorkflowProcess, WorkflowStatementText, WorkflowSubgraph,
-    WorkflowTerminalKind, analyze_workflow_program, workflow_call_to_ir, workflow_effect_to_ir,
+    Declaration, Expr, InvalidAst, LashVmHostEnvironment, ProcessDecl, Program, Span,
+    WorkflowGraph, WorkflowGraphError, WorkflowGraphProjector, WorkflowGraphVersionRefusal,
+    WorkflowNodeId, analyze_workflow_program, workflow_program_from_graph,
 };
 use thiserror::Error;
 
@@ -33,9 +29,8 @@ mod render_error;
 
 pub use editable_text::{
     TypeScriptFragmentError, parse_typescript_assign_target, parse_typescript_expression,
-    parse_typescript_process_statement,
+    parse_typescript_process_statement, parse_typescript_statement,
 };
-use editable_text::{opaque_wrapper_run_body, parse_typescript_fragment, statement_text};
 pub use printer::{
     TypeScriptSourceError, typescript_assign_target_source, typescript_expression_source,
     typescript_program_source, typescript_statement_source,
@@ -45,8 +40,8 @@ pub use printer::{
 /// with optional host-derived, non-authoritative type facets.
 ///
 /// The projection itself is `lash_vm`'s ([`WorkflowGraphProjector`]); this
-/// dialect contributes the canonical text the node spans address and the text
-/// of opaque statements. With no environment the result is the draft: it
+/// dialect contributes the canonical text the node spans address. With no
+/// environment the result is the draft: it
 /// claims no runtime identity and carries no facets. With one, the source is
 /// admitted (linked) against it, and the result is the admitted artifact's
 /// runnable view ([`workflow_graph_from_artifact`]) with facets computed over
@@ -84,9 +79,7 @@ fn draft_graph(
     if let Some(analysis) = analysis {
         projector = projector.with_analysis(analysis);
     }
-    let mut graph = projector.project(&TypeScriptStatementText);
-    present_loop_sources(&mut graph);
-    graph
+    projector.project()
 }
 
 /// The runnable view of an admitted module artifact: the graph of exactly the
@@ -108,16 +101,14 @@ fn artifact_graph(
 ) -> WorkflowGraph {
     let mut projector = WorkflowGraphProjector::new(artifact.ir())
         .with_source_identity(artifact.source_identity())
-        .with_spans(canonical_artifact_spans(artifact).unwrap_or_default());
+        .with_spans(canonical_spans(artifact.ir()).unwrap_or_default());
     if let Some(analysis) = analysis {
         projector = projector.with_analysis(analysis);
     }
-    let mut graph = projector.project(&TypeScriptStatementText);
-    present_loop_sources(&mut graph);
-    graph
+    projector.project()
 }
 
-/// The canonical spans of an artifact's program, keyed by the artifact's own
+/// The canonical spans of an admitted program, keyed by the program's own
 /// paths.
 ///
 /// The printed program holds every process body inline: a declared process
@@ -128,10 +119,7 @@ fn artifact_graph(
 /// holding it. A span is kept only when the artifact has a node at its path of
 /// the same form as the text's node there, so a path the printing and the
 /// linking do not share can never carry another node's span.
-fn canonical_artifact_spans(
-    artifact: &lash_vm::ModuleArtifact,
-) -> Option<std::collections::BTreeMap<lash_vm::AstPath, lash_vm::Span>> {
-    let ir = artifact.ir();
+fn canonical_spans(ir: &Program) -> Option<BTreeMap<lash_vm::AstPath, Span>> {
     let canonical = typescript_program_source(ir).ok()?;
     let draft = crate::parse(&canonical).ok()?;
     let bodies = process_body_text_paths(ir);
@@ -256,33 +244,43 @@ fn same_form(text: &Expr, admitted: &Expr) -> bool {
     ) || std::mem::discriminant(text) == std::mem::discriminant(admitted)
 }
 
-/// Shows a `for .. of` loop's authored source in its container.
+/// The source a `for .. of` loop iterates, as its author wrote it.
 ///
 /// The lowerer iterates a snapshot of the source (`Lash.ArrayFromIterable`),
-/// and the IR projection carries that call. A TypeScript author wrote the
-/// source itself, and the printer re-derives the snapshot from the header, so
-/// the container holds what the author can edit.
-fn present_loop_sources(graph: &mut WorkflowGraph) {
-    fn subgraph(graph: &mut WorkflowSubgraph) {
-        for node in &mut graph.nodes {
-            if let WorkflowNodeKind::Container(container) = &mut node.kind {
-                if let WorkflowContainer::For { iterable, .. } = container
-                    && let Some([source]) = printer::stdlib_call(iterable, "Lash.ArrayFromIterable")
-                {
-                    *iterable = source.clone();
-                }
-                for (_, child) in container.child_subgraphs_mut() {
-                    subgraph(child);
-                }
-            }
-        }
+/// and a workflow document carries that call because it is what runs. The
+/// printer re-derives the snapshot from the loop header, so a host showing
+/// the loop as TypeScript shows this.
+pub fn typescript_for_of_source(iterable: &Expr) -> &Expr {
+    match printer::stdlib_call(iterable, "Lash.ArrayFromIterable") {
+        Some([source]) => source,
+        _ => iterable,
     }
-    subgraph(&mut graph.main);
-    for declaration in &mut graph.declarations {
-        if let WorkflowDeclaration::Process(process) = declaration {
-            subgraph(&mut process.body);
-        }
-    }
+}
+
+/// The failure wrapper this dialect lowers around a process's run body,
+/// for a host that adds a process or changes one's authored parameters.
+pub fn typescript_process_wrapper(
+    params: &[lash_vm::ProcessParam],
+) -> lash_vm::WorkflowProcessWrapper {
+    let wrapped = crate::lower::process_run_wrapper(
+        Expr::Function(Box::new(lash_vm::FunctionExpr {
+            name: None,
+            js_name: None,
+            receiver: None,
+            params: params.iter().map(|param| param.name.clone()).collect(),
+            captures: Vec::new(),
+            body: Box::new(Expr::Absent),
+        })),
+        params
+            .iter()
+            .map(|param| Expr::Variable(param.name.clone()))
+            .collect(),
+    );
+    #[expect(
+        clippy::expect_used,
+        reason = "the lowerer's one wrapper builder produces the role's shape, which is what the reader accepts"
+    )]
+    lash_vm::WorkflowProcessWrapper::of(&wrapped).expect("the lowerer builds a process wrapper")
 }
 
 #[derive(Debug, Error)]
@@ -294,21 +292,22 @@ pub enum WorkflowGraphBuildError {
     CanonicalSource(#[from] TypeScriptSourceError),
 }
 
+/// Why a workflow document has no TypeScript rendering.
+///
+/// `Document` and `InvalidProgram` are refusals of the document itself, from
+/// the IR's own reconstruction and validation. `CanonicalSource` is the
+/// lens's refusal: the document is a valid program the TypeScript printer has
+/// no spelling for. The two expression variants are for a host that parses a
+/// node's edited text through this lens and reports a rejected field.
 #[derive(Clone, Debug, Error, PartialEq)]
 #[non_exhaustive]
 pub enum GraphRenderError {
     #[error(transparent)]
     UnsupportedSchemaVersion(#[from] WorkflowGraphVersionRefusal),
-    #[error("duplicate workflow node id `{id}`")]
-    DuplicateNodeId { id: String },
-    #[error("edge `{edge_id}` references unknown {endpoint} node `{node_id}`")]
-    UnknownNodeReference {
-        edge_id: String,
-        endpoint: &'static str,
-        node_id: String,
-    },
-    #[error("node `{node_id}` has a payload incompatible with its kind: {message}")]
-    InvalidNodePayload { node_id: String, message: String },
+    #[error(transparent)]
+    Document(#[from] WorkflowGraphError),
+    #[error("the workflow document does not spell a valid program: {0}")]
+    InvalidProgram(#[from] InvalidAst),
     #[error("node `{node_id}` has invalid `{field}` expression text: {message}")]
     InvalidExpression {
         node_id: String,
@@ -321,19 +320,8 @@ pub enum GraphRenderError {
         field: &'static str,
         message: String,
     },
-    #[error("opaque node `{node_id}` is not exactly one valid statement: {message}")]
-    InvalidOpaqueSource { node_id: String, message: String },
-    #[error("duplicate process name `{name}`")]
-    DuplicateProcessName { name: String },
-    /// A process's origin is derived at admission, never authored: a declared
-    /// process cannot take a lifted name, and a lifted one must still name the
-    /// literal it was lifted from, at its site, with its hidden parameters.
-    #[error("process `{name}` has an origin its program does not derive: {message}")]
-    ProcessOriginMismatch { name: String, message: String },
     #[error(transparent)]
     CanonicalSource(#[from] TypeScriptSourceError),
-    #[error("rendered workflow source did not parse: {message}")]
-    RenderedSourceInvalid { message: String },
 }
 
 /// Parse source, canonicalize it, and project it into a deterministic graph.
@@ -341,12 +329,12 @@ pub fn workflow_graph_from_source(src: &str) -> Result<WorkflowGraph, WorkflowGr
     workflow_graph_from_source_with_facets(src, None)
 }
 
-/// Validate a graph with every check used by rendering.
+/// Validate a workflow document as IR.
 ///
-/// This checks document-wide invariants, converts every node back to IR, and
-/// verifies that the resulting program has a canonical TypeScript spelling
-/// which parses back successfully. The final-parse check prints once to an
-/// internal buffer, but this function returns no source.
+/// The document is reconstructed to its program by `lash_vm` and that
+/// program is held to the IR's own rules ([`lash_vm::validate_ast`]). No
+/// TypeScript is printed or parsed, so a document this lens cannot spell
+/// still validates.
 pub fn validate(graph: &WorkflowGraph) -> Result<(), GraphRenderError> {
     validate_for_fleet(graph, lash_core_execution::FleetFormat::current())
 }
@@ -356,855 +344,76 @@ pub fn validate_for_fleet(
     graph: &WorkflowGraph,
     fleet: lash_core_execution::FleetFormat,
 ) -> Result<(), GraphRenderError> {
-    validated_source(graph, &BTreeSet::new(), fleet)?;
+    validated_program(graph, fleet)?;
     Ok(())
 }
 
-/// Validate and render a graph through the canonical TypeScript printer.
+/// The program a valid document spells.
+fn validated_program(
+    graph: &WorkflowGraph,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<Program, GraphRenderError> {
+    WorkflowGraph::admit_schema_version_for_fleet(graph.schema_version, fleet)?;
+    let program = workflow_program_from_graph(graph)?;
+    lash_vm::validate_ast(&program)?;
+    Ok(program)
+}
+
+/// The canonical TypeScript of a valid workflow document.
 pub fn workflow_graph_to_source(graph: &WorkflowGraph) -> Result<String, GraphRenderError> {
     workflow_graph_to_source_for_fleet(graph, lash_core_execution::FleetFormat::current())
 }
 
-/// Validate and render under the fleet epoch that pinned the graph document.
+/// Render under the fleet epoch that pinned the graph document.
 pub fn workflow_graph_to_source_for_fleet(
     graph: &WorkflowGraph,
     fleet: lash_core_execution::FleetFormat,
 ) -> Result<String, GraphRenderError> {
-    validated_source(graph, &BTreeSet::new(), fleet)
+    let program = validated_program(graph, fleet)?;
+    Ok(typescript_program_source(&program)?)
 }
 
-/// Validate and render the graph of a session cell: `globals` are the names
-/// earlier cells of its session bound, which the cell reads and its final
-/// parse must know, as the cell's own link did.
-pub fn workflow_graph_to_source_in_session(
-    graph: &WorkflowGraph,
-    globals: &BTreeSet<String>,
-) -> Result<String, GraphRenderError> {
-    workflow_graph_to_source_in_session_for_fleet(
-        graph,
-        globals,
-        lash_core_execution::FleetFormat::current(),
-    )
+/// The TypeScript view of one workflow document: its canonical source and
+/// where each node sits in it.
+///
+/// A view belongs to the document it was made from. `source_identity` is that
+/// document's admitted identity, `None` for a draft, and the spans are keyed
+/// by that document's own node ids, so a view is never read against another
+/// revision.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceView {
+    pub source_identity: Option<String>,
+    /// Canonical TypeScript for the document's program.
+    pub source: String,
+    /// The canonical span of each node the text holds a statement for.
+    pub spans: BTreeMap<WorkflowNodeId, Span>,
 }
 
-/// Validate and render a session cell under its store's fleet epoch.
-pub fn workflow_graph_to_source_in_session_for_fleet(
-    graph: &WorkflowGraph,
-    globals: &BTreeSet<String>,
-    fleet: lash_core_execution::FleetFormat,
-) -> Result<String, GraphRenderError> {
-    validated_source(graph, globals, fleet)
-}
-
-fn validated_source(
-    graph: &WorkflowGraph,
-    globals: &BTreeSet<String>,
-    fleet: lash_core_execution::FleetFormat,
-) -> Result<String, GraphRenderError> {
-    let program = validated_program(graph, globals, fleet)?;
+/// The TypeScript view of `graph`, or the typed reason this lens has none.
+///
+/// Sourceability is a property of the lens, not of the document: a refusal
+/// here leaves the graph a complete, valid, editable program.
+pub fn source_view(graph: &WorkflowGraph) -> Result<SourceView, GraphRenderError> {
+    let program = validated_program(graph, lash_core_execution::FleetFormat::current())?;
     let source = typescript_program_source(&program)?;
-    crate::parse_with_globals(&source, globals).map_err(|error| {
-        GraphRenderError::RenderedSourceInvalid {
-            message: error.to_string(),
-        }
-    })?;
-    Ok(source)
-}
-
-fn validated_program(
-    graph: &WorkflowGraph,
-    globals: &BTreeSet<String>,
-    fleet: lash_core_execution::FleetFormat,
-) -> Result<Program, GraphRenderError> {
-    validate_graph(graph, fleet)?;
-    graph_to_program(graph, globals)
-}
-
-#[cfg(test)]
-mod validation_tests {
-    use super::*;
-
-    fn final_parse_failure_graph() -> WorkflowGraph {
-        let mut graph = workflow_graph_from_source("finish(1);\n").expect("fixture projects");
-        let terminal = graph
-            .main
-            .nodes
-            .iter_mut()
-            .find_map(|node| match &mut node.kind {
-                WorkflowNodeKind::Terminal { expression, .. } => Some(expression),
-                _ => None,
-            })
-            .expect("fixture contains a terminal node");
-        *terminal = Expr::FunctionReturn(Box::new(Expr::Number(1.0)));
-        graph
-    }
-
-    #[test]
-    fn final_parse_fixture_passes_every_preceding_check() {
-        let graph = final_parse_failure_graph();
-        validate_graph(&graph, lash_core_execution::FleetFormat::current())
-            .expect("graph invariants hold");
-        let program = graph_to_program(&graph, &BTreeSet::new()).expect("graph converts to IR");
-        let source = typescript_program_source(&program).expect("IR prints");
-        assert_eq!(source, "return 1;\n");
-        assert!(
-            crate::parse(&source).is_err(),
-            "printed source must not parse"
-        );
-        assert!(matches!(
-            validate(&graph),
-            Err(GraphRenderError::RenderedSourceInvalid { .. })
-        ));
-    }
-}
-
-/// The TypeScript text of an opaque statement node.
-///
-/// This is the dialect half of the projection (ADR 0100 R8): the projector in
-/// `lash_vm` decides structure, and TypeScript supplies the source text a
-/// host shows for a statement the graph does not decompose.
-pub struct TypeScriptStatementText;
-
-impl WorkflowStatementText for TypeScriptStatementText {
-    fn statement_text(&self, statement: &Expr, available: &[String]) -> String {
-        statement_text(statement, available)
-    }
-}
-
-/// Rebuild the process wrapper around an authored run body.
-///
-/// The graph shows the authored body; the wrapper that turns an uncaught error
-/// into process failure is structure the lowerer owns, so it is rebuilt by the
-/// lowerer's one builder rather than stored.
-fn authored_return_type(origin: &lash_vm::ProcessOrigin) -> Option<&lash_vm::TypeExpr> {
-    match origin {
-        // TypeScript authors literals. A native declaration has always rendered
-        // without a TypeScript return annotation, with its output inferred again.
-        lash_vm::ProcessOrigin::Declared => None,
-        lash_vm::ProcessOrigin::Lifted {
-            declared_return_ty, ..
-        } => declared_return_ty.as_ref(),
-    }
-}
-
-fn process_wrapper(params: &[lash_vm::ProcessParam], body: Expr) -> Expr {
-    crate::lower::process_run_wrapper(
-        Expr::Function(Box::new(lash_vm::FunctionExpr {
-            name: None,
-            js_name: None,
-            receiver: None,
-            params: params.iter().map(|param| param.name.clone()).collect(),
-            captures: Vec::new(),
-            body: Box::new(body),
-        })),
-        params
-            .iter()
-            .map(|param| Expr::Variable(param.name.clone()))
-            .collect(),
-    )
-}
-
-fn validate_graph(
-    graph: &WorkflowGraph,
-    fleet: lash_core_execution::FleetFormat,
-) -> Result<(), GraphRenderError> {
-    WorkflowGraph::admit_schema_version_for_fleet(graph.schema_version, fleet)?;
-    let mut all_ids = BTreeSet::new();
-    validate_subgraph(&graph.main, &mut all_ids)?;
-    let mut process_names = BTreeSet::new();
-    for declaration in &graph.declarations {
-        if let WorkflowDeclaration::Process(process) = declaration {
-            validate_process_origin(process)?;
-            if !process_names.insert(process.name.clone()) {
-                return Err(GraphRenderError::DuplicateProcessName {
-                    name: process.name.clone(),
-                });
-            }
-            if !all_ids.insert(process.id.clone()) {
-                return Err(GraphRenderError::DuplicateNodeId {
-                    id: process.id.to_string(),
-                });
-            }
-            validate_subgraph(&process.body, &mut all_ids)?;
-        }
-    }
-    Ok(())
-}
-
-/// The origin checks a process's own fields can decide; the splice checks the
-/// rest against the literal at the site ([`splice_lifted_bodies`]).
-fn validate_process_origin(process: &WorkflowProcess) -> Result<(), GraphRenderError> {
-    let mismatch = |message: &str| {
-        Err(GraphRenderError::ProcessOriginMismatch {
-            name: process.name.clone(),
-            message: message.to_string(),
-        })
-    };
-    match &process.origin {
-        lash_vm::ProcessOrigin::Declared
-            if process
-                .name
-                .starts_with(lash_vm::LIFTED_PROCESS_NAME_PREFIX) =>
-        {
-            mismatch("a declared process cannot take a lifted process's name")
-        }
-        lash_vm::ProcessOrigin::Lifted { .. }
-            if !process
-                .name
-                .starts_with(lash_vm::LIFTED_PROCESS_NAME_PREFIX) =>
-        {
-            mismatch("a lifted process is named by its literal's digest")
-        }
-        lash_vm::ProcessOrigin::Lifted { hidden_params, .. }
-            if *hidden_params as usize > process.params.len() =>
-        {
-            mismatch("a lifted process has more hidden parameters than parameters")
-        }
-        // TypeScript declares no processes, so the lens has no spelling for
-        // a literal lifted out of a declared process's body.
-        lash_vm::ProcessOrigin::Lifted { site, .. } if site.root != lash_vm::AstRoot::Main => {
-            mismatch("the TypeScript lens renders only literals lifted from main")
-        }
-        _ => Ok(()),
-    }
-}
-
-fn validate_subgraph(
-    graph: &WorkflowSubgraph,
-    all_ids: &mut BTreeSet<WorkflowNodeId>,
-) -> Result<(), GraphRenderError> {
-    let local_ids = graph
-        .nodes
-        .iter()
-        .map(|node| node.id.clone())
-        .collect::<BTreeSet<_>>();
-    if local_ids.len() != graph.nodes.len() {
-        let mut seen = BTreeSet::new();
-        // The set is smaller than the vector, so a repeated id is always found;
-        // name the graph rather than panic if that ever stops holding.
-        let id = graph
-            .nodes
-            .iter()
-            .find(|node| !seen.insert(node.id.clone()))
-            .map_or_else(|| "<unknown>".to_string(), |node| node.id.to_string());
-        return Err(GraphRenderError::DuplicateNodeId { id });
-    }
-    for node in &graph.nodes {
-        if !all_ids.insert(node.id.clone()) {
-            return Err(GraphRenderError::DuplicateNodeId {
-                id: node.id.to_string(),
-            });
-        }
-        validate_node(node, all_ids)?;
-    }
-    for edge in &graph.edges {
-        if !local_ids.contains(&edge.from) && !all_ids.contains(&edge.from) {
-            return Err(GraphRenderError::UnknownNodeReference {
-                edge_id: edge.id.clone(),
-                endpoint: "source",
-                node_id: edge.from.to_string(),
-            });
-        }
-        if !local_ids.contains(&edge.to) && !all_ids.contains(&edge.to) {
-            return Err(GraphRenderError::UnknownNodeReference {
-                edge_id: edge.id.clone(),
-                endpoint: "target",
-                node_id: edge.to.to_string(),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn validate_node(
-    node: &WorkflowNode,
-    all_ids: &mut BTreeSet<WorkflowNodeId>,
-) -> Result<(), GraphRenderError> {
-    if let WorkflowNodeKind::Container(container) = &node.kind {
-        for (_, child) in container.child_subgraphs() {
-            validate_subgraph(child, all_ids)?;
-        }
-    }
-    if let WorkflowNodeKind::Container(WorkflowContainer::If {
-        then_is_block,
-        else_is_block,
-        then_graph,
-        else_graph,
-        ..
-    }) = &node.kind
-    {
-        let (then_graph, else_graph) = (then_graph.as_ref(), else_graph.as_ref());
-        if !then_is_block && *else_is_block {
-            return invalid_payload(
-                node,
-                "expression if cannot have a statement-block else branch",
-            );
-        }
-        if !then_is_block && (then_graph.nodes.len() != 1 || else_graph.nodes.len() != 1) {
-            return invalid_payload(
-                node,
-                "expression-if branches must contain exactly one value node",
-            );
-        }
-        if *then_is_block && !else_is_block {
-            let is_direct_else_if = matches!(
-                else_graph.nodes.as_slice(),
-                [WorkflowNode {
-                    kind: WorkflowNodeKind::Container(WorkflowContainer::If {
-                        then_is_block: true,
-                        ..
-                    }),
-                    ..
-                }]
-            );
-            if !is_direct_else_if {
-                return invalid_payload(
-                    node,
-                    "non-block statement-if else branch must be a direct else if",
-                );
-            }
-        }
-    }
-    Ok(())
-}
-
-fn invalid_payload<T>(node: &WorkflowNode, message: &str) -> Result<T, GraphRenderError> {
-    Err(GraphRenderError::InvalidNodePayload {
-        node_id: node.id.to_string(),
-        message: message.to_string(),
+    // Spans come from the canonical text's own parse. The document's nodes
+    // are paired with the nodes of that projection by where they sit, so a
+    // host's own node ids key the result.
+    let canonical = WorkflowGraphProjector::new(&program)
+        .with_spans(canonical_spans(&program).unwrap_or_default())
+        .project();
+    let located = canonical
+        .nodes()
+        .filter_map(|node| Some((node.id.clone(), node.source_span?)))
+        .collect::<BTreeMap<_, _>>();
+    let spans = lash_vm::reconcile(graph, &canonical)
+        .pairs
+        .into_iter()
+        .filter_map(|pair| Some((pair.submitted, *located.get(&pair.reprojected)?)))
+        .collect();
+    Ok(SourceView {
+        source_identity: graph.source_identity.clone(),
+        source,
+        spans,
     })
-}
-
-fn graph_to_program(
-    graph: &WorkflowGraph,
-    globals: &BTreeSet<String>,
-) -> Result<Program, GraphRenderError> {
-    let process_names = graph
-        .declarations
-        .iter()
-        .filter_map(|declaration| match declaration {
-            WorkflowDeclaration::Process(process) => Some(process.name.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    let mut declarations = Vec::with_capacity(graph.declarations.len());
-    let mut lifted: Vec<&WorkflowProcess> = Vec::new();
-    for declaration in &graph.declarations {
-        declarations.push(match declaration {
-            WorkflowDeclaration::Function(function) => Declaration::Function(function.clone()),
-            WorkflowDeclaration::Process(process) => {
-                // A lifted literal is not a module declaration: its authored
-                // arrow travels inline where it sits, so the rebuilt program
-                // carries no declaration for it. It is not skipped either —
-                // the lens owns its body in both directions, so the rendered
-                // subgraph is spliced back into the literal below (FIG-3118).
-                if process.origin.is_lifted() {
-                    lifted.push(process);
-                    continue;
-                }
-                let label =
-                    (process.name_source == WorkflowNodeNameSource::Label).then(|| LabelMetadata {
-                        title: process.display_name.clone().into(),
-                        description: process.description.clone().map(Into::into),
-                    });
-                Declaration::Process(ProcessDecl {
-                    name: process.name.clone().into(),
-                    params: process.params.clone(),
-                    return_ty: process.return_ty.clone(),
-                    label,
-                    origin: process.origin.clone(),
-                    body: process_wrapper(
-                        &process.params,
-                        subgraph_to_block(
-                            &process.body,
-                            RenderContext {
-                                scope: RenderScope::Process,
-                                processes: &process_names,
-                                globals,
-                            },
-                        )?,
-                    ),
-                })
-            }
-        });
-    }
-    let context = RenderContext {
-        scope: RenderScope::Main,
-        processes: &process_names,
-        globals,
-    };
-    let mut main = subgraph_to_block(&graph.main, context)?;
-    splice_lifted_bodies(&mut main, lifted, context)?;
-    Ok(Program {
-        declarations,
-        main,
-        // A graph renders to source, which the lowering re-admits; the
-        // private roles of its bindings come back from that lowering.
-        private_bindings: Default::default(),
-        spans: Default::default(),
-    })
-}
-
-/// Splices each lifted process's rendered body back into the literal it was
-/// projected from (FIG-3118).
-///
-/// A top-level `const`-bound `async` arrow is a process literal in `main`
-/// (FIG-2999), and the lens projects it twice: the statement node carries the
-/// arrow, and the body is projected as its own lifted process declaration so
-/// the nodes inside are editable. Rendering `main` alone would drop every edit
-/// made inside a process container, so the rendered body is spliced back.
-///
-/// Which literal a declaration belongs to is derived, never read from an
-/// authored position (FIG-3571). A declaration's name is the digest of the
-/// literal it was lifted from together with the site it was lifted at, so a
-/// literal carries the declaration exactly when it still digests to that name
-/// at that site — wherever the literal sits now. Adding, removing or reordering
-/// statements around a literal moves it without changing that proof, and
-/// admission re-derives the origin of the rendered program. An admitted
-/// program that holds the literal as a reference to its declaration names it
-/// directly.
-///
-/// A declaration no literal or reference carries — its origin, name or literal
-/// was edited — is refused, as is a literal two declarations could claim and a
-/// reference naming a lifted process twice. Nothing is spliced into a literal
-/// it was not projected from; a literal no declaration claims keeps its
-/// authored body.
-fn splice_lifted_bodies(
-    main: &mut Expr,
-    lifted: Vec<&WorkflowProcess>,
-    context: RenderContext<'_>,
-) -> Result<(), GraphRenderError> {
-    let mut pending = LiftedBodies::default();
-    for process in lifted {
-        if process.origin.is_lifted() {
-            pending.by_name.insert(process.name.clone(), process);
-        }
-    }
-    splice_at(
-        main,
-        &mut Vec::new(),
-        &mut Vec::new(),
-        &mut pending,
-        context,
-    )?;
-    match pending.by_name.into_values().next() {
-        Some(process) => Err(GraphRenderError::ProcessOriginMismatch {
-            name: process.name.clone(),
-            message: "no process literal or reference in the program carries it".to_string(),
-        }),
-        None => Ok(()),
-    }
-}
-
-/// The lifted declarations not yet spliced, by name.
-#[derive(Default)]
-struct LiftedBodies<'a> {
-    by_name: std::collections::BTreeMap<String, &'a WorkflowProcess>,
-    spliced: BTreeSet<String>,
-}
-
-impl<'a> LiftedBodies<'a> {
-    fn take_named(&mut self, name: &str) -> Option<&'a WorkflowProcess> {
-        let process = self.by_name.remove(name)?;
-        self.spliced.insert(name.to_string());
-        Some(process)
-    }
-
-    /// The declaration `literal` carries: one whose name `literal` digests to
-    /// at the declaration's own site, preferring the one lifted at the
-    /// literal's current position.
-    fn take_for_literal(
-        &mut self,
-        literal: &lash_vm::ProcessLiteralExpr,
-        path: &[u32],
-        unlabelled: &[u32],
-    ) -> Result<Option<&'a WorkflowProcess>, GraphRenderError> {
-        let carried = self
-            .by_name
-            .values()
-            .filter_map(|process| match &process.origin {
-                lash_vm::ProcessOrigin::Lifted { site, .. }
-                    if lash_vm::lifted_process_identity(&literal.body, &site.steps)
-                        == process.name =>
-                {
-                    Some((site.steps.as_slice(), process.name.clone()))
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let name = match carried
-            .iter()
-            .find(|(site, _)| *site == path || *site == unlabelled)
-        {
-            Some((_, name)) => name.clone(),
-            None => match carried.as_slice() {
-                [] => return Ok(None),
-                [(_, name)] => name.clone(),
-                [(_, name), ..] => {
-                    return Err(GraphRenderError::ProcessOriginMismatch {
-                        name: name.clone(),
-                        message: "more than one lifted process could claim a moved literal"
-                            .to_string(),
-                    });
-                }
-            },
-        };
-        Ok(self.take_named(&name))
-    }
-}
-
-/// The lifted declaration `expr` refers to, if it is a reference to one.
-///
-/// An admitted view spells the reference as `ProcessRef`. A host that carries
-/// node text spells it as the reference's printed name, which reads back as a
-/// variable; since lifted names are reserved to the linker, a variable naming
-/// a lifted declaration of this graph can only be that reference.
-fn lifted_reference(expr: &Expr, pending: &LiftedBodies<'_>) -> Option<String> {
-    let name = match expr {
-        Expr::ProcessRef { process } => process.as_str(),
-        Expr::Variable(name) => name.as_str(),
-        _ => return None,
-    };
-    (pending.by_name.contains_key(name) || pending.spliced.contains(name)).then(|| name.to_string())
-}
-
-fn splice_at(
-    expr: &mut Expr,
-    path: &mut Vec<u32>,
-    unlabelled: &mut Vec<u32>,
-    pending: &mut LiftedBodies<'_>,
-    context: RenderContext<'_>,
-) -> Result<(), GraphRenderError> {
-    if let Expr::ProcessLiteral(literal) = expr
-        && let Some(process) = pending.take_for_literal(literal, path, unlabelled)?
-    {
-        let mut statements = match subgraph_to_block(
-            &process.body,
-            RenderContext {
-                scope: RenderScope::Process,
-                processes: context.processes,
-                globals: context.globals,
-            },
-        )? {
-            Expr::Block(statements) => statements,
-            other => vec![other],
-        };
-        statements.push(Expr::Absent);
-        let body = Expr::Role {
-            role: lash_vm::StructuralRole::Completion,
-            expr: Box::new(Expr::Block(statements)),
-        };
-        literal.params = process.params.clone();
-        literal.return_ty = authored_return_type(&process.origin).cloned();
-        *literal.body = process_wrapper(&process.params, body);
-    } else if let Some(name) = lifted_reference(expr, pending)
-        && pending.spliced.contains(name.as_str())
-    {
-        return Err(GraphRenderError::ProcessOriginMismatch {
-            name,
-            message: "a lifted process is carried by one literal, not referenced twice".to_string(),
-        });
-    } else if let Some(name) = lifted_reference(expr, pending)
-        && let Some(process) = pending.take_named(&name)
-    {
-        // An admitted program holds the lifted literal as a reference to its
-        // declaration; the rendered program holds the literal itself, rebuilt
-        // from the declaration: its authored parameters, the captures its
-        // hidden parameters carry, and the rendered body.
-        let lash_vm::ProcessOrigin::Lifted { hidden_params, .. } = &process.origin else {
-            unreachable!("only lifted processes are spliced")
-        };
-        let authored = process
-            .params
-            .len()
-            .checked_sub(*hidden_params as usize)
-            .ok_or_else(|| GraphRenderError::ProcessOriginMismatch {
-                name: process.name.clone(),
-                message: "more hidden parameters than parameters".to_string(),
-            })?;
-        let (params, hidden) = process.params.split_at(authored);
-        let mut statements = match subgraph_to_block(
-            &process.body,
-            RenderContext {
-                scope: RenderScope::Process,
-                processes: context.processes,
-                globals: context.globals,
-            },
-        )? {
-            Expr::Block(statements) => statements,
-            other => vec![other],
-        };
-        statements.push(Expr::Absent);
-        let body = Expr::Role {
-            role: lash_vm::StructuralRole::Completion,
-            expr: Box::new(Expr::Block(statements)),
-        };
-        *expr = Expr::ProcessLiteral(Box::new(lash_vm::ProcessLiteralExpr {
-            params: params.to_vec(),
-            hidden_args: hidden.to_vec(),
-            return_ty: authored_return_type(&process.origin).cloned(),
-            body: Box::new(process_wrapper(params, body)),
-        }));
-    }
-    let label = matches!(expr, Expr::LabelAnnotated { .. });
-    for (index, child) in expr.children_mut().enumerate() {
-        let step = u32::try_from(index).unwrap_or(u32::MAX);
-        path.push(step);
-        if !label {
-            unlabelled.push(step);
-        }
-        splice_at(child, path, unlabelled, pending, context)?;
-        path.pop();
-        if !label {
-            unlabelled.pop();
-        }
-    }
-    Ok(())
-}
-
-/// What a node is being rendered back into.
-#[derive(Clone, Copy)]
-struct RenderContext<'a> {
-    scope: RenderScope,
-    /// The process names the module declares.
-    ///
-    /// `const child = async (..) => ..` projects as the module binding its
-    /// process reference. The reference is not ordinary text — the name is
-    /// bound by the very statement that reads it — so it is rebuilt from the
-    /// declaration list instead of parsed.
-    processes: &'a [String],
-    /// The session's globals: names earlier cells of the session bound, which
-    /// the cell's own link admitted and an opaque statement may therefore
-    /// read.
-    globals: &'a BTreeSet<String>,
-}
-
-impl RenderContext<'_> {
-    /// The module's process bindings, as a fragment parse sees them.
-    fn process_bindings(&self) -> std::collections::BTreeSet<String> {
-        self.processes.iter().cloned().collect()
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RenderScope {
-    Main,
-    Process,
-}
-
-fn subgraph_to_block(
-    graph: &WorkflowSubgraph,
-    context: RenderContext<'_>,
-) -> Result<Expr, GraphRenderError> {
-    graph
-        .nodes
-        .iter()
-        .map(|node| node_to_expr(node, context))
-        .collect::<Result<Vec<_>, _>>()
-        .map(Expr::Block)
-}
-
-fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr, GraphRenderError> {
-    let expression =
-        match &node.kind {
-            WorkflowNodeKind::Data {
-                binding,
-                expression,
-            } => {
-                if !lash_vm::is_pure_expr(expression) {
-                    return invalid_payload(node, "data expression is effectful");
-                }
-                with_assignment_ir(binding, expression.clone())
-            }
-            WorkflowNodeKind::Call {
-                binding,
-                receiver,
-                operation,
-                arguments,
-                result_steps,
-            } => {
-                let expression = workflow_call_to_ir(receiver, operation, arguments, result_steps);
-                with_assignment_ir(binding, expression)
-            }
-            WorkflowNodeKind::Effect {
-                binding,
-                effect,
-                arguments,
-                result_steps,
-            } => {
-                let expression = workflow_effect_to_ir(*effect, arguments, result_steps)
-                    .ok_or_else(|| GraphRenderError::InvalidNodePayload {
-                        node_id: node.id.to_string(),
-                        message: "effect arguments do not match its kind".to_string(),
-                    })?;
-                with_assignment_ir(binding, expression)
-            }
-            WorkflowNodeKind::Computation {
-                binding,
-                expression,
-            } => with_assignment_ir(binding, expression.clone()),
-            WorkflowNodeKind::StateUpdate {
-                target,
-                expression,
-                update,
-            } => {
-                let [output] = node.outputs.as_slice() else {
-                    return invalid_payload(node, "state update must have exactly one output");
-                };
-                if target.root.as_str() != output.variable {
-                    return invalid_payload(node, "state-update target root must match its output");
-                }
-                match update {
-                    Some(operator) => {
-                        let Some(role) =
-                            crate::lower::attribute_update(target, *operator, expression.clone())
-                        else {
-                            return invalid_payload(
-                                node,
-                                "an update's target is one member step of a variable",
-                            );
-                        };
-                        role
-                    }
-                    None => Expr::Assign {
-                        target: target.clone(),
-                        expr: Box::new(expression.clone()),
-                    },
-                }
-            }
-            WorkflowNodeKind::Terminal {
-                terminal,
-                expression,
-            } => {
-                let valid = matches!(
-                    (terminal, &expression),
-                    (
-                        WorkflowTerminalKind::Finish,
-                        Expr::Finish(_) | Expr::FunctionReturn(_)
-                    ) | (WorkflowTerminalKind::Fail, Expr::Fail(_))
-                );
-                if !valid {
-                    return invalid_payload(node, "terminal kind does not match its expression");
-                }
-                expression.clone()
-            }
-            WorkflowNodeKind::Container(container) => match container {
-                WorkflowContainer::If {
-                    binding,
-                    condition,
-                    then_is_block,
-                    else_is_block,
-                    then_graph,
-                    else_graph,
-                } => with_assignment_ir(
-                    binding,
-                    Expr::If {
-                        condition: Box::new(condition.clone()),
-                        then_block: Box::new(subgraph_to_branch(
-                            node,
-                            then_graph,
-                            context,
-                            *then_is_block,
-                            "then_graph",
-                        )?),
-                        else_block: Box::new(subgraph_to_branch(
-                            node,
-                            else_graph,
-                            context,
-                            *else_is_block,
-                            "else_graph",
-                        )?),
-                    },
-                ),
-                WorkflowContainer::For {
-                    binding,
-                    iterable,
-                    bind,
-                    body,
-
-                    authored_binding,
-                } => Expr::For {
-                    authored_binding: authored_binding.clone().map(Into::into),
-                    binding: binding.clone().into(),
-                    iterable: Box::new(iterable.clone()),
-                    bind: bind.clone().map(Box::new),
-                    body: Box::new(subgraph_to_block(body, context)?),
-                },
-                WorkflowContainer::While { condition, body } => Expr::While {
-                    condition: Box::new(condition.clone()),
-                    body: Box::new(subgraph_to_block(body, context)?),
-                },
-            },
-            WorkflowNodeKind::Opaque { source } => parse_opaque_statement(node, source, context)?,
-        };
-    Ok(if node.name_source == WorkflowNodeNameSource::Label {
-        Expr::LabelAnnotated {
-            label: LabelMetadata {
-                title: node.name.clone().into(),
-                description: node.description.clone().map(Into::into),
-            },
-            expr: Box::new(expression),
-        }
-    } else {
-        expression
-    })
-}
-
-fn subgraph_to_branch(
-    node: &WorkflowNode,
-    graph: &WorkflowSubgraph,
-    context: RenderContext<'_>,
-    is_block: bool,
-    child: &'static str,
-) -> Result<Expr, GraphRenderError> {
-    if is_block {
-        return subgraph_to_block(graph, context);
-    }
-    let [branch] = graph.nodes.as_slice() else {
-        return Err(GraphRenderError::InvalidNodePayload {
-            node_id: node.id.to_string(),
-            message: format!("non-block {child} must contain exactly one node"),
-        });
-    };
-    node_to_expr(branch, context)
-}
-
-fn parse_opaque_statement(
-    node: &WorkflowNode,
-    source: &str,
-    context: RenderContext<'_>,
-) -> Result<Expr, GraphRenderError> {
-    let (program, prelude) = parse_typescript_fragment(node, source, context)?;
-    let expressions = match context.scope {
-        RenderScope::Main => printer::statement_block_contents(&program.main),
-        RenderScope::Process => {
-            let Some(body) = opaque_wrapper_run_body(&program) else {
-                return invalid_payload(node, "opaque process wrapper did not produce a run body");
-            };
-            printer::statement_block_contents(body)
-        }
-    };
-    let expressions = expressions.into_iter().skip(prelude).collect::<Vec<_>>();
-    if expressions.len() != 1 {
-        return Err(GraphRenderError::InvalidOpaqueSource {
-            node_id: node.id.to_string(),
-            message: format!("expected one statement, found {}", expressions.len()),
-        });
-    }
-    #[expect(
-        clippy::expect_used,
-        reason = "the length check above returned for any count other than one"
-    )]
-    let expression = expressions.into_iter().next().expect("one expression");
-    Ok(expression.clone())
-}
-
-fn with_assignment_ir(binding: &Option<AssignTarget>, expression: Expr) -> Expr {
-    match binding {
-        Some(target) => Expr::Assign {
-            target: target.clone(),
-            expr: Box::new(expression),
-        },
-        None => expression,
-    }
 }

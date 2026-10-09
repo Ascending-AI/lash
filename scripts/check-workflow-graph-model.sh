@@ -27,7 +27,7 @@ if ! grep -qE 'lash_vm_runtime::trace_lashlang_main_map\(&artifact\.graph\)' \
   exit 1
 fi
 
-if ! grep -qE 'graph:[[:space:]]*lash_vm::workflow_graph_from_artifact\(artifact,[[:space:]]*&lash_vm::NoStatementText\)' \
+if ! grep -qE 'graph:[[:space:]]*lash_vm::workflow_graph_from_artifact\(artifact\)' \
   crates/lash-vm-worker/src/service.rs; then
   echo "workflow graph model check failed: worker no longer projects the admitted artifact's WorkflowGraph" >&2
   exit 1
@@ -192,8 +192,8 @@ ALLOWED = {
     "crates/lash-typescript/src/workflow_graph/printer.rs": (
         "the printer refuses to spell a generated binding as source"
     ),
-    "crates/lash-typescript/src/workflow_graph/mod.rs": (
-        "graph validation refuses a process whose name contradicts its origin"
+    "crates/lash-vm/src/workflow_graph/reconstruction.rs": (
+        "graph reconstruction refuses a process whose name contradicts its origin"
     ),
     "crates/lash-vm/src/ast_roles.rs": (
         "defines the lifted-name prefix and validates names against origins"

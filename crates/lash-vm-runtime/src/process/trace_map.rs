@@ -186,12 +186,8 @@ mod tests {
             lash_vm::Expr::Block(expressions) => expressions,
             _ => unreachable!(),
         }));
-        let graph =
-            lash_vm::workflow_graph_from_artifact(&linked.artifact, &lash_vm::NoStatementText);
-        let map = trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(
-            &linked.artifact,
-            &lash_vm::NoStatementText,
-        ));
+        let graph = lash_vm::workflow_graph_from_artifact(&linked.artifact);
+        let map = trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(&linked.artifact));
         assert_map_contract(&map, &graph.main);
     }
 
@@ -201,11 +197,10 @@ mod tests {
             vec![b::process("worker", Vec::new(), body())],
             Vec::new(),
         ));
-        let graph =
-            lash_vm::workflow_graph_from_artifact(&linked.artifact, &lash_vm::NoStatementText);
+        let graph = lash_vm::workflow_graph_from_artifact(&linked.artifact);
         let process = graph.process("worker").expect("worker graph");
         let map = trace_lashlang_process_map(
-            &lash_vm::workflow_graph_from_artifact(&linked.artifact, &lash_vm::NoStatementText),
+            &lash_vm::workflow_graph_from_artifact(&linked.artifact),
             "worker",
         )
         .expect("worker map");

@@ -45,7 +45,7 @@ class WorkflowGraphModelTests(unittest.TestCase):
             WORKER,
             "fn inspect(artifact: &lash_vm::ModuleArtifact) {\n"
             "    lash_vm_client::InspectedArtifact {\n"
-            "        graph: lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText),\n"
+            "        graph: lash_vm::workflow_graph_from_artifact(artifact),\n"
             "    }\n}\n",
         )
         self.write(
@@ -78,7 +78,7 @@ class WorkflowGraphModelTests(unittest.TestCase):
         self.write(
             TRACE,
             "#[cfg(test)]\nmod tests {\n"
-            "    fn fixture() { lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText); }\n"
+            "    fn fixture() { lash_vm::workflow_graph_from_artifact(artifact); }\n"
             "}\n",
         )
         result = self.check()
@@ -96,7 +96,7 @@ class WorkflowGraphModelTests(unittest.TestCase):
         with (self.root / TRACE).open("a") as source:
             source.write(
                 "#[cfg(test)]\nmod tests {\n"
-                "    fn fixture() { lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText); }\n"
+                "    fn fixture() { lash_vm::workflow_graph_from_artifact(artifact); }\n"
                 "}\n"
             )
         result = self.check()

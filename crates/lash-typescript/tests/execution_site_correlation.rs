@@ -22,12 +22,9 @@ use lash_vm::{
     WorkflowNodeKind,
 };
 
-/// The language-neutral IR projection, with TypeScript opaque-statement text.
+/// The language-neutral IR projection.
 fn workflow_graph_from_program(program: &lash_vm::Program) -> lash_vm::WorkflowGraph {
-    lash_vm::workflow_graph_from_program(
-        program,
-        &lash_typescript::workflow_graph::TypeScriptStatementText,
-    )
+    lash_vm::workflow_graph_from_program(program)
 }
 
 /// A `(kind, label, path)` triple for every execution site the compiler emitted,

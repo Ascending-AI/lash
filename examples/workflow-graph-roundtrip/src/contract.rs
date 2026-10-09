@@ -6,6 +6,7 @@ use lash::vm::ir::{
     Span, WorkflowDiagnosticClassification, WorkflowEdgeKind, WorkflowEffectKind,
     WorkflowNodeNameSource, WorkflowTerminalKind,
 };
+use lash::workflow::WorkflowGraphError;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -1097,27 +1098,30 @@ impl RenderErrorResponse {
                 "supportedRange": refusal.reads.supported(),
                 "fleetWriterVersion": refusal.reads.recorded(),
             }),
-            GraphRenderError::DuplicateNodeId { id } => json!({ "id": id }),
-            GraphRenderError::UnknownNodeReference {
-                edge_id, endpoint, ..
-            } => json!({ "edgeId": edge_id, "endpoint": endpoint }),
-            GraphRenderError::InvalidNodePayload { message, .. }
+            GraphRenderError::Document(WorkflowGraphError::DuplicateNodeId { id }) => {
+                json!({ "id": id })
+            }
+            GraphRenderError::Document(WorkflowGraphError::InvalidNodePayload {
+                message, ..
+            })
+            | GraphRenderError::Document(WorkflowGraphError::InvalidBodyForm { message })
             | GraphRenderError::InvalidExpression { message, .. }
-            | GraphRenderError::InvalidAssignmentTarget { message, .. }
-            | GraphRenderError::InvalidOpaqueSource { message, .. } => {
+            | GraphRenderError::InvalidAssignmentTarget { message, .. } => {
                 json!({ "reason": message })
             }
-            GraphRenderError::DuplicateProcessName { name } => json!({ "name": name }),
+            GraphRenderError::Document(WorkflowGraphError::DuplicateProcessName { name }) => {
+                json!({ "name": name })
+            }
+            GraphRenderError::InvalidProgram(error) => json!({ "reason": error.to_string() }),
             GraphRenderError::CanonicalSource(_) => json!({}),
-            GraphRenderError::RenderedSourceInvalid { message } => {
-                json!({ "reason": message })
-            }
             // Future render failures retain their stable library code without
             // the example inventing an unowned detail schema.
             _ => json!({}),
         };
-        if !matches!(&error, GraphRenderError::DuplicateNodeId { .. })
-            && let Some(node_id) = error.node_id()
+        if !matches!(
+            &error,
+            GraphRenderError::Document(WorkflowGraphError::DuplicateNodeId { .. })
+        ) && let Some(node_id) = error.node_id()
         {
             details["nodeId"] = json!(node_id);
         }
@@ -1172,10 +1176,12 @@ impl RenderErrorResponse {
     pub(crate) fn invalid_node_payload(node_id: &str, message: impl Into<String>) -> Self {
         let message = message.into();
         let host_message = format!("node `{node_id}` has an invalid payload: {message}");
-        let mut response = Self::render(GraphRenderError::InvalidNodePayload {
-            node_id: node_id.to_string(),
-            message,
-        });
+        let mut response = Self::render(GraphRenderError::Document(
+            WorkflowGraphError::InvalidNodePayload {
+                node_id: node_id.to_string(),
+                message,
+            },
+        ));
         response.body.error.message = host_message;
         response
     }

@@ -11,13 +11,16 @@ mod fold;
 #[path = "ast_number.rs"]
 pub(crate) mod number;
 pub use fold::{ExprFolder, fold_expr_children};
+#[path = "ast_slots.rs"]
+mod slots;
+pub use slots::{ExprSlot, ExprSlotVisitor, walk_expr_slots};
 #[path = "ast_roles.rs"]
 mod roles;
 pub(crate) use roles::check_unique_declarations;
 pub use roles::{
     AttributeAssignParts, AttributeStep, AttributeUpdate, BindingVisibility,
-    CollectionTransformParts, LIFTED_PROCESS_NAME_PREFIX, ProcessOrigin, StructuralRole,
-    UpdateOperator, lifted_process_identity, process_wrapper_run_path,
+    CollectionTransformParts, LIFTED_PROCESS_NAME_PREFIX, ProcessOrigin, ProcessWrapperParts,
+    StructuralRole, UpdateOperator, lifted_process_identity, process_wrapper_run_path,
 };
 use roles::{check_process_origins, check_program_roles};
 

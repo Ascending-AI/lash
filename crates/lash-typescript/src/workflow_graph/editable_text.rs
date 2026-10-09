@@ -1,87 +1,32 @@
-//! The lens's editable text fields: printing one node's TypeScript and parsing
-//! a host's edit of it back into IR.
+//! The lens's editable text fields: parsing a host's TypeScript edit of one
+//! expression, target or statement into IR.
 //!
 //! Every field here is TypeScript, and every parse goes through the dialect's
-//! own front-end rather than a second grammar. A node carries the identifiers
-//! visible before it runs, so a fragment that references them is parsed with
-//! exactly those names in scope: the dialect rejects an unknown binding, which
-//! is the behaviour the lens wants, but only for names that really are not
-//! there.
+//! own front-end rather than a second grammar. The caller names the
+//! identifiers visible where the fragment sits, so a fragment that references
+//! them is parsed with exactly those names in scope: the dialect rejects an
+//! unknown binding, but only for names that really are not there.
 
 use std::collections::BTreeSet;
 
 use lash_vm::{AssignPathStep, AssignTarget, Expr, Program};
 
-use super::printer::typescript_statement_source;
-use super::{GraphRenderError, RenderContext, RenderScope, WorkflowNode};
+/// The name the statement wrapper binds. It never reaches a graph.
+const STATEMENT_WRAPPER: &str = "workflowGraphStatement";
 
-pub(super) fn statement_text(expression: &Expr, bound: &[String]) -> String {
-    typescript_statement_source(expression, bound)
-        .unwrap_or_else(|error| format!("<non-sourceable statement: {error}>"))
-}
-
-/// Returns the parsed program and the number of leading statements the wrapper
-/// itself contributed, which the caller skips.
-pub(super) fn parse_typescript_fragment(
-    node: &WorkflowNode,
-    text: &str,
-    context: RenderContext<'_>,
-) -> Result<(Program, usize), GraphRenderError> {
-    let names = fragment_bindings(node);
-    // The session's globals are readable exactly as the cell's own link bound
-    // them. A name the node itself carries is the fragment's binding, so the
-    // session set drops it — which also keeps a process wrapper's `let`
-    // re-declaration of it from being shadowed by the ambient one.
-    let local: BTreeSet<String> = names.iter().cloned().collect();
-    let session: BTreeSet<String> = context.globals.difference(&local).cloned().collect();
-    let (source, globals, prelude) = match context.scope {
-        RenderScope::Main => (text.to_string(), local, 0),
-        // A process fragment is reparsed inside a process, and a function body
-        // cannot close over a mutable outer binding. So the visible names are
-        // re-declared inside the wrapper rather than left sitting above it,
-        // which is what keeps an edited reassignment parseable.
-        RenderScope::Process => {
-            let prelude = names
-                .iter()
-                .map(|name| format!("  let {name};\n"))
-                .collect::<String>();
-            (
-                format!("const {OPAQUE_WRAPPER} = async () => {{\n{prelude}{text}\n}};\n"),
-                BTreeSet::new(),
-                names.len(),
-            )
-        }
-    };
-    let program =
-        crate::parse_workflow_fragment(&source, &globals, &session, &context.process_bindings())
-            .map_err(|error| GraphRenderError::InvalidOpaqueSource {
-                node_id: node.id.to_string(),
-                message: error.to_string(),
-            })?;
-    Ok((program, prelude))
-}
-
-/// The names a fragment may read, in the order the wrapper declares them.
-fn fragment_bindings(node: &WorkflowNode) -> Vec<String> {
-    node.available_variables.clone()
-}
-
-/// The name the opaque-statement wrapper binds. It never reaches a graph.
-const OPAQUE_WRAPPER: &str = "workflowGraphOpaque";
-
-/// The authored statements of the opaque-statement wrapper.
+/// The authored statements of the statement wrapper.
 ///
 /// The wrapper is a top-level `const`-bound `async` arrow, which FIG-2999 made
 /// a process *literal* assigned in `main` rather than a `Declaration::Process`
 /// (ADR 0095). So the wrapper is read back out of its own binding, and the
 /// authored body out of the run wrapper the literal carries.
-pub(super) fn opaque_wrapper_run_body(program: &Program) -> Option<&Expr> {
+fn statement_wrapper_run_body(program: &Program) -> Option<&Expr> {
     let [Expr::Assign { target, expr }] =
         super::printer::statement_block_contents(&program.main).as_slice()
     else {
         return None;
     };
-    if target.root.as_str() != OPAQUE_WRAPPER || !target.steps.is_empty() {
+    if target.root.as_str() != STATEMENT_WRAPPER || !target.steps.is_empty() {
         return None;
     }
     let Expr::ProcessLiteral(literal) = expr.as_ref() else {
@@ -163,6 +108,32 @@ pub fn parse_typescript_assign_target(
         .ok_or_else(|| TypeScriptFragmentError("expected an assignment target".to_string()))
 }
 
+/// One statement of a cell's top level, with `globals` the names visible
+/// before it. A host that shows a region as TypeScript text reads its edit
+/// back through here; the statement's IR then projects as the typed region
+/// it is.
+pub fn parse_typescript_statement(
+    text: &str,
+    globals: &BTreeSet<String>,
+    processes: &BTreeSet<String>,
+) -> Result<Expr, TypeScriptFragmentError> {
+    let program = crate::parse_workflow_fragment(text, globals, &BTreeSet::new(), processes)
+        .map_err(|error| TypeScriptFragmentError(error.to_string()))?;
+    if !program.declarations.is_empty() {
+        return Err(TypeScriptFragmentError(
+            "expected one statement, found a declaration".to_string(),
+        ));
+    }
+    let statements = super::printer::statement_block_contents(&program.main);
+    match statements.as_slice() {
+        [statement] => Ok((*statement).clone()),
+        statements => Err(TypeScriptFragmentError(format!(
+            "expected one statement, found {}",
+            statements.len()
+        ))),
+    }
+}
+
 /// The text is reparsed inside a generated process-arrow wrapper, with
 /// `globals` re-declared in the run body so an edited reassignment still
 /// parses, and the wrapper's single statement is returned. The wrapper name
@@ -176,11 +147,11 @@ pub fn parse_typescript_process_statement(
         .iter()
         .map(|name| format!("  let {name};\n"))
         .collect::<String>();
-    let source = format!("const {OPAQUE_WRAPPER} = async () => {{\n{prelude}{text}\n}};\n");
+    let source = format!("const {STATEMENT_WRAPPER} = async () => {{\n{prelude}{text}\n}};\n");
     let program =
         crate::parse_workflow_fragment(&source, &BTreeSet::new(), &BTreeSet::new(), processes)
             .map_err(|error| TypeScriptFragmentError(error.to_string()))?;
-    let Some(body) = opaque_wrapper_run_body(&program) else {
+    let Some(body) = statement_wrapper_run_body(&program) else {
         return Err(TypeScriptFragmentError(
             "expected one process statement".to_string(),
         ));

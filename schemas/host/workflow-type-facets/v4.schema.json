@@ -1,5 +1,133 @@
 {
   "$defs": {
+    "ExprSlot": {
+      "description": "The role one child expression plays in its parent [`Expr`].",
+      "oneOf": [
+        {
+          "enum": [
+            "condition",
+            "then",
+            "else",
+            "iterable",
+            "receiver",
+            "callee",
+            "this",
+            "catch",
+            "finally",
+            "target",
+            "index",
+            "left",
+            "right"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A statement of a block or an element of a list.",
+          "properties": {
+            "item": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "item"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The value of a record entry, by entry position.",
+          "properties": {
+            "entry": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "entry"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "inner",
+          "description": "The expression a label or a structural role wraps.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A dynamic index of an assignment target's path, by position.",
+          "properties": {
+            "assign_index": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "assign_index"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "value",
+          "description": "The value an assignment stores.",
+          "type": "string"
+        },
+        {
+          "const": "bind",
+          "description": "The generated statements that bind a loop element to authored names.",
+          "type": "string"
+        },
+        {
+          "const": "body",
+          "description": "The body of a loop, a function, a process literal or a `try`.",
+          "type": "string"
+        },
+        {
+          "const": "input",
+          "description": "The input of a host descriptor constructor.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A call argument, by position.",
+          "properties": {
+            "arg": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "arg"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "operand",
+          "description": "The single operand of a unary form.",
+          "type": "string"
+        },
+        {
+          "const": "method_key",
+          "description": "The computed member a method call reads its callee from.",
+          "type": "string"
+        },
+        {
+          "const": "items",
+          "description": "The collection a map intrinsic reads.",
+          "type": "string"
+        },
+        {
+          "const": "function",
+          "description": "The callback a map intrinsic applies.",
+          "type": "string"
+        }
+      ]
+    },
     "ProcessParamWire": {
       "additionalProperties": false,
       "properties": {
@@ -270,7 +398,7 @@
       "type": "string"
     },
     "WorkflowSlotPath": {
-      "description": "An unambiguous address for one input location inside a workflow node.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts; field names use JSON string\nquoting so they cannot collide with structural indexes or separators.",
+      "description": "An unambiguous address for one expression inside a workflow node.\n\nTwo spellings share the type. A *structural* path is made only of\n[`WorkflowSlotPathSegment::Expr`] segments and walks the typed child slots\nof the node's statement ([`super::workflow_node_statement`]), so it reaches\nevery expression role of every IR variant; the empty path is the statement\nitself. A *call-argument* path starts at a receiver call's argument\n(`call`, `arg`, then record fields and list indexes) and is what type\nfacets name their expected arguments by.\n\nThe serialized list is authoritative. [`Display`](std::fmt::Display) is a\nderived spelling for text-only host contracts; field names use JSON string\nquoting so they cannot collide with structural indexes or separators.",
       "items": {
         "$ref": "#/$defs/WorkflowSlotPathSegment"
       },
@@ -330,6 +458,19 @@
           },
           "required": [
             "index"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "One typed child slot of the IR expression reached so far.",
+          "properties": {
+            "expr": {
+              "$ref": "#/$defs/ExprSlot"
+            }
+          },
+          "required": [
+            "expr"
           ],
           "type": "object"
         }

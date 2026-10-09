@@ -24,6 +24,7 @@ pub(super) fn process_from_data(
         params: Vec::new(),
         return_ty: None,
         origin: Default::default(),
+        wrapper: None,
         body: WorkflowSubgraph::default(),
     });
     let process_id = process.id.to_string();
@@ -47,6 +48,7 @@ pub(super) fn process_from_data(
 
 pub(super) fn seeded_process_body(process_id: &str, params: &[ProcessParam]) -> WorkflowSubgraph {
     WorkflowSubgraph {
+        form: Default::default(),
         nodes: vec![WorkflowNode {
             id: workflow_node_id(&format!("{process_id}:seed:finish")),
             name: "finish".to_string(),

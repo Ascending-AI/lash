@@ -9,9 +9,7 @@ use lash_core_store::testing::guarded_surfaces::{self as laws, SurfaceProbe};
 use super::tests::named_bytes;
 use super::*;
 use crate::testing::ast_builders as b;
-use crate::{
-    NoStatementText, WORKFLOW_GRAPH_SCHEMA_VERSION, WorkflowGraph, WorkflowGraphProjector,
-};
+use crate::{WORKFLOW_GRAPH_SCHEMA_VERSION, WorkflowGraph, WorkflowGraphProjector};
 
 const OWNER: &str = "lashvm";
 
@@ -53,7 +51,7 @@ fn write_graph(fleet: FleetFormat) -> Vec<u8> {
     let program = b::program(vec![b::assign("total", b::num(0.0))]);
     let graph = WorkflowGraphProjector::new(&program)
         .with_fleet_format(fleet)
-        .project(&NoStatementText);
+        .project();
     serde_json::to_vec(&graph).expect("encode the graph")
 }
 

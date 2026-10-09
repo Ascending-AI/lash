@@ -201,7 +201,7 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
     }
 
     // 2. The compiled inventory is the trace map, entry by entry.
-    let graph = lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText);
+    let graph = lash_vm::workflow_graph_from_artifact(artifact);
     let mut entries = vec![("main".to_string(), Entry::Main, &graph.main)];
     for declaration in &ir.declarations {
         if let Declaration::Process(process) = declaration {

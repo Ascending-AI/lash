@@ -31,7 +31,7 @@ fn editable_ir_fields_survive_every_lens_direction() {
             "for (const item of [1]) { console.log(2); }",
             "for (const entry of [1]) { console.log(2); }",
             0,
-            "binding",
+            "bind",
         ),
         ("const x = [1, 2];", "const x = [3, 4];", 0, "expression"),
         ("const x = [1, 2];", "const y = [1, 2];", 0, "binding"),

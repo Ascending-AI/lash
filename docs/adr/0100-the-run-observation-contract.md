@@ -168,9 +168,10 @@ Evidence: `crates/lash-vm/src/workflow_graph.rs:665`, `:735`, and
 
 ### R8: the projector lives in the IR crate
 
-`lash_vm::WorkflowGraphProjector` owns projection beside IR. A dialect supplies
-statement text through `WorkflowStatementText`; trace maps use `NoStatementText`.
-The process engine does not depend on `lash-typescript` for trace skeletons.
+`lash_vm::WorkflowGraphProjector` owns projection beside IR, and
+`lash_vm::workflow_program_from_graph` owns the inverse. Every admitted
+construct projects as a typed region, so neither direction reads statement
+text from a dialect. The process engine does not depend on `lash-typescript` for trace skeletons.
 `check-workflow-graph-model.sh` guards that dependency boundary.
 
 Evidence: `crates/lash-vm/src/workflow_graph/projection.rs:1`,
