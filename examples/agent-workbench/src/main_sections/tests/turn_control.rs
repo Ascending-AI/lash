@@ -376,7 +376,7 @@ async fn a_pending_cancel_terminal_retains_the_turns_routing() {
         "a still-active turn must not receive a terminal Done item"
     );
     gate.release(1);
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
     workbench.shutdown().await;
 }
 
@@ -456,7 +456,7 @@ finish(String(await handle));
         Some(lash::process::TerminalProcessStatus::Cancelled),
         "{process_outcome:?}"
     );
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
     assert!(state.active_turns.for_session(&session_id).is_none());
     workbench.shutdown().await;
 }
@@ -525,7 +525,7 @@ async fn concurrent_stops_publish_one_done_and_trace_winning_request() {
         );
     }
     gate.release(1);
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
     assert_eq!(
         done_items(&mut events),
         1,
@@ -590,7 +590,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
         ),
         "the terminal records the after-step stop: {terminal:?}"
     );
-    wait_for_turn_released(state, &session_id, &stopped_turn, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &stopped_turn).await;
 
     // Escalate: a routed turn already holding an after-step request is
     // upgraded by the Abort control.
@@ -719,7 +719,7 @@ async fn both_cancel_modes_request_cancellation_of_the_turns_awaited_process() {
             "{mode:?} must cancel the process its own turn started, and only it (not {foreign})"
         );
         gate.release(1);
-        wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+        wait_for_turn_released(state, &session_id, &turn_id).await;
     }
     workbench.shutdown().await;
 }

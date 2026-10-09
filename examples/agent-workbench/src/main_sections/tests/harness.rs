@@ -394,15 +394,18 @@ pub(crate) fn started_turn_id(accepted: &TurnAccepted) -> TurnId {
         .expect("a started send names its turn")
 }
 
+/// The longest a wait on a turn's settled state lasts. A hang guard only: the
+/// waits end on the state itself, so a loaded machine cannot fail them.
+const SETTLE_HANG_GUARD: Duration = Duration::from_secs(300);
+
 /// Wait until the send's follower settles `turn_id` and releases the
 /// session's claim on it.
 pub(crate) async fn wait_for_turn_released(
     state: &AppState,
     session_id: &SessionId,
     turn_id: &TurnId,
-    timeout: Duration,
 ) {
-    let deadline = tokio::time::Instant::now() + timeout;
+    let deadline = tokio::time::Instant::now() + SETTLE_HANG_GUARD;
     while state
         .active_turns
         .for_session(session_id)
@@ -410,7 +413,26 @@ pub(crate) async fn wait_for_turn_released(
     {
         assert!(
             tokio::time::Instant::now() < deadline,
-            "turn {turn_id} was not settled within {timeout:?}"
+            "turn {turn_id} was never settled"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// Wait until no follower in this process holds `turn_id`'s run. A follower
+/// releases the session's claim on the turn first and lets its run go when
+/// it ends, so a settled turn can still have a live follower; a restarted
+/// host has none.
+pub(crate) async fn wait_for_run_let_go(
+    state: &AppState,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+) {
+    let deadline = tokio::time::Instant::now() + SETTLE_HANG_GUARD;
+    while state.active_turns.follows.follows(session_id, turn_id) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the follower of turn {turn_id} never let its run go"
         );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -423,7 +445,7 @@ pub(crate) async fn run_turn(state: &AppState, text: &str) -> TurnId {
         .await
         .expect("the send is admitted");
     let turn_id = started_turn_id(&accepted);
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
     turn_id
 }
 
@@ -433,7 +455,7 @@ pub(crate) async fn run_turn_in(state: &AppState, session_id: &SessionId, text: 
         .await
         .expect("the send is admitted");
     let turn_id = started_turn_id(&accepted);
-    wait_for_turn_released(state, session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, session_id, &turn_id).await;
     turn_id
 }
 

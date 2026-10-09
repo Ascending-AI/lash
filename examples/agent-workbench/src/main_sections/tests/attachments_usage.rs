@@ -173,7 +173,7 @@ async fn attachment_usage_gate() {
     .expect("send the attachment turn through the chat route")
     .0;
     let turn_id = started_turn_id(&accepted);
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
     let runtime_window_end_ms = chrono::Utc::now().timestamp_millis() as u64;
     let session = state
         .open_session(&session_id, "test")

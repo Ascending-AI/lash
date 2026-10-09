@@ -405,7 +405,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
 
     // The admission task outlives the dropped request: the engine runs the
     // committed turn and its follower settles it.
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
     assert!(
         state.active_turns.for_session(&session_id).is_none(),
         "settlement must retire the detached turn"
@@ -416,7 +416,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
         .expect("a later send is admitted normally");
     assert!(!follow_up.queued, "the later send must not remain wedged");
     let follow_up_turn = started_turn_id(&follow_up);
-    wait_for_turn_released(state, &session_id, &follow_up_turn, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &follow_up_turn).await;
     workbench.shutdown().await;
 }
 
@@ -493,7 +493,7 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
     }));
 
     gate.release(2);
-    wait_for_turn_released(state, &session_id, &first_turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &first_turn_id).await;
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
             let snapshot = read_state(state, None).await.expect("settled snapshot");
@@ -544,7 +544,7 @@ async fn a_stalled_turn_does_not_block_competing_recovery_open() {
     .expect("recovery open does not wait out a stalled turn")
     .expect("recovery open succeeds while the turn is stalled");
     gate.release(1);
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
     assert!(state.active_turns.for_session(&session_id).is_none());
     workbench.shutdown().await;
 }

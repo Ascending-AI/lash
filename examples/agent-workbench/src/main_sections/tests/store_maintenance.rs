@@ -283,7 +283,7 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments() {
     .await
     .expect("send the attachment turn");
     let turn_id = started_turn_id(&accepted);
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
 
     // A blob nothing ever attached: no committed ref, no intent, no owner.
     let orphan = attachment_store

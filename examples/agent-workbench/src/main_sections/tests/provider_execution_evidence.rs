@@ -175,7 +175,7 @@ async fn provider_execution_evidence_reaches_the_record_surfaces() {
             .0;
             let turn_id = started_turn_id(&accepted);
             observed.push(next_model_call(&mut observations).await);
-            wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+            wait_for_turn_released(state, &session_id, &turn_id).await;
         }
 
         let first = &observed[0];

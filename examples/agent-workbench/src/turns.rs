@@ -76,6 +76,15 @@ impl RunFollows {
             .remove(&(session_id.clone(), run.clone()));
     }
 
+    /// Whether a follower here still holds `run`.
+    #[cfg(test)]
+    pub(crate) fn follows(&self, session_id: &SessionId, run: &TurnId) -> bool {
+        self.inner
+            .lock_recover()
+            .runs
+            .contains(&(session_id.clone(), run.clone()))
+    }
+
     /// Start watching `session_id`; false when a watch already runs.
     fn watch(&self, session_id: &SessionId) -> bool {
         self.inner.lock_recover().watched.insert(session_id.clone())

@@ -783,7 +783,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
     );
 
     provider_release.notify_one();
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
     assert_eq!(
         provider_entered_rx.recv().await,
         Some(1),

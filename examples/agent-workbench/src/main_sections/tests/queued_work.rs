@@ -117,6 +117,6 @@ async fn workbench_lists_and_controls_individual_queued_batches() {
     assert!(!timeline.contains("Run only this queued-work batch now"));
     assert!(timeline.contains("Cancel this pending queued-work batch"));
     gate.release(1);
-    wait_for_turn_released(state, &session_id, &foreground, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &foreground).await;
     workbench.shutdown().await;
 }

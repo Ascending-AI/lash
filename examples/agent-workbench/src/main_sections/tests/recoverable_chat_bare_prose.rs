@@ -293,10 +293,13 @@ async fn a_resettled_turn_publishes_its_reply_once() {
     let session_id = state.current_session_id();
     let turn_id = run_turn(state, "answer once").await;
 
-    // The claim a restarted host finds in its ledger for a settled turn.
+    // The claim a restarted host finds in its ledger for a settled turn. A
+    // restarted host has no follower on the run: a follower still ending
+    // would hold the run, and the resumed one would leave the claim to it.
+    wait_for_run_let_go(state, &session_id, &turn_id).await;
     state.track_turn(&session_id, &turn_id);
     crate::turns::resume_turn_followers(state).await;
-    wait_for_turn_released(state, &session_id, &turn_id, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_id, &turn_id).await;
     assert_eq!(
         trace.custom("user_turn.completed").len(),
         2,

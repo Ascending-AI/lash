@@ -38,8 +38,8 @@ async fn concurrent_sessions_isolate_transcripts() {
     );
     let turn_a = started_turn_id(&turn_a.expect("session A's send"));
     let turn_b = started_turn_id(&turn_b.expect("session B's send"));
-    wait_for_turn_released(state, &session_a, &turn_a, Duration::from_secs(30)).await;
-    wait_for_turn_released(state, &session_b, &turn_b, Duration::from_secs(30)).await;
+    wait_for_turn_released(state, &session_a, &turn_a).await;
+    wait_for_turn_released(state, &session_b, &turn_b).await;
     assert_eq!(
         user_rows(state, &session_a).await,
         vec!["isolation-marker-A".to_string()]
