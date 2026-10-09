@@ -8,6 +8,7 @@
 
 pub mod boundary;
 pub mod latency;
+pub mod offered_load;
 pub mod perf_support;
 pub mod receipt_tail;
 pub mod runtime_perf;

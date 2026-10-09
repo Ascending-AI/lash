@@ -16,7 +16,7 @@
 //! the retired live-report grace is no longer part of the measured engine.
 
 mod provider;
-mod runner;
+pub(crate) mod runner;
 
 use crate::perf_support::dhat;
 pub(crate) use provider::LatencyProviderKind;
@@ -308,7 +308,7 @@ pub(crate) fn samples_reference(
 
 /// The human-readable gate summary on stdout.
 fn print_summary(report: &runner::LatencyReport) {
-    println!("send-to-completion latency gate (FIG-3843)");
+    println!("send-to-completion latency gate (FIG-3843), closed-loop service diagnostic");
     for case in &report.cases {
         println!(
             "\ncase {} [{} / {:?} provider] — {} samples in {:.1}s — statuses {:?}",

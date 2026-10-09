@@ -6,7 +6,6 @@ struct HighTrafficOperationResult {
     kind: HighTrafficOperationKind,
     latency_ms: f64,
     pre_phase_dispatch_ms: f64,
-    arrival_pacing_lateness_ms: Option<f64>,
     durable_queue_depth: u64,
     phase_profile: BTreeMap<String, RuntimePerfPhaseRunResult>,
     turn_usage: LlmUsage,
@@ -26,6 +25,43 @@ struct HighTrafficStepResult {
 }
 
 const KNEE_TURN_INDEX_STEP_FACTOR: usize = 100_000_000;
+
+/// The high-traffic session population over a fresh SQLite store.
+pub(crate) struct HighTrafficPopulation {
+    runtime: crate::runtime_perf::harness::BenchmarkRuntime,
+}
+
+impl HighTrafficPopulation {
+    pub(crate) const SCENARIO: RuntimePerfScenario = RuntimePerfScenario::HighTrafficLoadSqlite;
+
+    /// Build the runtime on `sqlite_root` and open `population` sessions.
+    pub(crate) async fn open(
+        sqlite_root: std::path::PathBuf,
+        population: usize,
+    ) -> anyhow::Result<(Self, Vec<lash::LashSession>)> {
+        let mut runtime = build_runtime_with_sqlite_store(Self::SCENARIO, sqlite_root).await?;
+        let sessions = take_population_sessions(&mut runtime, Self::SCENARIO, population).await?;
+        Ok((Self { runtime }, sessions))
+    }
+
+    /// The serving core, for keyed reads beside its own writes.
+    pub(crate) fn core(&self) -> lash::LashCore {
+        self.runtime.core()
+    }
+
+    pub(crate) async fn close(mut self) -> anyhow::Result<()> {
+        self.runtime.close().await
+    }
+}
+
+/// The prompt the benchmark provider reads an operation's kind from.
+pub(crate) fn high_traffic_prompt(
+    kind: HighTrafficOperationKind,
+    ordinal: usize,
+    session_id: &lash::SessionId,
+) -> String {
+    format!("load-kind:{kind} operation:{ordinal} session:{session_id}")
+}
 
 async fn take_population_sessions(
     runtime: &mut crate::runtime_perf::harness::BenchmarkRuntime,
@@ -87,7 +123,6 @@ pub(super) async fn run_once_high_traffic(
     let mut total_admission_scan = RuntimePerfStoreTiming::default();
     let mut total_queue_enqueue = RuntimePerfStoreTiming::default();
     let mut pre_phase_dispatch_samples = Vec::new();
-    let mut arrival_pacing_lateness_samples = Vec::new();
     let mut knee_baseline = None;
     let mut detected_knee = None;
 
@@ -194,9 +229,6 @@ pub(super) async fn run_once_high_traffic(
                     + 1,
             );
             pre_phase_dispatch_samples.push(operation.pre_phase_dispatch_ms);
-            if let Some(lateness_ms) = operation.arrival_pacing_lateness_ms {
-                arrival_pacing_lateness_samples.push(lateness_ms);
-            }
             let durable_sample_key = if scenario.is_high_traffic_knee() {
                 format!(
                     "{prefix}.queue_depth.durable.sample.{:08}",
@@ -267,30 +299,18 @@ pub(super) async fn run_once_high_traffic(
     }
 
     let pre_phase_dispatch_us = average_micros(&pre_phase_dispatch_samples);
-    let arrival_pacing_lateness_us = average_micros(&arrival_pacing_lateness_samples);
     let store_transaction_us = average_store_timing(total_store_transaction);
     let admission_scan_us = average_store_timing(total_admission_scan);
     let queue_enqueue_us = average_store_timing(total_queue_enqueue);
-    let mut observable_wait_values = vec![
+    let observable_wait_values = [
         ("store_transaction", store_transaction_us),
         ("pre_phase_dispatch", pre_phase_dispatch_us),
         ("admission_scan", admission_scan_us),
         ("queue_enqueue", queue_enqueue_us),
     ];
-    if config.arrival_rate > 0 {
-        observable_wait_values.push(("arrival_pacing_lateness", arrival_pacing_lateness_us));
-    }
     for (name, value) in &observable_wait_values {
         extra_counters.insert(format!("wait.{name}.micros"), *value);
     }
-    extra_counters.insert(
-        "wait.arrival_pacing_lateness.micros".to_string(),
-        arrival_pacing_lateness_us,
-    );
-    extra_counters.insert(
-        "wait.arrival_pacing_lateness.observable".to_string(),
-        u64::from(config.arrival_rate > 0),
-    );
     // RuntimeStore exposes a complete store round trip, not the pool
     // checkout subspan. Keep the key explicit and mark it unavailable instead
     // of manufacturing a pool number from the transaction proxy.
@@ -379,25 +399,12 @@ async fn run_high_traffic_step(
             let mut results = Vec::with_capacity(chat_turns);
             for turn_index in 0..chat_turns {
                 let ordinal = turn_index * population + session_index;
-                let scheduled_at = scheduled_arrival(started, ordinal, config.arrival_rate);
-                if let Some(scheduled_at) = scheduled_at {
-                    tokio::time::sleep_until(tokio::time::Instant::from_std(scheduled_at)).await;
-                }
-                let arrival_pacing_lateness_ms = scheduled_at.map(|scheduled| {
-                    round3(
-                        Instant::now()
-                            .saturating_duration_since(scheduled)
-                            .as_secs_f64()
-                            * 1_000.0,
-                    )
-                });
                 let depth = queue_depth.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
                 queue_depth_samples.lock_recover().push(depth as u64);
                 let operation = run_high_traffic_operation(
                     &session,
                     ordinal,
-                    config.operation_kind(ordinal),
-                    arrival_pacing_lateness_ms,
+                    config.mix.operation_kind(ordinal),
                 )
                 .await;
                 let depth = queue_depth.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) - 1;
@@ -456,7 +463,6 @@ async fn run_high_traffic_operation(
     session: &lash::LashSession,
     ordinal: usize,
     kind: HighTrafficOperationKind,
-    arrival_pacing_lateness_ms: Option<f64>,
 ) -> anyhow::Result<HighTrafficOperationResult> {
     let probe = Arc::new(RuntimePerfPhaseProbe::default());
     session.set_turn_phase_probe(probe.clone()).await;
@@ -490,19 +496,12 @@ async fn run_high_traffic_operation(
         "wait.pre_phase_dispatch".to_string(),
         synthetic_phase(pre_phase_dispatch_ms, 1),
     );
-    if let Some(lateness_ms) = arrival_pacing_lateness_ms {
-        phase_profile.insert(
-            "wait.arrival_pacing_lateness".to_string(),
-            synthetic_phase(lateness_ms, 1),
-        );
-    }
 
     Ok(HighTrafficOperationResult {
         ordinal,
         kind,
         latency_ms,
         pre_phase_dispatch_ms,
-        arrival_pacing_lateness_ms,
         durable_queue_depth,
         phase_profile,
         turn_usage,
@@ -515,9 +514,10 @@ async fn run_high_traffic_direct_turn(
     kind: HighTrafficOperationKind,
 ) -> anyhow::Result<LlmUsage> {
     let report = session
-        .send(TurnInput::text(format!(
-            "load-kind:{kind} operation:{ordinal} session:{}",
-            session.session_id()
+        .send(TurnInput::text(high_traffic_prompt(
+            kind,
+            ordinal,
+            &session.session_id(),
         )))
         .id(lash_core::TurnId::fixture(format!(
             "runtime-perf-load-turn-{ordinal}"
@@ -552,11 +552,6 @@ fn high_traffic_turn_index(
         .checked_mul(KNEE_TURN_INDEX_STEP_FACTOR)
         .and_then(|prefix| prefix.checked_add(ordinal))
         .ok_or_else(|| anyhow::anyhow!("knee turn index overflow at step {step_index}"))
-}
-
-fn scheduled_arrival(started: Instant, ordinal: usize, arrival_rate: u64) -> Option<Instant> {
-    (arrival_rate > 0)
-        .then(|| started + Duration::from_secs_f64(ordinal as f64 / arrival_rate.max(1) as f64))
 }
 
 fn timing_delta(
@@ -665,11 +660,10 @@ mod high_traffic_tests {
 
     #[test]
     fn mix_parser_selects_each_weighted_kind_deterministically() {
-        let config = HighTrafficConfig::parse(4, 0, "plain=1,tool=1,queued=1,child=1", "4,8", 1.25)
-            .expect("valid mix");
+        let mix = HighTrafficMix::parse("plain=1,tool=1,queued=1,child=1").expect("valid mix");
         assert_eq!(
             (0..4)
-                .map(|ordinal| config.operation_kind(ordinal))
+                .map(|ordinal| mix.operation_kind(ordinal))
                 .collect::<Vec<_>>(),
             HighTrafficOperationKind::ALL
         );

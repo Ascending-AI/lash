@@ -84,9 +84,6 @@ struct Args {
     #[arg(long, default_value_t = 32)]
     runtime_perf_checkpoint_components: usize,
 
-    #[arg(long, default_value_t = 0)]
-    runtime_perf_load_arrival_rate: u64,
-
     /// Weighted high-traffic turn mix as comma-separated `kind=weight` pairs
     #[arg(long, default_value = "plain=1,tool=1,queued=1,child=1")]
     runtime_perf_load_mix: String,
@@ -145,6 +142,9 @@ enum Command {
     Boundary(lash_perf::boundary::Args),
     #[command(hide = true)]
     BoundaryWorker(lash_perf::boundary::WorkerArgs),
+    /// Sweep scheduled arrival rates over one population and write the
+    /// offered-load receipt and its operation ledger.
+    OfferedLoad(lash_perf::offered_load::Args),
     /// Regenerate the strict synthetic workload v1 JSON Schema.
     WorkloadSchema {
         #[arg(long, value_name = "SCHEMA.json")]
@@ -259,6 +259,14 @@ fn main() -> anyhow::Result<()> {
                 .build()?;
             return runtime.block_on(lash_perf::boundary::run_worker(options));
         }
+        Some(Command::OfferedLoad(options)) => {
+            let runtime = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .thread_stack_size(tokio_thread_stack_bytes(&args))
+                .build()?;
+            runtime.block_on(lash_perf::offered_load::run(options))?;
+            return Ok(());
+        }
         Some(Command::WorkloadSchema { out }) => {
             let schema = serde_json::to_string_pretty(&lash_perf::workload::schema())?;
             std::fs::write(out, format!("{schema}\n"))?;
@@ -352,7 +360,6 @@ fn main() -> anyhow::Result<()> {
         checkpoint_graph_rows: args.runtime_perf_checkpoint_graph_rows,
         checkpoint_components: args.runtime_perf_checkpoint_components,
         high_traffic_population: args.runtime_perf_load_population,
-        high_traffic_arrival_rate: args.runtime_perf_load_arrival_rate,
         high_traffic_mix: args.runtime_perf_load_mix,
         high_traffic_knee_populations: args.runtime_perf_knee_populations,
         high_traffic_knee_threshold: args.runtime_perf_knee_threshold,

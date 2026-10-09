@@ -51,7 +51,7 @@ use crate::runtime_perf::providers::BenchmarkStreamProfile;
 /// carry up to one interval of observation error; the send-to-completion
 /// measurement uses the direct outcome clock.
 const STORE_POLL_FLOOR: Duration = Duration::from_millis(2);
-const STORE_POLL_CEILING: Duration = Duration::from_millis(50);
+pub(crate) const STORE_POLL_CEILING: Duration = Duration::from_millis(50);
 /// A sample's store poller gives up here; its marks stay `None`.
 const STORE_POLL_TIMEOUT: Duration = Duration::from_secs(120);
 /// The follower poll schedule the `poll_detect` phase simulates.
@@ -146,11 +146,11 @@ pub(crate) struct Sample {
 
 /// The durable markers the per-sample store poller collects.
 #[derive(Default)]
-struct PollMarks {
-    admission_ms: Option<f64>,
-    applied_ms: Option<f64>,
-    settled_ms: Option<f64>,
-    timed_out: bool,
+pub(crate) struct PollMarks {
+    pub(crate) admission_ms: Option<f64>,
+    pub(crate) applied_ms: Option<f64>,
+    pub(crate) settled_ms: Option<f64>,
+    pub(crate) timed_out: bool,
 }
 
 /// The sink `outcome_into` taps: first activity, first visible delta and
@@ -220,13 +220,13 @@ fn elapsed_ms(start: Instant) -> f64 {
 
 /// The session handle a lane sends on: a live open session in-process, a
 /// durable session over the shared store cross-worker.
-enum LaneSession {
+pub(crate) enum LaneSession {
     Live(lash::LashSession),
     Durable(lash::DurableSession),
 }
 
 impl LaneSession {
-    fn send(&self, input: lash::TurnInput) -> lash::SendBuilder {
+    pub(crate) fn send(&self, input: lash::TurnInput) -> lash::SendBuilder {
         match self {
             Self::Live(session) => session.send(input),
             Self::Durable(session) => session.send(input),
@@ -237,7 +237,7 @@ impl LaneSession {
     /// shift leg stops instead of being orphaned when the endpoint drops.
     /// A durable session runs no runtime — its last shift ends on its own
     /// admission check.
-    async fn close(self) -> Result<()> {
+    pub(crate) async fn close(self) -> Result<()> {
         match self {
             Self::Live(session) => session.close().await.map_err(anyhow::Error::from),
             Self::Durable(_) => Ok(()),
@@ -251,10 +251,42 @@ impl LaneSession {
 /// the per-sample durable pollers read through its connections (WAL readers
 /// beside the writer) so marker reads never serialize on the
 /// connections the shift itself writes through.
-struct CaseTopology {
-    core: lash::LashCore,
-    observer: lash::LashCore,
+pub(crate) struct CaseTopology {
+    pub(crate) core: lash::LashCore,
+    pub(crate) observer: lash::LashCore,
     worker: Option<tokio::process::Child>,
+}
+
+impl CaseTopology {
+    /// A `lash-perf latency-worker` child serves `stores_dir`; the host core
+    /// only sends and follows.
+    pub(crate) async fn cross_worker(stores_dir: &Path, follower: FollowerMode) -> Result<Self> {
+        let worker = start_worker(stores_dir).await?;
+        let core = build_observer_with_mode(stores_dir, follower).await?;
+        let observer = build_observer(stores_dir).await?;
+        Ok(Self {
+            core,
+            observer,
+            worker: Some(worker),
+        })
+    }
+
+    pub(crate) async fn shutdown(self) -> Result<()> {
+        self.core.shutdown().await?;
+        self.observer.shutdown().await?;
+        if let Some(mut worker) = self.worker {
+            // EOF requests a clean node shutdown; the timeout still kills and reaps
+            // a child that cannot stop. kill_on_drop covers earlier error exits.
+            drop(worker.stdin.take());
+            match tokio::time::timeout(Duration::from_secs(10), worker.wait()).await {
+                Ok(status) => anyhow::ensure!(status?.success(), "latency worker failed"),
+                Err(_) => {
+                    worker.kill().await?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Run one case to completion and collect every sample.
@@ -298,15 +330,7 @@ pub(crate) async fn run_case(
             }
         }
         Topology::CrossWorker => {
-            let stores_dir = case_dir.join("worker");
-            let worker = start_worker(&stores_dir).await?;
-            let core = build_observer_with_mode(&stores_dir, spec.follower).await?;
-            let observer = build_observer(&stores_dir).await?;
-            CaseTopology {
-                core,
-                observer,
-                worker: Some(worker),
-            }
+            CaseTopology::cross_worker(&case_dir.join("worker"), spec.follower).await?
         }
     };
 
@@ -336,19 +360,7 @@ pub(crate) async fn run_case(
     samples.sort_by_key(|sample| (sample.lane, sample.index));
     let wall = started.elapsed();
     let report = CaseReport::assemble(spec, &samples, errors, wall);
-    topology.core.shutdown().await?;
-    topology.observer.shutdown().await?;
-    if let Some(mut worker) = topology.worker {
-        // EOF requests a clean node shutdown; the timeout still kills and reaps
-        // a child that cannot stop. kill_on_drop covers earlier error exits.
-        drop(worker.stdin.take());
-        match tokio::time::timeout(Duration::from_secs(10), worker.wait()).await {
-            Ok(status) => anyhow::ensure!(status?.success(), "latency worker failed"),
-            Err(_) => {
-                worker.kill().await?;
-            }
-        }
-    }
+    topology.shutdown().await?;
     Ok((report, samples))
 }
 
@@ -467,17 +479,13 @@ fn compat_profile() -> BenchmarkStreamProfile {
     }
 }
 
-/// One lane: open its session, run `count` measured sends sequentially.
-async fn run_lane(
-    spec: &CaseSpec,
+/// Create a fresh session for a lane: a live open session in-process, a
+/// durable handle over the shared store cross-worker.
+pub(crate) async fn create_lane_session(
     topology: &CaseTopology,
-    lane: usize,
-    count: usize,
-    timing: Arc<ProviderTiming>,
-    holds: Option<Arc<HoldRegistry>>,
-) -> Result<Vec<Sample>> {
-    let session_id = SessionId::fixture(format!("latency-{}-{lane}", spec.name));
-    // Each lane names a fresh session.
+    kind: Topology,
+    session_id: &SessionId,
+) -> Result<LaneSession> {
     let durable = topology
         .core
         .session(session_id.clone())
@@ -492,7 +500,7 @@ async fn run_lane(
         ))
         .await
         .map_err(anyhow::Error::from)?;
-    let session = match spec.topology {
+    Ok(match kind {
         Topology::SameProcess => LaneSession::Live(
             topology
                 .core
@@ -502,17 +510,38 @@ async fn run_lane(
                 .map_err(anyhow::Error::from)?,
         ),
         Topology::CrossWorker => LaneSession::Durable(durable),
-    };
-    // The observer uses a non-creating catalog lookup and keyed reads beside
-    // the live writer; it does not acquire execution authority.
-    let factory = topology.observer.backend().session_store_factory();
+    })
+}
+
+/// The store `poll_marks` reads `session_id` through. The observer uses a
+/// non-creating catalog lookup and keyed reads beside the live writer; it
+/// does not acquire execution authority.
+pub(crate) async fn observer_poll_store(
+    observer: &lash::LashCore,
+    session_id: &SessionId,
+) -> Result<Arc<dyn lash::persistence::RuntimeStore>> {
+    let factory = observer.backend().session_store_factory();
     if !matches!(
-        factory.lookup_session(&session_id).await?,
+        factory.lookup_session(session_id).await?,
         lash_core::SessionLookup::Live(_)
     ) {
         anyhow::bail!("the observer catalog has no store for `{session_id}`");
     }
-    let poll_store: Arc<dyn lash::persistence::RuntimeStore> = factory;
+    Ok(factory)
+}
+
+/// One lane: open its session, run `count` measured sends sequentially.
+async fn run_lane(
+    spec: &CaseSpec,
+    topology: &CaseTopology,
+    lane: usize,
+    count: usize,
+    timing: Arc<ProviderTiming>,
+    holds: Option<Arc<HoldRegistry>>,
+) -> Result<Vec<Sample>> {
+    let session_id = SessionId::fixture(format!("latency-{}-{lane}", spec.name));
+    let session = create_lane_session(topology, spec.topology, &session_id).await?;
+    let poll_store = observer_poll_store(&topology.observer, &session_id).await?;
     let hold = holds.map(|registry| registry.lane(&session_id));
     let ctx = SampleCtx {
         spec,
@@ -662,7 +691,7 @@ async fn measure_send(
 }
 
 /// The `TurnStatus` name a sample records.
-fn status_name(status: &lash::TurnStatus) -> String {
+pub(crate) fn status_name(status: &lash::TurnStatus) -> String {
     match status {
         lash::TurnStatus::Answered => "answered".to_string(),
         lash::TurnStatus::Failed => "failed".to_string(),
@@ -687,7 +716,7 @@ fn status_name(status: &lash::TurnStatus) -> String {
 /// restarts it at the floor: admission binds the row and names its run in
 /// one transaction, so the next mark is imminent whenever one just landed,
 /// and only a quiet wait pays the backoff.
-async fn poll_marks(
+pub(crate) async fn poll_marks(
     store: Arc<dyn lash::persistence::RuntimeStore>,
     session_id: SessionId,
     input_id: lash_core::InputId,
@@ -845,6 +874,9 @@ fn phases_of(samples: &[&Sample]) -> PhaseSummaries {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct CaseReport {
     pub(crate) name: &'static str,
+    /// Lanes are closed loops: a lane sends its next sample when the last
+    /// one returns, and every span starts at the send.
+    pub(crate) load_model: crate::offered_load::LoadModel,
     pub(crate) topology: Topology,
     pub(crate) provider: LatencyProviderKind,
     pub(crate) follower: FollowerMode,
@@ -875,6 +907,7 @@ impl CaseReport {
         let warm: Vec<&Sample> = all.iter().copied().filter(|sample| !sample.cold).collect();
         Self {
             name: spec.name,
+            load_model: crate::offered_load::LoadModel::ServiceDiagnostic,
             topology: spec.topology,
             provider: spec.provider,
             follower: spec.follower,
@@ -910,6 +943,7 @@ pub(crate) struct LatencyReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) samples_file: Option<std::path::PathBuf>,
     pub(crate) kind: &'static str,
+    pub(crate) load_model: crate::offered_load::LoadModel,
     pub(crate) schema: u32,
     pub(crate) crate_version: &'static str,
     pub(crate) environment: serde_json::Value,
@@ -962,6 +996,7 @@ pub(crate) fn build_report(
     LatencyReport {
         samples_file: None,
         kind: "lash.send-latency",
+        load_model: crate::offered_load::LoadModel::ServiceDiagnostic,
         schema: 1,
         crate_version: env!("CARGO_PKG_VERSION"),
         environment,

@@ -17,7 +17,7 @@ use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
 
 fn high_traffic_config() -> HighTrafficConfig {
-    HighTrafficConfig::parse(4, 0, "plain=1,tool=1,queued=1,child=1", "2,4", 1.25)
+    HighTrafficConfig::parse(4, "plain=1,tool=1,queued=1,child=1", "2,4", 1.25)
         .expect("valid high-traffic test config")
 }
 

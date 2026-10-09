@@ -1,7 +1,8 @@
 //! A small measured benchmark: simulated streaming runs publish one frame
 //! every 50 ms on replica A while a subscriber per run follows it on
 //! replica B. It reports publish-to-deliver latency and what the database
-//! spent. Run it with `--ignored`; it asserts nothing about speed.
+//! spent. Run it with `--ignored`; it asserts nothing about speed. It is a
+//! closed-loop service diagnostic, not an offered-load measurement.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -218,6 +219,9 @@ async fn streaming_runs_publish_to_deliver() {
     publish_latencies.sort_unstable();
     let events = runs * frames_per_run;
     let report = serde_json::json!({
+        // Each run publishes its next frame when the last publish returns and
+        // times from that send, so a late frame hides its own wait.
+        "load_model": "service-diagnostic",
         "runs": runs,
         "frame_ms": FRAME.as_millis(),
         "frames_per_run": frames_per_run,

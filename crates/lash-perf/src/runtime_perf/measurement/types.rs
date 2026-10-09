@@ -87,23 +87,13 @@ impl CheckpointCurveConfig {
     }
 }
 
+/// The weighted `kind=weight` turn mix every high-traffic population draws
+/// operation kinds from, by ordinal.
 #[derive(Clone, Debug)]
-pub(crate) struct HighTrafficConfig {
-    pub(crate) population: usize,
-    pub(crate) arrival_rate: u64,
-    pub(crate) mix: [u64; HighTrafficOperationKind::ALL.len()],
-    pub(crate) knee_populations: Vec<usize>,
-    pub(crate) knee_threshold: f64,
-}
+pub(crate) struct HighTrafficMix([u64; HighTrafficOperationKind::ALL.len()]);
 
-impl HighTrafficConfig {
-    pub(crate) fn parse(
-        population: usize,
-        arrival_rate: u64,
-        mix: &str,
-        knee_populations: &str,
-        knee_threshold: f64,
-    ) -> anyhow::Result<Self> {
+impl HighTrafficMix {
+    pub(crate) fn parse(mix: &str) -> anyhow::Result<Self> {
         let mut weights = [0; HighTrafficOperationKind::ALL.len()];
         for entry in mix.split(',').filter(|entry| !entry.trim().is_empty()) {
             let (kind, weight) = entry.split_once('=').ok_or_else(|| {
@@ -130,7 +120,38 @@ impl HighTrafficConfig {
         if weights.iter().all(|weight| *weight == 0) {
             anyhow::bail!("high-traffic mix must contain at least one positive weight");
         }
+        Ok(Self(weights))
+    }
 
+    pub(crate) fn operation_kind(&self, ordinal: usize) -> HighTrafficOperationKind {
+        let total = self.0.iter().sum::<u64>();
+        let mut selected = ordinal as u64 % total;
+        for (index, weight) in self.0.iter().copied().enumerate() {
+            if selected < weight {
+                return HighTrafficOperationKind::ALL[index];
+            }
+            selected -= weight;
+        }
+        unreachable!("positive high-traffic weight total always selects a kind")
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct HighTrafficConfig {
+    pub(crate) population: usize,
+    pub(crate) mix: HighTrafficMix,
+    pub(crate) knee_populations: Vec<usize>,
+    pub(crate) knee_threshold: f64,
+}
+
+impl HighTrafficConfig {
+    pub(crate) fn parse(
+        population: usize,
+        mix: &str,
+        knee_populations: &str,
+        knee_threshold: f64,
+    ) -> anyhow::Result<Self> {
+        let mix = HighTrafficMix::parse(mix)?;
         let knee_populations = knee_populations
             .split(',')
             .filter(|value| !value.trim().is_empty())
@@ -151,23 +172,10 @@ impl HighTrafficConfig {
 
         Ok(Self {
             population: population.max(1),
-            arrival_rate,
-            mix: weights,
+            mix,
             knee_populations,
             knee_threshold,
         })
-    }
-
-    pub(crate) fn operation_kind(&self, ordinal: usize) -> HighTrafficOperationKind {
-        let total = self.mix.iter().sum::<u64>();
-        let mut selected = ordinal as u64 % total;
-        for (index, weight) in self.mix.iter().copied().enumerate() {
-            if selected < weight {
-                return HighTrafficOperationKind::ALL[index];
-            }
-            selected -= weight;
-        }
-        unreachable!("positive high-traffic weight total always selects a kind")
     }
 }
 

@@ -11,4 +11,5 @@ mod smoke;
 mod store;
 
 pub use duration_trend::{export_duration_history_csv, run_duration_trend_cli};
+pub(crate) use measurement::{HighTrafficMix, HighTrafficPopulation, high_traffic_prompt};
 pub use report::{BudgetEnforcement, RuntimePerfRun, run_cli};

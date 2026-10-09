@@ -28,6 +28,9 @@ use guards::{
 pub(crate) struct RuntimePerfReport {
     kind: &'static str,
     experiments: BTreeMap<String, duration_trend::ExperimentIdentity>,
+    /// Every scenario here is closed-loop: the next operation is sent when
+    /// the last one returns and is timed from its send.
+    load_model: crate::offered_load::LoadModel,
     created_at: String,
     version: String,
     warmups: usize,
@@ -87,7 +90,6 @@ pub struct RuntimePerfRun {
     pub checkpoint_graph_rows: usize,
     pub checkpoint_components: usize,
     pub high_traffic_population: usize,
-    pub high_traffic_arrival_rate: u64,
     pub high_traffic_mix: String,
     pub high_traffic_knee_populations: String,
     pub high_traffic_knee_threshold: f64,
@@ -114,7 +116,6 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
         checkpoint_graph_rows,
         checkpoint_components,
         high_traffic_population,
-        high_traffic_arrival_rate,
         high_traffic_mix,
         high_traffic_knee_populations,
         high_traffic_knee_threshold,
@@ -140,7 +141,6 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
     )?;
     let high_traffic = HighTrafficConfig::parse(
         high_traffic_population,
-        high_traffic_arrival_rate,
         &high_traffic_mix,
         &high_traffic_knee_populations,
         high_traffic_knee_threshold,
@@ -151,7 +151,7 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
         "checkpoint_transcript_bytes": checkpoint_transcript_bytes,
         "checkpoint_messages": checkpoint_messages, "checkpoint_graph_rows": checkpoint_graph_rows,
         "checkpoint_components": checkpoint_components,
-        "load_population": high_traffic_population, "arrival_rate": high_traffic_arrival_rate,
+        "load_population": high_traffic_population,
         "mix": high_traffic_mix, "knee_populations": high_traffic_knee_populations,
         "knee_threshold": high_traffic_knee_threshold, "smoke": smoke,
         "dhat_frames": dhat_frames,
@@ -235,6 +235,7 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
                 )
             })
             .collect(),
+        load_model: crate::offered_load::LoadModel::ServiceDiagnostic,
         created_at: Utc::now().to_rfc3339(),
         version,
         warmups,
@@ -288,6 +289,7 @@ fn runtime_perf_output_json(out_path: &Path, report: &RuntimePerfReport) -> serd
         "worker_stack_bytes": report.worker_stack_bytes,
         "stack_profile": report.stack_profile,
         "allocation_mode": report.allocation_mode,
+        "load_model": report.load_model,
         "scenario_harnesses": report.scenario_harnesses,
         "summary": report.summary,
         "scenario_harness_summary": report.scenario_harness_summary,
@@ -881,6 +883,7 @@ mod tests {
         let report = RuntimePerfReport {
             kind: "runtime-perf",
             experiments: BTreeMap::new(),
+            load_model: crate::offered_load::LoadModel::ServiceDiagnostic,
             created_at: "test".to_string(),
             version: "test".to_string(),
             warmups: 0,
