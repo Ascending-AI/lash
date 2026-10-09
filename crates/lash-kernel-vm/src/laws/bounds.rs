@@ -139,7 +139,10 @@ fn the_memory_bound_refuses_a_native_reservation_before_the_allocation() {
     };
     assert_eq!(
         passes("let big = work.repeat(100000)", bounds),
-        exceeded(Bound::Memory, 64 << 10)
+        BoundExceeded {
+            function: Some(lash_kernel_doc::FunctionName::new("work.repeat").unwrap()),
+            ..exceeded(Bound::Memory, 64 << 10)
+        }
     );
     assert_eq!(REPEAT_BUILDS.load(Ordering::Relaxed), 0);
     // A reservation is refused only by what is live: the garbage of

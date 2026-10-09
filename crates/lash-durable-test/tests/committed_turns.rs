@@ -864,7 +864,7 @@ async fn a_host_renders_standard_and_rlm_history_from_typed_entries_live_and_aft
         RLM,
         vec![
             served::cell(
-                "for (let n = 0; n < 130; n++) { await tools.echo({ n }); }\nprint(\"called\");",
+                "for (let n = 0; n < 130; n++) { await tools.echo({ n }); }\nconsole.log(\"called\");",
             ),
             served::cell("finish(\"rlm reply\");"),
         ],
