@@ -461,12 +461,14 @@ async fn artifact_cleanups_are_armed_on_the_injected_store_clock() {
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
-            config: lash_core_execution::SessionPolicy::new(
+            config: lash_core_execution::PersistedSessionConfig::new(
                 lash_core_execution::TurnBudget::Unbounded,
                 lash_core_execution::MaxToolCalls::new(1024),
-            )
-            .into(),
+                lash_core_execution::NoProgressBudget::bounded(12),
+                lash_core_execution::SessionToolAccess::ambient(),
+            ),
             head: SessionCreationHead::Config,
+            retention: lash_core_execution::Retention::UntilGc,
         })
         .await
         .expect("create the session to delete");
@@ -491,7 +493,7 @@ async fn artifact_cleanups_are_armed_on_the_injected_store_clock() {
         lash_core_execution::ReferrerGuard::Journal(journal),
     );
     let artifacts = storage
-        .lashlang_artifact_store()
+        .lash_vm_artifact_store()
         .with_clock(Arc::clone(&clock));
     lash_core_execution::ModuleArtifactStore::publish_module_artifact(
         &artifacts,

@@ -28,14 +28,12 @@ mod support;
 
 use std::time::{Duration, Instant};
 
-use lash_durable::{ActorKey, CommitLabel, LeaseSettings, Notifier};
+use lash_durable::{CommitLabel, LeaseSettings, Notifier};
 use lash_facade_failover::events::{Command, Event};
-use lash_facade_failover::process::{AFTER, BEFORE, TRANSITIONS};
 use lash_facade_failover::turn::{self, TOOL};
 use lash_facade_failover::witness::Hold;
-use serde_json::Value;
 
-use support::cluster::{Cluster, Entry, until};
+use support::cluster::{Cluster, Entry};
 
 /// The node binary the cases boot.
 const NODE_BIN: &str = env!("CARGO_BIN_EXE_lash-facade-failover-node");
@@ -370,124 +368,6 @@ async fn a_once_step_killed_mid_body_settles_interrupted_on_another_node() {
          outcome_epoch={epoch}",
         ms(reap.at.saturating_duration_since(killed)),
     );
-}
-
-/// Kill -9 mid-wait: a process waits on a pinned key with a deadline, and
-/// the node that took it there dies. The other node fires the deadline,
-/// runs the step after it and ends the process; its start key, its event
-/// feed and its engine state all survive the move.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state() {
-    const START_KEY: &str = "facade-failover-process";
-    let wait = Duration::from_secs(4);
-    let mut cluster = Cluster::start(&NODES, Notifier::AfterCommit, Hold::Nothing).await;
-    let record = cluster.register_process(START_KEY, wait).await;
-    let process = record.id.clone();
-    let actor = ActorKey::process(process.as_str()).expect("a process actor key");
-    let before = cluster
-        .wait(STEP, "the step before the wait returns", |entry| {
-            is_body(entry, BEFORE, "returned")
-        })
-        .await;
-    until(STEP, "the wait is pinned", || async {
-        let waits = cluster.durable().pending_waits(&actor).await.ok()?;
-        (!waits.is_empty()).then_some(())
-    })
-    .await;
-    let snapshot = cluster
-        .durable()
-        .actor(&actor)
-        .await
-        .expect("read the process actor")
-        .expect("the process actor exists");
-    // The node that owns the waiting process, or, once it released it, the
-    // node that brought it there.
-    let owned = snapshot.owner.is_some();
-    let victim = snapshot
-        .owner
-        .as_ref()
-        .map_or_else(|| before.node.clone(), |owner| owner.node.to_string());
-    let survivor = other(&victim);
-    cluster.seen_alive(survivor, &victim).await;
-    let killed = cluster.kill(&victim).await;
-    let terminal = until(STEP, "the process ends", || async {
-        let record = cluster.process(&process).await;
-        record.terminal().cloned()
-    })
-    .await;
-    let ended = Instant::now();
-
-    // The step after the wait ran once, on the survivor; the one before it
-    // once, before the kill.
-    let effects = once_law(&cluster, BEFORE).await;
-    assert_eq!(
-        effects
-            .iter()
-            .map(|effect| (effect.phase.as_str(), effect.node.as_str()))
-            .collect::<Vec<_>>(),
-        vec![
-            ("entered", before.node.as_str()),
-            ("returned", before.node.as_str())
-        ],
-        "the step before the wait"
-    );
-    let after = once_law(&cluster, AFTER).await;
-    assert_eq!(
-        after
-            .iter()
-            .map(|effect| (effect.phase.as_str(), effect.node.as_str()))
-            .collect::<Vec<_>>(),
-        vec![("entered", survivor), ("returned", survivor)],
-        "the step after the wait"
-    );
-    // The engine state carried its count across the move.
-    let output = serde_json::to_value(terminal.into_await_output()).expect("the outcome encodes");
-    let transitions = find(&output, "transitions").and_then(Value::as_u64);
-    assert_eq!(
-        transitions,
-        Some(TRANSITIONS),
-        "the engine's state did not survive the move: {output}"
-    );
-    // The feed holds each emitted event once, in order.
-    let events: Vec<String> = cluster
-        .event_types(&process)
-        .await
-        .into_iter()
-        .filter(|event| event == BEFORE || event == AFTER)
-        .collect();
-    assert_eq!(
-        events,
-        vec![BEFORE.to_owned(), AFTER.to_owned()],
-        "the process's feed"
-    );
-    // The start key still names the process, and starting it again under
-    // that key answers it instead of starting another.
-    assert_eq!(
-        cluster.process_by_start_key(START_KEY).await,
-        Some(process.clone()),
-        "the start key"
-    );
-    let again = cluster.register_process(START_KEY, wait).await;
-    assert_eq!(
-        again.id, process,
-        "a second start under the key started another process"
-    );
-    eprintln!(
-        "case=kill-mid-wait victim={victim} owned_at_kill={owned} survivor={survivor} \
-         end_after_kill_ms={} transitions={TRANSITIONS}",
-        ms(ended.saturating_duration_since(killed)),
-    );
-}
-
-/// The first value under `key` anywhere in `value`.
-fn find<'a>(value: &'a Value, key: &str) -> Option<&'a Value> {
-    match value {
-        Value::Object(entries) => entries
-            .get(key)
-            .or_else(|| entries.values().find_map(|nested| find(nested, key))),
-        Value::Array(items) => items.iter().find_map(|nested| find(nested, key)),
-        _ => None,
-    }
 }
 
 /// Partition: one node's heartbeat is held while its `Once` body keeps

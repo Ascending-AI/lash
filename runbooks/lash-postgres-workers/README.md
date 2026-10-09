@@ -20,7 +20,7 @@ The harness is the internal crate
 the production runner with scripted services, as `lash-durable-test` does in
 process, so it is a substrate harness, not a facade host (the facade-only
 rule for `runbooks/*/src` does not apply to it). Its facade-host version,
-the same seven cases with each node a `LashCore` serving its own node, is
+six turn and node cases with each node a `LashCore` serving its own node, is
 [lash-facade-failover](../lash-facade-failover/README.md) (FIG-5193).
 
 It is the cross-process proof of ADR 0132 §3 (actors, node liveness, the

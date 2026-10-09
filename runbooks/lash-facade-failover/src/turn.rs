@@ -125,6 +125,7 @@ fn ext_write(witness: Witness, hold: Hold) -> Arc<dyn lash::tools::ToolProvider>
         serde_json::json!({ "type": "object" }),
     )
     .expect("ext_write's schemas")
+    .with_execution(Duration::from_secs(120))
     .with_execution_policy(ExecutionPolicy::Once)
     .with_tool_binding(lash::tools::ToolBinding::new(["tools"], TOOL));
     Arc::new(StaticToolProvider::new(
@@ -178,10 +179,13 @@ fn model(witness: Witness, hold: Hold) -> ProviderHandle {
 /// A text answer, streamed as one delta.
 fn streamed(request: &LlmRequest, text: &str) -> LlmResponse {
     if let Some(stream) = request.stream_events.as_ref() {
-        stream.send(lash::direct::LlmStreamEvent::Delta {
-            block: lash::direct::StreamBlockIdentity::new("text:0", 0),
-            text: text.to_owned(),
-        });
+        stream.send(lash::direct::LlmStreamEvent::Block(
+            lash::StreamBlockEvent::Delta {
+                kind: lash::StreamBlockKind::AssistantText,
+                block: lash::direct::StreamBlockIdentity::new("text:0", 0),
+                text: text.to_owned(),
+            },
+        ));
     }
     LlmResponse {
         parts: vec![lash::direct::LlmOutputPart::Text {
@@ -195,6 +199,7 @@ fn streamed(request: &LlmRequest, text: &str) -> LlmResponse {
 #[expect(clippy::expect_used, reason = "the model's metadata is a literal")]
 fn metadata() -> lash::LlmProfileMetadata {
     lash::LlmProfileMetadata::builder(MODEL)
+        .cache_retention(lash::provider::CacheRetention::Short)
         .context_window_tokens(200_000)
         .build()
         .expect("the model's metadata")
@@ -202,7 +207,7 @@ fn metadata() -> lash::LlmProfileMetadata {
 
 /// The dialect's worker service with its run deadlines off the clock: a
 /// held tool call keeps its cell waiting for as long as the case holds it.
-fn untimed_workers() -> lash::rlm::WorkerService {
+fn untimed_workers() -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::rlm::TypescriptDialect
         .worker_service()
@@ -211,15 +216,14 @@ fn untimed_workers() -> lash::rlm::WorkerService {
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
-    lash::rlm::WorkerService::new(config)
+    lash::vm::WorkerService::new(config)
 }
 
 /// Node `node`'s core over `backend`, as `witness` writes to the outside
 /// world and holding at `hold`. When `serve`, the core serves the backend's
 /// sessions and processes on its own node, named by `node`: what every
 /// facade host's core does; otherwise it only admits work, as a host
-/// outside the deployment does. The engine plugin contributes the runbook's
-/// process engine.
+/// outside the deployment does.
 ///
 /// # Errors
 ///
@@ -246,10 +250,13 @@ pub fn core(
     )
     .serve_sessions(serve)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+    .data_retention(lash::DataRetention::standard())
+    .tool_source_policy(lash::tools::ToolSourcePolicy::Tolerate)
+    .execution_budgets(lash::ExecutionBudgets::recommended())
+    .delta_coalescing(lash::DeltaCoalescing::recommended())
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
     .serve_test_llm_profile(model(witness.clone(), hold), metadata())
     .tools(ext_write(witness.clone(), hold))
-    .plugin(crate::process::FailoverEnginePlugin::factory(witness))
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         lash::persistence::LeaseOwnerId::new(node),
         lash::persistence::LeaseIncarnationId::new(format!("{node}-boot")),
@@ -265,11 +272,15 @@ pub fn core(
 /// The facade refused.
 pub async fn admit(core: &lash::LashCore) -> Result<(), String> {
     core.session(session())
-        .create(lash::SessionCreation::root(lash::SessionSpec::new(
-            MODEL,
-            lash::TurnBudget::Unbounded,
-            lash::MaxToolCalls::new(8),
-        )))
+        .create(lash::SessionCreation::root(
+            lash::plugins::SessionToolAccess::ambient(),
+            lash::SessionSpec::new(
+                MODEL,
+                lash::TurnBudget::Unbounded,
+                lash::MaxToolCalls::new(8),
+            )
+            .no_progress_budget(lash::NoProgressBudget::bounded(12)),
+        ))
         .await
         .map_err(|error| format!("create the session: {error}"))?
         .send(lash::TurnInput::text(

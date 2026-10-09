@@ -173,7 +173,7 @@ data = ["native//:postgres", "native//:nss_wrapper"]
 env = { LASH_WORKERS_POSTGRES = "$(location native//:postgres)", LASH_WORKERS_NSS_WRAPPER = "$(location native//:nss_wrapper)" }
 serial = true
 
-# The lash-facade-failover runbook (FIG-5193) runs the same seven cases with
+# The lash-facade-failover runbook (FIG-5193) runs the six turn and node cases with
 # facade-host nodes, so it owns its server the same way (the same pinned tree,
 # named the same way, so `with-service.sh pg17` hands it the 17 tree too) and
 # runs the same way.
@@ -182,7 +182,7 @@ packages = ["lash-facade-failover"]
 kinds = ["test"]
 targets = ["failover"]
 tags = ["dev-deferred"]
-reason = "seven multi-process failover cases of facade-host nodes over a private PostgreSQL server, two of which wait out a 15 s node lease; about two minutes serially"
+reason = "six multi-process failover cases of facade-host nodes over a private PostgreSQL server, two of which wait out a 15 s node lease; about two minutes serially"
 data = ["native//:postgres", "native//:nss_wrapper"]
 env = { LASH_WORKERS_POSTGRES = "$(location native//:postgres)", LASH_WORKERS_NSS_WRAPPER = "$(location native//:nss_wrapper)" }
 serial = true

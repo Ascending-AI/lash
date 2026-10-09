@@ -2540,7 +2540,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and the facade failover runbook's a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
+          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and lash-postgres-workers' a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
         },
         {
           "variant": "default",
@@ -2572,7 +2572,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and the facade failover runbook's a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
+          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and lash-postgres-workers' a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
         },
         {
           "variant": "default",
@@ -2604,7 +2604,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and the facade failover runbook's a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
+          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and lash-postgres-workers' a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
         },
         {
           "variant": "default",
@@ -2636,7 +2636,7 @@
           "state": "retired",
           "hold_reason": null,
           "registration": null,
-          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and the facade failover runbook's a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
+          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and lash-postgres-workers' a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
         }
       ],
       "setup": "Turn/process/operation owners; park before and after persisted commit on file SQLite/PG.",

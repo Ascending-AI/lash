@@ -98,10 +98,9 @@ pub async fn run(config: NodeConfig) -> Result<Stopped, String> {
     .await
     .map_err(|error| format!("connect the lash database: {error}"))?;
     // The workloads write no attachment; their bytes would land here.
-    let attachments = std::env::temp_dir().join(format!("lash-facade-failover-{}", config.node));
     let stores: Arc<dyn lash::StoreSet> = Arc::new(PostgresStoreSet::new(
         &storage,
-        Arc::new(lash::persistence::FileAttachmentStore::new(attachments)),
+        Arc::new(crate::attachments::NoAttachments),
     ));
     let recorded = RecordedStores::new(stores, &config.node);
     let store = recorded.store();

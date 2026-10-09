@@ -12,10 +12,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core_execution::{
-    Backend, BackendParts, NoProjectionProviders, ProcessId, ProcessInput, ProcessProvenance,
-    ProcessRecord, ProcessRegistration, StoreSet,
-};
+use lash_core_execution::{Backend, BackendParts, NoProjectionProviders, StoreSet};
 use lash_durable::{DurableStore, Notifier};
 use lash_facade_failover::events::{Command, Event, Report};
 use lash_facade_failover::node::host_config;
@@ -327,69 +324,6 @@ impl Cluster {
             .expect("the turn is admitted");
     }
 
-    /// Register a runbook process that waits `wait` between its steps, under
-    /// `start_key`.
-    pub async fn register_process(&self, start_key: &str, wait: Duration) -> ProcessRecord {
-        let registration = ProcessRegistration::new(
-            ProcessInput::Engine {
-                kind: lash_facade_failover::process::KIND.to_owned(),
-                payload: lash_facade_failover::process::payload(wait),
-            },
-            ProcessProvenance::host(),
-            lash_core_execution::LifetimeDecision::Detached,
-        )
-        // A process captures its environment, stored where any node reads
-        // it: an engine step reads its catalog from it.
-        .with_execution_env_ref(Some(
-            lash_core_execution::testing::process_execution_env_fixture(
-                self.backend.process_env_store().as_ref(),
-            )
-            .await,
-        ))
-        .with_start_key(Some(lash_core_execution::StartKey::for_host(start_key)))
-        .with_extra_event_types(
-            lash_facade_failover::process::declared_event_types().expect("the event types"),
-        );
-        self.backend
-            .process_registry()
-            .register_process(registration)
-            .await
-            .expect("the process registers")
-    }
-
-    /// The process registered under `start_key`, if one is retained.
-    pub async fn process_by_start_key(&self, start_key: &str) -> Option<ProcessId> {
-        let key = lash_core_execution::StartKey::for_host(start_key);
-        self.backend
-            .process_registry()
-            .get_process_by_start_key(&key)
-            .await
-            .expect("read the start key")
-            .map(|record| record.id)
-    }
-
-    /// A process's record.
-    pub async fn process(&self, process: &ProcessId) -> ProcessRecord {
-        self.backend
-            .process_registry()
-            .get_process(process)
-            .await
-            .expect("read the process")
-            .expect("the process is retained")
-    }
-
-    /// The types of a process's events, in sequence order.
-    pub async fn event_types(&self, process: &ProcessId) -> Vec<String> {
-        self.backend
-            .process_registry()
-            .recent_events(process, 100)
-            .await
-            .expect("read the process's events")
-            .into_iter()
-            .map(|event| event.event_type)
-            .collect()
-    }
-
     /// Every report so far, in arrival order.
     pub fn reports(&self) -> Vec<Entry> {
         self.reports.snapshot()
@@ -431,24 +365,5 @@ impl Cluster {
                 panic!("timed out after {within:?} waiting for {what}");
             }
         }
-    }
-}
-
-/// Poll `check` every 20 ms for up to `within` until it answers `Some`.
-pub async fn until<T, F, Fut>(within: Duration, what: &str, check: F) -> T
-where
-    F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Option<T>>,
-{
-    let deadline = Instant::now() + within;
-    loop {
-        if let Some(found) = check().await {
-            return found;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "timed out after {within:?} waiting for {what}"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }

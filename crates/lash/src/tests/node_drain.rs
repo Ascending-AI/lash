@@ -345,7 +345,10 @@ async fn a_host_learns_why_its_cores_node_stopped() {
     let script = Arc::new(Script::default());
     let old = build_boot(Arc::clone(&stores), "restarted-owner", "boot-1", &script);
     old.session(session_id("served"))
-        .create(crate::SessionCreation::root(mock_session_spec()))
+        .create(crate::SessionCreation::root(
+            crate::plugins::SessionToolAccess::ambient(),
+            mock_session_spec(),
+        ))
         .await
         .expect("created");
     // The old boot's node answered a turn, so it registered first.

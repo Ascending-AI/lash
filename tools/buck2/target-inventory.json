@@ -48218,7 +48218,7 @@
         {
           "build_label": "//runbooks/lash-facade-failover:failover__test",
           "cargo": "failover",
-          "cargo_only": "seven multi-process failover cases of facade-host nodes over a private PostgreSQL server, two of which wait out a 15 s node lease; about two minutes serially",
+          "cargo_only": "six multi-process failover cases of facade-host nodes over a private PostgreSQL server, two of which wait out a 15 s node lease; about two minutes serially",
           "check_label": "//runbooks/lash-facade-failover:failover__test[check]",
           "clippy_label": "//runbooks/lash-facade-failover:failover__test__clippy[clippy.txt]",
           "kind": "test",

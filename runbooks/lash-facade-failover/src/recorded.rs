@@ -24,12 +24,12 @@ use lash::durable::{
     DurableError, DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit,
     MailTx, NodeLease, NodeSpec, NodeWakeFeed, NodeWakes, Owner, Reaped, WakeBatch,
 };
+use lash::persistence::ProcessRegistry;
 use lash::persistence::{
     ArtifactCleanupLedger, AttachmentReferrers, AttachmentStore, DeploymentStore,
     ModuleArtifactStore, ObligationLedger, ProcessDefinitionStore, ProcessExecutionEnvStore,
     RecoveryLeaderStore, ToolMaterialStore, TurnPreludeStore,
 };
-use lash::process::ProcessRegistry;
 use lash::runtime::Clock;
 use lash::{ObligationKind, ProcessId, SessionId, StoreBindingId, StoreSet, TurnId};
 use tokio::sync::Notify;
