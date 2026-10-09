@@ -598,13 +598,13 @@ struct CheckpointComponentRefs {
     components: BTreeMap<String, lash_core::CheckpointComponentDescriptor>,
 }
 
+/// The one plugin namespace the checkpoint bodies carry.
+const DIFFERENTIAL_PLUGIN: &str = "differential-plugin";
+
 #[expect(
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
-/// The one plugin namespace the checkpoint bodies carry.
-const DIFFERENTIAL_PLUGIN: &str = "differential-plugin";
-
 fn checkpoint_bodies() -> HydratedSessionCheckpoint {
     let tool_state = serde_json::from_value::<ToolState>(serde_json::json!({
         "generation": 7,

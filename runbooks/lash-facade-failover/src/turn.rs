@@ -249,7 +249,7 @@ pub fn core(
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
     .serve_test_llm_profile(model(witness.clone(), hold), metadata())
     .tools(ext_write(witness.clone(), hold))
-    .plugin(crate::process::FailoverEnginePlugin::new(witness))
+    .plugin(crate::process::FailoverEnginePlugin::factory(witness))
     .build(lash::persistence::LeaseOwnerIdentity::opaque(
         lash::persistence::LeaseOwnerId::new(node),
         lash::persistence::LeaseIncarnationId::new(format!("{node}-boot")),

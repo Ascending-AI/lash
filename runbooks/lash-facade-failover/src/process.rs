@@ -273,7 +273,7 @@ pub struct FailoverEnginePlugin {
 impl FailoverEnginePlugin {
     /// The plugin, its steps writing to `witness`.
     #[must_use]
-    pub fn new(witness: Witness) -> Arc<dyn PluginFactory> {
+    pub fn factory(witness: Witness) -> Arc<dyn PluginFactory> {
         Arc::new(Self { witness })
     }
 }
