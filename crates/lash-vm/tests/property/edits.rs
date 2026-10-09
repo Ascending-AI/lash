@@ -30,6 +30,7 @@ use super::ir_gen;
 pub struct Fuzzed {
     /// The kind of every edit of an applied transaction.
     pub applied: Vec<&'static str>,
+    pub expression_targets: Vec<&'static str>,
     /// The diagnostic code of every refusal, with the kind of the edit it
     /// names (`transaction` for a check of the whole result).
     pub refused: Vec<(&'static str, &'static str)>,
@@ -98,8 +99,9 @@ fn live(
         prop_assert_eq!(draft.node_id(handle), Some(id));
         prop_assert!(
             handles.insert(handle, id.clone()).is_none(),
-            "two nodes share {}",
-            handle
+            "two nodes share {} at {}",
+            handle,
+            id
         );
     }
     Ok(handles)
@@ -211,6 +213,18 @@ fn slots_of(draft: &WorkflowDraft, handle: WorkflowDraftHandle) -> Vec<Vec<ExprS
     paths.0
 }
 
+fn expression_slots(expression: &Expr) -> Vec<Vec<ExprSlot>> {
+    struct Paths(Vec<Vec<ExprSlot>>);
+    impl ExprSlotVisitor for Paths {
+        fn visit_slot(&mut self, path: &[ExprSlot], _expr: &Expr) {
+            self.0.push(path.to_vec());
+        }
+    }
+    let mut paths = Paths(vec![Vec::new()]);
+    walk_expr_slots(&mut paths, expression);
+    paths.0
+}
+
 impl Script<'_> {
     fn pick(&mut self, options: usize) -> usize {
         let word = self.words.get(self.at).copied().unwrap_or(0);
@@ -306,7 +320,7 @@ impl Script<'_> {
                 statement: script.statement(),
             }
         };
-        let kind = self.pick(26);
+        let kind = self.pick(28);
         let node = self.handle(&view.nodes);
         let process = self.handle(&view.processes);
         match (kind, node, process) {
@@ -333,7 +347,60 @@ impl Script<'_> {
                     count => slots[self.pick(count)].clone(),
                 };
                 WorkflowEdit::ReplaceExpression {
-                    node,
+                    target: lash_vm::WorkflowExpressionRef::Node(node),
+                    slot: WorkflowSlotPath::structural(slot),
+                    expression: self.expression(),
+                }
+            }
+            (26, _, _) if !view.functions.is_empty() => {
+                let name = view.functions[self.pick(view.functions.len())].clone();
+                let Some(function) =
+                    draft.document().declarations.iter().find_map(
+                        |declaration| match declaration {
+                            WorkflowDeclaration::Function(function) if function.name == name => {
+                                Some(function)
+                            }
+                            _ => None,
+                        },
+                    )
+                else {
+                    return insert(self);
+                };
+                let paths = expression_slots(&function.body);
+                WorkflowEdit::ReplaceExpression {
+                    target: lash_vm::WorkflowExpressionRef::Function(name),
+                    slot: WorkflowSlotPath::structural(paths[self.pick(paths.len())].clone()),
+                    expression: self.expression(),
+                }
+            }
+            (27, _, Some(process)) => {
+                let mut paths = Vec::new();
+                if let Some(wrapper) = draft
+                    .process(process)
+                    .and_then(|process| process.wrapper.as_ref())
+                {
+                    for (index, argument) in (0u32..).zip(&wrapper.arguments) {
+                        for mut path in expression_slots(argument) {
+                            path.insert(0, ExprSlot::Arg(index));
+                            paths.push(path);
+                        }
+                    }
+                    if let Some(driver) = &wrapper.driver {
+                        for (index, argument) in (1u32..).zip(&driver.arguments) {
+                            for mut path in expression_slots(argument) {
+                                path.splice(0..0, [ExprSlot::Callee, ExprSlot::Arg(index)]);
+                                paths.push(path);
+                            }
+                        }
+                    }
+                }
+                let slot = if paths.is_empty() {
+                    vec![ExprSlot::Arg(0)]
+                } else {
+                    paths[self.pick(paths.len())].clone()
+                };
+                WorkflowEdit::ReplaceExpression {
+                    target: lash_vm::WorkflowExpressionRef::ProcessWrapper(process),
                     slot: WorkflowSlotPath::structural(slot),
                     expression: self.expression(),
                 }
@@ -621,7 +688,12 @@ pub fn fuzz(program: &Program, words: &[u16]) -> Result<Fuzzed, TestCaseError> {
         .opened()
         .map(|(handle, id)| (handle, id.clone()))
         .collect::<BTreeMap<_, _>>();
-    prop_assert_eq!(&opened, &live(&draft)?);
+    prop_assert_eq!(
+        &opened,
+        &live(&draft).map_err(|error| TestCaseError::fail(format!(
+            "opening the generated document: {error}"
+        )))?
+    );
     let mut script = Script {
         words,
         at: 0,
@@ -639,6 +711,17 @@ pub fn fuzz(program: &Program, words: &[u16]) -> Result<Fuzzed, TestCaseError> {
             .map(|_| script.edit(&draft, &shape))
             .collect::<Vec<_>>();
         let kinds = edits.iter().map(workflow_edit_kind).collect::<Vec<_>>();
+        let expression_targets = edits
+            .iter()
+            .filter_map(|edit| match edit {
+                WorkflowEdit::ReplaceExpression { target, .. } => Some(match target {
+                    lash_vm::WorkflowExpressionRef::Node(_) => "node",
+                    lash_vm::WorkflowExpressionRef::Function(_) => "function",
+                    lash_vm::WorkflowExpressionRef::ProcessWrapper(_) => "process_wrapper",
+                }),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
         let stale = previous.filter(|_| script.pick(16) == 15);
         match draft.apply(WorkflowEditTransaction {
             base: stale.unwrap_or(revision),
@@ -658,11 +741,14 @@ pub fn fuzz(program: &Program, words: &[u16]) -> Result<Fuzzed, TestCaseError> {
                 }
             }
             Ok(correspondence) => {
+                fuzzed.expression_targets.extend(expression_targets);
                 prop_assert!(stale.is_none(), "a stale transaction applied");
                 prop_assert_eq!(correspondence.base, revision);
                 prop_assert_eq!(correspondence.revision, draft.revision());
                 prop_assert_ne!(draft.revision(), revision);
-                let now = live(&draft)?;
+                let now = live(&draft).map_err(|error| {
+                    TestCaseError::fail(format!("after edit kinds {kinds:?}: {error}"))
+                })?;
                 correspondence_is_total(&correspondence, &before, &now)?;
                 correspondence_is_total(&draft.correspondence_since_open(), &opened, &now)?;
 

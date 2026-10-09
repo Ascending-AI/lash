@@ -401,7 +401,7 @@ fn typed_edit(draft: &WorkflowDraft, edit: EditRequest) -> Result<WorkflowEdit> 
             slot,
             expression,
         } => WorkflowEdit::ReplaceExpression {
-            node: handle(&node)?,
+            target: lash::workflow::WorkflowExpressionRef::Node(handle(&node)?),
             slot,
             expression,
         },

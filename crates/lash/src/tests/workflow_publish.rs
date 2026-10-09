@@ -521,3 +521,110 @@ async fn a_published_workflow_starts_its_inline_process_after_the_host_pin_is_re
     );
     core.shutdown().await.expect("the core shuts down");
 }
+
+/// FIG-5647: declaration slots reach worker admission and durable execution.
+#[tokio::test]
+async fn function_and_wrapper_slot_edits_publish_and_run_on_the_durable_engine() {
+    use crate::workflow::{WorkflowEditLocation, WorkflowExpressionRef};
+    use lash_vm::{ExprSlot, FunctionExpr, ProcessWrapperParts, TypeExpr, WorkflowSlotPath};
+
+    let program = b::module(
+        vec![
+            b::function_decl(
+                "decorate",
+                vec![b::function_param("value", TypeExpr::Str)],
+                TypeExpr::Str,
+                b::binary(
+                    b::var("value"),
+                    lash_vm::CoercingBinaryOp::Add,
+                    b::string("_before"),
+                ),
+            ),
+            b::process(
+                "guarded",
+                vec![b::param("name", TypeExpr::Str)],
+                ProcessWrapperParts::build(
+                    FunctionExpr {
+                        name: Some("run".into()),
+                        js_name: None,
+                        receiver: None,
+                        params: vec!["input".into()],
+                        captures: Vec::new(),
+                        body: Box::new(b::function_call(
+                            "decorate",
+                            vec![b::field(b::var("input"), "value")],
+                        )),
+                    },
+                    None,
+                    vec![b::record(vec![("value", b::string("initial"))])],
+                    "caught".into(),
+                ),
+            ),
+        ],
+        Vec::new(),
+    );
+    let graph = lash_vm::testing::differential::through_wire(
+        &lash_vm::workflow_graph_from_program(&program),
+    )
+    .expect("document wire round trip");
+    let mut draft = WorkflowDraft::open(&graph).expect("draft");
+    let process = draft
+        .handle(&draft.document().process("guarded").expect("guarded").id)
+        .expect("process handle");
+    let function_slot = WorkflowSlotPath::structural([ExprSlot::Right]);
+    draft
+        .apply(WorkflowEditTransaction {
+            base: draft.revision(),
+            edits: vec![WorkflowEdit::ReplaceExpression {
+                target: WorkflowExpressionRef::Function("decorate".into()),
+                slot: function_slot.clone(),
+                expression: b::string("_edited"),
+            }],
+        })
+        .expect("function slot edit");
+    let (core, _) = recording_core().await;
+    let pin = crate::process::HostArtifactPin::mint();
+    let function_publication = published(publish(&core, &pin, &draft).await);
+    assert_eq!(
+        function_publication.correspondence.expression_edits,
+        vec![WorkflowEditLocation::Function {
+            name: "decorate".into(),
+            slot: function_slot
+        }]
+    );
+    let (_, output) = run(
+        &core,
+        &pin,
+        &function_publication.definition,
+        "function-slot",
+    )
+    .await;
+    assert_eq!(output, serde_json::json!("initial_edited"));
+
+    let wrapper_slot = WorkflowSlotPath::structural([ExprSlot::Arg(0), ExprSlot::Entry(0)]);
+    draft
+        .apply(WorkflowEditTransaction {
+            base: draft.revision(),
+            edits: vec![WorkflowEdit::ReplaceExpression {
+                target: WorkflowExpressionRef::ProcessWrapper(process),
+                slot: wrapper_slot.clone(),
+                expression: b::string("wrapper"),
+            }],
+        })
+        .expect("wrapper argument slot edit");
+    let wrapper_publication = published(publish(&core, &pin, &draft).await);
+    assert_eq!(
+        wrapper_publication.correspondence.expression_edits.last(),
+        Some(&WorkflowEditLocation::ProcessWrapper {
+            process,
+            slot: wrapper_slot
+        })
+    );
+    let (_, output) = run(&core, &pin, &wrapper_publication.definition, "wrapper-slot").await;
+    assert_eq!(output, serde_json::json!("wrapper_edited"));
+    core.host_artifacts()
+        .release(pin)
+        .await
+        .expect("release pin");
+    core.shutdown().await.expect("shutdown");
+}

@@ -246,7 +246,8 @@ pub use workflow_graph::{
     WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
     WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
     WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
-    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowNodeSource,
+    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowExpressionRef,
+    WorkflowNodeSource,
 };
 pub use workflow_graph::{
     projected_node_type_facets, workflow_call_from_ir, workflow_call_to_ir,

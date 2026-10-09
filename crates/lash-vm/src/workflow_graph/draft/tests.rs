@@ -237,7 +237,7 @@ fn removing_a_producer_with_live_uses_is_refused_unless_the_transaction_reconnec
         vec![
             WorkflowEdit::RemoveNode { node: producer },
             WorkflowEdit::ReplaceExpression {
-                node: consumer,
+                target: super::WorkflowExpressionRef::Node(consumer),
                 slot: echoed(),
                 expression: b::string("b"),
             },
@@ -362,7 +362,7 @@ fn a_try_region_is_edited_in_place() {
                 binding: Some("problem".into()),
             },
             WorkflowEdit::ReplaceExpression {
-                node: handler,
+                target: super::WorkflowExpressionRef::Node(handler),
                 slot: WorkflowSlotPath::structural([ExprSlot::Operand]),
                 expression: b::var("problem"),
             },
@@ -470,7 +470,7 @@ fn a_lifted_process_is_edited_through_its_container_and_keeps_its_handles() {
         &mut draft,
         vec![
             WorkflowEdit::ReplaceExpression {
-                node: print,
+                target: super::WorkflowExpressionRef::Node(print),
                 slot: WorkflowSlotPath::structural([ExprSlot::Operand]),
                 expression: b::string("started"),
             },
@@ -793,7 +793,7 @@ fn an_edge_drag_is_a_typed_edit_and_no_order_is_a_cycle() {
     assert_eq!(
         connect,
         WorkflowEdit::ReplaceExpression {
-            node: consumer,
+            target: super::WorkflowExpressionRef::Node(consumer),
             slot: echoed(),
             expression: b::var("a"),
         }
@@ -921,5 +921,224 @@ fn removing_a_function_with_live_calls_is_refused_unless_the_transaction_removes
     assert_eq!(
         spelled(&draft),
         b::program(vec![b::print(b::string("done"))])
+    );
+}
+
+/// FIG-5647: a declaration's body uses the same subtree slots as a node.
+#[tokio::test]
+async fn a_function_body_expression_is_edited_by_slot_and_publishes_and_runs() {
+    let program = |factor| {
+        b::module(
+            vec![b::function_decl(
+                "scale",
+                vec![b::function_param("value", TypeExpr::Any)],
+                TypeExpr::Any,
+                b::binary(
+                    b::var("value"),
+                    crate::CoercingBinaryOp::Multiply,
+                    b::num(factor),
+                ),
+            )],
+            vec![b::finish(b::function_call("scale", vec![b::num(3.0)]))],
+        )
+    };
+    let mut draft = open(&program(2.0));
+    let slot = WorkflowSlotPath::structural([ExprSlot::Right]);
+    let change = apply(
+        &mut draft,
+        vec![WorkflowEdit::ReplaceExpression {
+            target: super::WorkflowExpressionRef::Function("scale".into()),
+            slot: slot.clone(),
+            expression: b::num(4.0),
+        }],
+    )
+    .expect("a function body subtree is editable");
+    let location = WorkflowEditLocation::Function {
+        name: "scale".into(),
+        slot: slot.clone(),
+    };
+    assert_eq!(change.expression_edits, vec![location.clone()]);
+    assert_eq!(
+        draft.correspondence_since_open().expression_edits,
+        change.expression_edits
+    );
+    let (_, diagnostic, kind) = refused(
+        &mut draft,
+        vec![WorkflowEdit::ReplaceExpression {
+            target: super::WorkflowExpressionRef::Function("scale".into()),
+            slot: slot.clone(),
+            expression: b::var("missing"),
+        }],
+    );
+    assert_eq!(diagnostic, location);
+    assert_eq!(
+        kind,
+        Kind::UnresolvedBinding {
+            name: "missing".into()
+        }
+    );
+    let unknown_slot = WorkflowSlotPath::structural([ExprSlot::Arg(99)]);
+    let (_, diagnostic, kind) = refused(
+        &mut draft,
+        vec![WorkflowEdit::ReplaceExpression {
+            target: super::WorkflowExpressionRef::Function("scale".into()),
+            slot: unknown_slot.clone(),
+            expression: b::num(1.0),
+        }],
+    );
+    assert_eq!(
+        diagnostic,
+        WorkflowEditLocation::Function {
+            name: "scale".into(),
+            slot: unknown_slot
+        }
+    );
+    assert_eq!(kind, Kind::UnknownSlot);
+    assert_eq!(spelled(&draft), program(4.0));
+    let graph =
+        crate::testing::differential::through_wire(draft.document()).expect("wire round trip");
+    let admission = crate::admit_workflow_graph(
+        &graph,
+        &crate::LashVmHostEnvironment::new(crate::LashVmHostCatalog::new()),
+    )
+    .expect("publication admits");
+    assert_eq!(
+        change.through(&admission.nodes).expression_edits,
+        change.expression_edits
+    );
+    let run = crate::testing::differential::run_artifact(&admission.linked.artifact).await;
+    assert!(
+        matches!(&run.entries[0].outcome, Ok(crate::ExecutionOutcome::Finished(crate::Value::Number(value))) if *value == 12.0),
+        "{:?}",
+        run.entries[0].outcome
+    );
+}
+
+/// FIG-5647: wrapper arguments remain independently editable from run bodies.
+#[tokio::test]
+async fn a_wrapper_argument_expression_is_edited_by_slot_and_publishes_and_runs() {
+    let program = |value, required| {
+        b::module(
+            vec![Declaration::Process(ProcessDecl {
+                name: "worker".into(),
+                params: Vec::new(),
+                return_ty: None,
+                label: None,
+                origin: ProcessOrigin::Declared,
+                body: ProcessWrapperParts::build(
+                    FunctionExpr {
+                        name: Some("run".into()),
+                        js_name: None,
+                        receiver: None,
+                        params: vec!["input".into()],
+                        captures: Vec::new(),
+                        body: Box::new(b::field(b::var("input"), "value")),
+                    },
+                    Some((
+                        "__lash_vm_closure".into(),
+                        vec![b::num(required), b::bool_lit(false)],
+                    )),
+                    vec![b::record(vec![("value", b::num(value))])],
+                    "caught".into(),
+                ),
+            })],
+            Vec::new(),
+        )
+    };
+    let mut draft = open(&program(2.0, 0.0));
+    let worker = draft
+        .handle(&draft.document().process("worker").expect("worker").id)
+        .expect("handle");
+    let body = draft.body(&WorkflowBodyRef::Process(worker));
+    let slot = WorkflowSlotPath::structural([ExprSlot::Arg(0), ExprSlot::Entry(0)]);
+    let change = apply(
+        &mut draft,
+        vec![WorkflowEdit::ReplaceExpression {
+            target: super::WorkflowExpressionRef::ProcessWrapper(worker),
+            slot: slot.clone(),
+            expression: b::num(7.0),
+        }],
+    )
+    .expect("a wrapper argument subtree is editable");
+    assert_eq!(draft.body(&WorkflowBodyRef::Process(worker)), body);
+    let location = WorkflowEditLocation::ProcessWrapper {
+        process: worker,
+        slot: slot.clone(),
+    };
+    assert_eq!(change.expression_edits, vec![location.clone()]);
+    let (_, diagnostic, kind) = refused(
+        &mut draft,
+        vec![WorkflowEdit::ReplaceExpression {
+            target: super::WorkflowExpressionRef::ProcessWrapper(worker),
+            slot: slot.clone(),
+            expression: b::var("missing"),
+        }],
+    );
+    assert_eq!(diagnostic, location);
+    assert_eq!(
+        kind,
+        Kind::UnresolvedBinding {
+            name: "missing".into()
+        }
+    );
+    let body_slot =
+        WorkflowSlotPath::structural([ExprSlot::Callee, ExprSlot::Arg(0), ExprSlot::Body]);
+    let (_, diagnostic, kind) = refused(
+        &mut draft,
+        vec![WorkflowEdit::ReplaceExpression {
+            target: super::WorkflowExpressionRef::ProcessWrapper(worker),
+            slot: body_slot.clone(),
+            expression: b::num(1.0),
+        }],
+    );
+    assert_eq!(
+        diagnostic,
+        WorkflowEditLocation::ProcessWrapper {
+            process: worker,
+            slot: body_slot
+        }
+    );
+    assert_eq!(kind, Kind::SlotInChildBody);
+    let driver_slot = WorkflowSlotPath::structural([ExprSlot::Callee, ExprSlot::Arg(1)]);
+    let change = apply(
+        &mut draft,
+        vec![WorkflowEdit::ReplaceExpression {
+            target: super::WorkflowExpressionRef::ProcessWrapper(worker),
+            slot: driver_slot.clone(),
+            expression: b::num(1.0),
+        }],
+    )
+    .expect("driver arguments are editable too");
+    assert_eq!(
+        change.expression_edits,
+        vec![WorkflowEditLocation::ProcessWrapper {
+            process: worker,
+            slot: driver_slot
+        }]
+    );
+    assert_eq!(draft.correspondence_since_open().expression_edits.len(), 2);
+    assert_eq!(draft.body(&WorkflowBodyRef::Process(worker)), body);
+    assert_eq!(spelled(&draft), program(7.0, 1.0));
+    let graph =
+        crate::testing::differential::through_wire(draft.document()).expect("wire round trip");
+    let admission = crate::admit_workflow_graph(
+        &graph,
+        &crate::LashVmHostEnvironment::new(crate::LashVmHostCatalog::new()),
+    )
+    .expect("publication admits");
+    assert_eq!(
+        change.through(&admission.nodes).expression_edits,
+        change.expression_edits
+    );
+    let run = crate::testing::differential::run_artifact(&admission.linked.artifact).await;
+    let worker = run
+        .entries
+        .iter()
+        .find(|entry| entry.entry == "worker")
+        .expect("worker runs");
+    assert!(
+        matches!(&worker.outcome, Ok(crate::ExecutionOutcome::Finished(crate::Value::Number(value))) if *value == 7.0),
+        "{:?}",
+        worker.outcome
     );
 }

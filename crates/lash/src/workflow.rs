@@ -133,7 +133,8 @@ pub use lash_vm::{
     WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
     WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowDraftRevision,
     WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
-    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowNodeSource,
+    WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowExpressionRef,
+    WorkflowNodeSource,
 };
 pub use lash_vm_runtime::{WorkflowDocument, WorkflowEntry, WorkflowExecutionDocument};
 

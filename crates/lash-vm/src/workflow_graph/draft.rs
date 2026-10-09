@@ -51,7 +51,7 @@ mod scope;
 mod tests;
 
 pub use correspondence::{WorkflowCorrespondence, WorkflowCorrespondenceEntry, WorkflowNodeSource};
-pub use edit::{WorkflowBindingRef, WorkflowEdgeDrag, WorkflowEdit};
+pub use edit::{WorkflowBindingRef, WorkflowEdgeDrag, WorkflowEdit, WorkflowExpressionRef};
 
 use correspondence::Journal;
 use scope::{FrameRoot, Lexical, Role};
@@ -132,8 +132,15 @@ pub enum WorkflowEditLocation {
     Process {
         process: WorkflowDraftHandle,
     },
+    /// A slot from the declared function's body (empty for the whole body).
     Function {
         name: AstString,
+        slot: WorkflowSlotPath,
+    },
+    /// A slot from the wrapper's run call, as in [`WorkflowExpressionRef`].
+    ProcessWrapper {
+        process: WorkflowDraftHandle,
+        slot: WorkflowSlotPath,
     },
 }
 
@@ -156,7 +163,7 @@ pub enum WorkflowEditDiagnosticKind {
     /// loop is a container, never a back edge.
     #[error("a node cannot move into its own subtree; repetition is a loop container")]
     MoveIntoOwnSubtree,
-    #[error("the node has no expression at that slot")]
+    #[error("the target has no expression at that slot")]
     UnknownSlot,
     #[error("the slot is inside a child body, whose statements are nodes of their own")]
     SlotInChildBody,
@@ -423,6 +430,7 @@ impl WorkflowDraft {
         let revision = WorkflowDraftRevision(self.revision.0 + 1);
         let journal = std::mem::take(&mut state.journal);
         let entries = journal.correspondence(&self.state.ids, &state.ids);
+        let expression_edits = journal.expression_edits.clone();
         self.history.append(journal);
         self.state = state;
         self.revision = revision;
@@ -430,6 +438,7 @@ impl WorkflowDraft {
             base: transaction.base,
             revision,
             entries,
+            expression_edits,
         })
     }
 
@@ -440,6 +449,7 @@ impl WorkflowDraft {
             base: WorkflowDraftRevision(0),
             revision: self.revision,
             entries: self.history.correspondence(&self.opened, &self.state.ids),
+            expression_edits: self.history.expression_edits.clone(),
         }
     }
 
@@ -765,6 +775,9 @@ impl State {
 
     /// The node and expression path that hold the expression at `path`.
     fn locate(&self, path: &AstPath) -> WorkflowEditLocation {
+        if let Some(location) = self.locate_wrapper_argument(path) {
+            return location;
+        }
         if let Some(id) = holder(&self.addresses, path)
             && let Some(handle) = self.handles.get(id)
             && let Some(address) = self.address(*handle)
@@ -782,9 +795,60 @@ impl State {
         };
         match self.owner(&FrameRoot::Declaration(index)) {
             Some(Owner::Process(process)) => WorkflowEditLocation::Process { process },
-            Some(Owner::Function(name)) => WorkflowEditLocation::Function { name },
+            Some(Owner::Function(name)) => WorkflowEditLocation::Function {
+                name,
+                slot: WorkflowSlotPath::structural(
+                    expr_at(&self.program, &AstPath::declaration(index, Vec::new()))
+                        .and_then(|body| body.slot_path(&path.steps))
+                        .unwrap_or_default(),
+                ),
+            },
             Some(Owner::Main) | None => WorkflowEditLocation::Document,
         }
+    }
+
+    /// Wrapper argument paths have no statement of their own. Check them
+    /// before an enclosing literal's statement can claim the diagnostic.
+    fn locate_wrapper_argument(&self, path: &AstPath) -> Option<WorkflowEditLocation> {
+        for process in processes(&self.document).filter(|process| process.wrapper.is_some()) {
+            let body = self
+                .program
+                .declarations
+                .iter()
+                .enumerate()
+                .find_map(|(index, declaration)| match declaration {
+                    Declaration::Process(declared) if declared.name.as_str() == process.name => {
+                        Some(AstPath::declaration(u32::try_from(index).ok()?, Vec::new()))
+                    }
+                    _ => None,
+                })
+                .or_else(|| match &process.origin {
+                    crate::ProcessOrigin::Lifted { site, .. } => Some(site.child(0)),
+                    crate::ProcessOrigin::Declared => None,
+                })?;
+            if path.root != body.root || !path.steps.starts_with(&body.steps) {
+                continue;
+            }
+            let slots =
+                expr_at(&self.program, &body)?.slot_path(&path.steps[body.steps.len()..])?;
+            // The wrapper role owns a try that finishes with the run call.
+            let Some(call_slots) = slots.strip_prefix(&[
+                crate::ExprSlot::Inner,
+                crate::ExprSlot::Body,
+                crate::ExprSlot::Operand,
+            ]) else {
+                continue;
+            };
+            if matches!(call_slots, [crate::ExprSlot::Arg(_), ..])
+                || matches!(call_slots, [crate::ExprSlot::Callee, crate::ExprSlot::Arg(index), ..] if *index > 0)
+            {
+                return Some(WorkflowEditLocation::ProcessWrapper {
+                    process: *self.handles.get(&process.id)?,
+                    slot: WorkflowSlotPath::structural(call_slots.iter().copied()),
+                });
+            }
+        }
+        None
     }
 
     /// The binding checks of a transaction's whole result.

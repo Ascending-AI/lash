@@ -808,12 +808,14 @@ fn edited_documents_stay_programs(
 fn seeded_edit_scripts_apply_every_edit_kind() {
     let mut applied = std::collections::BTreeMap::<&str, usize>::new();
     let mut refused = std::collections::BTreeMap::<(&str, &str), usize>::new();
+    let mut expression_targets = std::collections::BTreeSet::new();
     let mut admitted = 0usize;
     let mut admission_refused = std::collections::BTreeMap::<String, usize>::new();
     for seed in 0..SEEDED_PROGRAMS {
         let (fuzzed, published) =
             edited_documents_stay_programs(&seeded_tape(seed), &seeded_tape(seed + 10_000))
                 .unwrap_or_else(|error| panic!("seed {seed}: {error}"));
+        expression_targets.extend(fuzzed.expression_targets);
         for kind in fuzzed.applied {
             *applied.entry(kind).or_default() += 1;
         }
@@ -825,6 +827,11 @@ fn seeded_edit_scripts_apply_every_edit_kind() {
             *admission_refused.entry(format!("{kind:?}")).or_default() += 1;
         }
     }
+    assert_eq!(
+        expression_targets,
+        std::collections::BTreeSet::from(["node", "function", "process_wrapper"]),
+        "edit scripts apply expression edits at every root"
+    );
     let kinds = lash_vm::testing::workflow_edits::WORKFLOW_EDIT_KINDS;
     assert_eq!(
         applied.keys().copied().collect::<Vec<_>>(),

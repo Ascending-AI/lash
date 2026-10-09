@@ -356,7 +356,7 @@ fn typed_edit(
             slot,
             expression,
         } => WorkflowEdit::ReplaceExpression {
-            node: handle(named, &node)?,
+            target: lash::workflow::WorkflowExpressionRef::Node(handle(named, &node)?),
             slot,
             expression,
         },
@@ -653,7 +653,7 @@ fn form_edits(
                     let mut slot = container_path(&own_statement(base)?);
                     slot.push(ExprSlot::Iterable);
                     edits.push(WorkflowEdit::ReplaceExpression {
-                        node: handle,
+                        target: lash::workflow::WorkflowExpressionRef::Node(handle),
                         slot: WorkflowSlotPath::structural(slot),
                         expression: iterable.clone(),
                     });

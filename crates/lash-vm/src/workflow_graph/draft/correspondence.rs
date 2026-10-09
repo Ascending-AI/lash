@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::{WorkflowDraftHandle, WorkflowDraftRevision};
+use super::{WorkflowDraftHandle, WorkflowDraftRevision, WorkflowEditLocation};
 use crate::workflow_graph::WorkflowNodeId;
 
 /// Where a node that was not in the base came from.
@@ -72,6 +72,10 @@ pub struct WorkflowCorrespondence {
     pub base: WorkflowDraftRevision,
     pub revision: WorkflowDraftRevision,
     pub entries: Vec<WorkflowCorrespondenceEntry>,
+    /// Locations addressed by applied expression edits, in edit order. These
+    /// are the locations at the time of each edit, using stable draft handles;
+    /// they are recorded by the edits, never inferred from matching trees.
+    pub expression_edits: Vec<WorkflowEditLocation>,
 }
 
 impl WorkflowCorrespondence {
@@ -147,6 +151,7 @@ impl WorkflowCorrespondence {
             base: self.base,
             revision: self.revision,
             entries,
+            expression_edits: self.expression_edits.clone(),
         }
     }
 }
@@ -154,6 +159,7 @@ impl WorkflowCorrespondence {
 /// What edits and normalizations did to handles.
 #[derive(Clone, Debug, Default)]
 pub(super) struct Journal {
+    pub(super) expression_edits: Vec<WorkflowEditLocation>,
     pub(super) minted: BTreeMap<WorkflowDraftHandle, WorkflowNodeSource>,
     pub(super) deleted: BTreeSet<WorkflowDraftHandle>,
     pub(super) split: BTreeMap<WorkflowDraftHandle, Vec<WorkflowDraftHandle>>,
@@ -169,6 +175,7 @@ impl Journal {
         for (handle, source) in later.minted {
             self.minted.entry(handle).or_insert(source);
         }
+        self.expression_edits.extend(later.expression_edits);
         self.deleted.extend(later.deleted);
         self.split.extend(later.split);
         self.moved.extend(later.moved);

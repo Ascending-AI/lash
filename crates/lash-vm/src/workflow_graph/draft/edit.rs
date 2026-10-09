@@ -66,6 +66,35 @@ pub enum WorkflowEdgeDrag {
     },
 }
 
+/// The expression root a slot path addresses.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkflowExpressionRef {
+    /// A node's statement, outside the child bodies that have their own nodes.
+    Node(WorkflowDraftHandle),
+    /// The body expression of a declared function.
+    Function(AstString),
+    /// A process wrapper's run call. `Arg(i)` addresses a run argument;
+    /// `Callee/Arg(i + 1)` addresses a driver argument (argument zero is the
+    /// run function). The run body is edited through its own nodes.
+    ProcessWrapper(WorkflowDraftHandle),
+}
+
+impl WorkflowExpressionRef {
+    pub(super) fn location(&self, slot: WorkflowSlotPath) -> WorkflowEditLocation {
+        match self {
+            Self::Node(node) => WorkflowEditLocation::Node { node: *node, slot },
+            Self::Function(name) => WorkflowEditLocation::Function {
+                name: name.clone(),
+                slot,
+            },
+            Self::ProcessWrapper(process) => WorkflowEditLocation::ProcessWrapper {
+                process: *process,
+                slot,
+            },
+        }
+    }
+}
+
 /// One typed change to a draft.
 ///
 /// A statement is given as the IR expression it is, label included
@@ -100,10 +129,11 @@ pub enum WorkflowEdit {
         node: WorkflowDraftHandle,
         statement: Expr,
     },
-    /// Replaces the expression at `slot`, a non-empty path from the node's
-    /// statement that stays outside its child bodies.
+    /// Replaces the expression at `slot` from `target`. Node paths must be
+    /// non-empty and stay outside child bodies; a function's empty path
+    /// addresses its body itself. Wrapper paths address run or driver arguments.
     ReplaceExpression {
-        node: WorkflowDraftHandle,
+        target: WorkflowExpressionRef,
         slot: WorkflowSlotPath,
         expression: Expr,
     },
@@ -275,26 +305,54 @@ impl State {
                 self.settled(at_node(node))
             }
             WorkflowEdit::ReplaceExpression {
-                node,
+                target,
                 slot,
                 expression,
             } => {
-                let refuse = |kind| {
-                    (
-                        WorkflowEditLocation::Node {
-                            node,
-                            slot: slot.clone(),
-                        },
-                        kind,
-                    )
-                };
-                let slots = slot
-                    .expr_slots()
-                    .filter(|slots| !slots.is_empty())
-                    .ok_or_else(|| refuse(Kind::UnknownSlot))?;
-                let subject = node_mut(&mut self.working, node).ok_or_else(|| unknown(node))?;
-                replace_expression(subject, &slots, expression).map_err(refuse)?;
-                self.settled(WorkflowEditLocation::Node { node, slot })
+                let location = target.location(slot.clone());
+                let refuse = |kind| (location.clone(), kind);
+                let slots = slot.expr_slots().ok_or_else(|| refuse(Kind::UnknownSlot))?;
+                match target {
+                    WorkflowExpressionRef::Node(node) => {
+                        if slots.is_empty() {
+                            return Err(refuse(Kind::UnknownSlot));
+                        }
+                        let subject = node_mut(&mut self.working, node)
+                            .ok_or_else(|| refuse(Kind::UnknownHandle { handle: node }))?;
+                        replace_expression(subject, &slots, expression).map_err(refuse)?;
+                    }
+                    WorkflowExpressionRef::Function(name) => {
+                        let function = self
+                            .working
+                            .declarations
+                            .iter_mut()
+                            .find_map(|declaration| match declaration {
+                                WorkflowDeclaration::Function(function)
+                                    if function.name == name =>
+                                {
+                                    Some(function)
+                                }
+                                _ => None,
+                            })
+                            .ok_or_else(|| refuse(Kind::UnknownFunction { name }))?;
+                        *function
+                            .body
+                            .at_slots_mut(&slots)
+                            .ok_or_else(|| refuse(Kind::UnknownSlot))? = expression;
+                    }
+                    WorkflowExpressionRef::ProcessWrapper(process) => {
+                        let subject = process_mut(&mut self.working, process)
+                            .ok_or_else(|| refuse(Kind::UnknownHandle { handle: process }))?;
+                        let wrapper = subject.wrapper.as_mut().ok_or_else(|| {
+                            refuse(Kind::EditDoesNotApply {
+                                expected: "a process with a failure wrapper",
+                            })
+                        })?;
+                        *wrapper_argument_mut(wrapper, &slots).map_err(refuse)? = expression;
+                    }
+                }
+                self.journal.expression_edits.push(location.clone());
+                self.settled(location)
             }
             WorkflowEdit::SetBinding { node, binding } => {
                 let subject = node_mut(&mut self.working, node).ok_or_else(|| unknown(node))?;
@@ -466,6 +524,20 @@ impl State {
                     return Err((at_process(process), Kind::DerivedProcess));
                 }
                 let former = AstString::from(declared.name.as_str());
+                if self
+                    .working
+                    .process(&name)
+                    .is_some_and(|existing| existing.id != process.id())
+                {
+                    return Err((
+                        at_process(process),
+                        Kind::InvalidProgram(crate::InvalidAst::DuplicateDeclaration {
+                            name: name.to_string(),
+                        }),
+                    ));
+                }
+                let declared =
+                    process_mut(&mut self.working, process).ok_or_else(|| unknown(process))?;
                 declared.name = name.to_string();
                 if declared.name_source == WorkflowNodeNameSource::Derived {
                     declared.display_name = name.to_string();
@@ -512,11 +584,17 @@ impl State {
                 self.working
                     .declarations
                     .push(WorkflowDeclaration::Function(function));
-                self.settled(WorkflowEditLocation::Function { name })
+                self.settled(WorkflowEditLocation::Function {
+                    name,
+                    slot: WorkflowSlotPath::default(),
+                })
             }
             WorkflowEdit::ReplaceFunction { function } => {
                 let name = function.name.clone();
-                let location = WorkflowEditLocation::Function { name: name.clone() };
+                let location = WorkflowEditLocation::Function {
+                    name: name.clone(),
+                    slot: WorkflowSlotPath::default(),
+                };
                 let declared = self
                     .working
                     .declarations
@@ -538,7 +616,10 @@ impl State {
                 });
                 if self.working.declarations.len() == before {
                     return Err((
-                        WorkflowEditLocation::Function { name: name.clone() },
+                        WorkflowEditLocation::Function {
+                            name: name.clone(),
+                            slot: WorkflowSlotPath::default(),
+                        },
                         Kind::UnknownFunction { name },
                     ));
                 }
@@ -646,6 +727,7 @@ impl State {
             WorkflowBindingRef::Function { function, name } => {
                 let location = WorkflowEditLocation::Function {
                     name: function.clone(),
+                    slot: WorkflowSlotPath::default(),
                 };
                 let frame = (0u32..)
                     .zip(&self.program.declarations)
@@ -758,13 +840,37 @@ impl State {
                     },
                 ))?;
                 Ok(WorkflowEdit::ReplaceExpression {
-                    node: *to,
+                    target: WorkflowExpressionRef::Node(*to),
                     slot: slot.clone(),
                     expression: Expr::Variable(binding.root.clone()),
                 })
             }
         }
     }
+}
+
+/// The run call's ordinary slots, restricted to its argument expressions.
+fn wrapper_argument_mut<'w>(
+    wrapper: &'w mut WorkflowProcessWrapper,
+    slots: &[ExprSlot],
+) -> Result<&'w mut Expr, Kind> {
+    let (argument, rest) = match slots {
+        [ExprSlot::Arg(index), rest @ ..] => (wrapper.arguments.get_mut(*index as usize), rest),
+        [ExprSlot::Callee, ExprSlot::Arg(index), rest @ ..] if *index > 0 => (
+            wrapper
+                .driver
+                .as_mut()
+                .and_then(|driver| driver.arguments.get_mut((*index - 1) as usize)),
+            rest,
+        ),
+        [ExprSlot::Callee, ExprSlot::Body, ..] | [ExprSlot::Callee, ExprSlot::Arg(0), ..] => {
+            return Err(Kind::SlotInChildBody);
+        }
+        _ => return Err(Kind::UnknownSlot),
+    };
+    argument
+        .and_then(|argument| argument.at_slots_mut(rest))
+        .ok_or(Kind::UnknownSlot)
 }
 
 fn position(index: usize) -> u32 {
