@@ -37,7 +37,7 @@ pub const TOOL: &str = "ext_write";
 const MODEL: &str = "workers-model";
 
 /// The cell the model writes: one `Once` tool call, and what it answered.
-const CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nprint(written);\n</typescript>";
+const CELL: &str = "<typescript>\nconst written = await tools.ext_write({ x: 7 });\nconsole.log(written);\n</typescript>";
 /// What the final answer starts with.
 pub const FINAL_PREFIX: &str = "final answer from ";
 
