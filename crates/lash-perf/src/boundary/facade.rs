@@ -62,6 +62,9 @@ pub(super) fn provider(meter: &Meter, pending: bool) -> ProviderHandle {
         }).build().into_handle()
 }
 
+/// A core serving as node `owner`. The name is the node's durable identity:
+/// a later boot under the same name fences the earlier one, so cores that
+/// serve side by side each need their own (FIG-5637).
 pub(super) fn build(
     backend: lash::Backend,
     owner: &str,
@@ -82,7 +85,8 @@ pub(super) fn build(
         builder = builder.serve_test_llm_profile(provider, metadata()?);
     }
     Ok(builder.build(lash::persistence::LeaseOwnerIdentity::opaque(
-        "boundary", owner,
+        owner,
+        format!("boundary-{}", std::process::id()),
     ))?)
 }
 

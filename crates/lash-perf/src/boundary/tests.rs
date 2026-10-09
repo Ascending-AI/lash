@@ -75,3 +75,22 @@ async fn seeded_plan_receipt_runs_generated_cells_on_the_durable_node() {
     assert_eq!(receipt.evidence["primary_turns"], 2);
     eprintln!("{}", serde_json::to_string(&receipt).unwrap());
 }
+/// FIG-5637: every writer is a node of its own. Under one shared node name
+/// the writer that booted last fenced the others, and their sends settled
+/// only while it was still there to run them.
+#[tokio::test]
+async fn sqlite_writer_settles_its_send_after_a_later_booted_writer_has_left() {
+    let dir = tempfile::tempdir().unwrap();
+    lash_sqlite_store::SqliteStoreSet::open(
+        dir.path().join("lash.db"),
+        lash_sqlite_store::SqliteSynchronous::Normal,
+    )
+    .await
+    .unwrap();
+    let first = workers::Writer::open(dir.path(), 0).await.unwrap();
+    let second = workers::Writer::open(dir.path(), 1).await.unwrap();
+    let left = second.finish(1).await.unwrap();
+    assert_eq!(left.count("send.settle"), 1);
+    let stayed = first.finish(1).await.unwrap();
+    assert_eq!(stayed.count("send.settle"), 1);
+}

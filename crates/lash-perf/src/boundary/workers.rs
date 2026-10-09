@@ -2,7 +2,7 @@
 //! releases a stdin barrier only after every child opened its own core.
 use super::{Args, Case, Meter, Receipt, facade};
 use anyhow::{Context, Result, ensure};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -19,22 +19,62 @@ pub struct WorkerArgs {
     pub operations: usize,
 }
 
+/// One writer: its own core over the shared database, serving as its own
+/// node, and the session it sends to.
+pub(super) struct Writer {
+    lane: usize,
+    core: lash::LashCore,
+    session: lash::DurableSession,
+    meter: Meter,
+}
+
+impl Writer {
+    pub(super) async fn open(store_dir: &Path, lane: usize) -> Result<Self> {
+        let meter = Meter::default();
+        let stores = lash_sqlite_store::SqliteStoreSet::open(
+            store_dir.join("lash.db"),
+            lash_sqlite_store::SqliteSynchronous::Normal,
+        )
+        .await?;
+        let core = facade::build(
+            facade::backend(Arc::new(stores))?,
+            &format!("writer-{lane}"),
+            true,
+            true,
+            facade::provider(&meter, false),
+        )?;
+        let session = facade::create(&core, &format!("writer-{lane}")).await?;
+        Ok(Self {
+            lane,
+            core,
+            session,
+            meter,
+        })
+    }
+
+    /// Send and settle `operations` inputs, then stop the writer's node.
+    pub(super) async fn finish(self, operations: usize) -> Result<Meter> {
+        let result = async {
+            for n in 0..operations {
+                facade::send(
+                    &self.session,
+                    &format!("writer-{}-{n}", self.lane),
+                    &self.meter,
+                )
+                .await?;
+            }
+            anyhow::Ok(())
+        }
+        .await;
+        self.core.shutdown().await?;
+        result?;
+        Ok(self.meter)
+    }
+}
+
 pub async fn run_worker(args: &WorkerArgs) -> Result<()> {
     use std::io::Write;
-    let meter = Meter::default();
-    let stores = lash_sqlite_store::SqliteStoreSet::open(
-        args.store_dir.join("lash.db"),
-        lash_sqlite_store::SqliteSynchronous::Normal,
-    )
-    .await?;
-    let core = facade::build(
-        facade::backend(Arc::new(stores))?,
-        &format!("writer-{}-{}", args.lane, std::process::id()),
-        true,
-        true,
-        facade::provider(&meter, false),
-    )?;
-    let session = facade::create(&core, &format!("writer-{}", args.lane)).await?;
+    let writer = Writer::open(&args.store_dir, args.lane).await?;
     println!("boundary writer ready");
     std::io::stdout().flush()?;
     let mut line = String::new();
@@ -42,15 +82,7 @@ pub async fn run_worker(args: &WorkerArgs) -> Result<()> {
         .read_line(&mut line)
         .await?;
     ensure!(line == "go\n", "writer barrier was not released");
-    let result = async {
-        for n in 0..args.operations {
-            facade::send(&session, &format!("writer-{}-{n}", args.lane), &meter).await?;
-        }
-        anyhow::Ok(())
-    }
-    .await;
-    core.shutdown().await?;
-    result?;
+    let meter = writer.finish(args.operations).await?;
     super::write_receipt(
         &args.out,
         &Receipt::new(
