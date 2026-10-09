@@ -488,20 +488,6 @@ async fn global_regexp_match_value_of_preserves_identity() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn date_to_string_produces_the_ecma_date_string() {
-    let program = Program::block(vec![
-        ts_assign("date", heap_new("Date", vec![Expr::Number(42.0)])),
-        Expr::Finish(Box::new(heap_method("toString", "date", Vec::new()))),
-    ]);
-    assert_eq!(
-        run_typescript_ast_across_every_effect(program).await,
-        ExecutionOutcome::Finished(Value::String(
-            "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)".into()
-        ))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn javascript_unary_plus_and_minus_use_exact_reference_to_number() {
     let mut expressions = Vec::new();
     for (name, value) in [
@@ -747,34 +733,6 @@ async fn exotic_references_work_as_discarded_truthy_unary_iterable_and_binary_op
         ExecutionOutcome::Finished(Value::String(
             "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)x".into()
         ))
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn set_normalizes_negative_zero_before_iteration() {
-    let program = Program::block(vec![
-        ts_assign("set", heap_new("Set", Vec::new())),
-        heap_method("add", "set", vec![Expr::Number(-0.0)]),
-        ts_assign("reciprocal", Expr::Absent),
-        Expr::For {
-            authored_binding: None,
-            binding: "value".into(),
-            iterable: Box::new(Expr::Variable("set".into())),
-            bind: None,
-            body: Box::new(ts_assign(
-                "reciprocal",
-                Expr::CoercingBinary {
-                    left: Box::new(Expr::Number(1.0)),
-                    op: crate::CoercingBinaryOp::Divide,
-                    right: Box::new(Expr::Variable("value".into())),
-                },
-            )),
-        },
-        Expr::Finish(Box::new(Expr::Variable("reciprocal".into()))),
-    ]);
-    assert_eq!(
-        run_typescript_ast_across_every_effect(program).await,
-        ExecutionOutcome::Finished(Value::Number(f64::INFINITY))
     );
 }
 

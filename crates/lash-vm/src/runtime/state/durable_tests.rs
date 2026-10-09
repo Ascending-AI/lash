@@ -605,37 +605,6 @@ fn a_rebound_name_is_no_longer_expired() {
     assert!(state.expired_functions().is_empty());
 }
 
-/// The dropped names survive a durable reload and a whole-snapshot round
-/// trip, so a later cell is refused the same way live and reloaded.
-#[test]
-fn the_dropped_functions_survive_a_reload() {
-    let mut heap = Heap::default();
-    let helper = closure(&mut heap);
-    let list = heap
-        .allocate(HeapObject::list(vec![Value::Number(1.0)]))
-        .expect("allocate a list");
-    let state = install(vec![("helper", helper), ("items", list)], heap);
-    let parts = complete(&state);
-    let (reloaded, _) = reload(&parts.header, &bodies(&parts));
-    assert_eq!(reloaded.expired_functions(), state.expired_functions());
-
-    let bytes = state
-        .snapshot()
-        .to_canonical_bytes()
-        .expect("encode the whole snapshot");
-    let decoded = State::from_snapshot(
-        Snapshot::from_canonical_bytes(&bytes).expect("decode the whole snapshot"),
-    );
-    assert_eq!(decoded.expired_functions(), state.expired_functions());
-
-    // A plain state keeps the names too.
-    let mut plain = State::new();
-    plain.expired_functions.insert("gone".to_string());
-    let parts = complete(&plain);
-    let (reloaded, _) = reload(&parts.header, &bodies(&parts));
-    assert!(reloaded.expired_functions().contains("gone"));
-}
-
 /// A name cannot be both live and dropped, so a wire claiming both is refused.
 #[test]
 fn a_dropped_name_that_is_also_bound_is_refused() {

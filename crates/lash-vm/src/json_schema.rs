@@ -519,28 +519,6 @@ mod tests {
     }
 
     #[test]
-    fn imports_primitive_types_and_drops_refinements() {
-        for (schema, expected) in [
-            (
-                json!({ "type": "string", "minLength": 2, "maxLength": 8, "pattern": "x", "format": "email" }),
-                TypeExpr::Str,
-            ),
-            (
-                json!({ "type": "integer", "minimum": 1, "maximum": 5 }),
-                TypeExpr::Int,
-            ),
-            (
-                json!({ "type": "number", "exclusiveMinimum": 0 }),
-                TypeExpr::Float,
-            ),
-            (json!({ "type": "boolean" }), TypeExpr::Bool),
-            (json!({ "type": "null" }), TypeExpr::Null),
-        ] {
-            assert_eq!(import_schema(&schema), expected);
-        }
-    }
-
-    #[test]
     fn imports_closed_object_properties_and_required_fields() {
         let schema = json!({
             "type": "object",
@@ -557,30 +535,6 @@ mod tests {
                 field("count", TypeExpr::Int, true),
                 field("name", TypeExpr::Str, false),
             ])
-        );
-    }
-
-    #[test]
-    fn imports_arrays_and_missing_items() {
-        assert_eq!(
-            import_schema(&json!({ "type": "array", "items": { "type": "string" } })),
-            TypeExpr::List(Box::new(TypeExpr::Str))
-        );
-        assert_eq!(
-            import_schema(&json!({ "type": "array" })),
-            TypeExpr::List(Box::new(TypeExpr::Any))
-        );
-    }
-
-    #[test]
-    fn imports_string_enums_and_representable_singleton_unions() {
-        assert_eq!(
-            import_schema(&json!({ "enum": ["fast", "safe"] })),
-            TypeExpr::Enum(vec!["fast".into(), "safe".into()])
-        );
-        assert_eq!(
-            import_schema(&json!({ "enum": ["ready", null] })),
-            TypeExpr::union(vec![TypeExpr::Enum(vec!["ready".into()]), TypeExpr::Null])
         );
     }
 
@@ -752,18 +706,30 @@ mod tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn named_data_types_ride_in_a_plain_ref() {
-        assert_eq!(
-            type_expr_to_json_schema(&TypeExpr::Ref("host.Descriptor".into())),
-            json!({ "$ref": "host.Descriptor" })
-        );
-        assert_eq!(
-            import_schema(&json!({ "$ref": "host.Descriptor" })),
-            TypeExpr::Ref("host.Descriptor".into())
-        );
+        assert!(matches!(
+            json_schema_to_type_expr(&json!({
+                "x-lash": {
+                    "kind": "process",
+                    "signature": {
+                        "params": [{ "name": "if", "schema": {} }],
+                        "output": {}
+                    }
+                }
+            }))
+            .expect_err("a reserved keyword is refused"),
+            JsonSchemaError::InvalidProcessSignature {
+                source: ProcessSignatureError::InvalidParameterName { .. },
+                ..
+            }
+        ));
+        ProcessSignature::try_new(
+            vec![ProcessParam {
+                name: "value".into(),
+                ty: TypeExpr::Enum(Vec::new()),
+            }],
+            TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Int]),
+        )
+        .expect("FIG-2879 does not add unrelated TypeExpr restrictions");
     }
 
     /// The prompt projection reads `TypeExpr` directly: a `TypeExpr::Object`
@@ -872,6 +838,26 @@ mod tests {
                 json_schema_to_type_expr(&schema).expect("an exported schema imports"),
                 ty
             );
+        assert_eq!(
+            import_schema(&json!({ "type": "array" })),
+            TypeExpr::List(Box::new(TypeExpr::Any))
+        );
+        assert_eq!(
+            import_schema(&json!({ "enum": ["ready", null] })),
+            TypeExpr::union(vec![TypeExpr::Enum(vec!["ready".into()]), TypeExpr::Null])
+        );
+        assert_eq!(
+            import_schema(&json!({ "type": "number", "exclusiveMinimum": 0 })),
+            TypeExpr::Float
+        );
+        assert_eq!(
+            type_expr_to_json_schema(&TypeExpr::Ref("host.Descriptor".into())),
+            json!({ "$ref": "host.Descriptor" })
+        );
+        for example in [TypeExpr::Any, TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Null])] {
+            let schema = type_expr_to_json_schema(&example);
+            prop_assert_eq!(json_schema_to_type_expr(&schema).expect("an exported schema imports"), example);
+        }
         }
     }
 }

@@ -106,6 +106,13 @@ fn committed_node_expectations_match_the_accepted_dialect() {
         shard_counts.get("findings").copied().unwrap_or_default() >= 10,
         "every fixed semantic finding needs an oracle row"
     );
+    for expression in [
+        "(() => { const m = new Map(); m.set(NaN, 'first'); m.set(-0, 'zero'); m.set(NaN, 'updated'); m.set(0, 'same zero'); return [...m.keys()].map(key => 1 / key).join(','); })()",
+        "(() => { const s = new Set(); s.add(NaN); s.add(NaN); s.add(-0); s.add(0); return [...s].map(value => 1 / value).join(','); })()",
+    ] {
+        check_row(expression, "accept", r#""NaN,Infinity""#, "-")
+            .expect("Map keys and Set elements normalize negative zero without reordering");
+    }
 }
 
 /// Links `source` the way a cell is admitted: against a host, with the

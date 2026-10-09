@@ -724,4 +724,37 @@ fn every_value_type_round_trips_or_is_refused() {
         ));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+    #[derive(Serialize)]
+    struct PlainHeader {
+        version: u32,
+        expired_functions: Vec<String>,
+    }
+    let header = rmp_serde::to_vec_named(&PlainHeader {
+        version: lash_vm::LASH_VM_SNAPSHOT_VERSION,
+        expired_functions: vec!["gone".to_string()],
+    })
+    .expect("encode the Plain-mode durable header");
+    let mut instance = lash_vm::VmInstance::pristine();
+    let baseline = instance
+        .restore_durable_parts(
+            &header,
+            std::iter::empty::<(&str, &[u8])>(),
+            lash_core::FleetFormat::current(),
+        )
+        .expect("reload expired names without a heap");
+    assert!(instance.state().expired_functions().contains("gone"));
+    let parts = instance
+        .state()
+        .durable_parts(&baseline, lash_core::FleetFormat::current())
+        .expect("capture expired names without a heap");
+    assert!(parts.fragments.is_empty());
+    assert_eq!(parts.header, header);
+    instance
+        .restore_durable_parts(
+            &parts.header,
+            std::iter::empty::<(&str, &[u8])>(),
+            lash_core::FleetFormat::current(),
+        )
+        .expect("reload the captured Plain-mode header");
+    assert!(instance.state().expired_functions().contains("gone"));
 }

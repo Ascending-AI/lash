@@ -586,6 +586,62 @@ mod tests {
             TypeExpr::Bool,
             json!({"type": "boolean"}),
         );
+        for (source, output, schema) in [
+            (
+                "const worker = async () => { try { return true; } catch (error) { } }; finish(worker);",
+                TypeExpr::union(vec![TypeExpr::Bool, TypeExpr::Null]),
+                json!({"anyOf": [{"type": "boolean"}, {"type": "null"}]}),
+            ),
+            (
+                "const worker = async () => { try { return true; } finally { null; } }; finish(worker);",
+                TypeExpr::Bool,
+                json!({"type": "boolean"}),
+            ),
+        ] {
+            assert_async_output(source, output, schema);
+        }
+        // Finish remains an IR terminal; TypeScript process bodies use Return.
+        use lash_vm::{Expr, LinkedModule, testing::ast_builders as builders};
+
+        for (body, expected) in [
+            (
+                builders::try_expr(
+                    builders::finish(builders::bool_lit(true)),
+                    Some(builders::catch("error", Expr::Null)),
+                    None,
+                ),
+                TypeExpr::union(vec![TypeExpr::Bool, TypeExpr::Null]),
+            ),
+            (
+                builders::try_expr(
+                    builders::finish(builders::bool_lit(true)),
+                    None,
+                    Some(builders::finish(builders::string("cleanup"))),
+                ),
+                TypeExpr::Str,
+            ),
+            (
+                builders::try_expr(
+                    builders::finish(builders::bool_lit(true)),
+                    None,
+                    Some(Expr::Null),
+                ),
+                TypeExpr::Bool,
+            ),
+        ] {
+            let linked = LinkedModule::link(
+                builders::module(vec![builders::process("done", vec![], body)], vec![]),
+                lash_vm::LashVmHostEnvironment::default(),
+            )
+            .expect("try process links");
+            let Some(TypeExpr::Process(ty)) = linked.artifact.process_type("done") else {
+                panic!("process signature")
+            };
+            assert_eq!(
+                ty.as_signature().expect("complete signature").output(),
+                &expected
+            );
+        }
     }
 
     #[test]

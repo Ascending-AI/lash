@@ -148,44 +148,6 @@ fn child_mutation_invalidates_materialized_ancestor_cache() {
 }
 
 #[test]
-fn map_and_set_use_same_value_zero_without_reordering_updates() {
-    let mut heap = Heap::default();
-    let (Value::Ref(map), _) = heap.allocate_map(Vec::new()).expect("Map") else {
-        unreachable!()
-    };
-    heap.map_set(map, Value::Number(f64::NAN), Value::String("first".into()))
-        .expect("insert NaN");
-    heap.map_set(map, Value::Number(-0.0), Value::String("zero".into()))
-        .expect("insert negative zero");
-    heap.map_set(
-        map,
-        Value::Number(f64::NAN),
-        Value::String("updated".into()),
-    )
-    .expect("update NaN");
-    heap.map_set(map, Value::Number(0.0), Value::String("same zero".into()))
-        .expect("update zero");
-    let entries = heap.map_entries(map).expect("read Map").expect("Map kind");
-    assert_eq!(entries.len(), 2);
-    assert!(matches!(entries[0].0, Value::Number(value) if value.is_nan()));
-    assert_eq!(entries[0].1, Value::String("updated".into()));
-    assert!(matches!(entries[1].0, Value::Number(value) if value.to_bits() == 0.0_f64.to_bits()));
-    assert_eq!(entries[1].1, Value::String("same zero".into()));
-
-    let (Value::Ref(set), _) = heap.allocate_set(Vec::new()).expect("Set") else {
-        unreachable!()
-    };
-    for value in [f64::NAN, f64::NAN, -0.0, 0.0] {
-        heap.set_add(set, Value::Number(value))
-            .expect("add Set value");
-    }
-    let values = heap.set_values(set).expect("read Set").expect("Set kind");
-    assert_eq!(values.len(), 2);
-    assert!(matches!(values[0], Value::Number(value) if value.is_nan()));
-    assert!(matches!(values[1], Value::Number(value) if value.to_bits() == 0.0_f64.to_bits()));
-}
-
-#[test]
 fn exotic_member_apis_import_inline_compounds_before_storage() {
     let mut heap = Heap::default();
     let inline_list = || Value::List(vec![Value::Number(1.0)].into());

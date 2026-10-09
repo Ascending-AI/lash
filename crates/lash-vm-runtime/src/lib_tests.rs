@@ -215,29 +215,6 @@ fn from_input_schema_tool_imports_contract_marker_and_default() {
 }
 
 #[test]
-fn representable_type_schema_subset_round_trips() {
-    let types = [
-        lash_vm::TypeExpr::Any,
-        lash_vm::TypeExpr::Str,
-        lash_vm::TypeExpr::Int,
-        lash_vm::TypeExpr::Float,
-        lash_vm::TypeExpr::Bool,
-        lash_vm::TypeExpr::Null,
-        lash_vm::TypeExpr::Enum(vec!["fast".into(), "safe".into()]),
-        lash_vm::TypeExpr::List(Box::new(lash_vm::TypeExpr::Str)),
-        lash_vm::TypeExpr::union(vec![lash_vm::TypeExpr::Str, lash_vm::TypeExpr::Null]),
-    ];
-
-    for expected in types {
-        let schema = lash_vm_type_expr_schema(&expected);
-        assert_eq!(
-            lash_vm::json_schema_to_type_expr(&schema).expect("an exported schema imports"),
-            expected
-        );
-    }
-}
-
-#[test]
 fn dotted_operation_names_are_rejected() {
     let tool = lash_core::ToolDefinition::raw(
         "tool:test/update_plan",

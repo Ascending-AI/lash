@@ -305,10 +305,7 @@ mod tests {
             validate(&[0xca, 0, 0, 0, 0], 1),
             Err(SnapshotDecodeError::NonCanonicalEncoding { .. })
         ));
-    }
 
-    #[test]
-    fn canonical_binary_widths_accept_complete_bodies_and_refuse_truncation() {
         assert_eq!(
             validate(&[0x92, 0xc4, 1, 0, 0xc4, 1, 1], 2),
             Ok(()),

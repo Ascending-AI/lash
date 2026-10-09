@@ -66,30 +66,6 @@ fn process_signature_construction_and_wire_shape_are_checked() {
 }
 
 #[test]
-fn process_signature_refuses_invalid_names_without_broadening_type_validation() {
-    assert!(matches!(
-        ProcessSignature::try_new(vec![param("1bad", TypeExpr::Str)], TypeExpr::Bool),
-        Err(ProcessSignatureError::InvalidParameterName { .. })
-    ));
-    assert!(matches!(
-        ProcessSignature::try_new(vec![param("if", TypeExpr::Str)], TypeExpr::Bool),
-        Err(ProcessSignatureError::InvalidParameterName { .. })
-    ));
-    assert!(matches!(
-        ProcessSignature::try_new(
-            vec![param("value", TypeExpr::Str), param("value", TypeExpr::Int)],
-            TypeExpr::Bool,
-        ),
-        Err(ProcessSignatureError::DuplicateParameter { .. })
-    ));
-    ProcessSignature::try_new(
-        vec![param("value", TypeExpr::Enum(Vec::new()))],
-        TypeExpr::union(vec![TypeExpr::Str, TypeExpr::Int]),
-    )
-    .expect("FIG-2879 does not add unrelated TypeExpr restrictions");
-}
-
-#[test]
 fn union_members_hold_at_least_two_variants() {
     // FIG-3269: the two-member floor is structural. `UnionMembers::new`
     // refuses degenerate member lists and `TypeExpr::union` collapses

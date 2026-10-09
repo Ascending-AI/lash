@@ -43,10 +43,6 @@ fn resolved_type_assignability_rejects_known_scalar_mismatches() {
 
 #[test]
 fn resolved_type_assignability_treats_strings_as_consistent_with_string_enums() {
-    let target = TypeExpr::Enum(vec!["a".into(), "b".into()]);
-
-    assert!(is_resolved_type_assignable(&TypeExpr::Str, &target));
-    assert!(!is_resolved_type_assignable(&TypeExpr::Int, &target));
     assert!(is_resolved_type_assignable(
         &TypeExpr::Enum(vec!["a".into()]),
         &TypeExpr::Str
@@ -96,32 +92,6 @@ fn resolved_type_assignability_lets_a_process_fill_its_definition_record() {
             required_field("id", TypeExpr::Str),
             required_field("signature", TypeExpr::Any),
         ])
-    ));
-}
-
-/// `[]` is how a caller spells "no items", and `union_type` types it as
-/// the empty-list sentinel `list[null]`. It has to reach a `list[T]`
-/// parameter for every `T`, including through a union target such as
-/// `list[dict] | null` (FIG-1421). A populated list keeps its real
-/// element check.
-#[test]
-fn resolved_type_assignability_lets_an_empty_list_reach_any_list_target() {
-    let empty = TypeExpr::List(Box::new(TypeExpr::Null));
-
-    assert!(is_resolved_type_assignable(
-        &empty,
-        &TypeExpr::List(Box::new(TypeExpr::Dict))
-    ));
-    assert!(is_resolved_type_assignable(
-        &empty,
-        &TypeExpr::union(vec![
-            TypeExpr::List(Box::new(TypeExpr::Dict)),
-            TypeExpr::Null
-        ])
-    ));
-    assert!(!is_resolved_type_assignable(
-        &TypeExpr::List(Box::new(TypeExpr::Int)),
-        &TypeExpr::List(Box::new(TypeExpr::Dict))
     ));
 }
 

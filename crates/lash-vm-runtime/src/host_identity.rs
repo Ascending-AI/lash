@@ -168,78 +168,6 @@ mod tests {
         );
     }
 
-    /// The defect the cell key exists to prevent: one turn, two cells, one
-    /// program.
-    ///
-    /// A leaf id is a node id plus an occurrence counted per VM execution, and
-    /// each cell gets a fresh VM, so two cells of one turn running the same
-    /// source produce the same node id at the same occurrence. The opener is
-    /// the same for both — it is the turn — so without the cell's own
-    /// execution key the two mint one identity.
-    #[test]
-    fn two_cells_of_one_turn_running_one_program_mint_distinct_identities() {
-        let opener = EffectOpener::turn("session-1", "turn-7");
-        let first = LashVmHostIdentities::cell(opener.clone(), "exec-code:1");
-        let second = LashVmHostIdentities::cell(opener.clone(), "exec-code:2");
-
-        assert_eq!(
-            first.opener(),
-            second.opener(),
-            "both cells belong to one opener; that is the point"
-        );
-        assert_ne!(
-            first.call_id(0),
-            second.call_id(0),
-            "two cells of one turn must not mint one leaf identity"
-        );
-        assert_ne!(
-            first.child_call_id(0, 0),
-            second.child_call_id(0, 0),
-            "two cells of one turn must not mint one child identity"
-        );
-    }
-
-    /// A cell under a session operation opens on that operation, and two
-    /// cells of one operation stay apart: the cell's own replay key is what
-    /// keeps them apart (ADR 0099 §1).
-    #[test]
-    fn two_cells_of_one_session_operation_mint_distinct_identities() {
-        let scope = ExecutionScope::session_operation("session-1", "operation-3");
-        let opener = EffectOpener::for_scope(&AdmittedScope::new(scope))
-            .expect("a session operation is an opener");
-        assert_eq!(
-            opener,
-            EffectOpener::session_operation("session-1", "operation-3")
-        );
-        let first = LashVmHostIdentities::cell(opener.clone(), "exec-code:1");
-        let second = LashVmHostIdentities::cell(opener.clone(), "exec-code:2");
-
-        assert_eq!(
-            first.opener(),
-            second.opener(),
-            "both cells belong to one operation; that is the point"
-        );
-        assert_ne!(
-            first.call_id(0),
-            second.call_id(0),
-            "two cells of one operation must not mint one leaf identity"
-        );
-        assert_ne!(
-            first.child_call_id(0, 0),
-            second.child_call_id(0, 0),
-            "two cells of one operation must not mint one child identity"
-        );
-        assert_ne!(
-            opener,
-            EffectOpener::for_scope(&AdmittedScope::new(ExecutionScope::turn(
-                "session-1",
-                "operation-3"
-            )),)
-            .expect("a turn is an opener"),
-            "a session operation is not a turn that happens to spell its id"
-        );
-    }
-
     /// The defect the canonical encoding exists for: `:`-joined free-form
     /// components are not injective.
     ///
@@ -371,5 +299,40 @@ mod tests {
             "exec-code:1:lk2:0000000007"
         );
         assert_eq!(cell.namespace().seal(), "exec-code:1:lk2:~seal");
+
+        let scope = ExecutionScope::session_operation("session-1", "operation-3");
+        let opener = EffectOpener::for_scope(&AdmittedScope::new(scope))
+            .expect("a session operation is an opener");
+        assert_eq!(
+            opener,
+            EffectOpener::session_operation("session-1", "operation-3")
+        );
+        let first = LashVmHostIdentities::cell(opener.clone(), "exec-code:1");
+        let second = LashVmHostIdentities::cell(opener.clone(), "exec-code:2");
+
+        assert_eq!(
+            first.opener(),
+            second.opener(),
+            "both cells belong to one operation; that is the point"
+        );
+        assert_ne!(
+            first.call_id(0),
+            second.call_id(0),
+            "two cells of one operation must not mint one leaf identity"
+        );
+        assert_ne!(
+            first.child_call_id(0, 0),
+            second.child_call_id(0, 0),
+            "two cells of one operation must not mint one child identity"
+        );
+        assert_ne!(
+            opener,
+            EffectOpener::for_scope(&AdmittedScope::new(ExecutionScope::turn(
+                "session-1",
+                "operation-3"
+            )),)
+            .expect("a turn is an opener"),
+            "a session operation is not a turn that happens to spell its id"
+        );
     }
 }
