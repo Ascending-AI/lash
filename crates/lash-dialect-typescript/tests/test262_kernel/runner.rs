@@ -582,3 +582,18 @@ fn json_stringify_rechecks_the_kind_after_to_json() {
         ]),
     );
 }
+
+/// Array search returns immediately for an empty receiver, before fromIndex coercion.
+#[test]
+fn empty_array_search_does_not_convert_from_index() {
+    assert_finished(
+        execute(
+            "const from = {valueOf() { throw new Error('converted'); }}; finish([ [].indexOf(1, from), [].lastIndexOf(1, from), [].includes(1, from) ]);",
+        ),
+        Datum::List(vec![
+            Datum::Float(lash_kernel_doc::Float::new(-1.0)),
+            Datum::Float(lash_kernel_doc::Float::new(-1.0)),
+            Datum::Bool(false),
+        ]),
+    );
+}

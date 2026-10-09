@@ -419,6 +419,7 @@ errors "type_error", "RangeError"
 charge 8
 body {
   let length = invoke ts.array.length(this)
+  if eq(length, 0) { return -1.0 }
   let search = invoke ts.array.argument(args, 0)
   let input = invoke ts.array.argument(args, 1)
   let from = invoke ts.array.integer(input)
@@ -443,6 +444,7 @@ errors "type_error", "RangeError"
 charge 8
 body {
   let length = invoke ts.array.length(this)
+  if eq(length, 0) { return -1.0 }
   let search = invoke ts.array.argument(args, 0)
   let from = num.sub(length, 1)
   if num.lt(1, list.len(args)) { let array_arg_1 = args[1]
@@ -468,6 +470,7 @@ errors "type_error", "RangeError"
 charge 8
 body {
   let length = invoke ts.array.length(this)
+  if eq(length, 0) { return false }
   let search = invoke ts.array.argument(args, 0)
   let input = invoke ts.array.argument(args, 1)
   let from = invoke ts.array.integer(input)
