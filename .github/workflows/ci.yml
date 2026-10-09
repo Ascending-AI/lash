@@ -2056,6 +2056,9 @@ jobs:
       - name: Check the code-mode dialect boundary
         run: python3 scripts/check-dialect-boundary.py
 
+      - name: Check that the kernel crates depend on nothing else in lash
+        run: python3 scripts/check-kernel-boundary.py
+
       - name: Check the durability engine's SQL boundary
         run: python3 scripts/check-durable-sql.py
 

@@ -935,6 +935,27 @@ PACKAGE_DEPS = {
             "serde_json": "//third-party/rust:p0313"
         }
     },
+    "lash-kernel-doc": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "num_bigint": "//third-party/rust:p0210",
+            "num_traits": "//third-party/rust:p0216",
+            "schemars": "//third-party/rust:p0299",
+            "serde": "//third-party/rust:p0307",
+            "serde_json": "//third-party/rust:p0313",
+            "sha2": "//third-party/rust:p0319",
+            "thiserror": "//third-party/rust:p0364"
+        }
+    },
+    "lash-kernel-vm": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "thiserror": "//third-party/rust:p0364"
+        }
+    },
     "lash-perf": {
         "build": {},
         "dev": {

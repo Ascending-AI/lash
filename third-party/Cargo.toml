@@ -1890,7 +1890,7 @@ features = []
 package = "serde_json"
 version = "=1.0.150"
 default-features = false
-features = ["alloc", "default", "float_roundtrip", "raw_value", "std"]
+features = ["alloc", "default", "float_roundtrip", "raw_value", "std", "unbounded_depth"]
 
 [dependencies.p0314]
 package = "serde_path_to_error"

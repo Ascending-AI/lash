@@ -1159,6 +1159,7 @@ schema_documents(
         "//crates/lash-vm:workflow_schema_generator__bin",
         "//crates/lash-trace:trace_schema_generator__bin",
         "//crates/lash-core-execution:process_event_schema_generator__bin",
+        "//crates/lash-kernel-doc:kernel_schema_generator__bin",
     ],
     script = "scripts/generate-workflow-schemas.py",
 )

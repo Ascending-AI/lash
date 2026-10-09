@@ -1,0 +1,25 @@
+[package]
+name = "lash-kernel-vm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The lash kernel's machine: runs an admitted document as tasks, charges it, parks it and resumes it."
+keywords = ["lash", "kernel", "workflow", "interpreter"]
+categories = ["emulators"]
+publish = false
+
+[lib]
+name = "lash_kernel_vm"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-doc = { workspace = true }
+thiserror = { workspace = true }

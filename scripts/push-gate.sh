@@ -61,6 +61,7 @@ run_release_script_tests() {
   step "Repository script tests"
   python3 scripts/test_check_facade_only_examples.py
   python3 scripts/test_check_dialect_boundary.py
+  python3 scripts/test_check_kernel_boundary.py
   python3 scripts/test_check_feature_coverage.py
   python3 scripts/check_feature_coverage.py check
   python3 scripts/test_check_judged_build_geometry.py
@@ -201,6 +202,9 @@ run_rust_source_guards() {
 
   step "Dialect boundary guard"
   python3 scripts/check-dialect-boundary.py
+
+  step "Kernel boundary guard"
+  python3 scripts/check-kernel-boundary.py
 
   step "Durability engine SQL guard"
   python3 scripts/check-durable-sql.py

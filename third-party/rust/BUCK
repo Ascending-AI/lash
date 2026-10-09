@@ -18467,6 +18467,7 @@ third_party_rust_library(
         "float_roundtrip",
         "raw_value",
         "std",
+        "unbounded_depth",
     ],
     platform = {
         "linux-x86_64": dict(),
@@ -18510,6 +18511,7 @@ third_party_rust_binary(
         "float_roundtrip",
         "raw_value",
         "std",
+        "unbounded_depth",
     ],
     platform = {
         "linux-x86_64": dict(),
@@ -18539,6 +18541,7 @@ third_party_buildscript_run(
         "float_roundtrip",
         "raw_value",
         "std",
+        "unbounded_depth",
     ],
     platform = {
         "linux-x86_64": dict(),

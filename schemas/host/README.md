@@ -26,9 +26,14 @@ target runs all of them:
 | `workflow-execution-overlay` | `WorkflowExecutionOverlay` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
 | `process-effect-outcome` | `process.effect_outcome` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
 | `process-effect-omissions` | `process.effect_omissions` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
+| `kernel-document` | kernel `Document` | `KERNEL_VERSION` | `crates/lash-kernel-doc/src/bin/kernel_schema_generator.rs` |
+| `kernel-annotations` | kernel `Annotations` | `KERNEL_VERSION` | `crates/lash-kernel-doc/src/bin/kernel_schema_generator.rs` |
+| `kernel-function` | kernel `FunctionDefinition` | `KERNEL_VERSION` | `crates/lash-kernel-doc/src/bin/kernel_schema_generator.rs` |
 
-The runtime registers and validates the process-event payload schemas. These
-six documents describe their owners' stored or projection contracts. Lash
+The runtime registers and validates the process-event payload schemas. The
+three kernel documents are the stored forms of `lash-kernel-doc`
+([kernel semantics](../../docs/kernel/semantics.md), `K-DOC-004`). These
+documents describe their owners' stored or projection contracts. Lash
 ships no engine wire protocol; hosts own transport DTOs and compatibility
 ([ADR 0136](../../docs/adr/0136-hosts-own-their-wire-contracts.md)).
 

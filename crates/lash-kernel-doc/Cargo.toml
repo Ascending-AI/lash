@@ -1,0 +1,36 @@
+[package]
+name = "lash-kernel-doc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The lash kernel's document: values, types, forms, function definitions, the native-function interface, validation and the kernel text notation."
+keywords = ["lash", "kernel", "workflow", "document"]
+categories = ["data-structures", "parser-implementations"]
+publish = false
+
+[lib]
+name = "lash_kernel_doc"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+num-bigint = { workspace = true }
+num-traits = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+# `unbounded_depth`: the decoders bound nesting themselves (`K-DOC-006`), at a
+# depth serde_json's fixed limit of 128 would refuse.
+serde_json = { workspace = true, features = ["unbounded_depth"] }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+[[bin]]
+name = "kernel_schema_generator"
+path = "src/bin/kernel_schema_generator.rs"

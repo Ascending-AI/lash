@@ -1258,6 +1258,7 @@ SCRIPT_PROOFS = {
     "scripts/check-substrate-port-ledger.py": "scripts/test_check_substrate_port_ledger.py",
     "scripts/check-substrate-todos.py": "scripts/test_check_substrate_todos.py",
     "scripts/check-dialect-boundary.py": "scripts/test_check_dialect_boundary.py",
+    "scripts/check-kernel-boundary.py": "scripts/test_check_kernel_boundary.py",
     "scripts/check-history-readers.sh": "scripts/test_ci_plan.py",
     "scripts/check-guarded-transactions.py": "scripts/test_check_guarded_transactions.py",
     "scripts/guarded-transaction-readonly.txt": "scripts/test_check_guarded_transactions.py",

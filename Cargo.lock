@@ -2740,6 +2740,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-kernel-doc"
+version = "0.0.0-dev"
+dependencies = [
+ "num-bigint",
+ "num-traits",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "lash-kernel-vm"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-doc",
+ "thiserror",
+]
+
+[[package]]
 name = "lash-perf"
 version = "0.0.0-dev"
 dependencies = [
