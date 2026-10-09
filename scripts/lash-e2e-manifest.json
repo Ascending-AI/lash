@@ -2537,9 +2537,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, Run parks and their redrive, went with L3s (FIG-5196); L13 (FIG-5193) re-scopes it to process parks (planned:P1) or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and the facade failover runbook's a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
         },
         {
           "variant": "default",
@@ -2568,9 +2569,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, Run parks and their redrive, went with L3s (FIG-5196); L13 (FIG-5193) re-scopes it to process parks (planned:P1) or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and the facade failover runbook's a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
         },
         {
           "variant": "default",
@@ -2599,9 +2601,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, Run parks and their redrive, went with L3s (FIG-5196); L13 (FIG-5193) re-scopes it to process parks (planned:P1) or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and the facade failover runbook's a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
         },
         {
           "variant": "default",
@@ -2630,9 +2633,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, Run parks and their redrive, went with L3s (FIG-5196); L13 (FIG-5193) re-scopes it to process parks (planned:P1) or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: Run parks and their redrive went with the turn park tables and feed that 0cc1b81d98 (FIG-5196) deleted. A parked process is an actor waiting on a durable key: it resumes from its stored state on whichever node claims it, and no catalogue lookup is left to forbid. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once (SQLite memory, SQLite file, PostgreSQL), cell_restore_laws processes_await_in_a_cell_parks_and_resumes_on_*, and the facade failover runbook's a_process_killed_mid_wait_finishes_on_another_node_with_its_start_key_feed_and_state."
         }
       ],
       "setup": "Turn/process/operation owners; park before and after persisted commit on file SQLite/PG.",
@@ -2697,9 +2701,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: continuation capture and adoption lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A turn has no continuation to adopt: a cancel ends the turn once and the next input starts a new turn on the session's committed head. Its laws hold in lash-sim crash_matrix a_turn_cancel_cut_at_every_label_ends_the_turn_once (every tier) and turn_phases a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_*."
         },
         {
           "variant": "post-adoption",
@@ -2724,9 +2729,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: continuation capture and adoption lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A turn has no continuation to adopt: a cancel ends the turn once and the next input starts a new turn on the session's committed head. Its laws hold in lash-sim crash_matrix a_turn_cancel_cut_at_every_label_ends_the_turn_once (every tier) and turn_phases a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_*."
         },
         {
           "variant": "capture-adoption",
@@ -2751,9 +2757,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: continuation capture and adoption lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A turn has no continuation to adopt: a cancel ends the turn once and the next input starts a new turn on the session's committed head. Its laws hold in lash-sim crash_matrix a_turn_cancel_cut_at_every_label_ends_the_turn_once (every tier) and turn_phases a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_*."
         },
         {
           "variant": "post-adoption",
@@ -2778,9 +2785,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: continuation capture and adoption lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A turn has no continuation to adopt: a cancel ends the turn once and the next input starts a new turn on the session's committed head. Its laws hold in lash-sim crash_matrix a_turn_cancel_cut_at_every_label_ends_the_turn_once (every tier) and turn_phases a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_*."
         },
         {
           "variant": "capture-adoption",
@@ -2805,9 +2813,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: continuation capture and adoption lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A turn has no continuation to adopt: a cancel ends the turn once and the next input starts a new turn on the session's committed head. Its laws hold in lash-sim crash_matrix a_turn_cancel_cut_at_every_label_ends_the_turn_once (every tier) and turn_phases a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_*."
         },
         {
           "variant": "post-adoption",
@@ -2832,9 +2841,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: continuation capture and adoption lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A turn has no continuation to adopt: a cancel ends the turn once and the next input starts a new turn on the session's committed head. Its laws hold in lash-sim crash_matrix a_turn_cancel_cut_at_every_label_ends_the_turn_once (every tier) and turn_phases a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_*."
         },
         {
           "variant": "capture-adoption",
@@ -2859,9 +2869,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: continuation capture and adoption lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A turn has no continuation to adopt: a cancel ends the turn once and the next input starts a new turn on the session's committed head. Its laws hold in lash-sim crash_matrix a_turn_cancel_cut_at_every_label_ends_the_turn_once (every tier) and turn_phases a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_*."
         },
         {
           "variant": "post-adoption",
@@ -2886,9 +2897,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, capture and adoption of a continuation, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: continuation capture and adoption lived in the Run journal that c1a00eb8dd (FIG-5174) deleted. A turn has no continuation to adopt: a cancel ends the turn once and the next input starts a new turn on the session's committed head. Its laws hold in lash-sim crash_matrix a_turn_cancel_cut_at_every_label_ends_the_turn_once (every tier) and turn_phases a_cancel_at_the_admission_cut_withdraws_or_cancels_exactly_once_on_*."
         }
       ],
       "setup": "Capture old turn/process then admit successor; identical new input.",
@@ -4077,9 +4089,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, segment handover, went with L7b (FIG-5198); L13 (FIG-5193) re-scopes it to a process resumed from its snapshot on another node, or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: segment handover went with SegmentHandover and the process segment handover tables that 96558d9d7b (FIG-5198) deleted. A process is not handed over: its actor's stored state moves with its lease. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once and a_code_cell_cut_at_every_label_resumes_from_its_snapshot (resumed from the snapshot on the other node, Once interrupted and never re-run), lash-durable-test declared_start_crash_laws (no duplicate start), and the failover runbooks' kill-mid-wait cases."
         },
         {
           "variant": "default",
@@ -4104,9 +4117,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, segment handover, went with L7b (FIG-5198); L13 (FIG-5193) re-scopes it to a process resumed from its snapshot on another node, or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: segment handover went with SegmentHandover and the process segment handover tables that 96558d9d7b (FIG-5198) deleted. A process is not handed over: its actor's stored state moves with its lease. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once and a_code_cell_cut_at_every_label_resumes_from_its_snapshot (resumed from the snapshot on the other node, Once interrupted and never re-run), lash-durable-test declared_start_crash_laws (no duplicate start), and the failover runbooks' kill-mid-wait cases."
         },
         {
           "variant": "default",
@@ -4131,9 +4145,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, segment handover, went with L7b (FIG-5198); L13 (FIG-5193) re-scopes it to a process resumed from its snapshot on another node, or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: segment handover went with SegmentHandover and the process segment handover tables that 96558d9d7b (FIG-5198) deleted. A process is not handed over: its actor's stored state moves with its lease. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once and a_code_cell_cut_at_every_label_resumes_from_its_snapshot (resumed from the snapshot on the other node, Once interrupted and never re-run), lash-durable-test declared_start_crash_laws (no duplicate start), and the failover runbooks' kill-mid-wait cases."
         },
         {
           "variant": "default",
@@ -4158,9 +4173,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, segment handover, went with L7b (FIG-5198); L13 (FIG-5193) re-scopes it to a process resumed from its snapshot on another node, or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: segment handover went with SegmentHandover and the process segment handover tables that 96558d9d7b (FIG-5198) deleted. A process is not handed over: its actor's stored state moves with its lease. Its laws hold in lash-sim crash_matrix a_process_cut_at_every_label_resolves_waits_and_cascades_once and a_code_cell_cut_at_every_label_resumes_from_its_snapshot (resumed from the snapshot on the other node, Once interrupted and never re-run), lash-durable-test declared_start_crash_laws (no duplicate start), and the failover runbooks' kill-mid-wait cases."
         }
       ],
       "setup": "RLM process with pending source, held loser, state, retained material and declared start.",
@@ -4206,9 +4222,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, retained material transferred to a successor, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: retained material transferred to a successor lived in the Run journal and RestoreRunMaterial that c1a00eb8dd (FIG-5174) deleted. A call's admitted material is the store's own. Its laws hold in turn_phases a_call_whose_admitted_body_is_lost_settles_unsent, which settles a call whose admitted body is lost without sending it again, and the cross-backend differential's corrupt_prior_checkpoint_refuses_read_modify_write on SQLite and PostgreSQL."
         },
         {
           "variant": "default",
@@ -4233,9 +4250,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, retained material transferred to a successor, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: retained material transferred to a successor lived in the Run journal and RestoreRunMaterial that c1a00eb8dd (FIG-5174) deleted. A call's admitted material is the store's own. Its laws hold in turn_phases a_call_whose_admitted_body_is_lost_settles_unsent, which settles a call whose admitted body is lost without sending it again, and the cross-backend differential's corrupt_prior_checkpoint_refuses_read_modify_write on SQLite and PostgreSQL."
         },
         {
           "variant": "default",
@@ -4260,9 +4278,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, retained material transferred to a successor, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: retained material transferred to a successor lived in the Run journal and RestoreRunMaterial that c1a00eb8dd (FIG-5174) deleted. A call's admitted material is the store's own. Its laws hold in turn_phases a_call_whose_admitted_body_is_lost_settles_unsent, which settles a call whose admitted body is lost without sending it again, and the cross-backend differential's corrupt_prior_checkpoint_refuses_read_modify_write on SQLite and PostgreSQL."
         },
         {
           "variant": "default",
@@ -4287,9 +4306,10 @@
             "junit",
             "provenance"
           ],
-          "state": "held",
-          "hold_reason": "its subject, retained material transferred to a successor, went with L4 (FIG-5174); L13 (FIG-5193) re-scopes it or retires it",
-          "registration": null
+          "state": "retired",
+          "hold_reason": null,
+          "registration": null,
+          "disposition": "Retired, subject deleted: retained material transferred to a successor lived in the Run journal and RestoreRunMaterial that c1a00eb8dd (FIG-5174) deleted. A call's admitted material is the store's own. Its laws hold in turn_phases a_call_whose_admitted_body_is_lost_settles_unsent, which settles a call whose admitted body is lost without sending it again, and the cross-backend differential's corrupt_prior_checkpoint_refuses_read_modify_write on SQLite and PostgreSQL."
         }
       ],
       "setup": "Transfer real retained result to successor; ensure owner-qualified reference published.",

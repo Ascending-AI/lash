@@ -35,13 +35,17 @@ use file SQLite; S30 uses memory SQLite. Full and release select the same
 deterministic catalogue; the paid live-provider cases S35/S36 are a separate
 `live` tier.
 
-On 2026-10-08 the release catalogue holds 134 rows:
+On 2026-10-09 the release catalogue holds 134 rows:
 - 86 are `ready`.
-- 28 are `retired`: S10, S13, S24, S33 and S09's before-intent variant. Their
-  subjects went with the Run journal (FIG-5174) or with build generations and
-  finalize (FIG-5200).
-- 20 are `held`: L13 (FIG-5193) re-scopes S22, S23, S31 and S32, so a release
-  run refuses until it lands.
+- 48 are `retired`:
+  - S10, S13, S24, S33 and S09's before-intent variant. Their subjects went
+    with the Run journal (FIG-5174) or with build generations and finalize
+    (FIG-5200).
+  - S22, S23, S31 and S32, retired by L13 (FIG-5193). Their subjects went
+    with turn parks (FIG-5196), the Run journal (FIG-5174) and segment
+    handover (FIG-5198). Each disposition names the durable laws that hold
+    the guarantee that survives.
+- None is `held`.
 
 ## The harness
 

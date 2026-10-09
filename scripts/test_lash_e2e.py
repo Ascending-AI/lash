@@ -92,9 +92,9 @@ class ReceiptLaws(unittest.TestCase):
         live = e2e.plan(self.manifest, "b" * 64, "live", [], SOURCE)
         self.assertEqual(live["guarded"], [])
         with patch.object(e2e, "ancestor", return_value=True):
-            final = e2e.plan(self.manifest, "b" * 64, "full", ["S22"], SOURCE)
+            final = e2e.plan(self.manifest, "b" * 64, "full", ["S18"], SOURCE)
         self.assertEqual(final["guarded"], [])
-        self.assertEqual({g["ticket"] for r in final["cases"] for g in r["arc_guards"]}, {f"FIG-{i}" for i in range(4896, 4901)})
+        self.assertEqual({g["ticket"] for r in final["cases"] for g in r["arc_guards"]}, {"FIG-4897"})
         # Held-row refusal is a receipt rule independent of which scenarios
         # currently have resume oracles registered.
         manifest = copy.deepcopy(self.manifest)
@@ -392,9 +392,17 @@ class ReceiptLaws(unittest.TestCase):
             e2e.reconcile(expected, receipt, missing, manifest)
 
     def test_r8_ready_selection_excludes_held_rows_and_marks_the_tier_incomplete(self):
-        planned = e2e.plan(self.manifest, "b" * 64, "full", [], SOURCE, [], True)
+        # The rule is independent of which rows the real catalogue holds.
+        manifest = copy.deepcopy(self.manifest)
+        for scenario in manifest["scenarios"]:
+            if scenario["id"] == "S26":
+                for row in scenario["cases"]:
+                    if row["leg"] == "resume":
+                        row.update(state="held", hold_reason="synthetic missing resume oracle",
+                                   registration=None)
+        planned = e2e.plan(manifest, "b" * 64, "full", [], SOURCE, [], True)
         held_keys = {e2e.case_key({"scenario": scenario["id"], **row})
-                     for scenario in self.manifest["scenarios"] for row in scenario["cases"]
+                     for scenario in manifest["scenarios"] for row in scenario["cases"]
                      if "full" in row["tiers"] and row["state"] == "held"}
         self.assertTrue(held_keys)
         self.assertEqual(set(planned["excluded_held"]), held_keys)
@@ -402,7 +410,7 @@ class ReceiptLaws(unittest.TestCase):
         self.assertEqual(planned["held"], [])
         self.assertEqual(planned["selected"], len(planned["cases"]))
         with self.assertRaisesRegex(ValueError, "release certification"):
-            e2e.plan(self.manifest, "b" * 64, "release", [], SOURCE, [], True)
+            e2e.plan(manifest, "b" * 64, "release", [], SOURCE, [], True)
 
         manifest = copy.deepcopy(self.manifest)
         for scenario in manifest["scenarios"]:
