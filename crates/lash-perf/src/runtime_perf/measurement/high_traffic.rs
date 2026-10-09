@@ -468,27 +468,30 @@ async fn run_high_traffic_operation(
     session.set_turn_phase_probe(probe.clone()).await;
     let operation_started = Instant::now();
     let mut durable_queue_depth = 0;
-    let turn_usage = if kind == HighTrafficOperationKind::Queued {
-        let handle = session
-            .send(TurnInput::text(format!(
-                "load-kind:{kind} operation:{ordinal}"
-            )))
-            .id(lash_core::TurnId::fixture(format!(
-                "runtime-perf-load-{ordinal}"
-            )))
-            .await?;
-        durable_queue_depth = session.durable().pending_turn_inputs().await?.len() as u64;
-        let report = handle.output().await?.result;
-        if !matches!(report.outcome, lash::TurnOutcome::Finished(_)) {
-            anyhow::bail!(
-                "queued high-traffic operation {ordinal} did not finish: {:?}",
-                report.outcome
-            );
-        }
-        LlmUsage::default()
-    } else {
-        run_high_traffic_direct_turn(session, ordinal, kind).await?
-    };
+    let turn_usage = crate::perf_support::async_operations::observe(kind.as_str(), async {
+        anyhow::Ok(if kind == HighTrafficOperationKind::Queued {
+            let handle = session
+                .send(TurnInput::text(format!(
+                    "load-kind:{kind} operation:{ordinal}"
+                )))
+                .id(lash_core::TurnId::fixture(format!(
+                    "runtime-perf-load-{ordinal}"
+                )))
+                .await?;
+            durable_queue_depth = session.durable().pending_turn_inputs().await?.len() as u64;
+            let report = handle.output().await?.result;
+            if !matches!(report.outcome, lash::TurnOutcome::Finished(_)) {
+                anyhow::bail!(
+                    "queued high-traffic operation {ordinal} did not finish: {:?}",
+                    report.outcome
+                );
+            }
+            LlmUsage::default()
+        } else {
+            run_high_traffic_direct_turn(session, ordinal, kind).await?
+        })
+    })
+    .await?;
     let latency_ms = elapsed_ms(operation_started);
     let pre_phase_dispatch_ms = probe.first_phase_delay_ms(operation_started);
     let mut phase_profile = probe.take_completed();

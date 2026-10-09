@@ -89,6 +89,7 @@ opentelemetry_sdk = { version = "0.33", features = ["metrics", "testing"] }
 stats_alloc = "0.1"
 dhat = { version = "0.3", optional = true }
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tokio-metrics = { version = "0.5.2", default-features = false }
 tokio-util = { workspace = true, features = ["rt"] }
 uuid = { workspace = true, features = ["v4"] }
 

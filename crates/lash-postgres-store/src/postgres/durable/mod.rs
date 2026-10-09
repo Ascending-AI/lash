@@ -48,13 +48,14 @@ use lash_store_sql::durable::session_mail::SessionMailStatements;
 use lash_store_sql::durable::{ActorStatements, MailStatements, NodeStatements};
 use sqlx::postgres::PgRow;
 use sqlx::{PgConnection, PgPool, Row};
-use tokio::sync::OwnedSemaphorePermit;
 
 use crate::StoreError;
 use crate::guarded_tx::{GuardedTx, WriterFence, begin_durable};
 use crate::host::{RolePools, TransactionPrelude};
 use crate::support::store_sqlx_error;
 
+#[path = "../durable_admission.rs"]
+mod admission;
 mod park_events;
 pub(crate) mod processes;
 mod prompts;
@@ -472,71 +473,6 @@ impl PostgresDurableStore {
     }
 
     /// Where `capacity`'s operations run.
-    fn route(&self, capacity: CommitCapacity) -> Route<'_> {
-        let pools = &*self.pools;
-        let preludes = &pools.preludes;
-        match capacity {
-            CommitCapacity::Renewal => Route {
-                pool: &pools.renewal,
-                prelude: &preludes.renewal,
-                admitted: false,
-            },
-            CommitCapacity::Scheduler => Route {
-                pool: &pools.scheduler,
-                prelude: &preludes.scheduler,
-                admitted: false,
-            },
-            CommitCapacity::Critical => Route {
-                pool: &pools.critical,
-                prelude: &preludes.durable,
-                admitted: false,
-            },
-            CommitCapacity::Work => Route {
-                pool: &pools.work,
-                prelude: &preludes.durable,
-                admitted: true,
-            },
-        }
-    }
-
-    /// Run `operation` on `capacity` within its deadline, admitted first
-    /// when it runs on the work pool. The permit is the operation's: it is
-    /// released when the operation ends, never held past it.
-    async fn within<T>(
-        &self,
-        capacity: CommitCapacity,
-        operation: impl std::future::Future<Output = Result<T, DurableError>>,
-    ) -> Result<T, DurableError> {
-        let route = self.route(capacity);
-        // Boxed: every store operation runs through here, and its body is
-        // the largest future of the call.
-        let operation = Box::pin(operation);
-        route
-            .prelude
-            .bounded(async {
-                let _admission = self.admit(&route).await?;
-                operation.await
-            })
-            .await
-            .unwrap_or_else(|deadline| Err(deadline_failure(deadline)))
-    }
-
-    async fn admit(&self, route: &Route<'_>) -> Result<Option<OwnedSemaphorePermit>, DurableError> {
-        if !route.admitted {
-            return Ok(None);
-        }
-        Arc::clone(&self.pools.admission)
-            .acquire_owned()
-            .await
-            .map(Some)
-            .map_err(|_| {
-                DurableError::Store(StoreFailure {
-                    kind: StoreFailureKind::Unavailable,
-                    message: "the durable store's admission is closed".to_owned(),
-                })
-            })
-    }
-
     /// A guarded, bounded transaction on `label`'s capacity and the instant
     /// it runs at: the role's guards and the fence lock with `BEGIN`, then
     /// the fence's read and the database clock in one statement. Called

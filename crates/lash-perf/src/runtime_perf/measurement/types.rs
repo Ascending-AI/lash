@@ -17,7 +17,7 @@ pub(crate) enum HighTrafficOperationKind {
 impl HighTrafficOperationKind {
     pub(crate) const ALL: [Self; 4] = [Self::Plain, Self::Tool, Self::Queued, Self::Child];
 
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::Plain => "plain",
             Self::Tool => "tool",

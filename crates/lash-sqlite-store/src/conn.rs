@@ -54,13 +54,9 @@ use lash_core_execution::compat::VersionRange;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use std::collections::HashMap;
 use std::path::PathBuf;
-#[cfg(feature = "perf-witness")]
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock, Weak};
 use std::time::Duration;
-#[cfg(feature = "perf-witness")]
-use std::time::Instant;
 mod worker;
 use worker::Connection as AsyncConnection;
 
@@ -217,37 +213,6 @@ fn checkpoint_if_needed(state: &CheckpointState) -> rusqlite::Result<bool> {
     let busy: i64 =
         connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
     Ok(busy != 0)
-}
-
-#[cfg(feature = "perf-witness")]
-static GATE_TIMING_ENABLED: AtomicBool = AtomicBool::new(false);
-
-#[cfg(feature = "perf-witness")]
-/// Enable opt-in write-gate timing for the current process.
-pub fn enable_gate_timings() {
-    GATE_TIMING_ENABLED.store(true, Ordering::Relaxed);
-}
-#[cfg(feature = "perf-witness")]
-static GATE_TIMINGS: LazyLock<Mutex<Vec<(u64, u64)>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-
-#[cfg(feature = "perf-witness")]
-fn record_gate_timing(wait: Duration, hold: Duration) {
-    if GATE_TIMING_ENABLED.load(Ordering::Relaxed) {
-        GATE_TIMINGS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push((wait.as_micros() as u64, hold.as_micros() as u64));
-    }
-}
-
-#[cfg(feature = "perf-witness")]
-/// Drain opt-in write-gate wait and hold measurements, in microseconds.
-pub fn take_gate_timings() -> Vec<(u64, u64)> {
-    std::mem::take(
-        &mut GATE_TIMINGS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner),
-    )
 }
 
 /// `target`'s shared write gate, created on first open.
@@ -633,9 +598,17 @@ impl SqliteConnection {
                 // Journal setup must queue with schema installation and other
                 // in-process writers, just like BEGIN IMMEDIATE. SQLite's WAL
                 // transition can otherwise race their schema/header locks.
+                #[cfg(feature = "perf-witness")]
+                let mut setup_timing =
+                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.setup_gate");
                 let _setup_gate = setup_gate
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                #[cfg(feature = "perf-witness")]
+                if let Some(timing) = &mut setup_timing {
+                    timing.start_service();
+                    timing.complete();
+                }
                 // Install the busy handler through the rusqlite API *before* the
                 // WAL conversion so ordinary write contention waits on it.
                 c.busy_timeout(policy.busy_timeout)?;
@@ -702,9 +675,17 @@ impl SqliteConnection {
                 // Even cache_size reads the database schema. A first opener
                 // must wait for an in-process installer or WAL transition
                 // before spending the read-only SQLite busy budget.
+                #[cfg(feature = "perf-witness")]
+                let mut setup_timing =
+                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.setup_gate");
                 let _setup_gate = setup_gate
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                #[cfg(feature = "perf-witness")]
+                if let Some(timing) = &mut setup_timing {
+                    timing.start_service();
+                    timing.complete();
+                }
                 c.busy_timeout(operational.readonly_busy_timeout)?;
                 c.set_prepared_statement_cache_capacity(operational.statement_cache_capacity);
                 c.pragma_update(None, "cache_size", operational.readonly_cache_size)?;
@@ -871,9 +852,17 @@ impl SqliteConnection {
         let read_gate = Arc::clone(&self.read_gate);
         flatten(
             self.run(move |c| {
+                #[cfg(feature = "perf-witness")]
+                let mut read_timing =
+                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
                 let _read_gate = read_gate
                     .read()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                #[cfg(feature = "perf-witness")]
+                if let Some(timing) = &mut read_timing {
+                    timing.start_service();
+                    timing.complete();
+                }
                 Ok(f(c))
             })
             .await,
@@ -898,9 +887,17 @@ impl SqliteConnection {
         let read_gate = Arc::clone(&self.read_gate);
         flatten(
             self.run(move |c| {
+                #[cfg(feature = "perf-witness")]
+                let mut read_timing =
+                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
                 let _read_gate = read_gate
                     .read()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                #[cfg(feature = "perf-witness")]
+                if let Some(timing) = &mut read_timing {
+                    timing.start_service();
+                    timing.complete();
+                }
                 let tx = c.transaction_with_behavior(TransactionBehavior::Deferred)?;
                 let value = f(&tx)?;
                 tx.rollback()?;
@@ -941,12 +938,28 @@ impl SqliteConnection {
         let read_gate = Arc::clone(&self.read_gate);
         let fleet = flatten(
             self.run(move |c| {
+                #[cfg(feature = "perf-witness")]
+                let mut read_timing =
+                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
                 let _read_gate = read_gate
                     .read()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                #[cfg(feature = "perf-witness")]
+                if let Some(timing) = &mut read_timing {
+                    timing.start_service();
+                    timing.complete();
+                }
+                #[cfg(feature = "perf-witness")]
+                let mut write_timing =
+                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.write_gate");
                 let _write_gate = write_gate
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
+                #[cfg(feature = "perf-witness")]
+                if let Some(timing) = &mut write_timing {
+                    timing.start_service();
+                    timing.complete();
+                }
                 let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
                 let fleet = f(&tx)?;
                 tx.commit()?;
@@ -1003,18 +1016,27 @@ impl SqliteConnection {
         let pauses = self.pauses.clone();
         flatten(
             self.run(move |c| {
+                #[cfg(feature = "perf-witness")]
+                let mut read_timing =
+                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.read_gate");
                 let _read_gate = read_gate
                     .read()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 #[cfg(feature = "perf-witness")]
-                let waiting_since = Instant::now();
+                if let Some(timing) = &mut read_timing {
+                    timing.start_service();
+                    timing.complete();
+                }
+                #[cfg(feature = "perf-witness")]
+                let mut write_timing =
+                    lash_core_execution::perf_witness::queues::Timer::enqueue("sqlite.write_gate");
                 let write_gate = write_gate
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 #[cfg(feature = "perf-witness")]
-                let wait = waiting_since.elapsed();
-                #[cfg(feature = "perf-witness")]
-                let holding_since = Instant::now();
+                if let Some(timing) = &mut write_timing {
+                    timing.start_service();
+                }
                 let result = (|| {
                     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
                     let fleet = fence.check(&tx)?;
@@ -1041,11 +1063,11 @@ impl SqliteConnection {
                     };
                     Ok(Ok(value))
                 })();
-                #[cfg(feature = "perf-witness")]
-                let hold = holding_since.elapsed();
                 drop(write_gate);
                 #[cfg(feature = "perf-witness")]
-                record_gate_timing(wait, hold);
+                if let Some(mut timing) = write_timing.take() {
+                    timing.complete();
+                }
                 if result.is_ok()
                     && let Some(checkpoint) = &checkpoint
                 {

@@ -139,12 +139,16 @@ impl RunRecorder {
         }
     }
 
-    async fn measured_span<T, F>(&mut self, f: F) -> anyhow::Result<(T, MeasuredSpan)>
+    async fn measured_span<T, F>(
+        &mut self,
+        name: &'static str,
+        f: F,
+    ) -> anyhow::Result<(T, MeasuredSpan)>
     where
         F: Future<Output = anyhow::Result<T>>,
     {
         let meter = SpanMeter::start();
-        let value = f.await?;
+        let value = crate::perf_support::async_operations::observe(name, f).await?;
         let span = meter.finish();
         self.total_alloc = alloc_delta(self.total.alloc_before, allocator_stats());
         self.last_memory = span.memory_after;
@@ -161,7 +165,7 @@ impl RunRecorder {
         T: Send + 'a,
     {
         Box::pin(async move {
-            let (value, span) = self.measured_span(f).await?;
+            let (value, span) = self.measured_span(name, f).await?;
             self.stage_entries.push((name, span.stage_result()));
             Ok(value)
         })
@@ -245,13 +249,18 @@ impl RunRecorder {
         P: FnOnce(&T, &TurnSpans, &mut TurnTail) -> anyhow::Result<()>,
     {
         let run_meter = SpanMeter::start();
-        let TurnRun { value, mut tail } = run.await?;
+        let TurnRun { value, mut tail } =
+            crate::perf_support::async_operations::observe("turn.run", run).await?;
         let run_span = run_meter.finish();
         self.total_alloc = alloc_delta(self.total.alloc_before, allocator_stats());
         self.last_memory = run_span.memory_after;
 
         let await_meter = SpanMeter::start();
-        await_background_work.await?;
+        crate::perf_support::async_operations::observe(
+            "turn.await_background_work",
+            await_background_work,
+        )
+        .await?;
         let await_span = await_meter.finish();
         self.total_alloc = alloc_delta(self.total.alloc_before, allocator_stats());
         self.last_memory = await_span.memory_after;

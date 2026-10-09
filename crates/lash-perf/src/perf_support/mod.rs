@@ -1,3 +1,4 @@
+pub mod async_operations;
 pub mod dhat;
 pub mod git;
 pub mod memory;

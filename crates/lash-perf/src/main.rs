@@ -250,6 +250,16 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 
 fn main() -> anyhow::Result<()> {
     lash_core::perf_witness::startup::initialize_epoch();
+    let capture = lash_perf::perf_support::async_operations::Capture::from_env()?;
+    let result = run_main();
+    // Write diagnostic evidence even when the population returns an error.
+    let receipt = capture.map(|capture| capture.finish()).transpose();
+    result?;
+    receipt?;
+    Ok(())
+}
+
+fn run_main() -> anyhow::Result<()> {
     let args = Args::parse();
     let startup_recorder = if matches!(
         &args.command,

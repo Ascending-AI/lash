@@ -36,7 +36,7 @@ where
     let before_alloc = allocator_stats();
     let before_memory = process_memory_sample();
     let started = Instant::now();
-    let value = future.await?;
+    let value = crate::perf_support::async_operations::observe(name, future).await?;
     let after_alloc = allocator_stats();
     let after_memory = process_memory_sample();
     Ok((

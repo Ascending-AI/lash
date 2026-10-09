@@ -127,13 +127,20 @@ pub(super) async fn create(core: &lash::LashCore, name: &str) -> Result<lash::Du
 }
 pub(super) async fn send(session: &lash::DurableSession, name: &str, meter: &Meter) -> Result<()> {
     let start = Instant::now();
-    let handle = session
-        .send(lash::TurnInput::text(name))
-        .id(lash::TurnId::try_from(name.to_owned())?)
-        .await?;
+    let handle = crate::perf_support::async_operations::observe("boundary.send.accept", async {
+        session
+            .send(lash::TurnInput::text(name))
+            .id(lash::TurnId::try_from(name.to_owned())?)
+            .await
+    })
+    .await?;
     meter.record("send.accept", 1, start);
     let start = Instant::now();
-    let output = tokio::time::timeout(Duration::from_secs(60), handle.output()).await??;
+    let output = crate::perf_support::async_operations::observe(
+        "boundary.send.settle",
+        tokio::time::timeout(Duration::from_secs(60), handle.output()),
+    )
+    .await??;
     ensure!(
         matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
         "send stopped: {:?}",
@@ -376,7 +383,11 @@ async fn root_redrive(
         );
         meter.record("root.redrive.mail", 1, start);
         let start = Instant::now();
-        let output = tokio::time::timeout(Duration::from_secs(60), handle.output()).await??;
+        let output = crate::perf_support::async_operations::observe(
+            "boundary.send.settle",
+            tokio::time::timeout(Duration::from_secs(60), handle.output()),
+        )
+        .await??;
         ensure!(
             matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
             "redrive did not finish"
@@ -474,7 +485,11 @@ async fn takeover(
         .await??;
         meter.record("call.takeover", 1, takeover_start);
         let start = Instant::now();
-        let output = tokio::time::timeout(Duration::from_secs(60), handle.output()).await??;
+        let output = crate::perf_support::async_operations::observe(
+            "boundary.send.settle",
+            tokio::time::timeout(Duration::from_secs(60), handle.output()),
+        )
+        .await??;
         ensure!(
             matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
             "takeover failed"

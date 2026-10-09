@@ -5,6 +5,8 @@
 
 pub mod startup;
 
+pub mod queues;
+
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex, MutexGuard};
