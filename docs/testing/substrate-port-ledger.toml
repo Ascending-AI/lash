@@ -80,7 +80,7 @@ note = "every crash-matrix cell checks F2 (crates/lash-sim/src/crash_matrix/inva
 [planned."F3"]
 owner = "L4"
 law = "a process-start tool cut at every label yields exactly one process row or none, never an outcome without its process"
-path = "crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome"
+path = "crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome"
 
 [planned."NR-1"]
 owner = "V0"
@@ -168,7 +168,7 @@ path = "crates/lash-durable-test/tests/live_fault_park.rs::a_live_surface_instal
 [planned."INTENT1"]
 owner = "L4"
 law = "a tool's declared intents realize as store-local effects in its outcome's settle transaction: an undeclared intent or one under a foreign authority is refused typed before anything is realized, and a cut at any commit label realizes each intent once or not at all"
-path = "crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome"
+path = "crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome"
 
 [planned."SIGNAL1"]
 owner = "L6"
@@ -8637,7 +8637,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "rebuilt (FIG-5184) as crates/lash-sim/tests/crash_matrix.rs::a_process_cut_at_every_label_resolves_waits_and_cascades_once: a process's Once and Repeatable steps, its pinned key resolved by the host, its bounded wait on another process and its terminal's cascade, cut at every label; a terminal resolving a ProcessTerminal wait is cut in crates/lash-sim/tests/crash_matrix.rs::a_session_close_cut_at_every_label_ends_at_its_tombstone. Open finding FIG-5184 M1 (L6, FIG-5175) shows at step.outcome#1 fail-before (crates/lash-sim/src/crash_matrix/findings.rs)"
+note = "rebuilt (FIG-5184) as crates/lash-sim/tests/crash_matrix.rs::a_process_cut_at_every_label_resolves_waits_and_cascades_once: a process's Once and Repeatable steps, its pinned key resolved by the host, its bounded wait on another process and its terminal's cascade, cut at every label; a terminal resolving a ProcessTerminal wait is cut in crates/lash-sim/tests/crash_matrix.rs::a_session_close_cut_at_every_label_ends_at_its_tombstone. FIG-5184 M1, which showed at step.outcome#1 fail-before, no longer shows; FIG-5193 deleted its findings entry"
 
 [[row]]
 path = "crates/lash-sim/src/crash_matrix/cases/scope.rs"
@@ -8843,7 +8843,7 @@ laws = [
 ]
 disposition = "replaced-by:crates/lash-sim/tests/crash_matrix.rs::a_session_close_cut_at_every_label_ends_at_its_tombstone"
 status = "deleted"
-note = "the SessionDelete obligation's relay ticks, backoff and stall ceiling are deleted with ADR 0109's relay; a session delete is the session actor's own durable close (FIG-5176), and every cut of it reaches its tombstone within its bound; open finding FIG-5184 M2 (L6b, FIG-5176) is a lost wake in its triggers step FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
+note = "the SessionDelete obligation's relay ticks, backoff and stall ceiling are deleted with ADR 0109's relay; a session delete is the session actor's own durable close (FIG-5176), and every cut of it reaches its tombstone within its bound; FIG-5184 M2, a lost wake in its triggers step, no longer shows; FIG-5193 deleted its findings entry FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward."
 
 [[row]]
 path = "crates/lash-sqlite-store/tests/conformance/attachment_store.rs"
@@ -26262,7 +26262,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5223 deleted the signal sequence projection these laws pinned: a tool's signal is a store-local effect staged by its realization and appended by the round.outcome commit that records the call, so no attempt reads a sequence before its outcome commits and a realized signal answers the signal it sent. That the signal is delivered exactly when its outcome commits is crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_and_signal_cut_at_every_label_commit_only_with_its_outcome; only these laws of the file are listed, the rest stay FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
+note = "FIG-5223 deleted the signal sequence projection these laws pinned: a tool's signal is a store-local effect staged by its realization and appended by the round.outcome commit that records the call, so no attempt reads a sequence before its outcome commits and a realized signal answers the signal it sent. That the signal is delivered exactly when its outcome commits is crates/lash-sim/tests/crash_matrix.rs::a_tool_s_process_start_cut_at_every_label_commits_only_with_its_outcome; only these laws of the file are listed, the rest stay FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/typescript_cells.rs"
