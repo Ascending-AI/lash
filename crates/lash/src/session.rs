@@ -492,6 +492,7 @@ impl SessionBuilder {
             ports.process.clone(),
             resolved.catalog,
             Arc::clone(&self.core.observer_pacing),
+            Arc::clone(&self.core.published_heads),
         ));
         env = binding.apply_owner(env);
         // Plugin configuration is creation config (FIG-4112, FIG-4379): the
@@ -848,6 +849,7 @@ impl LashSession {
             runtime: self.runtime.clone(),
             store: self.binding.store(),
             observation_work_limits: self.binding.observation_work_limits(),
+            published_heads: self.binding.published_heads(),
         }
     }
 
@@ -1093,6 +1095,7 @@ pub struct ObservableSession {
     observation_work_limits: lash_trace::ObservationWorkLimits,
     pub(crate) runtime: RuntimeHandle,
     store: lash_core::store::SessionStore,
+    published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
 }
 
 impl ObservableSession {
@@ -1105,6 +1108,7 @@ impl ObservableSession {
             self.runtime.clone(),
             self.store.clone(),
             self.observation_work_limits,
+            Arc::clone(&self.published_heads),
         )
     }
 

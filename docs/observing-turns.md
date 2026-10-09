@@ -105,6 +105,14 @@ whose `entries` are empty. A consumer holding the head skips it as a
 redelivery; one holding an earlier revision cannot extend it and rebuilds
 from the durable head, which the feed answers as a replay gap.
 
+A commit is durable before its `Committed` is published, and a run answers
+from its durable terminal. A cursor read before the commit and resumed right
+after the run's output is therefore behind the head with no bridge yet. The
+node that made the commit holds that reader until the publication was
+attempted, then judges the replay again: a late publication is not a gap. A
+publication that failed, or a commit made on another node whose observation
+has not arrived, still answers a replay gap with the durable head.
+
 ```rust,ignore
 if let lash::observe::SessionObservationEventPayload::Committed { entries, .. } = &event.payload {
     for entry in entries.iter().filter(|entry| !entry.is_suppressed()) {

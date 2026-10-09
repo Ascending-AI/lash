@@ -240,9 +240,10 @@ impl LashCore {
 
     /// The turn services a node runs this core's sessions' turns with.
     pub(crate) fn turn_services(&self) -> Arc<dyn TurnServices> {
-        Arc::new(RuntimeTurnServices::new(Arc::new(CoreRuntimes(
-            self.detached(),
-        ))))
+        Arc::new(RuntimeTurnServices::new(
+            Arc::new(CoreRuntimes(self.detached())),
+            Arc::clone(&self.published_heads),
+        ))
     }
 
     /// This core without its node: what the node opens runtimes through.

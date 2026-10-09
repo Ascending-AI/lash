@@ -395,7 +395,10 @@ async fn every_terminalize_branch_makes_runtime_shaped_session_deletion_terminal
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+// One thread: the route's forwarder cannot run between the publications
+// below, so its capacity-one receiver always lags. On two workers it could
+// take each event as it was published and never lag (FIG-5605).
+#[tokio::test]
 async fn product_event_route_lag_emits_durable_ordered_resync() {
     let workbench = Workbench::builder(silent_provider())
         .event_tx(SessionEventRegistry::new(1))

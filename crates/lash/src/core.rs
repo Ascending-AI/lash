@@ -40,6 +40,9 @@ pub struct LashCore {
     pub(crate) process_replay_store: Arc<dyn lash_core::ProcessReplayStore>,
     pub(crate) language_observation_publisher:
         Arc<crate::language_observation::LanguageObservationPublisher>,
+    /// The session commits this core's node is publishing: its turn services
+    /// mark them, and its session feeds wait for them.
+    pub(crate) published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
     /// What one process snapshot may read to fold its effect evidence.
     pub(crate) process_effect_fold_budget: crate::process_feed::EffectFoldBudget,
     pub(crate) process_observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
@@ -1297,6 +1300,7 @@ impl LashCoreBuilder {
             live_replay_store,
             process_replay_store,
             language_observation_publisher,
+            published_heads: Arc::default(),
             process_effect_fold_budget,
             process_observation_hub,
             process_lifecycle_feed,

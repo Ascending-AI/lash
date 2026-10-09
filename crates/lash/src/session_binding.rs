@@ -11,6 +11,9 @@ use lash_core::ActorContext;
 pub(crate) struct BoundSession {
     pub(crate) observer_pacing: Arc<crate::ObserverPacing>,
     observation_work_limits: lash_trace::ObservationWorkLimits,
+    /// The commits the owner core's node is publishing, which the session's
+    /// feed waits for before it judges a gap.
+    published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
     store: lash_core::store::SessionStore,
     effect_host: ActorContext,
     process: ProcessWorkWiring,
@@ -32,9 +35,11 @@ impl BoundSession {
         process: ProcessWorkWiring,
         catalog: Arc<dyn DeploymentStore>,
         observer_pacing: Arc<crate::ObserverPacing>,
+        published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
     ) -> Self {
         Self {
             observer_pacing,
+            published_heads,
             store,
             effect_host: env.core.control.effect_host.clone(),
             observation_work_limits: env.core.observation_work_limits,
@@ -71,6 +76,12 @@ impl BoundSession {
 
     pub(crate) fn observation_work_limits(&self) -> lash_trace::ObservationWorkLimits {
         self.observation_work_limits
+    }
+
+    pub(crate) fn published_heads(
+        &self,
+    ) -> Arc<lash_core::runtime::durable::services::PublishedHeads> {
+        Arc::clone(&self.published_heads)
     }
 
     pub(crate) fn trace_scopes(&self) -> Arc<dyn lash_core::TraceScopeFactory> {

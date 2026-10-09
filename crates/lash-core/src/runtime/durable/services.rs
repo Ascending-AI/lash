@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
-use super::commit_publication::{CommitBase, PublishedHeads, announce_head};
+pub use super::commit_publication::PublishedHeads;
+use super::commit_publication::{CommitBase, announce_head};
 use super::head::{HeadCache, SessionHead};
 use super::session::{
     AdmittedInputs, CellToolCalls, OpenTurn, RecordedPreparation, TurnDrive, TurnError,
@@ -59,12 +60,14 @@ impl std::fmt::Debug for RuntimeTurnServices {
 }
 
 impl RuntimeTurnServices {
-    /// The turn services of the sessions `runtimes` opens.
+    /// The turn services of the sessions `runtimes` opens, which mark the
+    /// commits they are publishing in `published`: the deployment's session
+    /// feeds read the same marks.
     #[must_use]
-    pub fn new(runtimes: Arc<dyn SessionRuntimes>) -> Self {
+    pub fn new(runtimes: Arc<dyn SessionRuntimes>, published: Arc<PublishedHeads>) -> Self {
         Self {
             runtimes,
-            published: Arc::default(),
+            published,
         }
     }
 
@@ -302,6 +305,11 @@ impl TurnServices for RuntimeTurnServices {
         // the one the mail drain handed out, and applies it: its commit
         // settles the row, and is published once it is acknowledged.
         let commit = CommitBase::of(&runtime);
+        // A command commits once, as its last step: a reader that finds the
+        // head past this base waits for the publication below (FIG-5605).
+        let _committing = commit
+            .as_ref()
+            .map(|commit| self.published.committing(commit));
         runtime
             .drain_next_session_command_with_cancellation(CancellationToken::new(), &controller)
             .await?;

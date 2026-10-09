@@ -57,6 +57,8 @@ pub(crate) struct FeedSource {
     live_replay: Arc<dyn LiveReplayStore>,
     transcript_decoders: crate::transcript::TranscriptDecoders,
     resident: RuntimeHandle,
+    /// The commits this node is still publishing.
+    published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
 }
 
 impl FeedSource {
@@ -64,10 +66,12 @@ impl FeedSource {
         resident: RuntimeHandle,
         store: lash_core::store::SessionStore,
         work_limits: lash_trace::ObservationWorkLimits,
+        published_heads: Arc<lash_core::runtime::durable::services::PublishedHeads>,
     ) -> Self {
         let observation = resident.observe();
         Self {
             work_limits,
+            published_heads,
             session_id: observation.session_id().clone(),
             transcript_decoders: observation.read_view.transcript_decoders().clone(),
             live_replay: Arc::clone(&resident.live_replay_store),
@@ -152,12 +156,19 @@ impl FeedSource {
     /// The live replay after `cursor`, judged against the durable head read
     /// now: a cursor past the head, or behind it without a replayed
     /// `Committed` bridging to it, is a gap rebuilt from the head.
+    ///
+    /// A head this node's own commit moved is durable before its `Committed`
+    /// is published. A replay that does not bridge to it is judged again
+    /// once that publication was attempted, so the window between the two
+    /// is never a gap (FIG-5605).
     pub(crate) async fn resume(&self, cursor: &SessionCursor) -> Result<SessionResume> {
         let requested = self.requested_revision(cursor)?;
-        let durable = self.durable_revision().await?;
-        let reason = if requested > durable {
-            LiveReplayGapReason::Unavailable
-        } else {
+        let mut settled = false;
+        let reason = loop {
+            let durable = self.durable_revision().await?;
+            if requested > durable {
+                break LiveReplayGapReason::Unavailable;
+            }
             match self
                 .live_replay
                 .replay_after_cursor(cursor)
@@ -170,8 +181,16 @@ impl FeedSource {
                 {
                     return Ok(SessionResume::Replayed { events });
                 }
-                LiveReplayOutcome::Replayed(_) => LiveReplayGapReason::Unavailable,
-                LiveReplayOutcome::Gap(reason) => reason,
+                LiveReplayOutcome::Replayed(_) if settled => {
+                    break LiveReplayGapReason::Unavailable;
+                }
+                LiveReplayOutcome::Replayed(_) => {
+                    self.published_heads
+                        .settled(&self.session_id, durable)
+                        .await;
+                    settled = true;
+                }
+                LiveReplayOutcome::Gap(reason) => break reason,
             }
         };
         let (observation, gap) = self.gap(cursor, reason).await?;
@@ -185,10 +204,12 @@ impl FeedSource {
         cursor: &SessionCursor,
     ) -> Result<SessionObservationSubscription> {
         let requested = self.requested_revision(cursor)?;
-        let durable = self.durable_revision().await?;
-        let reason = if requested > durable {
-            LiveReplayGapReason::Unavailable
-        } else {
+        let mut settled = false;
+        let reason = loop {
+            let durable = self.durable_revision().await?;
+            if requested > durable {
+                break LiveReplayGapReason::Unavailable;
+            }
             match self
                 .live_replay
                 .subscribe_after_cursor(cursor)
@@ -200,8 +221,16 @@ impl FeedSource {
                 {
                     return Ok(SessionObservationSubscription::Subscribed(subscription));
                 }
-                LiveReplaySubscribeOutcome::Subscribed(_) => LiveReplayGapReason::Unavailable,
-                LiveReplaySubscribeOutcome::Gap(reason) => reason,
+                LiveReplaySubscribeOutcome::Subscribed(_) if settled => {
+                    break LiveReplayGapReason::Unavailable;
+                }
+                LiveReplaySubscribeOutcome::Subscribed(_) => {
+                    self.published_heads
+                        .settled(&self.session_id, durable)
+                        .await;
+                    settled = true;
+                }
+                LiveReplaySubscribeOutcome::Gap(reason) => break reason,
             }
         };
         let (observation, gap) = self.gap(cursor, reason).await?;
