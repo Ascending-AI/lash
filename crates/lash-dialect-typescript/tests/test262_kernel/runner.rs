@@ -781,3 +781,14 @@ fn computed_member_reads_check_the_base_before_key_conversion() {
         Datum::Float(lash_kernel_doc::Float::new(2.0)),
     );
 }
+
+/// Function.toString checks callability before refusing unavailable source text.
+#[test]
+fn function_to_string_rejects_non_callable_receivers() {
+    assert_finished(
+        execute(
+            "let count = 0; for (const value of [undefined, null, {}]) { try { Function.prototype.toString.call(value); } catch (e) { if (e.name === 'TypeError') count++; } } finish(count);",
+        ),
+        Datum::Float(lash_kernel_doc::Float::new(3.0)),
+    );
+}

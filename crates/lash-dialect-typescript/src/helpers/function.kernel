@@ -77,5 +77,6 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "closure") {} else { throw error.new("type_error", "Function receiver required", null) }
   throw error.new("TS_FUNCTION_STRING_COERCION", "Function source is unavailable", null)
 }
