@@ -7,7 +7,9 @@ method parameters and returns, public fields, variant payloads, trait
 supertraits, associated types and consts, generic bounds, type aliases -- has a
 path under the facade. This walks rustdoc JSON documents (one per crate) and
 fails listing each unreachable type with the facade items whose signatures name
-it.
+it. Host-facing signatures also cannot name the store-author ProcessRecord;
+classification follows facade module homes (persistence and durability for
+stores, every other supported module for hosts and plugins).
 
 Reachability starts at the facade root and follows public modules and `pub use`
 re-exports, including globs and re-exports from other crates; a re-export's
@@ -127,6 +129,8 @@ class Facade:
         # `#[doc(hidden)]` item: the supported surface whose signatures count.
         # A hidden item is still nameable, so it satisfies a reference.
         self.supported: set[ItemRef] = set()
+        # Classification follows facade module homes, including every alias.
+        self.host_paths: dict[ItemRef, set[str]] = defaultdict(set)
         self.unresolved_reexports: list[str] = []
 
     def resolve(self, document: Document, item_id: int | str) -> ItemRef | None:
@@ -158,14 +162,17 @@ class Facade:
         stack: list[tuple[ItemRef, str, bool]] = [
             (ItemRef(self.facade, str(root.raw["root"])), self.facade, False)
         ]
-        visited: set[tuple[ItemRef, bool]] = set()
+        visited: set[tuple[ItemRef, bool, bool]] = set()
         while stack:
             ref, path, hidden = stack.pop()
             item = self.item(ref)
             hidden = hidden or is_hidden(item)
-            if (ref, hidden) in visited or (ref, False) in visited:
+            store_author = path.split("::")[1:2] in (["persistence"], ["durability"])
+            if not hidden and not store_author:
+                self.host_paths[ref].add(path)
+            if (ref, hidden, store_author) in visited or (ref, False, store_author) in visited:
                 continue
-            visited.add((ref, hidden))
+            visited.add((ref, hidden, store_author))
             self.reachable.setdefault(ref, path)
             if not hidden:
                 self.supported.add(ref)
@@ -308,6 +315,27 @@ class Facade:
                     if bound is not None and kind_of(bound) == "assoc_type":
                         yield from path_ids(document, bound["inner"]["assoc_type"]["type"])
 
+    def process_record_boundaries(self) -> set[str]:
+        """Host signatures cannot name the store-author row, even when nameable.
+
+        Persistence and durability are the store-author module homes. All
+        other supported facade modules expose host/plugin contracts. There is
+        no item membership list: moving or adding a public item classifies it
+        from its home, and a host alias cannot borrow a store exemption.
+        """
+        violations: set[str] = set()
+        for ref, homes in self.host_paths.items():
+            if kind_of(self.item(ref)) not in SIGNATURE_KINDS:
+                continue
+            # Re-exporting the row itself into a host module also breaks the boundary.
+            if self.item(ref).get("name") == "ProcessRecord":
+                violations.update(homes)
+            for document, path_id in self.signature_ids(ref):
+                target = self.resolve(document, path_id)
+                if target is not None and self.item(target).get("name") == "ProcessRecord":
+                    violations.update(homes)
+        return violations
+
     def gaps(self) -> dict[tuple[str, str], set[str]]:
         """Unreachable first-party (crate, definition path) -> facade items naming it."""
 
@@ -363,6 +391,9 @@ def main(argv: list[str]) -> int:
     facade = Facade(load_documents(args.documents), args.facade)
     facade.walk()
     gaps = facade.gaps()
+    boundaries = facade.process_record_boundaries()
+    for path in sorted(boundaries):
+        print(f"host-facing signature names store-author ProcessRecord: {path}", file=sys.stderr)
     for reexport in facade.unresolved_reexports:
         print(f"unresolved re-export {reexport}", file=sys.stderr)
     for (crate, path), users in sorted(gaps.items()):
@@ -373,18 +404,18 @@ def main(argv: list[str]) -> int:
             f"named by {', '.join(shown[:3])}{more}",
             file=sys.stderr,
         )
-    if gaps or facade.unresolved_reexports:
+    if gaps or facade.unresolved_reexports or boundaries:
         print(
             f"facade completeness: {len(gaps)} first-party type(s) named by facade signatures "
             f"have no `{args.facade}::` path; export each through the facade or narrow the "
-            "signature that names it",
+            f"signature that names it; {len(boundaries)} host-facing ProcessRecord boundary violation(s)",
             file=sys.stderr,
         )
         return 1
     print(
         f"facade completeness: {len(facade.reachable)} reachable items across "
         f"{len(facade.documents)} crates; every first-party signature type is nameable "
-        f"through `{args.facade}::`"
+        f"through `{args.facade}::`; host signatures keep ProcessRecord in store-author modules"
     )
     return 0
 

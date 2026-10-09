@@ -16,6 +16,23 @@ The worked example is the attachment family (FIG-3380):
 |---|---|---|---|
 | attachment | `crates/lash-store-sql/src/attachment/{manifest,condemnation,blob}.rs` | `crates/lash-sqlite-store/src/{attachments,attachment_store}.rs` | `crates/lash-postgres-store/src/postgres/attachments.rs` |
 
+## The public store-author contract
+
+A custom store depends on `lash` alone. `lash::persistence` owns the
+`ProcessRegistry` family, `ProcessRecord`, raw roster/change rows, registration
+and completion outcomes, receipts and write authorities. `ProcessRecord` is
+what a store persists and folds; its engine configuration, session capability
+and trace authority are storage facts, not a host observation. The durability
+ports, including `lash::durability::SessionTurns`, may consume that row.
+`examples/integrator-contract` compiles an external implementation of these
+ports without depending on an internal crate.
+
+Hosts and plugins read `lash::process::ObservedProcess` through `processes()`,
+roster pages, `changed_since`, the recovering feed and runtime-provided process
+services. Start, list and cancel effect outcomes carry that same observed
+shape. These reads use the observer's single row projection and actor-park
+lookup; a host never needs a raw-row read or another projection.
+
 ## 1. Inventory the family first
 
 Collect every production statement over the family's tables, in both backends,

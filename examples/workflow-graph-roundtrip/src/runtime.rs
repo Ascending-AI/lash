@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash::LashCore;
+use lash::persistence::ProcessStartReceipt;
 use lash::process::*;
 use lash::tracing::TraceLanguageExecutionPayload;
 use lash::vm::ir::{Expr, WorkflowDeclaration, WorkflowNodeId, WorkflowNodeKind};

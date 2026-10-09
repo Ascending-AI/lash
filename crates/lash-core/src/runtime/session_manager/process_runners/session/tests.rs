@@ -509,3 +509,65 @@ fn child_final_value_refuses_a_frame_switch_or_stopped_turn() {
     let failure = final_value_of_turn(&stopped).expect_err("a stopped child has no final value");
     assert_eq!(failure.code, "process_session_turn_stopped");
 }
+
+/// FIG-5615: plugins read the same observed state as hosts, through their
+/// runtime-provided read service rather than a store row.
+#[tokio::test]
+async fn plugin_process_reads_are_canonical_observations() {
+    let backend = crate::testing::sqlite_memory_store_backend().await;
+    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        backend.clone(),
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+        crate::ToolSourcePolicy::Tolerate,
+        crate::ExecutionBudgets::recommended(),
+        crate::runtime::DeltaCoalescing::recommended(),
+        crate::DataRetentionConfig::standard(),
+    ));
+    let runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(Vec::new()),
+        host,
+    )
+    .await;
+    let registry = backend.process_registry();
+    let record = registry
+        .register_process(crate::testing::held_engine_registration(
+            serde_json::json!({"probe": true}),
+            crate::ProcessProvenance::host(),
+            crate::Lifetime::Detached,
+        ))
+        .await
+        .expect("register");
+    registry
+        .add_observer(
+            runtime.session_id(),
+            &record.id,
+            crate::ProcessObserverBy::host("law"),
+        )
+        .await
+        .expect("visible");
+    let services = runtime.runtime_session_services().expect("services");
+    let rows: Vec<crate::facade_support::ObservedProcess> = services
+        .process_read_service()
+        .list_visible(
+            runtime.session_id(),
+            crate::ProcessListMode::All,
+            crate::ProcessOpScope::new(crate::ActorContext::detached(backend.clone())),
+        )
+        .await
+        .expect("plugin read");
+    let observer = crate::facade_support::ProcessWorkObserver::new(registry)
+        .with_actor_parks(Arc::clone(backend.durable()));
+    assert_eq!(
+        rows,
+        vec![
+            observer
+                .process(&record.id)
+                .await
+                .expect("host read")
+                .expect("retained")
+        ]
+    );
+}

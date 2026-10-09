@@ -310,7 +310,7 @@ pub trait ProcessReadService: Send + Sync {
         _session_id: &SessionId,
         _mode: crate::ProcessListMode,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
         Err(PluginError::Session(
             "process inspection is unavailable in this runtime".to_string(),
         ))

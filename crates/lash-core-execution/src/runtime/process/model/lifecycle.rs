@@ -54,7 +54,8 @@ impl WaitState {
     }
 }
 
-/// Durable process lifecycle fold. Observer membership is queryable edge
+/// Store-author row: the durable process lifecycle fold returned by registry ports.
+/// Hosts and plugins read `ObservedProcess` instead. Observer membership is queryable edge
 /// state, audited by events but deliberately not projected
 /// into this record.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

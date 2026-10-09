@@ -5,6 +5,134 @@ mod tests {
 
     use crate::ProcessEffectOutcome;
 
+    /// FIG-5615: effect reads are the same canonical observation as the roster,
+    /// including typed outcomes, cancellation evidence and actor parks.
+    #[tokio::test]
+    async fn process_effect_reads_carry_the_canonical_observation() {
+        let backend = crate::support::sqlite_memory_store_backend().await;
+        let registry = backend.process_registry();
+        let env_store = backend.process_env_store();
+        let executor = || {
+            crate::RuntimeEffectLocalExecutor::processes(
+                Arc::clone(&registry),
+                Arc::new(crate::NoProcessWork::for_registry(Arc::clone(&registry))),
+                crate::testing::process_engine_fixture(),
+                crate::runtime::HostStartAdmission::default(),
+            )
+            .with_process_env_store(Arc::clone(&env_store))
+            .with_process_actor_parks(Arc::clone(backend.durable()))
+        };
+        let envelope = start_envelope(
+            env_store.as_ref(),
+            "observed-effects",
+            engine_registration("observed-effects", "valid"),
+            crate::ProcessExecutionEnvSpec::new(
+                crate::AdmittedPluginConfig::default(),
+                crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                    crate::MaxToolCalls::new(1024),
+                    lash_core_execution::NoProgressBudget::bounded(12),
+                ),
+                crate::SessionToolAccess::ambient(),
+            ),
+        )
+        .await;
+        let started: crate::facade_support::ObservedProcess =
+            started_record(execute_start(envelope, executor()).await.expect("start"));
+        let observer = crate::runtime::process::ProcessWorkObserver::new(Arc::clone(&registry))
+            .with_actor_parks(Arc::clone(backend.durable()));
+        assert_eq!(
+            Some(started.clone()),
+            observer.process(&started.process_id).await.expect("read")
+        );
+        let receiver = crate::ExecutionScope::runtime_operation("observed-effects");
+        let crate::ProcessEffectOutcome::List { entries } = executor()
+            .into_process()
+            .expect("executor")
+            .execute(
+                &receiver,
+                crate::ProcessCommand::List {
+                    selection: crate::ProcessListSelection::HostRunning,
+                },
+            )
+            .await
+            .expect("list")
+        else {
+            panic!("list outcome")
+        };
+        assert_eq!(entries, vec![started.clone()]);
+        let crate::ProcessEffectOutcome::Cancel { record: cancelled } = executor()
+            .into_process()
+            .expect("executor")
+            .execute(
+                &receiver,
+                crate::ProcessCommand::Cancel {
+                    process_id: started.process_id.clone(),
+                    origin: crate::CancelOrigin::OperatorRequested,
+                    requester: "observed-effects".into(),
+                    attribution: None,
+                },
+            )
+            .await
+            .expect("cancel")
+        else {
+            panic!("cancel outcome")
+        };
+        assert_eq!(
+            Some(*cancelled.clone()),
+            observer.process(&started.process_id).await.expect("read")
+        );
+        assert_eq!(
+            cancelled.cancel_request.expect("cancel evidence").origin,
+            crate::CancelOrigin::OperatorRequested
+        );
+        // A terminal list preserves the typed output, rather than flattening status.
+        let output = crate::ToolCallOutput::success(serde_json::json!({"answer": 42}));
+        registry
+            .complete_process(
+                &started.process_id,
+                crate::ProcessAwaitOutput::from_tool_output(output.clone()),
+                crate::ProcessCompletionAuthority::workflow_key(&started.process_id),
+            )
+            .await
+            .expect("terminal");
+        let session_id = crate::SessionId::from("observed-effects");
+        registry
+            .add_observer(
+                &session_id,
+                &started.process_id,
+                crate::ProcessObserverBy::host("law"),
+            )
+            .await
+            .expect("observer");
+        let crate::ProcessEffectOutcome::List { entries } = executor()
+            .into_process()
+            .expect("executor")
+            .execute(
+                &receiver,
+                crate::ProcessCommand::List {
+                    selection: crate::ProcessListSelection::Observed {
+                        session_scope: crate::SessionScope::new(session_id),
+                        mode: crate::ProcessListMode::All,
+                    },
+                },
+            )
+            .await
+            .expect("terminal list")
+        else {
+            panic!("list outcome")
+        };
+        assert_eq!(
+            entries[0]
+                .terminal()
+                .expect("typed terminal")
+                .clone()
+                .into_await_output()
+                .into_tool_output(),
+            output
+        );
+    }
+
     #[tokio::test]
     async fn a_journaled_environment_load_keeps_its_bytes_after_the_source_pin_ends() {
         let backend = crate::support::sqlite_memory_store_backend().await;
@@ -300,7 +428,9 @@ mod tests {
         Ok(crate::RuntimeEffectOutcome::Process { result })
     }
 
-    fn started_record(outcome: crate::RuntimeEffectOutcome) -> crate::ProcessRecord {
+    fn started_record(
+        outcome: crate::RuntimeEffectOutcome,
+    ) -> crate::facade_support::ObservedProcess {
         let crate::RuntimeEffectOutcome::Process {
             result: ProcessEffectOutcome::Start { record, .. },
         } = outcome
@@ -383,11 +513,11 @@ mod tests {
                 .expect("re-run process start before guard cleanup"),
         );
         assert_eq!(
-            rerun.id, first.id,
+            rerun.process_id, first.process_id,
             "the start key returns the retained process, never a second one"
         );
         let record = registry
-            .get_process(&first.id)
+            .get_process(&first.process_id)
             .await
             .expect("read registered process")
             .expect("registered process remains live");
@@ -538,7 +668,7 @@ mod tests {
             "the start first tries its fenced claim, then acquires for the process"
         );
         let record = registry
-            .get_process(&started.id)
+            .get_process(&started.process_id)
             .await
             .expect("read registered process")
             .expect("registered process remains live");
@@ -659,7 +789,7 @@ mod tests {
                 .await
                 .expect("the retry is returned the retained process"),
         );
-        assert_eq!(returned.id, retained.id);
+        assert_eq!(returned.process_id, retained.id);
         assert_eq!(returned.env_ref.as_ref(), Some(&first_ref));
 
         let process = crate::ArtifactReferrer::ProcessRecord(retained.id.clone());
@@ -740,7 +870,7 @@ mod tests {
         let record = started_record(outcome);
         assert!(
             registry
-                .get_process(&record.id)
+                .get_process(&record.process_id)
                 .await
                 .expect("read the started process")
                 .is_some(),

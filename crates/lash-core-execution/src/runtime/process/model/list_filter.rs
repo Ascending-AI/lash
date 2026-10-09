@@ -163,8 +163,32 @@ impl ProcessListFilter {
         self.status.list_mode()
     }
 
+    pub fn matches_observed(&self, process: &crate::facade_support::ObservedProcess) -> bool {
+        self.matches_facts(ProcessSelectionFacts {
+            status: process.status(),
+            identity: &process.identity,
+            originator: &process.originator,
+            lifetime: &process.lifetime,
+            cancel_request: process.cancel_request.as_ref(),
+            created_at_ms: process.created_at_ms,
+            updated_at_ms: process.updated_at_ms,
+        })
+    }
+
     pub fn matches_record(&self, record: &ProcessRecord) -> bool {
-        self.status.matches(record.status())
+        self.matches_facts(ProcessSelectionFacts {
+            status: record.status(),
+            identity: &record.identity,
+            originator: &record.provenance.originator,
+            lifetime: &record.lifetime,
+            cancel_request: record.cancel_request.as_deref(),
+            created_at_ms: record.created_at_ms,
+            updated_at_ms: record.updated_at_ms,
+        })
+    }
+
+    fn matches_facts(&self, record: ProcessSelectionFacts<'_>) -> bool {
+        self.status.matches(record.status)
             && self
                 .definition_id
                 .as_ref()
@@ -172,13 +196,13 @@ impl ProcessListFilter {
             && self
                 .originator
                 .as_ref()
-                .is_none_or(|originator| originator.matches(&record.provenance.originator))
+                .is_none_or(|originator| originator.matches(record.originator))
             && self
                 .until
                 .as_ref()
                 .is_none_or(|scope| record.lifetime.scope() == Some(scope))
             && self.cancel_pending_before_ms.is_none_or(|before_ms| {
-                !record.status().is_terminal()
+                !record.status.is_terminal()
                     && record
                         .cancel_request
                         .as_ref()
@@ -199,9 +223,19 @@ impl ProcessListFilter {
                 .created_at_end_ms
                 .is_none_or(|end_ms| record.created_at_ms < end_ms)
             && self.retired_since_ms.is_none_or(|since_ms| {
-                !record.status().is_retired() || record.updated_at_ms >= since_ms
+                !record.status.is_retired() || record.updated_at_ms >= since_ms
             })
     }
+}
+
+struct ProcessSelectionFacts<'a> {
+    status: ProcessStatus,
+    identity: &'a ProcessIdentity,
+    originator: &'a ProcessOriginator,
+    lifetime: &'a crate::LifetimeDecision,
+    cancel_request: Option<&'a lash_sansio::CancelRequest>,
+    created_at_ms: u64,
+    updated_at_ms: u64,
 }
 
 fn optional_string_filter(args: &serde_json::Value, key: &str) -> Result<Option<String>, String> {

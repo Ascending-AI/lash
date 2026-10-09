@@ -507,8 +507,28 @@ pub mod direct {
     };
 }
 
-/// Session persistence types and services.
 pub mod persistence {
+    //! Store-author contracts, including the process registry and its row.
+    //!
+    //! Custom stores implement these ports against `lash` alone. `ProcessRecord`
+    //! is the durable lifecycle fold stores persist and return; receipts and
+    //! authorities here govern writes. Hosts and plugins read
+    //! [`crate::process::ObservedProcess`] through `processes()` or their
+    //! runtime-provided services instead.
+    #[cfg(any(test, feature = "testing"))]
+    pub use lash_core::{
+        ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
+    };
+    pub use lash_core::{
+        NonTerminalProcessPage, ProcessCancelReceipt, ProcessChange, ProcessClockRebind,
+        ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessEventAppendRequest,
+        ProcessEventLog, ProcessExecutionWriteAuthority, ProcessHandleView, ProcessLifecycle,
+        ProcessListFilter, ProcessLiveReferenceView, ProcessObserverRegistry, ProcessOpScope,
+        ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistrationReceipt, ProcessRegistry,
+        ProcessRetention, ProcessRosterRecords, ProcessStartOutcome, ProcessStartReceipt,
+        ProcessToolIntents, StagedProcessStart,
+    };
+
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core_store::artifact_referrer::{
         ArtifactCarry, ArtifactCleanup, ArtifactReferrerError, ArtifactReferrerKind,
@@ -1106,7 +1126,10 @@ pub mod secrets {
     pub use lash_sansio::Redacted;
 }
 
-/// Durable process definitions, handles, and events.
+/// Host process observation, definitions and lifecycle commands.
+///
+/// Hosts and plugins read [`ObservedProcess`]. Raw rows and their store ports
+/// live in [`crate::persistence`].
 pub mod process {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::{
@@ -1126,68 +1149,55 @@ pub mod process {
     /// The origin of a lifecycle cancellation submitted to a registry.
     pub use lash_core::CancelOrigin;
     pub use lash_core::SessionTurnOutcome;
+    /// Registry admission receipts and lifecycle write outcomes.
+    pub use lash_core::runtime::StoreRealization;
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
-        ParentEndPlan, ProcessChange, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
-        ProcessOutcome, ProcessParkReason, ProcessStartOutcome, ProcessTombstone, WaitKind,
-        WaitState,
+        ParentEndPlan, ProcessOutcome, ProcessParkReason, ProcessTombstone, WaitKind, WaitState,
     };
     /// The one lifecycle state a process record holds, and the outcome a
     /// terminal one ends in.
     pub use lash_core::runtime::{
         ProcessLifecycleState, ProcessOutcomeNotRetained, ProcessTerminal,
     };
-    /// Registry admission receipts and lifecycle write outcomes.
-    pub use lash_core::runtime::{ProcessRegistrationReceipt, StoreRealization};
     pub use lash_core::{
         AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
         DeclaredProcessIdentity, HandleId, InvalidProcessDefinitionId, InvalidStartKey, Lifetime,
         LifetimeDecision, LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE,
-        MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, NonTerminalProcessPage,
-        PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-        PROCESS_EFFECT_OUTCOME_EVENT_TYPE, ProcessAwaitOutput, ProcessCancelReceipt,
-        ProcessChangeBounds, ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority,
-        ProcessDefinition, ProcessDefinitionDraft, ProcessDefinitionDraftError,
-        ProcessDefinitionId, ProcessDefinitionRef, ProcessDefinitionRefusal,
-        ProcessDefinitionResolution, ProcessDefinitionTarget, ProcessDefinitionValue,
-        ProcessEffectNodeReport, ProcessEffectOccurrence, ProcessEffectOmissions,
-        ProcessEffectOmittedCounts, ProcessEffectOutcomeClass, ProcessEffectReport,
-        ProcessEffectReportError, ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt,
-        ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventKind,
-        ProcessEventLite, ProcessEventLog, ProcessEventPage, ProcessEventPageEvents,
-        ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
+        MAX_PROCESS_ROSTER_PAGE_SIZE, NoProcessWork, PROCESS_EFFECT_OCCURRENCE_CAP,
+        PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE, ProcessAwaitOutput,
+        ProcessChangeBounds, ProcessChangeCursor, ProcessDefinition, ProcessDefinitionDraft,
+        ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionRef,
+        ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionTarget,
+        ProcessDefinitionValue, ProcessEffectNodeReport, ProcessEffectOccurrence,
+        ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
+        ProcessEffectReport, ProcessEffectReportError, ProcessEngineKind, ProcessEvent,
+        ProcessEventAppendReceipt, ProcessEventHistoryRetention, ProcessEventKind,
+        ProcessEventLite, ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore,
+        ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease,
         ProcessExecutionContext, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-        ProcessExternalRef, ProcessHandleView, ProcessIdentity, ProcessInput, ProcessLifecycle,
-        ProcessLifecycleFact, ProcessLineage, ProcessListFilter, ProcessListMode,
-        ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
-        ProcessOriginator, ProcessOriginatorFilter, ProcessProvenance, ProcessPruneReport,
-        ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
-        ProcessRegistrationOutcome, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
-        ProcessRetention, ProcessRosterCursor, ProcessRosterRecords, ProcessService,
-        ProcessSessionDeleteReport, ProcessSignature, ProcessStartOptions, ProcessStartReceipt,
+        ProcessExternalRef, ProcessIdentity, ProcessInput, ProcessLifecycleFact, ProcessLineage,
+        ProcessListMode, ProcessObserverBy, ProcessOriginator, ProcessOriginatorFilter,
+        ProcessProvenance, ProcessPruneReport, ProcessRegistration, ProcessRegistrationOutcome,
+        ProcessRegistryCursor, ProcessResumeRefusal, ProcessRosterCursor, ProcessService,
+        ProcessSessionDeleteReport, ProcessSignature, ProcessStartOptions,
         ProcessStartRegistration, ProcessStartRequest, ProcessStartTarget, ProcessStarted,
-        ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessToolIntents,
-        ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus,
-        ScopeGrant, ScopeId, ScopeRef, ScopeStorageError, SessionScope, StagedPluginState,
-        StagedProcessStart, StartCx, StartCxError, StartKey, StoreLocalEffect, StoreLocalRows,
-        TerminalProcessStatus, WatchedRegistry, facade_support::CanonicalProcessEventAppend,
-        facade_support::ObservedProcess, facade_support::ObservedProcessChange,
-        facade_support::ObservedProcessEvent, facade_support::ObservedProcessEventLite,
-        facade_support::ObservedProcessEventPage, facade_support::ObservedProcessEventReadOutcome,
-        facade_support::ObservedWorkItem, facade_support::ObservedWorkItemState,
-        facade_support::ProcessChangeHub, facade_support::ProcessChangeSubscription,
-        facade_support::ProcessEventSink, facade_support::ProcessRosterPage,
-        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
-        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
-        facade_support::SessionScopeId, facade_support::watch_process_registry, lifetime,
+        ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessWorkSubstrate,
+        ProcessWorkWiring, ProjectionWatermark, RetiredProcessStatus, ScopeGrant, ScopeId,
+        ScopeRef, ScopeStorageError, SessionScope, StagedPluginState, StartCx, StartCxError,
+        StartKey, StoreLocalEffect, StoreLocalRows, TerminalProcessStatus, WatchedRegistry,
+        facade_support::CanonicalProcessEventAppend, facade_support::ObservedProcess,
+        facade_support::ObservedProcessChange, facade_support::ObservedProcessEvent,
+        facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
+        facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,
+        facade_support::ObservedWorkItemState, facade_support::ProcessChangeHub,
+        facade_support::ProcessChangeSubscription, facade_support::ProcessEventSink,
+        facade_support::ProcessRosterPage, facade_support::ProcessRuntimeHost,
+        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWorkObserver,
+        facade_support::ProcessWorkSnapshot, facade_support::SessionScopeId,
+        facade_support::watch_process_registry, lifetime,
     };
     pub use lash_core::{ArgsMismatch, ArgsMode};
-    /// Test-only registry probes and the conformance-suite registry type that
-    /// carries them (`testing` feature only; no production trait requires them).
-    #[cfg(any(test, feature = "testing"))]
-    pub use lash_core::{
-        ConformanceProcessRegistry, ProcessEventLogTestSupport, ProcessRegistryTestSupport,
-    };
     /// Process observation's contract: the snapshot, cursor, stream events,
     /// typed gaps and the replay store behind a process feed.
     pub use lash_core::{
@@ -1205,7 +1215,10 @@ pub mod process {
     pub use lash_vm_runtime::{LASH_VM_ENGINE_KIND, LashVmProcessInput};
 }
 
-/// Durability configuration and backend contracts.
+/// Store-author durability configuration and backend contracts.
+///
+/// These ports may consume stored [`crate::persistence::ProcessRecord`] rows.
+/// Host observations use [`crate::process::ObservedProcess`].
 pub mod durability {
     pub use lash_core::{EffectAttempt, RecordedEffectExecution};
     // The vocabulary this module's signatures name (the facade-completeness rule).

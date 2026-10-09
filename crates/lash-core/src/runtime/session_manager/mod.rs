@@ -701,8 +701,11 @@ mod process_visibility_tests {
             .expect("a turn's scope")
     }
 
-    fn contains_hidden(records: &[crate::ProcessRecord], hidden: &crate::ProcessId) -> bool {
-        records.iter().any(|record| record.id == *hidden)
+    fn contains_hidden(
+        records: &[crate::facade_support::ObservedProcess],
+        hidden: &crate::ProcessId,
+    ) -> bool {
+        records.iter().any(|record| record.process_id == *hidden)
     }
 
     #[tokio::test]

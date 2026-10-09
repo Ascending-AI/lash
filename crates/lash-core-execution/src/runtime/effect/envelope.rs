@@ -14,7 +14,7 @@ use crate::sansio::{ExecutionEnvironmentSync, ExecutionEnvironmentSyncFailure, L
 use crate::{
     CausalRef, CheckpointDelivery, EffectAddress, ExecResponse, ExecutionScope,
     LlmRequest as CoreLlmRequest, LlmResponse, ProcessAwaitOutput, ProcessExecutionContext,
-    ProcessListMode, ProcessRecord, ProcessStartRegistration, SessionScope,
+    ProcessListMode, ProcessStartRegistration, SessionScope,
 };
 
 use super::executor::RuntimeEffectControllerError;
@@ -850,12 +850,12 @@ pub enum ProcessEffectOutcome {
         // Boxed so the fat durable record does not size the whole outcome enum
         // (and the runtime effect enum wrapping it) inline through the recursive
         // effect executor.
-        record: Box<ProcessRecord>,
+        record: Box<crate::facade_support::ObservedProcess>,
         /// Whether this start created the process or found it registered.
         disposition: crate::ProcessRegistrationOutcome,
     },
     List {
-        entries: Vec<ProcessRecord>,
+        entries: Vec<crate::facade_support::ObservedProcess>,
     },
     ValidateVisible {
         not_visible: Option<ProcessId>,
@@ -870,7 +870,7 @@ pub enum ProcessEffectOutcome {
         output: Box<ProcessAwaitOutput>,
     },
     Cancel {
-        record: Box<ProcessRecord>,
+        record: Box<crate::facade_support::ObservedProcess>,
     },
     Definition {
         definition: Box<crate::ProcessDefinition>,

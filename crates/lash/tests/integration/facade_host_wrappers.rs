@@ -116,7 +116,7 @@ impl lash::StoreSet for HostStores {
         self.inner.attachment_referrers()
     }
 
-    fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
+    fn process_registry(&self) -> Arc<dyn lash::persistence::ProcessRegistry> {
         self.inner.process_registry()
     }
 

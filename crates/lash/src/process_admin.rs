@@ -166,6 +166,7 @@ impl Processes {
                         session_turn_admission,
                     },
                 )
+                .with_process_actor_parks(Arc::clone(self.core.backend.durable()))
                 .with_process_attachments(self.core.backend.attachment_referrers())
                 .with_process_env_store(Arc::clone(
                     &self.core.env.core.durability.process_env_store,
@@ -411,7 +412,11 @@ impl Processes {
         };
         // Registration created the process's actor ready, in the same
         // transaction: nothing is left to deliver.
-        Ok(lash_core::ProcessStartReceipt::of(&record, disposition))
+        Ok(lash_core::ProcessStartReceipt {
+            process_id: record.process_id,
+            start_key,
+            disposition,
+        })
     }
 
     /// Reads one bounded fleet page. Follow every continuation, including on
@@ -591,7 +596,7 @@ impl Processes {
                 "process cancel returned the wrong outcome".to_string(),
             )));
         };
-        Ok(lash_core::ProcessCancelReceipt::from_record(*record)?)
+        Ok(lash_core::ProcessCancelReceipt::from_observed(*record)?)
     }
 
     /// Redrives a parked process (ADR 0132 §11): clears its park and its
@@ -645,7 +650,7 @@ impl Processes {
         let mut summaries = Vec::with_capacity(running.len());
         for process in running {
             summaries.push(
-                self.cancel(&process.id, scoped_effect_controller.clone())
+                self.cancel(&process.process_id, scoped_effect_controller.clone())
                     .await?,
             );
         }

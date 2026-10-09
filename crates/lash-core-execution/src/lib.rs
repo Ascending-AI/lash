@@ -291,6 +291,7 @@ pub mod facade_support {
     pub use crate::runtime::SessionCommand;
     pub use crate::runtime::SessionCommandReceipt;
     pub use crate::runtime::SessionScopeId;
+    pub use crate::runtime::process::observation::observe_process_records;
     pub use crate::runtime::{ObservedProcessChange, ProcessRosterPage};
 
     pub use crate::runtime::SystemClock;

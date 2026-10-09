@@ -511,9 +511,9 @@ async fn execute_one(
                 .cancel_recorded_intent(&intent.owner, &intent.process_id, identity.clone(), scope)
                 .await?;
             Ok((
-                crate::ToolIntentRealized::CancelProcess(crate::ProcessCancelReceipt::from_record(
-                    record,
-                )?),
+                crate::ToolIntentRealized::CancelProcess(
+                    crate::ProcessCancelReceipt::from_observed(record)?,
+                ),
                 None,
             ))
         }

@@ -1568,7 +1568,8 @@ impl EffectBackedProcessService {
             process_engine_fixture(),
             crate::runtime::HostStartAdmission::default(),
         )
-        .with_process_env_store(Arc::clone(&self.process_env_store));
+        .with_process_env_store(Arc::clone(&self.process_env_store))
+        .with_process_actor_parks(Arc::clone(scope.effect_controller.backend().durable()));
         let outcome = scoped
             .process_effect(
                 crate::RuntimeEffectEnvelope::new(
@@ -1604,9 +1605,9 @@ impl crate::ProcessService for EffectBackedProcessService {
         &self,
         owner: &crate::RuntimeOwner,
         mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         let session_id = crate::plugin::require_session_owner(owner, "list_visible_for_attempt")?;
-        match mode {
+        let records = match mode {
             crate::ProcessListMode::Live => self.registry.list_live_observed_by(session_id).await,
             crate::ProcessListMode::All => {
                 self.registry
@@ -1619,7 +1620,12 @@ impl crate::ProcessService for EffectBackedProcessService {
                     )
                     .await
             }
-        }
+        }?;
+        crate::facade_support::observe_process_records(
+            &crate::facade_support::ProcessWorkObserver::new(Arc::clone(&self.registry)),
+            records,
+        )
+        .await
     }
 
     async fn start_from_request(
@@ -1637,7 +1643,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         };
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Start { record, .. } => {
-                Ok(crate::ProcessHandleView::from_record(*record))
+                Ok(crate::ProcessHandleView::from_observed(*record))
             }
             _ => unreachable!("start command returns start outcome"),
         }
@@ -1668,7 +1674,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         registration: crate::ProcessStartRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         let registration = admitted_registration(registration, &scope)?;
         let command = crate::ProcessCommand::Start {
             registration,
@@ -1700,7 +1706,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         let command = crate::ProcessCommand::List {
             selection: crate::ProcessListSelection::Observed {
                 session_scope: crate::SessionScope::new(session_id),
@@ -1745,7 +1751,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         let command = Self::cancel_command(
             process_id,
             crate::CancelOrigin::OperatorRequested,
@@ -1765,7 +1771,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         let command = Self::cancel_command(
             process_id,
             crate::CancelOrigin::ModelRequested,
@@ -2054,7 +2060,7 @@ impl crate::ProcessService for MockSessionManager {
         registration: crate::ProcessStartRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
         let registration = admitted_registration(registration, &scope)?
             .stating_input()
             .map_err(|registration| {
@@ -2072,7 +2078,8 @@ impl crate::ProcessService for MockSessionManager {
             .await?
             .id;
         let authority = crate::ProcessCompletionAuthority::workflow_key(&id);
-        self.registry()?
+        let record = self
+            .registry()?
             .complete_process(
                 &id,
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
@@ -2083,7 +2090,10 @@ impl crate::ProcessService for MockSessionManager {
                 authority,
             )
             .await
-            .map(crate::ProcessCompletionOutcome::into_record)
+            .map(crate::ProcessCompletionOutcome::into_record)?;
+        crate::runtime::process::ProcessWorkObserver::new(Arc::clone(self.registry()?))
+            .observed(record)
+            .await
     }
 
     async fn await_process(
@@ -2101,9 +2111,9 @@ impl crate::ProcessService for MockSessionManager {
         session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, PluginError> {
         let _ = scope;
-        match mode {
+        let records = match mode {
             crate::ProcessListMode::Live => {
                 self.registry()?.list_live_observed_by(session_id).await
             }
@@ -2118,7 +2128,10 @@ impl crate::ProcessService for MockSessionManager {
                     )
                     .await
             }
-        }
+        }?;
+        crate::runtime::process::ProcessWorkObserver::new(Arc::clone(self.registry()?))
+            .observe_records(records)
+            .await
     }
 
     async fn validate_visible(
@@ -2152,10 +2165,10 @@ impl crate::ProcessService for MockSessionManager {
         _owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
         let registry = self.registry()?;
         let process_id = registry.require_process_id(process_id).await?;
-        registry
+        let record = registry
             .request_process_cancel(
                 &process_id,
                 crate::CancelOrigin::OperatorRequested,
@@ -2163,6 +2176,9 @@ impl crate::ProcessService for MockSessionManager {
                     .expect("serializable effect scope"),
                 None,
             )
+            .await?;
+        crate::runtime::process::ProcessWorkObserver::new(Arc::clone(registry))
+            .observed(record)
             .await
     }
 
@@ -2172,16 +2188,19 @@ impl crate::ProcessService for MockSessionManager {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         _scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, PluginError> {
         let registry = self.registry()?;
         let process_id = registry.require_process_id(process_id).await?;
-        registry
+        let record = registry
             .request_process_cancel(
                 &process_id,
                 crate::CancelOrigin::ModelRequested,
                 identity.replay_key.clone(),
                 Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
             )
+            .await?;
+        crate::runtime::process::ProcessWorkObserver::new(Arc::clone(registry))
+            .observed(record)
             .await
     }
 

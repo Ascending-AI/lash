@@ -38,7 +38,7 @@ async fn complete(
         .complete_process(
             process_id,
             lash::process::ProcessAwaitOutput::from_tool_output(output),
-            lash::process::ProcessCompletionAuthority::workflow_key(process_id),
+            lash::persistence::ProcessCompletionAuthority::workflow_key(process_id),
         )
         .await
         .expect("complete process");
@@ -343,7 +343,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window() {
             lash::process::ProcessAwaitOutput::from_tool_output(
                 lash::tools::ToolCallOutput::success(json!("done")),
             ),
-            lash::process::ProcessCompletionAuthority::workflow_key(&ids["settled-process"]),
+            lash::persistence::ProcessCompletionAuthority::workflow_key(&ids["settled-process"]),
         )
         .await
         .expect("record the terminal outcome");

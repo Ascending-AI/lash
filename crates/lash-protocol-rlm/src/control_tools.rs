@@ -347,7 +347,7 @@ mod tests {
             _registration: lash_core::ProcessStartRegistration,
             _options: lash_core::ProcessStartOptions,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessRecord, PluginError> {
+        ) -> Result<lash_core::facade_support::ObservedProcess, PluginError> {
             Err(PluginError::Session(
                 "process starts are unavailable in this test".to_string(),
             ))
@@ -368,7 +368,7 @@ mod tests {
             _session_id: &SessionId,
             _mode: lash_core::ProcessListMode,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<Vec<lash_core::ProcessRecord>, PluginError> {
+        ) -> Result<Vec<lash_core::facade_support::ObservedProcess>, PluginError> {
             Ok(Vec::new())
         }
 
@@ -388,7 +388,7 @@ mod tests {
             _owner: &lash_core::RuntimeOwner,
             _process_id: &ProcessId,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessRecord, PluginError> {
+        ) -> Result<lash_core::facade_support::ObservedProcess, PluginError> {
             Err(PluginError::Session(
                 "process cancellation is unavailable in this test".to_string(),
             ))
@@ -400,7 +400,7 @@ mod tests {
             _process_id: &ProcessId,
             _identity: lash_core::ToolIntentIdentity,
             _scope: lash_core::ProcessOpScope<'_>,
-        ) -> Result<lash_core::ProcessRecord, PluginError> {
+        ) -> Result<lash_core::facade_support::ObservedProcess, PluginError> {
             Err(PluginError::Session(
                 "recorded process cancellation is unavailable in this test".to_string(),
             ))

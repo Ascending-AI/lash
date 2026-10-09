@@ -4,10 +4,10 @@ error[E0433]: cannot find `ProcessIdRegistrar` in `process`
 5 |     let _ = lash::process::ProcessIdRegistrar::REGISTRAR;
   |                            ^^^^^^^^^^^^^^^^^^ could not find `ProcessIdRegistrar` in `process`
   |
-help: a trait with a similar name exists
+help: a struct with a similar name exists
   |
 5 -     let _ = lash::process::ProcessIdRegistrar::REGISTRAR;
-5 +     let _ = lash::process::ProcessRegistrar::REGISTRAR;
+5 +     let _ = lash::process::ProcessRegistration::REGISTRAR;
   |
 
 error[E0624]: associated function `from_minted` is private

@@ -22,9 +22,11 @@ impl RuntimeExecutionContext<'_> {
         record
     }
 
-    pub(super) fn process_status_value(status: &crate::ProcessRecord) -> serde_json::Value {
+    pub(super) fn process_status_value(
+        status: &crate::facade_support::ObservedProcess,
+    ) -> serde_json::Value {
         json!({
-            "process_id": status.id,
+            "process_id": status.process_id,
             "status": status.status().label(),
         })
     }

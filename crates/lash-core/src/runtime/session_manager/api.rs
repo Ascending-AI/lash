@@ -137,7 +137,7 @@ impl crate::plugin::ProcessReadService for RuntimeSessionProcessService {
         session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         if self
             .visibility
             .consults_filter(ProcessVisibilityOperation::ListVisible)
@@ -161,7 +161,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         &self,
         owner: &crate::RuntimeOwner,
         mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         if self
             .visibility
             .consults_filter(ProcessVisibilityOperation::ListVisibleForAttempt)
@@ -194,7 +194,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
                 scope,
             )
             .await?;
-        Ok(crate::ProcessHandleView::from_record(record))
+        Ok(crate::ProcessHandleView::from_observed(record))
     }
 
     async fn stage_recorded_start(
@@ -237,7 +237,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         registration: crate::ProcessStartRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         self.services
             .processes
             .start_process(
@@ -306,7 +306,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         if self
             .visibility
             .consults_filter(ProcessVisibilityOperation::ListVisible)
@@ -355,7 +355,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         self.services
             .processes
             .cancel_process(&self.services.current, owner, process_id, scope)
@@ -368,7 +368,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         self.services
             .processes
             .cancel_recorded_intent(&self.services.current, process_id, identity, scope)

@@ -34,7 +34,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         registration: crate::ProcessStartRegistration,
         observers: Vec<SessionId>,
         execution_context: crate::ProcessExecutionContext,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::Start {
                 registration,
@@ -84,6 +84,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 ..Default::default()
             },
         )
+        .with_process_actor_parks(Arc::clone(self.current.host.core.backend().durable()))
         .with_process_env_store(Arc::clone(
             &self.current.host.core.durability.process_env_store,
         ))
@@ -118,7 +119,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         &self,
         session_scope: crate::SessionScope,
         mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::List {
                 selection: crate::ProcessListSelection::Observed {
@@ -139,7 +140,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         // The recorded cancel admission checks the process is retained and
         // records its answer: a replay after the process was pruned reads
         // that answer, never a registry that has moved on (ADR 0105 §1).
@@ -340,7 +341,7 @@ impl ProcessCapability {
         registration: crate::ProcessStartRegistration,
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         self.ensure_known_process_session(current, session_id)
             .await?;
         self.mark_current_process_sync_needed(current, session_id);
@@ -539,7 +540,7 @@ impl ProcessCapability {
         session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         self.command_runner(current, &scope)?
             .list(
                 self.process_scope_for_op(session_id, scope.agent_frame_id()),
@@ -554,7 +555,7 @@ impl ProcessCapability {
         session_id: &SessionId,
         mode: crate::ProcessListMode,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         let records = self
             .list_process_handles(current, session_id, mode, scope)
             .await?;
@@ -571,7 +572,7 @@ impl ProcessCapability {
         current: &CurrentOwnerCapability,
         owner: &crate::RuntimeOwner,
         mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         let records = self
             .list_process_handles_for_attempt(current, owner, mode)
             .await?;
@@ -591,13 +592,13 @@ impl ProcessCapability {
         current: &CurrentOwnerCapability,
         owner: &crate::RuntimeOwner,
         mode: crate::ProcessListMode,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    ) -> Result<Vec<crate::facade_support::ObservedProcess>, crate::PluginError> {
         let registry = current.host.process_registry().ok_or_else(|| {
             crate::PluginError::Session(
                 "process registry is unavailable in this runtime".to_string(),
             )
         })?;
-        match owner {
+        let records = match owner {
             crate::RuntimeOwner::Session(session_id) => match mode {
                 crate::ProcessListMode::Live => registry.list_live_observed_by(session_id).await,
                 crate::ProcessListMode::All => {
@@ -629,7 +630,13 @@ impl ProcessCapability {
                     })
                     .collect())
             }
-        }
+        }?;
+        crate::facade_support::observe_process_records(
+            &crate::facade_support::ProcessWorkObserver::new(Arc::clone(registry))
+                .with_actor_parks(Arc::clone(current.host.core.backend().durable())),
+            records,
+        )
+        .await
     }
 
     #[expect(
@@ -642,7 +649,7 @@ impl ProcessCapability {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
         let _ = owner;
         runner
@@ -719,7 +726,7 @@ impl ProcessCapability {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: crate::ProcessOpScope<'_>,
-    ) -> Result<crate::ProcessRecord, crate::PluginError> {
+    ) -> Result<crate::facade_support::ObservedProcess, crate::PluginError> {
         let runner = self.command_runner(current, &scope)?;
         runner
             .cancel_named(
@@ -821,8 +828,8 @@ impl ProcessCapability {
     fn narrow_tool_visible_records(
         current: &CurrentOwnerCapability,
         session_id: &SessionId,
-        records: Vec<crate::ProcessRecord>,
-    ) -> Vec<crate::ProcessRecord> {
+        records: Vec<crate::facade_support::ObservedProcess>,
+    ) -> Vec<crate::facade_support::ObservedProcess> {
         let Some(filter) = current
             .host
             .core
@@ -834,7 +841,7 @@ impl ProcessCapability {
         };
         let candidates = records
             .iter()
-            .map(|record| record.id.clone())
+            .map(|record| record.process_id.clone())
             .collect::<Vec<_>>();
         let returned_candidates = candidates
             .iter()
@@ -864,7 +871,7 @@ impl ProcessCapability {
         );
         records
             .into_iter()
-            .filter(|record| returned.contains(&record.id))
+            .filter(|record| returned.contains(&record.process_id))
             .collect()
     }
 

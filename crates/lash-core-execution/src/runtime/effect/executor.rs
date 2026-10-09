@@ -95,6 +95,7 @@ pub struct ProcessLocalExecution {
     /// durable attachment store: its terminals deliver nothing to hold.
     pub attachments: Option<Arc<dyn crate::AttachmentReferrers>>,
     pub(crate) outcome_observer: Option<ProcessOutcomeObserver>,
+    pub(crate) actors: Option<Arc<dyn lash_durable::DurableStore>>,
 }
 
 /// Local execution target for the journaled immutable-definition commands:
@@ -489,6 +490,17 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         self
     }
 
+    /// Read actor parks from this store when projecting start, list and cancel
+    /// results into their canonical host observation.
+    pub fn with_process_actor_parks(mut self, actors: Arc<dyn lash_durable::DurableStore>) -> Self {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
+            execution.actors = Some(actors);
+        }
+        self
+    }
+
     /// Installs an observer after a process side effect has completed but
     /// before a durable controller receives the outcome to record.
     ///
@@ -556,6 +568,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                     turn_cancellation: None,
                     attachments: None,
                     outcome_observer: None,
+                    actors: None,
                 },
             ))),
             replay_trace: None,

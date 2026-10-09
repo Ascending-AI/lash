@@ -280,21 +280,23 @@ fn processes_area_witnesses() {
     let _ = lash::process::ProcessChangeHub::notify;
     // W0156: lash::process::ProcessChangeHub::subscribe [function]
     let _ = lash::process::ProcessChangeHub::subscribe;
-    // W0159: lash::process::ProcessCompletionAuthority::WorkflowKey [variant]
-    variant_witness(|value: &lash::process::ProcessCompletionAuthority| {
+    // W0159: lash::persistence::ProcessCompletionAuthority::WorkflowKey [variant]
+    variant_witness(|value: &lash::persistence::ProcessCompletionAuthority| {
         matches!(
             value,
-            lash::process::ProcessCompletionAuthority::WorkflowKey { .. }
+            lash::persistence::ProcessCompletionAuthority::WorkflowKey { .. }
         )
     });
-    // W0160: lash::process::ProcessCompletionAuthority::WorkflowKey::workflow_key [field]
-    field_witness(|value: &lash::process::ProcessCompletionAuthority| {
-        if let lash::process::ProcessCompletionAuthority::WorkflowKey { workflow_key, .. } = value {
+    // W0160: lash::persistence::ProcessCompletionAuthority::WorkflowKey::workflow_key [field]
+    field_witness(|value: &lash::persistence::ProcessCompletionAuthority| {
+        if let lash::persistence::ProcessCompletionAuthority::WorkflowKey { workflow_key, .. } =
+            value
+        {
             let _ = workflow_key;
         }
     });
-    // W0161: lash::process::ProcessCompletionAuthority::validate [function]
-    let _ = lash::process::ProcessCompletionAuthority::validate;
+    // W0161: lash::persistence::ProcessCompletionAuthority::validate [function]
+    let _ = lash::persistence::ProcessCompletionAuthority::validate;
     // W0167: lash::process::ProcessEvent [struct]
     type_witness::<lash::process::ProcessEvent>();
     // W0169: lash::process::ProcessEvent::invocation [field]
@@ -313,24 +315,24 @@ fn processes_area_witnesses() {
     field_witness(|value: &lash::process::ProcessEvent| {
         let _ = &value.sequence;
     });
-    // W0176: lash::process::ProcessEventAppendRequest::cancel_requested [function]
-    let _ = lash::process::ProcessEventAppendRequest::cancel_requested;
-    // W0178: lash::process::ProcessEventAppendRequest::external_ref_set [function]
-    let _ = lash::process::ProcessEventAppendRequest::external_ref_set;
-    // W0179: lash::process::ProcessEventAppendRequest::first_started [function]
-    let _ = lash::process::ProcessEventAppendRequest::first_started;
-    // W0180: lash::process::ProcessEventAppendRequest::observer_added [function]
-    let _ = lash::process::ProcessEventAppendRequest::observer_added;
-    // W0181: lash::process::ProcessEventAppendRequest::observer_removed [function]
-    let _ = lash::process::ProcessEventAppendRequest::observer_removed;
-    // W0183: lash::process::ProcessEventAppendRequest::replay [field]
-    field_witness(|value: &lash::process::ProcessEventAppendRequest| {
+    // W0176: lash::persistence::ProcessEventAppendRequest::cancel_requested [function]
+    let _ = lash::persistence::ProcessEventAppendRequest::cancel_requested;
+    // W0178: lash::persistence::ProcessEventAppendRequest::external_ref_set [function]
+    let _ = lash::persistence::ProcessEventAppendRequest::external_ref_set;
+    // W0179: lash::persistence::ProcessEventAppendRequest::first_started [function]
+    let _ = lash::persistence::ProcessEventAppendRequest::first_started;
+    // W0180: lash::persistence::ProcessEventAppendRequest::observer_added [function]
+    let _ = lash::persistence::ProcessEventAppendRequest::observer_added;
+    // W0181: lash::persistence::ProcessEventAppendRequest::observer_removed [function]
+    let _ = lash::persistence::ProcessEventAppendRequest::observer_removed;
+    // W0183: lash::persistence::ProcessEventAppendRequest::replay [field]
+    field_witness(|value: &lash::persistence::ProcessEventAppendRequest| {
         let _ = &value.replay;
     });
-    // W0184: lash::process::ProcessEventAppendRequest::wait_cleared [function]
-    let _ = lash::process::ProcessEventAppendRequest::wait_cleared;
-    // W0185: lash::process::ProcessEventAppendRequest::wait_entered [function]
-    let _ = lash::process::ProcessEventAppendRequest::wait_entered;
+    // W0184: lash::persistence::ProcessEventAppendRequest::wait_cleared [function]
+    let _ = lash::persistence::ProcessEventAppendRequest::wait_cleared;
+    // W0185: lash::persistence::ProcessEventAppendRequest::wait_entered [function]
+    let _ = lash::persistence::ProcessEventAppendRequest::wait_entered;
     // W0186: lash::process::ProcessEventAppendReceipt [struct]
     type_witness::<lash::process::ProcessEventAppendReceipt>();
     // W0187: lash::process::ProcessEventAppendReceipt::event [field]
@@ -365,8 +367,8 @@ fn processes_area_witnesses() {
     });
     // W0199: lash::process::ProcessExecutionEnvSpec::to_store_bytes [function]
     let _ = lash::process::ProcessExecutionEnvSpec::to_store_bytes;
-    // W0200: lash::process::ProcessHandleView::new [function]
-    let _ = lash::process::ProcessHandleView::new(todo!(), todo!(), todo!());
+    // W0200: lash::persistence::ProcessHandleView::new [function]
+    let _ = lash::persistence::ProcessHandleView::new(todo!(), todo!(), todo!());
     // W0201: lash::process::ProcessIdentity::definition [field]
     field_witness(|value: &lash::process::ProcessIdentity| {
         let _ = &value.definition;
@@ -407,25 +409,25 @@ fn processes_area_witnesses() {
             let _ = turn_input;
         }
     });
-    // W0217: lash::process::ProcessListFilter::created_at_end_ms [field]
-    field_witness(|value: &lash::process::ProcessListFilter| {
+    // W0217: lash::persistence::ProcessListFilter::created_at_end_ms [field]
+    field_witness(|value: &lash::persistence::ProcessListFilter| {
         let _ = &value.created_at_end_ms;
     });
-    // W0218: lash::process::ProcessListFilter::created_at_start_ms [field]
-    field_witness(|value: &lash::process::ProcessListFilter| {
+    // W0218: lash::persistence::ProcessListFilter::created_at_start_ms [field]
+    field_witness(|value: &lash::persistence::ProcessListFilter| {
         let _ = &value.created_at_start_ms;
     });
-    // W0219: lash::process::ProcessListFilter::identity_kind [field]
-    field_witness(|value: &lash::process::ProcessListFilter| {
+    // W0219: lash::persistence::ProcessListFilter::identity_kind [field]
+    field_witness(|value: &lash::persistence::ProcessListFilter| {
         let _ = &value.identity_kind;
     });
-    // W0220: lash::process::ProcessListFilter::identity_label [field]
-    field_witness(|value: &lash::process::ProcessListFilter| {
+    // W0220: lash::persistence::ProcessListFilter::identity_label [field]
+    field_witness(|value: &lash::persistence::ProcessListFilter| {
         let _ = &value.identity_label;
     });
-    // W0221: lash::process::ProcessLiveReferenceView::from_records [function]
-    let _ = lash::process::ProcessLiveReferenceView::from_records(std::iter::empty::<
-        &'static lash::process::ProcessRecord,
+    // W0221: lash::persistence::ProcessLiveReferenceView::from_records [function]
+    let _ = lash::persistence::ProcessLiveReferenceView::from_records(std::iter::empty::<
+        &'static lash::persistence::ProcessRecord,
     >());
     // W0222: lash::process::ProcessObserverBy::Host [variant]
     variant_witness(|value: &lash::process::ProcessObserverBy| {
@@ -436,16 +438,16 @@ fn processes_area_witnesses() {
         let lash::process::ProcessObserverBy::Host { operation_id, .. } = value;
         let _ = operation_id;
     });
-    // W0224: lash::process::ProcessOpScope [struct]
-    type_witness::<lash::process::ProcessOpScope>();
-    // W0225: lash::process::ProcessOpScope::agent_frame_id [function]
-    let _ = lash::process::ProcessOpScope::agent_frame_id;
-    // W0226: lash::process::ProcessOpScope::new [function]
-    let _ = lash::process::ProcessOpScope::new(todo!());
-    // W0227: lash::process::ProcessOpScope::with_agent_frame_id [function]
-    let _ = lash::process::ProcessOpScope::with_agent_frame_id;
-    // W0228: lash::process::ProcessOpScope::with_parent_invocation [function]
-    let _ = lash::process::ProcessOpScope::with_parent_invocation;
+    // W0224: lash::persistence::ProcessOpScope [struct]
+    type_witness::<lash::persistence::ProcessOpScope>();
+    // W0225: lash::persistence::ProcessOpScope::agent_frame_id [function]
+    let _ = lash::persistence::ProcessOpScope::agent_frame_id;
+    // W0226: lash::persistence::ProcessOpScope::new [function]
+    let _ = lash::persistence::ProcessOpScope::new(todo!());
+    // W0227: lash::persistence::ProcessOpScope::with_agent_frame_id [function]
+    let _ = lash::persistence::ProcessOpScope::with_agent_frame_id;
+    // W0228: lash::persistence::ProcessOpScope::with_parent_invocation [function]
+    let _ = lash::persistence::ProcessOpScope::with_parent_invocation;
     // W0229: lash::process::ProcessOriginator::Host [variant]
     variant_witness(|value: &lash::process::ProcessOriginator| {
         matches!(value, lash::process::ProcessOriginator::Host { .. })
@@ -458,54 +460,54 @@ fn processes_area_witnesses() {
     });
     // W0231: lash::process::ProcessOriginator::host [function]
     let _ = lash::process::ProcessOriginator::host();
-    // W0232: lash::process::ProcessRecord::from_prepared_registration [function]
-    let _ = lash::process::ProcessRecord::from_prepared_registration;
-    // W0233: lash::process::ProcessRecord::from_registration [function]
-    let _ = lash::process::ProcessRecord::from_registration;
-    // W0234: lash::process::ProcessRecord::from_registration_with_clock [function]
-    let _ = lash::process::ProcessRecord::from_registration_with_clock;
-    // W0236: lash::process::ProcessRegistry::add_observer [function]
-    fn meth_0236<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0232: lash::persistence::ProcessRecord::from_prepared_registration [function]
+    let _ = lash::persistence::ProcessRecord::from_prepared_registration;
+    // W0233: lash::persistence::ProcessRecord::from_registration [function]
+    let _ = lash::persistence::ProcessRecord::from_registration;
+    // W0234: lash::persistence::ProcessRecord::from_registration_with_clock [function]
+    let _ = lash::persistence::ProcessRecord::from_registration_with_clock;
+    // W0236: lash::persistence::ProcessRegistry::add_observer [function]
+    fn meth_0236<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::add_observer;
     }
-    // W0237: lash::process::ProcessRegistry::append_event_with_authority [function]
-    fn meth_0237<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0237: lash::persistence::ProcessRegistry::append_event_with_authority [function]
+    fn meth_0237<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::append_event_with_authority;
     }
-    // W0239: lash::process::ProcessRegistry::clear_process_wait_with_authority [function]
-    fn meth_0239<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0239: lash::persistence::ProcessRegistry::clear_process_wait_with_authority [function]
+    fn meth_0239<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::clear_process_wait_with_authority;
     }
-    // W0242: lash::process::ProcessRegistry::delete_session_process_state [function]
-    fn meth_0242<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0242: lash::persistence::ProcessRegistry::delete_session_process_state [function]
+    fn meth_0242<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::delete_session_process_state;
     }
-    // W0245: lash::process::ProcessRegistry::get_process [function]
-    fn meth_0245<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0245: lash::persistence::ProcessRegistry::get_process [function]
+    fn meth_0245<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::get_process;
     }
-    // W0246: lash::process::ProcessRegistry::list_live_observed_by [function]
-    fn meth_0246<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0246: lash::persistence::ProcessRegistry::list_live_observed_by [function]
+    fn meth_0246<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::list_live_observed_by;
     }
-    // W0247: lash::process::ProcessRegistry::list_observed_by [function]
-    fn meth_0247<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0247: lash::persistence::ProcessRegistry::list_observed_by [function]
+    fn meth_0247<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::list_observed_by;
     }
-    // W0250: lash::process::ProcessRegistry::processes_changed_since [function]
-    fn meth_0250<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0250: lash::persistence::ProcessRegistry::processes_changed_since [function]
+    fn meth_0250<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::processes_changed_since;
     }
-    // W0252: lash::process::ProcessRegistry::record_first_started_with_authority [function]
-    fn meth_0252<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0252: lash::persistence::ProcessRegistry::record_first_started_with_authority [function]
+    fn meth_0252<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::record_first_started_with_authority;
     }
-    // W0255: lash::process::ProcessRegistry::set_process_wait_with_authority [function]
-    fn meth_0255<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0255: lash::persistence::ProcessRegistry::set_process_wait_with_authority [function]
+    fn meth_0255<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::set_process_wait_with_authority;
     }
-    // W0258: lash::process::ProcessRegistry::with_runtime_clock [function]
-    fn meth_0258<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0258: lash::persistence::ProcessRegistry::with_runtime_clock [function]
+    fn meth_0258<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::with_runtime_clock;
     }
     // W0259: lash::process::ProcessService [trait]

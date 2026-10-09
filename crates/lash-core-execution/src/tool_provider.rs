@@ -131,8 +131,8 @@ impl AttemptProcessReads {
             .list_visible_for_attempt(&self.owner, filter.list_mode())
             .await?
             .into_iter()
-            .filter(|record| filter.matches_record(record))
-            .map(crate::ProcessHandleView::from_record)
+            .filter(|record| filter.matches_observed(record))
+            .map(crate::ProcessHandleView::from_observed)
             .collect())
     }
 }

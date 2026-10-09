@@ -38,7 +38,7 @@ async fn register_terminal_processes(
                 lash::process::ProcessAwaitOutput::from_tool_output(
                     lash::tools::ToolCallOutput::success(json!("done")),
                 ),
-                lash::process::ProcessCompletionAuthority::workflow_key(&process_id),
+                lash::persistence::ProcessCompletionAuthority::workflow_key(&process_id),
             )
             .await
             .expect("complete process");

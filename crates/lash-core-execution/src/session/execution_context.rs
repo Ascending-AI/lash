@@ -988,8 +988,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             .await
         {
             Ok(record) => {
-                self.record_started_process(&record.id);
-                crate::ToolInvocationReply::success(Self::process_handle_json(&record.id))
+                self.record_started_process(&record.process_id);
+                crate::ToolInvocationReply::success(Self::process_handle_json(&record.process_id))
             }
             Err(err) => crate::ToolInvocationReply::error(serde_json::json!(err.to_string())),
         }

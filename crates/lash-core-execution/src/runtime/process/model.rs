@@ -1319,6 +1319,13 @@ pub struct ProcessStartReceipt {
     pub disposition: ProcessRegistrationOutcome,
 }
 
+impl ProcessHandleView {
+    pub fn from_observed(process: super::observation::ObservedProcess) -> Self {
+        let status = process.status();
+        Self::new(process.process_id, process.identity, status)
+    }
+}
+
 impl ProcessStartReceipt {
     /// The receipt of a start that registered `record` with `disposition`.
     pub fn of(record: &ProcessRecord, disposition: ProcessRegistrationOutcome) -> Self {
@@ -1338,6 +1345,23 @@ pub struct ProcessCancelReceipt {
 }
 
 impl ProcessCancelReceipt {
+    pub fn from_observed(
+        process: super::observation::ObservedProcess,
+    ) -> Result<Self, crate::PluginError> {
+        let status = process.status();
+        let request = process.cancel_request.ok_or_else(|| {
+            crate::PluginError::Session(format!(
+                "process `{}` has no cancellation request",
+                process.process_id
+            ))
+        })?;
+        Ok(Self {
+            process_id: process.process_id,
+            status,
+            origin: request.origin,
+        })
+    }
+
     /// Builds a `ProcessCancelReceipt` from record data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Result<Self, crate::PluginError> {

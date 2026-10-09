@@ -30,7 +30,7 @@ impl AppState {
         session_id: &SessionId,
         process_id: &ProcessId,
         operation_id: &str,
-    ) -> Result<lash::process::ProcessCancelReceipt, AppError> {
+    ) -> Result<lash::persistence::ProcessCancelReceipt, AppError> {
         let operation = self
             .host_operation(format!("workbench-process-cancel:{operation_id}"))
             .await?;
@@ -74,12 +74,12 @@ impl AppState {
             .processes()
             .prune(
                 u64::MAX,
-                Some(&lash::process::ProcessListFilter {
+                Some(&lash::persistence::ProcessListFilter {
                     status: lash::process::ProcessStatusFilter::Any,
                     originator: Some(lash::process::ProcessOriginatorFilter::session(
                         session_id.clone(),
                     )),
-                    ..lash::process::ProcessListFilter::default()
+                    ..lash::persistence::ProcessListFilter::default()
                 }),
                 lash::process::ProjectionWatermark::NoProjector,
             )

@@ -71,7 +71,7 @@ async fn attach_turn(
 async fn setup(
     State(state): State<ReceiverState>,
     Path(session): Path<lash::SessionId>,
-) -> AppResult<Json<lash::process::ProcessStartReceipt>> {
+) -> AppResult<Json<lash::persistence::ProcessStartReceipt>> {
     let core = &state.app.core;
     let receipt = receiver::register_receiver(core, &session, core.effect_host())
         .await
@@ -94,7 +94,7 @@ async fn setup(
 async fn start_sleeper(
     State(state): State<ReceiverState>,
     Path((session, millis)): Path<(lash::SessionId, i64)>,
-) -> AppResult<Json<lash::process::ProcessStartReceipt>> {
+) -> AppResult<Json<lash::persistence::ProcessStartReceipt>> {
     drop(
         state
             .app
@@ -116,7 +116,7 @@ async fn start_sleeper(
 async fn start_source(
     State(state): State<ReceiverState>,
     Path((session, key)): Path<(lash::SessionId, String)>,
-) -> AppResult<Json<lash::process::ProcessStartReceipt>> {
+) -> AppResult<Json<lash::persistence::ProcessStartReceipt>> {
     let core = &state.app.core;
     Ok(Json(
         receiver::start_source(core, &session, &key, core.effect_host())

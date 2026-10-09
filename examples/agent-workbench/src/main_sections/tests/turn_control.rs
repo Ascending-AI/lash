@@ -646,7 +646,7 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
 /// Register a process `turn_id` started, `Detached` from it: the turn's own
 /// end leaves it alone, so only the turn control's cancel reaches it.
 async fn register_turn_child(
-    registry: &Arc<dyn lash::process::ProcessRegistry>,
+    registry: &Arc<dyn lash::persistence::ProcessRegistry>,
     session_id: &SessionId,
     turn_id: &TurnId,
 ) -> lash::ProcessId {

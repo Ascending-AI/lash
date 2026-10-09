@@ -183,6 +183,27 @@ class FacadeCompletenessTest(unittest.TestCase):
             self.assertEqual([], facade.unresolved_reexports)
             return {path: sorted(users) for (_crate, path), users in facade.gaps().items()}
 
+    def test_host_signatures_reject_store_rows_by_module_home(self) -> None:
+        raw = crate_f([])
+        raw["index"]["0"]["inner"]["module"]["items"] += [20, 30]
+        raw["index"].update({
+            "20": module("persistence", [21, 22]),
+            "21": struct("ProcessRecord", []),
+            "22": function("read", [], ty("ProcessRecord", 21)),
+            "30": module("process", [31]),
+            "31": function("host_read", [], ty("ProcessRecord", 21)),
+        })
+        raw["paths"]["21"] = {
+            "crate_id": 0, "path": ["f", "persistence", "ProcessRecord"], "kind": "struct"
+        }
+        facade = fc.Facade({"f": fc.Document("f", raw)}, "f")
+        facade.walk()
+        self.assertEqual({"f::process::host_read"}, facade.process_record_boundaries())
+        raw["index"]["30"]["inner"]["module"]["items"] = []
+        facade = fc.Facade({"f": fc.Document("f", raw)}, "f")
+        facade.walk()
+        self.assertEqual(set(), facade.process_record_boundaries())
+
     def test_trait_parameters_and_inherent_returns_must_be_nameable(self) -> None:
         self.assertEqual(
             {

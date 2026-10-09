@@ -534,7 +534,7 @@ mod tests {
     /// workbench that keeps both alive.
     async fn test_process_observer() -> (
         lash::process::ProcessWorkObserver,
-        Arc<dyn lash::process::ProcessRegistry>,
+        Arc<dyn lash::persistence::ProcessRegistry>,
         crate::tests::Workbench,
     ) {
         let workbench = crate::tests::Workbench::silent().await;

@@ -521,12 +521,12 @@ impl ToolIntentIngress {
             RealizedIntent::Process(result) => match result {
                 lash_core::ProcessEffectOutcome::Start { record, .. } => {
                     lash_core::ToolIntentRealized::StartProcess(
-                        lash_core::ProcessHandleView::from_record(*record),
+                        lash_core::ProcessHandleView::from_observed(*record),
                     )
                 }
                 lash_core::ProcessEffectOutcome::Cancel { record } => {
                     lash_core::ToolIntentRealized::CancelProcess(
-                        lash_core::ProcessCancelReceipt::from_record(*record)
+                        lash_core::ProcessCancelReceipt::from_observed(*record)
                             .map_err(|error| RealizationFailure::Command(kind, error))?,
                     )
                 }
@@ -953,6 +953,7 @@ impl ToolIntentIngress {
                     session_turn_admission: None,
                 },
             )
+            .with_process_actor_parks(std::sync::Arc::clone(self.core.backend.durable()))
             .with_process_attachments(self.core.backend.attachment_referrers())
             .with_process_env_store(std::sync::Arc::clone(
                 &self.core.env.core.durability.process_env_store,

@@ -255,7 +255,7 @@ impl lash::StoreSet for LedgerStores {
         })
     }
 
-    fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
+    fn process_registry(&self) -> Arc<dyn lash::persistence::ProcessRegistry> {
         self.inner.process_registry()
     }
 

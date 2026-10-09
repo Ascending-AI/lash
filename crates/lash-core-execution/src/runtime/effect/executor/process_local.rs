@@ -119,7 +119,12 @@ impl ProcessLocalExecution {
             turn_cancellation,
             attachments,
             outcome_observer,
+            actors,
         } = self;
+        let mut observer = crate::runtime::process::ProcessWorkObserver::new(Arc::clone(&registry));
+        if let Some(actors) = actors {
+            observer = observer.with_actor_parks(actors);
+        }
         let outcome = match command {
             ProcessCommand::Start {
                 registration,
@@ -154,7 +159,7 @@ impl ProcessLocalExecution {
                 let record = started.record;
                 Ok((
                     ProcessEffectOutcome::Start {
-                        record: Box::new(record),
+                        record: Box::new(observer.observed(record).await?),
                         disposition,
                     },
                     realization,
@@ -200,7 +205,9 @@ impl ProcessLocalExecution {
                     }
                 };
                 Ok((
-                    ProcessEffectOutcome::List { entries },
+                    ProcessEffectOutcome::List {
+                        entries: observer.observe_records(entries).await?,
+                    },
                     crate::StoreRealization::Realized,
                 ))
             }
@@ -328,7 +335,7 @@ impl ProcessLocalExecution {
                     .await?;
                 Ok((
                     ProcessEffectOutcome::Cancel {
-                        record: Box::new(record),
+                        record: Box::new(observer.observed(record).await?),
                     },
                     realization,
                 ))

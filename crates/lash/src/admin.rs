@@ -593,7 +593,7 @@ impl SessionAdmin {
         let summary = processes
             .cancel(&owner, process_id, scope)
             .await
-            .and_then(lash_core::ProcessCancelReceipt::from_record)
+            .and_then(lash_core::ProcessCancelReceipt::from_observed)
             .map_err(EmbedError::Plugin)?;
         Ok(summary)
     }

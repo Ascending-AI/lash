@@ -424,7 +424,7 @@ impl ProcessQuery for Integrator {
         filter: &ProcessListFilter,
         limit: NonZeroUsize,
         continuation: Option<lash::process::ProcessRosterCursor>,
-    ) -> Result<lash::process::ProcessRosterRecords, PluginError> {
+    ) -> Result<lash::persistence::ProcessRosterRecords, PluginError> {
         unreachable!("external signature witness")
     }
     async fn process_change_bounds(
@@ -770,4 +770,20 @@ impl FleetFormatStore for Integrator {
     fn fleet_format(&self) -> FleetFormat {
         FleetFormat::current()
     }
+}
+
+/// The facade alone supplies both the registry implementation contract above
+/// and the row constructors an external store uses for its lifecycle fold.
+#[test]
+fn a_store_author_constructs_its_process_row_through_the_facade() {
+    let process_id = lash::ProcessId::fixture("external-store-row");
+    let registration = lash::testing::held_engine_registration(
+        Default::default(),
+        ProcessProvenance::host(),
+        Lifetime::Detached,
+    );
+    let row = ProcessRecord::from_registration(registration, process_id.clone());
+    assert_eq!(row.id, process_id);
+    assert_eq!(row.status(), ProcessStatus::Running);
+    assert_eq!(row.last_event_sequence, 0);
 }

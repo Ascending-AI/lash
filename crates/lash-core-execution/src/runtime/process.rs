@@ -12,7 +12,7 @@ mod guarded_surface_tests;
 pub(crate) mod model;
 #[cfg(test)]
 mod model_filter_tests;
-mod observation;
+pub(crate) mod observation;
 mod observer_intent;
 mod op_scope;
 mod references;

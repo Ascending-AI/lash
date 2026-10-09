@@ -4,14 +4,13 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use lash::persistence::ProcessStartReceipt;
 use lash::plugins::{
     PluginDeclaration, PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
     ProcessEngine, ProcessEngineContributionContext, ProcessEngineRegistration, ProcessInfraError,
     SessionPlugin,
 };
-use lash::process::{
-    ProcessAwaitOutput, ProcessInput, ProcessOriginator, ProcessStartReceipt, ProcessStartRequest,
-};
+use lash::process::{ProcessAwaitOutput, ProcessInput, ProcessOriginator, ProcessStartRequest};
 
 /// The kind of [`ReceiverEngine`].
 pub const RECEIVER_ENGINE_KIND: &str = "h2-receiver";

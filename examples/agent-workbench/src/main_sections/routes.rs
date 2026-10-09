@@ -680,10 +680,10 @@ async fn runtime_wide_work(
         .saturating_sub(WORK_RAIL_RETIRED_WINDOW_MS);
     let mut observed = state
         .process_observer
-        .snapshot_all(&lash::process::ProcessListFilter {
+        .snapshot_all(&lash::persistence::ProcessListFilter {
             status: lash::process::ProcessStatusFilter::Any,
             retired_since_ms: Some(retired_since_ms),
-            ..lash::process::ProcessListFilter::default()
+            ..lash::persistence::ProcessListFilter::default()
         })
         .await
         // Audited: runtime-wide process observation reads the global registry without a session store.

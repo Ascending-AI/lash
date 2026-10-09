@@ -236,7 +236,10 @@ impl ProcessWorkObserver {
     }
 
     /// `record` as a host observes it, with its actor's park.
-    async fn observed(&self, record: ProcessRecord) -> Result<ObservedProcess, PluginError> {
+    pub(crate) async fn observed(
+        &self,
+        record: ProcessRecord,
+    ) -> Result<ObservedProcess, PluginError> {
         let park = match &self.actors {
             Some(actors) if !record.is_terminal() => {
                 crate::runtime::actor::process::park_of(actors.as_ref(), &record.id)
@@ -455,7 +458,7 @@ impl ProcessWorkObserver {
         Ok((observed, next))
     }
 
-    async fn observe_records(
+    pub(crate) async fn observe_records(
         &self,
         records: Vec<ProcessRecord>,
     ) -> Result<Vec<ObservedProcess>, PluginError> {
@@ -527,6 +530,15 @@ impl ProcessWorkObserver {
             }
         }
     }
+}
+
+/// Cross-crate observation seam for runtime services. Uses the same row and
+/// actor-park projection as facade roster, snapshot and change reads.
+pub async fn observe_process_records(
+    observer: &ProcessWorkObserver,
+    records: Vec<ProcessRecord>,
+) -> Result<Vec<ObservedProcess>, PluginError> {
+    observer.observe_records(records).await
 }
 
 impl ObservedProcess {

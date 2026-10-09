@@ -219,71 +219,71 @@ fn processes_area_witnesses_b() {
     });
     // W0436: lash::durability::EffectJournalRetirement::process [function]
     let _ = lash::durability::EffectJournalRetirement::process(lash::ProcessId::fixture("x"));
-    // W0437: lash::process::ProcessChange [enum]
-    type_witness::<lash::process::ProcessChange>();
-    // W0438: lash::process::ProcessChange::Deleted [variant]
-    variant_witness(|value: &lash::process::ProcessChange| {
-        matches!(value, lash::process::ProcessChange::Deleted { .. })
+    // W0437: lash::persistence::ProcessChange [enum]
+    type_witness::<lash::persistence::ProcessChange>();
+    // W0438: lash::persistence::ProcessChange::Deleted [variant]
+    variant_witness(|value: &lash::persistence::ProcessChange| {
+        matches!(value, lash::persistence::ProcessChange::Deleted { .. })
     });
-    // W0439: lash::process::ProcessChange::Deleted::tombstone [field]
-    field_witness(|value: &lash::process::ProcessChange| {
-        if let lash::process::ProcessChange::Deleted { tombstone, .. } = value {
+    // W0439: lash::persistence::ProcessChange::Deleted::tombstone [field]
+    field_witness(|value: &lash::persistence::ProcessChange| {
+        if let lash::persistence::ProcessChange::Deleted { tombstone, .. } = value {
             let _ = tombstone;
         }
     });
-    // W0440: lash::process::ProcessChange::Upsert [variant]
-    variant_witness(|value: &lash::process::ProcessChange| {
-        matches!(value, lash::process::ProcessChange::Upsert { .. })
+    // W0440: lash::persistence::ProcessChange::Upsert [variant]
+    variant_witness(|value: &lash::persistence::ProcessChange| {
+        matches!(value, lash::persistence::ProcessChange::Upsert { .. })
     });
-    // W0441: lash::process::ProcessChange::Upsert::record [field]
-    field_witness(|value: &lash::process::ProcessChange| {
-        if let lash::process::ProcessChange::Upsert { record, .. } = value {
+    // W0441: lash::persistence::ProcessChange::Upsert::record [field]
+    field_witness(|value: &lash::persistence::ProcessChange| {
+        if let lash::persistence::ProcessChange::Upsert { record, .. } = value {
             let _ = record;
         }
     });
-    // W0442: lash::process::ProcessCompletionOutcome [enum]
-    type_witness::<lash::process::ProcessCompletionOutcome>();
-    // W0443: lash::process::ProcessCompletionOutcome::AlreadyApplied [variant]
-    variant_witness(|value: &lash::process::ProcessCompletionOutcome| {
+    // W0442: lash::persistence::ProcessCompletionOutcome [enum]
+    type_witness::<lash::persistence::ProcessCompletionOutcome>();
+    // W0443: lash::persistence::ProcessCompletionOutcome::AlreadyApplied [variant]
+    variant_witness(|value: &lash::persistence::ProcessCompletionOutcome| {
         matches!(
             value,
-            lash::process::ProcessCompletionOutcome::AlreadyApplied { .. }
+            lash::persistence::ProcessCompletionOutcome::AlreadyApplied { .. }
         )
     });
-    // W0444: lash::process::ProcessCompletionOutcome::AlreadyApplied::stored [field]
-    field_witness(|value: &lash::process::ProcessCompletionOutcome| {
-        if let lash::process::ProcessCompletionOutcome::AlreadyApplied { stored, .. } = value {
+    // W0444: lash::persistence::ProcessCompletionOutcome::AlreadyApplied::stored [field]
+    field_witness(|value: &lash::persistence::ProcessCompletionOutcome| {
+        if let lash::persistence::ProcessCompletionOutcome::AlreadyApplied { stored, .. } = value {
             let _ = stored;
         }
     });
-    // W0445: lash::process::ProcessCompletionOutcome::Committed [variant]
-    variant_witness(|value: &lash::process::ProcessCompletionOutcome| {
+    // W0445: lash::persistence::ProcessCompletionOutcome::Committed [variant]
+    variant_witness(|value: &lash::persistence::ProcessCompletionOutcome| {
         matches!(
             value,
-            lash::process::ProcessCompletionOutcome::Committed(..)
+            lash::persistence::ProcessCompletionOutcome::Committed(..)
         )
     });
-    // W0446: lash::process::ProcessCompletionOutcome::Committed::0 [field]
-    field_witness(|value: &lash::process::ProcessCompletionOutcome| {
-        if let lash::process::ProcessCompletionOutcome::Committed(f0) = value {
+    // W0446: lash::persistence::ProcessCompletionOutcome::Committed::0 [field]
+    field_witness(|value: &lash::persistence::ProcessCompletionOutcome| {
+        if let lash::persistence::ProcessCompletionOutcome::Committed(f0) = value {
             let _ = f0;
         }
     });
-    // W0447: lash::process::ProcessCompletionOutcome::Superseded [variant]
-    variant_witness(|value: &lash::process::ProcessCompletionOutcome| {
+    // W0447: lash::persistence::ProcessCompletionOutcome::Superseded [variant]
+    variant_witness(|value: &lash::persistence::ProcessCompletionOutcome| {
         matches!(
             value,
-            lash::process::ProcessCompletionOutcome::Superseded { .. }
+            lash::persistence::ProcessCompletionOutcome::Superseded { .. }
         )
     });
-    // W0448: lash::process::ProcessCompletionOutcome::Superseded::stored [field]
-    field_witness(|value: &lash::process::ProcessCompletionOutcome| {
-        if let lash::process::ProcessCompletionOutcome::Superseded { stored, .. } = value {
+    // W0448: lash::persistence::ProcessCompletionOutcome::Superseded::stored [field]
+    field_witness(|value: &lash::persistence::ProcessCompletionOutcome| {
+        if let lash::persistence::ProcessCompletionOutcome::Superseded { stored, .. } = value {
             let _ = stored;
         }
     });
-    // W0449: lash::process::ProcessCompletionOutcome::from_stored [function]
-    let _ = lash::process::ProcessCompletionOutcome::from_stored;
+    // W0449: lash::persistence::ProcessCompletionOutcome::from_stored [function]
+    let _ = lash::persistence::ProcessCompletionOutcome::from_stored;
     // W0450: lash::plugins::ProcessEngine [trait]
     fn trait_witness_0450<T: lash::plugins::ProcessEngine>() {}
     // W0452: lash::plugins::ProcessEngine::kind [function]
@@ -300,33 +300,33 @@ fn processes_area_witnesses_b() {
     let _ = lash::plugins::ProcessEngineContributionContext::process_lifecycle_available;
     // W0459: lash::plugins::ProcessEngineContributionContext::trace_runtime [function]
     let _ = lash::plugins::ProcessEngineContributionContext::trace_runtime;
-    // W0482: lash::process::ProcessExecutionWriteAuthority [struct]
-    type_witness::<lash::process::ProcessExecutionWriteAuthority>();
-    // W0483: lash::process::ProcessExecutionWriteAuthority::attempt [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::attempt;
-    // W0484: lash::process::ProcessExecutionWriteAuthority::attempt_for [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::attempt_for;
-    // W0485: lash::process::ProcessExecutionWriteAuthority::engine_execution_id [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::engine_execution_id;
-    // W0486: lash::process::ProcessExecutionWriteAuthority::execution_id [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::execution_id;
-    // W0487: lash::process::ProcessExecutionWriteAuthority::owner_identity [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::owner_identity;
-    // W0488: lash::process::ProcessExecutionWriteAuthority::process_id [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::process_id;
-    // W0490: lash::process::ProcessExecutionWriteAuthority::bind_attempt [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::bind_attempt;
-    // W0491: lash::process::ProcessExecutionWriteAuthority::invocation [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::invocation(
+    // W0482: lash::persistence::ProcessExecutionWriteAuthority [struct]
+    type_witness::<lash::persistence::ProcessExecutionWriteAuthority>();
+    // W0483: lash::persistence::ProcessExecutionWriteAuthority::attempt [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::attempt;
+    // W0484: lash::persistence::ProcessExecutionWriteAuthority::attempt_for [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::attempt_for;
+    // W0485: lash::persistence::ProcessExecutionWriteAuthority::engine_execution_id [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::engine_execution_id;
+    // W0486: lash::persistence::ProcessExecutionWriteAuthority::execution_id [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::execution_id;
+    // W0487: lash::persistence::ProcessExecutionWriteAuthority::owner_identity [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::owner_identity;
+    // W0488: lash::persistence::ProcessExecutionWriteAuthority::process_id [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::process_id;
+    // W0490: lash::persistence::ProcessExecutionWriteAuthority::bind_attempt [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::bind_attempt;
+    // W0491: lash::persistence::ProcessExecutionWriteAuthority::invocation [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::invocation(
         lash::ProcessId::fixture("x"),
         String::new(),
     );
-    // W0493: lash::process::ProcessExecutionWriteAuthority::invocation_started [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::invocation_started;
-    // W0496: lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_start [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_start;
-    // W0497: lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_write [function]
-    let _ = lash::process::ProcessExecutionWriteAuthority::validate_invocation_for_write;
+    // W0493: lash::persistence::ProcessExecutionWriteAuthority::invocation_started [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::invocation_started;
+    // W0496: lash::persistence::ProcessExecutionWriteAuthority::validate_invocation_for_start [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::validate_invocation_for_start;
+    // W0497: lash::persistence::ProcessExecutionWriteAuthority::validate_invocation_for_write [function]
+    let _ = lash::persistence::ProcessExecutionWriteAuthority::validate_invocation_for_write;
     // W0498: lash::process::ProcessId [type_alias]
     type_witness::<lash::ProcessId>();
     // W0499: lash::plugins::ProcessInfraError [struct]
@@ -354,28 +354,28 @@ fn processes_area_witnesses_b() {
     field_witness(|value: &lash_core::ProcessSpawnProvenance| {
         let _ = &value.originator;
     });
-    // W0512: lash::process::ProcessStartOutcome [enum]
-    type_witness::<lash::process::ProcessStartOutcome>();
-    // W0513: lash::process::ProcessStartOutcome::AlreadyApplied [variant]
-    variant_witness(|value: &lash::process::ProcessStartOutcome| {
+    // W0512: lash::persistence::ProcessStartOutcome [enum]
+    type_witness::<lash::persistence::ProcessStartOutcome>();
+    // W0513: lash::persistence::ProcessStartOutcome::AlreadyApplied [variant]
+    variant_witness(|value: &lash::persistence::ProcessStartOutcome| {
         matches!(
             value,
-            lash::process::ProcessStartOutcome::AlreadyApplied(..)
+            lash::persistence::ProcessStartOutcome::AlreadyApplied(..)
         )
     });
-    // W0514: lash::process::ProcessStartOutcome::AlreadyApplied::0 [field]
-    field_witness(|value: &lash::process::ProcessStartOutcome| {
-        if let lash::process::ProcessStartOutcome::AlreadyApplied(f0) = value {
+    // W0514: lash::persistence::ProcessStartOutcome::AlreadyApplied::0 [field]
+    field_witness(|value: &lash::persistence::ProcessStartOutcome| {
+        if let lash::persistence::ProcessStartOutcome::AlreadyApplied(f0) = value {
             let _ = f0;
         }
     });
-    // W0522: lash::process::ProcessStartOutcome::Started [variant]
-    variant_witness(|value: &lash::process::ProcessStartOutcome| {
-        matches!(value, lash::process::ProcessStartOutcome::Started(..))
+    // W0522: lash::persistence::ProcessStartOutcome::Started [variant]
+    variant_witness(|value: &lash::persistence::ProcessStartOutcome| {
+        matches!(value, lash::persistence::ProcessStartOutcome::Started(..))
     });
-    // W0523: lash::process::ProcessStartOutcome::Started::0 [field]
-    field_witness(|value: &lash::process::ProcessStartOutcome| {
-        if let lash::process::ProcessStartOutcome::Started(f0) = value {
+    // W0523: lash::persistence::ProcessStartOutcome::Started::0 [field]
+    field_witness(|value: &lash::persistence::ProcessStartOutcome| {
+        if let lash::persistence::ProcessStartOutcome::Started(f0) = value {
             let _ = f0;
         }
     });
@@ -541,12 +541,12 @@ fn processes_area_witnesses_b() {
             let _ = f0;
         }
     });
-    // W0705: lash::process::ProcessRegistry::admit_tool_intent_submission [function]
-    fn meth_0705<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0705: lash::persistence::ProcessRegistry::admit_tool_intent_submission [function]
+    fn meth_0705<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::admit_tool_intent_submission;
     }
-    // W0706: lash::process::ProcessRegistry::complete_tool_intent_submission [function]
-    fn meth_0706<T: lash::process::ProcessRegistry>(_: &T) {
+    // W0706: lash::persistence::ProcessRegistry::complete_tool_intent_submission [function]
+    fn meth_0706<T: lash::persistence::ProcessRegistry>(_: &T) {
         let _ = T::complete_tool_intent_submission;
     }
     // W0709: lash::persistence::ForkSessionRequest::pending_observer_intents [field]

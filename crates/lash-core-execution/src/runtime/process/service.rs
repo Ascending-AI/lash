@@ -4,7 +4,7 @@ use crate::plugin::PluginError;
 
 use super::events::ProcessAwaitOutput;
 use super::model::{
-    ProcessCancelReceipt, ProcessHandleView, ProcessListMode, ProcessRecord, ProcessStartOptions,
+    ProcessCancelReceipt, ProcessHandleView, ProcessListMode, ProcessStartOptions,
     ProcessStartRegistration, ProcessStartRequest,
 };
 use super::op_scope::ProcessOpScope;
@@ -40,7 +40,7 @@ pub trait ProcessService: Send + Sync {
         &self,
         owner: &crate::RuntimeOwner,
         mode: ProcessListMode,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
+    ) -> Result<Vec<super::observation::ObservedProcess>, PluginError> {
         let _ = (owner, mode);
         Err(PluginError::Session(
             "controller-free process reads are unavailable in this service".to_string(),
@@ -114,7 +114,7 @@ pub trait ProcessService: Send + Sync {
         registration: ProcessStartRegistration,
         options: ProcessStartOptions,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<super::observation::ObservedProcess, PluginError>;
 
     async fn await_process(
         &self,
@@ -166,7 +166,7 @@ pub trait ProcessService: Send + Sync {
         session_id: &SessionId,
         mode: ProcessListMode,
         scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<ProcessRecord>, PluginError>;
+    ) -> Result<Vec<super::observation::ObservedProcess>, PluginError>;
 
     /// A session may address the processes it observes; a process, the ones
     /// whose recorded ancestry names it as their immediate starter.
@@ -182,7 +182,7 @@ pub trait ProcessService: Send + Sync {
         owner: &crate::RuntimeOwner,
         process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<super::observation::ObservedProcess, PluginError>;
 
     /// Journal-first cancellation used only by the recorded intent protocol.
     async fn cancel_recorded_intent(
@@ -191,7 +191,7 @@ pub trait ProcessService: Send + Sync {
         process_id: &ProcessId,
         identity: crate::ToolIntentIdentity,
         scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError>;
+    ) -> Result<super::observation::ObservedProcess, PluginError>;
 
     async fn cancel_all_visible(
         &self,
@@ -204,13 +204,13 @@ pub trait ProcessService: Send + Sync {
         let owner = crate::RuntimeOwner::Session(session_id.clone());
         let mut cancelled = Vec::new();
         for record in entries {
-            if record.is_terminal() {
+            if record.status().is_terminal() {
                 continue;
             }
             cancelled.push(
-                self.cancel(&owner, &record.id, scope.clone())
+                self.cancel(&owner, &record.process_id, scope.clone())
                     .await
-                    .and_then(ProcessCancelReceipt::from_record)?,
+                    .and_then(ProcessCancelReceipt::from_observed)?,
             );
         }
         Ok(cancelled)
@@ -246,7 +246,7 @@ impl ProcessService for UnavailableProcessService {
         _registration: ProcessStartRegistration,
         _options: ProcessStartOptions,
         _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<super::observation::ObservedProcess, PluginError> {
         Err(PluginError::Session(
             "processes are unavailable in this runtime".to_string(),
         ))
@@ -267,7 +267,7 @@ impl ProcessService for UnavailableProcessService {
         _session_id: &SessionId,
         _mode: ProcessListMode,
         _scope: ProcessOpScope<'_>,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
+    ) -> Result<Vec<super::observation::ObservedProcess>, PluginError> {
         Err(PluginError::Session(
             "process registry is unavailable in this runtime".to_string(),
         ))
@@ -289,7 +289,7 @@ impl ProcessService for UnavailableProcessService {
         _owner: &crate::RuntimeOwner,
         _process_id: &ProcessId,
         _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<super::observation::ObservedProcess, PluginError> {
         Err(PluginError::Session(
             "process registry is unavailable in this runtime".to_string(),
         ))
@@ -301,7 +301,7 @@ impl ProcessService for UnavailableProcessService {
         _process_id: &ProcessId,
         _identity: crate::ToolIntentIdentity,
         _scope: ProcessOpScope<'_>,
-    ) -> Result<ProcessRecord, PluginError> {
+    ) -> Result<super::observation::ObservedProcess, PluginError> {
         Err(PluginError::Session(
             "processes are unavailable in this runtime".to_string(),
         ))
