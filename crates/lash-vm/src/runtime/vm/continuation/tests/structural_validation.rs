@@ -33,8 +33,6 @@ fn awaited_settled_value_survives_a_finally_origin_wire_roundtrip() {
     assert_eq!(decoded.finally_stack, continuation.finally_stack);
 }
 
-// Pins N's version and bytes; the synthetic N+1 moves them.
-#[cfg(not(feature = "synthetic-next"))]
 #[test]
 fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
     let source = crate::ExecutionHostError::from_tool_failure(
@@ -68,7 +66,10 @@ fn structured_tool_failure_survives_a_finally_origin_wire_roundtrip() {
     validate_continuation(&continuation).unwrap();
 
     let wire = serde_json::to_value(&continuation).unwrap();
-    assert_eq!(wire["format_version"], serde_json::json!(1));
+    assert_eq!(
+        wire["format_version"],
+        serde_json::json!(VM_CONTINUATION_FORMAT_VERSION)
+    );
     assert_eq!(
         wire["finally_stack"][0]["completion"]["origin"]["error"],
         serde_json::json!({
