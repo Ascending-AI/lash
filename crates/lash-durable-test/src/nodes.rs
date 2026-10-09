@@ -446,7 +446,7 @@ mod tests {
     use crate::script::Fault;
     use crate::testing::{FORMATS, actor, sqlite};
     use lash_durable::runner::{Exit, Owned};
-    use lash_durable::{ActorState, Epoch, MailKind, MailSeq, Release};
+    use lash_durable::{ActorState, Epoch, LeaseSettings, MailKind, MailSeq, Release};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
@@ -529,13 +529,17 @@ mod tests {
     /// A deployment of `hold` on one node, `a`, under `script`, holding
     /// actor `one` hot.
     async fn holding(script: Script, hold: &Arc<Hold>) -> SimNodes {
+        holding_with_lease(script, hold, LeaseConfig::default()).await
+    }
+
+    async fn holding_with_lease(script: Script, hold: &Arc<Hold>, lease: LeaseConfig) -> SimNodes {
         let clock = SimClock::new();
         let nodes = SimNodes::new(
             sqlite(Arc::clone(&clock)).await,
             clock,
             script,
             SimNodesConfig {
-                lease: LeaseConfig::default(),
+                lease,
                 decodes: vec![FormatSet::new(FORMATS)],
                 max_active: 4,
             },
@@ -664,6 +668,85 @@ mod tests {
             0,
             "its activation stopped with it"
         );
+    }
+
+    /// A delayed successful heartbeat renews from its send time, never
+    /// from its acknowledgement: sent at 1 s, answered at 2 s, then cut
+    /// off, the node and its activation stop at 4 s (FIG-5745).
+    #[tokio::test]
+    async fn a_delayed_heartbeat_renews_from_send_time() {
+        let script = Script::new();
+        script.cut_on(
+            "a",
+            CommitLabel::HEARTBEAT,
+            1,
+            Fault::DelayedAck(Duration::from_secs(1)),
+        );
+        for nth in 2..=3 {
+            script.cut_on("a", CommitLabel::HEARTBEAT, nth, Fault::FailBefore);
+        }
+        let hold = Arc::new(Hold::default());
+        let lease = LeaseSettings {
+            heartbeat_every: Duration::from_secs(1),
+            self_stop_after: Duration::from_secs(3),
+            ..LeaseSettings::standard()
+        }
+        .validate()
+        .unwrap();
+        let nodes = holding_with_lease(script, &hold, lease).await;
+        while nodes.clock().logical_ms() < 2_000 {
+            nodes.step().await.unwrap();
+        }
+        assert_eq!(hold.live.load(Ordering::SeqCst), 1);
+        let trace = nodes.script().trace();
+        let first = trace
+            .iter()
+            .find(|write| write.point.label == CommitLabel::HEARTBEAT)
+            .unwrap();
+        assert_eq!(first.at_ms, 1_000);
+        assert!(first.committed());
+        assert_eq!(first.cut, Some(Fault::DelayedAck(Duration::from_secs(1))));
+        while nodes.clock().logical_ms() < 4_000 {
+            nodes.step().await.unwrap();
+        }
+        assert_eq!(nodes.clock().logical_ms(), 4_000);
+        assert_eq!(nodes.stopped("a").await, Some(Ok(Stopped::Unrenewed)));
+        assert_eq!(hold.live.load(Ordering::SeqCst), 0);
+    }
+
+    /// A committed release whose acknowledgement hangs consumes only the
+    /// shutdown budget; stopping has already dropped every activation.
+    #[tokio::test]
+    async fn a_delayed_release_acknowledgement_is_bounded_by_shutdown() {
+        let script = Script::new();
+        script.cut_on(
+            "a",
+            CommitLabel::NODE_RELEASE,
+            1,
+            Fault::DelayedAck(Duration::from_secs(60)),
+        );
+        let hold = Arc::new(Hold::default());
+        let nodes = holding(script, &hold).await;
+        nodes.stop("a");
+        nodes.quiesce().await;
+        let trace = nodes.script().trace();
+        let release = trace
+            .iter()
+            .find(|write| write.point.label == CommitLabel::NODE_RELEASE)
+            .unwrap();
+        assert_eq!(
+            release.cut,
+            Some(Fault::DelayedAck(Duration::from_secs(60)))
+        );
+        assert!(release.committed(), "the delayed release cut was reached");
+        let by = release.at_ms + 2_000;
+        assert_eq!(hold.live.load(Ordering::SeqCst), 0);
+        while nodes.clock().logical_ms() < by {
+            nodes.step().await.unwrap();
+        }
+        assert_eq!(nodes.clock().logical_ms(), by);
+        assert_eq!(nodes.stopped("a").await, Some(Ok(Stopped::Requested)));
+        assert_eq!(hold.live.load(Ordering::SeqCst), 0);
     }
 
     /// A node whose claim hangs keeps its lease: renewal runs on a task of

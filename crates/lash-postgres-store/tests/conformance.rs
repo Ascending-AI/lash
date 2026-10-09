@@ -676,7 +676,9 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
     ));
 }
 
-lash_conformance::process_registry_reopenable_tests!({
+// The catalogue's ordinary laws use concurrent handles. The cold-reopen
+// law below opens its reader only after the writes have committed.
+lash_conformance::process_registry_tests!(@catalogue reopenable {
     let Some((database_fixture, storage)) = storage().await else {
         eprintln!("skipping Postgres process conformance: LASH_POSTGRES_DATABASE_URL is not set");
         return;
@@ -698,6 +700,114 @@ lash_conformance::process_registry_reopenable_tests!({
         })
     })
 });
+
+/// Committed records, their event folds, observers and conserved counts
+/// survive reopening through a post-write pool with the original closed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn process_registry_reopen_conformance() {
+    use lash_core_execution::{
+        ProcessEventLogTestSupport as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
+        ProcessQuery as _, ProcessRegistrar as _,
+    };
+    let (database_fixture, storage) = storage().await.expect("PostgreSQL fixture");
+    lash_conformance::publish_process_registry_fixture_environments(&storage.process_env_store())
+        .await;
+    let open = storage.process_registry();
+    let observer = SessionId::from("cold-observer");
+    let terminal_base = open
+        .register_process_with_observers(
+            lash_core::testing::held_engine_registration(
+                serde_json::json!({"case": "cold-terminal"}),
+                lash_core_execution::ProcessProvenance::host(),
+                lash_core_execution::Lifetime::Detached,
+            ),
+            std::slice::from_ref(&observer),
+        )
+        .await
+        .expect("register observed process");
+    open.complete_process(
+        &terminal_base.id,
+        lash_core_execution::ProcessAwaitOutput::from_tool_output(
+            lash_core_execution::ToolCallOutput::success(serde_json::json!({"committed": true})),
+        ),
+        lash_core_execution::ProcessCompletionAuthority::workflow_key(&terminal_base.id),
+    )
+    .await
+    .expect("commit terminal");
+    let terminal = open
+        .get_process(&terminal_base.id)
+        .await
+        .expect("terminal projection")
+        .expect("retained terminal");
+    let live = open
+        .register_process(lash_core::testing::held_engine_registration(
+            serde_json::json!({"case": "cold-live"}),
+            lash_core_execution::ProcessProvenance::host(),
+            lash_core_execution::Lifetime::Detached,
+        ))
+        .await
+        .expect("register live process");
+    let reopened = lash_postgres_store::testing::connect(database_fixture.url())
+        .await
+        .expect("construct post-write Postgres registry pool");
+    storage.pool().close().await;
+    drop(open);
+    let reader = reopened.process_registry();
+    for (base, expected) in [(&terminal_base, &terminal), (&live, &live)] {
+        let stored = reader
+            .get_process(&base.id)
+            .await
+            .expect("read through the new pool")
+            .expect("committed record survives");
+        assert_eq!(&stored, expected);
+        let events = reader
+            .full_event_window(&base.id, 0)
+            .await
+            .expect("read committed event log");
+        let folded = lash_core_execution::runtime::fold_process_record(base.clone(), &events)
+            .expect("refold committed events");
+        assert_eq!(folded, stored);
+    }
+    assert!(
+        reader
+            .is_observer(&observer, &terminal_base.id)
+            .await
+            .expect("retained observer")
+    );
+    let retained = lash_core::testing::process_roster_records_for_fixture(
+        &reader,
+        &lash_core_execution::ProcessListFilter {
+            status: lash_core_execution::ProcessStatusFilter::Any,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("cold roster");
+    assert_eq!(retained.len(), 2);
+    assert_eq!(
+        retained
+            .iter()
+            .filter(|record| record.is_terminal())
+            .count(),
+        1
+    );
+    assert_eq!(
+        reader
+            .count_non_terminal_processes()
+            .await
+            .expect("cold live count"),
+        1
+    );
+    let summary = reader
+        .live_reference_summary()
+        .await
+        .expect("cold reference count");
+    assert_eq!(
+        summary.iter().map(|view| view.process_count).sum::<usize>(),
+        1
+    );
+    drop(database_fixture);
+}
 
 lash_conformance::process_change_horizon_tests!({
     let Some((database_fixture, storage)) = storage().await else {

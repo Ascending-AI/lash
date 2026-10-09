@@ -563,6 +563,121 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
     );
 }
 
+/// Real SQLITE_FULL on the owning writer publishes neither head nor
+/// receipt; after capacity returns the identical commit applies once.
+#[tokio::test]
+async fn real_page_exhaustion_rolls_back_and_the_exact_retry_commits_once() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("full.db");
+    let store = SqliteStore::open_file_with_options_for_testing(
+        &path,
+        StoreOptions {
+            blob_profile: BuiltinBlobProfile::LowLatency,
+            ..StoreOptions::standard(SqliteSynchronous::Normal)
+        },
+    )
+    .await
+    .expect("open writer");
+    let session = SessionId::from("real-full");
+    let state = durable_state(&store, &session).await;
+    let before = store
+        .load_session_head_meta(&session)
+        .await
+        .expect("head before")
+        .expect("created head");
+    let mut commit = RuntimeCommit::persisted_state_for_test(&state);
+    commit.checkpoint.components.insert(
+        "full/body".to_owned(),
+        lash_core_execution::HydratedCheckpointComponent::changed(vec![b'x'; 524_288]),
+    );
+    store
+        .conn
+        .call(|conn| {
+            let pages: u64 = conn.query_row("PRAGMA page_count", [], |row| row.get(0))?;
+            let limit: u64 =
+                conn.query_row(&format!("PRAGMA max_page_count = {pages}"), [], |row| {
+                    row.get(0)
+                })?;
+            assert_eq!(limit, pages);
+            Ok(())
+        })
+        .await
+        .expect("limit the actual writer to its current pages");
+    let error = store
+        .commit_runtime_state(commit.clone())
+        .await
+        .expect_err("SQLite must exhaust its pages");
+    assert!(
+        matches!(&error, StoreError::StorageFailure { backend: "sqlite", message } if message == "database or disk is full"),
+        "exact SQLite FULL refusal: {error:?}",
+    );
+    let after = store
+        .load_session_head_meta(&session)
+        .await
+        .expect("head after refusal")
+        .expect("created head retained");
+    assert_eq!(after.head_revision, before.head_revision);
+    assert_eq!(after.checkpoint_ref, before.checkpoint_ref);
+    assert_eq!(after.leaf_node_id, before.leaf_node_id);
+    let receipts = store
+        .conn
+        .call(|conn| {
+            conn.query_row(
+                "SELECT count(*) FROM runtime_turn_commits WHERE session_id = 'real-full'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .await
+        .expect("receipt count after refusal");
+    assert_eq!(receipts, 0);
+    store
+        .conn
+        .call(|conn| {
+            conn.query_row("PRAGMA max_page_count = 2147483646", [], |row| {
+                row.get::<_, u64>(0)
+            })
+        })
+        .await
+        .expect("restore writer capacity");
+    let receipt = store
+        .commit_runtime_state(commit.clone())
+        .await
+        .expect("retry the identical valid commit");
+    assert_eq!(receipt.head_revision, 1);
+    assert!(!receipt.receipt_replayed);
+    drop(store);
+    let reopened = SqliteStore::open_file_for_testing(&path)
+        .await
+        .expect("reopen committed database");
+    let head = reopened
+        .load_session_head_meta(&session)
+        .await
+        .expect("reopened head")
+        .expect("head exists");
+    assert_eq!(head.head_revision, receipt.head_revision);
+    assert_eq!(head.checkpoint_ref, Some(receipt.checkpoint_ref.clone()));
+    let replayed = reopened
+        .commit_runtime_state(commit)
+        .await
+        .expect("same receipt after reopen");
+    assert!(replayed.receipt_replayed);
+    assert_eq!(replayed.head_revision, receipt.head_revision);
+    assert_eq!(replayed.checkpoint_ref, receipt.checkpoint_ref);
+    let receipts = reopened
+        .conn
+        .call(|conn| {
+            conn.query_row(
+                "SELECT count(*) FROM runtime_turn_commits WHERE session_id = 'real-full'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .await
+        .expect("receipt count after retry and replay");
+    assert_eq!(receipts, 1);
+}
+
 #[tokio::test]
 async fn real_locked_catalog_surfaces_typed_contention() {
     let dir = tempfile::tempdir().expect("tempdir");

@@ -1057,7 +1057,11 @@ impl SqliteConnection {
                             value
                         }
                         TxOutcome::Rollback(value) => {
-                            tx.tx.rollback()?;
+                            // SQLITE_FULL may already have rolled the transaction
+                            // back. Preserve the closure's original refusal then.
+                            if !tx.tx.is_autocommit() {
+                                tx.tx.rollback()?;
+                            }
                             value
                         }
                     };

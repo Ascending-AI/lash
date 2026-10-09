@@ -690,7 +690,7 @@ impl CellTurn {
     }
 
     /// The identity laws after a run.
-    async fn identity_laws(&self, nodes: &SimNodes) -> Vec<String> {
+    async fn identity_laws(&self, nodes: &SimNodes, cut: Option<&Cut>) -> Vec<String> {
         let mut violations = Vec::new();
         let entries = self.world.entries();
         let mut ids: BTreeMap<i64, Vec<&ToolCallId>> = BTreeMap::new();
@@ -706,13 +706,19 @@ impl CellTurn {
                 ids.entry(x).or_default().push(call);
             }
         }
-        if let (Some(a), Some(b)) = (ids.get(&1), ids.get(&2))
-            && a.iter().any(|call| b.contains(call))
-        {
-            violations.push(format!(
-                "operation B took operation A's ToolCallId: {entries:?}"
-            ));
-        }
+        // NR-2: losing a Once start may interrupt before either body runs.
+        // These faults lose the owner or its acknowledgement; the uncut
+        // reference and fail-before retries must populate both witnesses.
+        let interrupted_once = cut.is_some_and(|cut| {
+            matches!(
+                cut.fault,
+                Fault::Abort | Fault::CommitThenAbort | Fault::AckHidden | Fault::Zombie
+            )
+        });
+        violations.extend(identity_population_violations(
+            &ids,
+            matches!(self.cell, Cell::Identity | Cell::Deferred) && !interrupted_once,
+        ));
         violations.extend(turn_ended(nodes).await);
         violations
     }
@@ -779,6 +785,41 @@ impl CellTurn {
         }
         violations.extend(turn_ended(nodes).await);
         violations
+    }
+}
+
+/// A comparison needs both body populations as witnesses.
+fn identity_population_violations(
+    ids: &BTreeMap<i64, Vec<&ToolCallId>>,
+    require_populations: bool,
+) -> Vec<String> {
+    if require_populations {
+        let missing: Vec<String> = [(1, "A"), (2, "B")]
+            .into_iter()
+            .filter(|(x, _)| ids.get(x).is_none_or(Vec::is_empty))
+            .map(|(_, operation)| format!("operation {operation} has no body identity witness"))
+            .collect();
+        if !missing.is_empty() {
+            return missing;
+        }
+    }
+    if let (Some(a), Some(b)) = (ids.get(&1), ids.get(&2))
+        && a.iter().any(|call| b.contains(call))
+    {
+        return vec!["operation B took operation A's ToolCallId".to_owned()];
+    }
+    Vec::new()
+}
+
+#[test]
+fn identity_comparison_refuses_a_missing_body_population() {
+    let call = ToolCallId::fixture("body-witness");
+    for (present, missing) in [(1, "B"), (2, "A")] {
+        let ids = BTreeMap::from([(present, vec![&call])]);
+        assert_eq!(
+            identity_population_violations(&ids, true),
+            vec![format!("operation {missing} has no body identity witness")],
+        );
     }
 }
 
@@ -871,7 +912,7 @@ impl Scenario for CellTurn {
             Cell::Repeatable => self.repeatable_laws(nodes).await,
             Cell::Race => self.race_laws(nodes, cut).await,
             Cell::Identity | Cell::Sleep | Cell::AwaitProcess | Cell::Deferred => {
-                self.identity_laws(nodes).await
+                self.identity_laws(nodes, cut).await
             }
         }
     }
@@ -1129,7 +1170,7 @@ async fn deferred_grant_across_a_crash(dialect: Dialect, postgres_url: Option<St
         );
     }
     nodes.quiesce().await;
-    let mut violations = turn.identity_laws(&nodes).await;
+    let mut violations = turn.identity_laws(&nodes, None).await;
     let calls = turn
         .world
         .entries()

@@ -528,6 +528,78 @@ async fn the_idlest_window_is_evicted_to_keep_the_aggregate_bounds() {
     assert!(over <= 0, "no window holds more than it reserved");
 }
 
+/// Byte retention keeps the newest suffix, even when all three events
+/// fit by count. Equal-sized labelled rows fit two but never three.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn byte_trimming_keeps_exactly_the_newest_two_events() {
+    const CAP: usize = 4_096;
+    let Replicas {
+        database,
+        schema,
+        a,
+        b,
+    } = replicas(|policy| {
+        policy.data.max_events_per_process = 64;
+        policy.data.max_bytes_per_process = CAP;
+        policy.data.reservation_bytes = CAP;
+        policy.data.max_retained_bytes = CAP as u64;
+    })
+    .await;
+    let process = ProcessId::fixture("byte-suffix");
+    let start = earliest(&b, &process).await;
+    let labels = ["old", "mid", "new"].map(|name| format!("{name}{}", "x".repeat(1_000)));
+    let first = publish(&a, &process, "old", &labels[0]).await;
+    publish(&a, &process, "mid", &labels[1]).await;
+    let pool = sqlx::PgPool::connect(database.url())
+        .await
+        .expect("budget reader");
+    let charges: Vec<i64> = sqlx::query_scalar(&format!(
+        "SELECT bytes FROM \"{schema}\".process_replay_log ORDER BY position"
+    ))
+    .fetch_all(&pool)
+    .await
+    .expect("read two independent row charges");
+    assert_eq!(charges.len(), 2);
+    assert_eq!(
+        charges[0], charges[1],
+        "equal-length labelled fixtures have equal charges"
+    );
+    assert!(2 * charges[0] <= CAP as i64, "two fit: {charges:?}");
+    assert!(
+        3 * charges[0] > CAP as i64,
+        "three exceed the cap: {charges:?}"
+    );
+    publish(&a, &process, "new", &labels[2]).await;
+    assert_eq!(
+        replay(&b, &start).await.err(),
+        Some(ProcessReplayGapReason::Trimmed)
+    );
+    let suffix = replay(&b, &first.cursor)
+        .await
+        .expect("continue after the trimmed event");
+    assert_eq!(
+        suffix
+            .iter()
+            .map(|event| process_observation_label(event))
+            .collect::<Vec<_>>(),
+        labels[1..]
+    );
+    let (events, bytes): (i64, i64) = sqlx::query_as(&format!(
+        "SELECT retained_events, retained_bytes FROM \"{schema}\".process_replay_head"
+    ))
+    .fetch_one(&pool)
+    .await
+    .expect("read retained accounting");
+    assert_eq!(events, 2);
+    assert_eq!(bytes, 2 * charges[0]);
+    assert!(bytes <= CAP as i64);
+    pool.close().await;
+    let ((resident, reserved), (heads, held, over)) = budget(database.url(), &schema).await;
+    assert_eq!((resident, reserved), (1, CAP as i64));
+    assert_eq!((heads, held), (resident, reserved));
+    assert!(over <= 0);
+}
+
 /// Idle expiry forgets only processes nobody follows (FIG-5627): a process
 /// that publishes nothing for longer than `max_age` keeps its head while a
 /// replica has a subscriber on it, so the follower's tail stays open and
