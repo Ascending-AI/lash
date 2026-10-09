@@ -11,10 +11,11 @@
 //! `chaos_soak_smoke` is the short profile: two epochs of twelve steps on
 //! SQLite memory. `chaos_soak_on_postgres` runs the same profile on
 //! PostgreSQL, with the database faults applied, when the run names a
-//! server. The long profile, `chaos_soak_long` and
-//! `chaos_soak_long_on_postgres`, runs epochs of forty steps for an hour of
-//! wall time; release certification selects it by hand, past NativeLink's
-//! action limit:
+//! server. The long profile runs epochs of forty steps for an hour of wall
+//! time: `chaos_soak_long` on SQLite memory, and `chaos_soak_on_postgres`
+//! under `LASH_CHAOS_SOAK_PROFILE=long`, so the PostgreSQL gate that selects
+//! the short profile also selects the law the long one runs. Release
+//! certification selects it by hand, past NativeLink's action limit:
 //!
 //! ```sh
 //! kiln test //crates/lash-sim:chaos_soak__test --local-test-execution \
@@ -97,13 +98,26 @@ async fn chaos_soak_smoke() {
     assert_green(&report);
 }
 
+/// The profile `LASH_CHAOS_SOAK_PROFILE` names: `long`, or the short one
+/// when it is unset or `short`.
+fn postgres_profile() -> (u64, usize, usize, Duration) {
+    match std::env::var("LASH_CHAOS_SOAK_PROFILE").as_deref() {
+        Ok("long") => (LONG_SEED, LONG_EPOCHS, LONG_STEPS, LONG_CAP),
+        Ok("short" | "") | Err(std::env::VarError::NotPresent) => {
+            (SMOKE_SEED, SMOKE_EPOCHS, SMOKE_STEPS, SMOKE_CAP)
+        }
+        other => panic!("LASH_CHAOS_SOAK_PROFILE is `short` or `long`, not {other:?}"),
+    }
+}
+
 /// The short profile on PostgreSQL, with lock-timeout storms and database
-/// restarts applied.
+/// restarts applied, or the long one under `LASH_CHAOS_SOAK_PROFILE=long`.
 #[tokio::test]
 #[ignore = "requires PostgreSQL; select inside a with-service.sh pg gate"]
 async fn chaos_soak_on_postgres() {
     let dialect = Dialect::postgres_from_env().expect("LASH_POSTGRES_DATABASE_URL names a server");
-    let config = SoakConfig::from_env(SMOKE_SEED, SMOKE_EPOCHS, SMOKE_STEPS, SMOKE_CAP, dialect);
+    let (seed, epochs, steps, cap) = postgres_profile();
+    let config = SoakConfig::from_env(seed, epochs, steps, cap, dialect);
     let report = chaos_soak::run(config).await;
     assert_green(&report);
 }
@@ -119,17 +133,6 @@ async fn chaos_soak_long() {
         LONG_CAP,
         Dialect::SqliteMemory,
     );
-    let report = chaos_soak::run(config).await;
-    assert_green(&report);
-}
-
-/// The long profile on PostgreSQL, with lock-timeout storms and database
-/// restarts applied.
-#[tokio::test]
-#[ignore = "the long profile on PostgreSQL: an hour of wall time; select inside a with-service.sh pg gate"]
-async fn chaos_soak_long_on_postgres() {
-    let dialect = Dialect::postgres_from_env().expect("LASH_POSTGRES_DATABASE_URL names a server");
-    let config = SoakConfig::from_env(LONG_SEED, LONG_EPOCHS, LONG_STEPS, LONG_CAP, dialect);
     let report = chaos_soak::run(config).await;
     assert_green(&report);
 }
