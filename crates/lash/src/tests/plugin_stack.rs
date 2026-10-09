@@ -455,6 +455,7 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
     config.prompt_features.decomposition = false;
     config.continue_as_soft_warn_tokens = None;
     config.render.print.max_chars = Some(9);
+    config.render.preview.max_chars = Some(9);
     config.max_output_chars = 500;
 
     let recorded = config.recorded_behaviour();
@@ -465,7 +466,7 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
     let (provider, requests) =
         super::standard_compaction_persistence::standard_compaction_provider_recorded(vec![
             text_response(&typescript_block(
-                r#"const opaque = new Map([["a", 1], ["b", 2], ["c", 3]]);
+                r#"const mapped = new Map([["a", 1], ["b", 2], ["c", 3]]);
 const object = { first: 1, second: 2 };
 await tools.app_lookup({});
 console.log("abcdefghijklmnopqrstuvwxyz");"#,
@@ -510,10 +511,20 @@ console.log("abcdefghijklmnopqrstuvwxyz");"#,
             .join("\n");
         let summary = text
             .lines()
-            .find_map(|line| line.strip_prefix("- `opaque`: "))
-            .expect("opaque binding in the next real prompt");
+            .find_map(|line| line.strip_prefix("- `mapped`: "))
+            .expect("map binding in the next real prompt");
         assert!(
-            summary.contains("Map(3)") && summary.chars().count() <= 18,
+            // A kernel map with text keys has a JSON record view. The
+            // configured preview and key cuts apply to it like other data.
+            summary.contains("keys=3 (see Schema)")
+                && summary
+                    .split_once(" ≈ ")
+                    .expect("the map has a bounded preview")
+                    .1
+                    .chars()
+                    .count()
+                    == 9
+                && !summary.contains("keys=3 (a, b, c)"),
             "{summary}"
         );
     }

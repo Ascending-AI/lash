@@ -270,7 +270,13 @@ impl lash_core::ToolProvider for Leaves {
             .as_str()
             .unwrap_or_default()
             .to_owned();
-        let position = call.args["position"].as_u64().unwrap_or(u64::MAX) as usize;
+        // The kernel preserves a TypeScript number's Float spelling
+        // (K-EFF-002); a whole numeric argument is still its leaf ordinal.
+        let position = call.args["position"]
+            .as_f64()
+            .expect("a numeric leaf ordinal");
+        assert!(position.fract() == 0.0 && (0.0..WIDTHS[2] as f64).contains(&position));
+        let position = position as usize;
         let scenario = self.rendezvous.scenario(&name);
         scenario.record(Event::Started(position));
         let required = scenario.required(position);
@@ -790,54 +796,53 @@ fn refusals(world: &World, name: &str) -> Vec<String> {
     shown
 }
 
-/// A group of exactly `max_tool_calls` calls runs as it always did, and a
-/// group of one more is refused whole: none of its calls starts, and the
-/// model is shown the refusal naming the limit.
+/// A protocol round of exactly `max_tool_calls` calls runs, and a round
+/// of one more is refused whole before any body starts. Kernel cells issue
+/// individual effects, not protocol rounds: their cumulative limit is pinned
+/// by `tool_call_limit_staged_calls`.
 async fn tool_call_limit_admits_the_limit_and_refuses_the_group_past_it(tier: Tier) {
-    for code in [false, true] {
-        let Some(producers) = Producers::new(tier, code).await else {
-            return;
-        };
-        for producer in producers_of(code) {
-            let label = producer.label();
-            let at = format!("{label}-limit-at");
-            let plan = vec![Route::Leaf; LIMIT];
-            let scenario = producers
-                .rendezvous
-                .open(&at, Scenario::new(LIMIT, true, BTreeMap::new()));
-            let output = producers
-                .world
-                .run(&at, served::spec(LIMIT), producer.script(&at, &plan))
-                .await;
-            assert_activation_shape(&at, producer, LIMIT, &scenario, &output);
-            assert_eq!(
-                refusals(&producers.world, &at),
-                Vec::<String>::new(),
-                "{at}: a group of exactly max_tool_calls calls is not refused"
-            );
+    let Some(producers) = Producers::new(tier, false).await else {
+        return;
+    };
+    for producer in STANDARD {
+        let label = producer.label();
+        let at = format!("{label}-limit-at");
+        let plan = vec![Route::Leaf; LIMIT];
+        let scenario = producers
+            .rendezvous
+            .open(&at, Scenario::new(LIMIT, true, BTreeMap::new()));
+        let output = producers
+            .world
+            .run(&at, served::spec(LIMIT), producer.script(&at, &plan))
+            .await;
+        assert_activation_shape(&at, producer, LIMIT, &scenario, &output);
+        assert_eq!(
+            refusals(&producers.world, &at),
+            Vec::<String>::new(),
+            "{at}: a round of exactly max_tool_calls calls is not refused"
+        );
 
-            let past = format!("{label}-limit-past");
-            let plan = vec![Route::Leaf; LIMIT + 1];
-            let scenario = producers
-                .rendezvous
-                .open(&past, Scenario::new(LIMIT + 1, false, BTreeMap::new()));
-            producers
-                .world
-                .run(&past, served::spec(LIMIT), producer.script(&past, &plan))
-                .await;
-            assert_eq!(
-                scenario.started(),
-                Vec::<usize>::new(),
-                "{past}: no call of a refused group runs"
-            );
-            assert_eq!(
-                refusals(&producers.world, &past).first(),
-                Some(&expected_refusal(0, LIMIT + 1)),
-                "{past}: the model is shown the refusal, naming the limit"
-            );
-        }
-        producers.world.shutdown().await;
+        let past = format!("{label}-limit-past");
+        let plan = vec![Route::Leaf; LIMIT + 1];
+        let scenario = producers
+            .rendezvous
+            .open(&past, Scenario::new(LIMIT + 1, false, BTreeMap::new()));
+        producers
+            .world
+            .run(&past, served::spec(LIMIT), producer.script(&past, &plan))
+            .await;
+        assert_eq!(
+            scenario.started(),
+            Vec::<usize>::new(),
+            "{past}: no call of a refused round runs"
+        );
+        assert_eq!(
+            refusals(&producers.world, &past).first(),
+            Some(&expected_refusal(0, LIMIT + 1)),
+            "{past}: the model is shown the refusal, naming the limit"
+        );
     }
+    producers.world.shutdown().await;
 }
 
 /// Calls issued in sequence are counted the way the surface's scope says: a

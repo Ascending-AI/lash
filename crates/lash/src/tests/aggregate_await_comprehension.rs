@@ -80,7 +80,7 @@ const TICKET_CELL: &str = r#"
 const ids = ["o-17", "o-22", "o-37"];
 const orders = await Promise.all(ids.map((id) => retail.order({ id: id })));
 const delivered = orders.filter((o) => o.status == "delivered").map((o) => o.id);
-print(`delivered: ${delivered}`);
+console.log(`delivered: ${delivered}`);
 "#;
 
 const IMPERATIVE_CELL: &str = r#"
@@ -92,7 +92,7 @@ for (const id of ids) {
     delivered.push(o.id);
   }
 }
-print(`delivered: ${delivered}`);
+console.log(`delivered: ${delivered}`);
 "#;
 
 async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {

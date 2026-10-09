@@ -4370,13 +4370,13 @@ needs = ["cell"]
 class = "replace"
 lane = "L9e"
 laws = [
-  "a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure",
-  "a_compilation_worker_crash_is_never_a_recorded_host_cell_failure",
+  "a_lowering_worker_crash_is_never_a_recorded_host_cell_failure",
+  "a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure",
 ]
 disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs"
 status = "deleted"
 owed = "a VM worker crash during source analysis or compilation is never recorded as the cell's failure"
-note = "the file went with Restate (FIG-5190, 5ad9641f9e); each law has a row of its own"
+note = "FIG-5760 re-aims the surviving crash guarantee at kernel Lower/Cell requests; the old References/Compile paths are gone. the file went with Restate (FIG-5190, 5ad9641f9e); each law has a row of its own"
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/worker_crashes.rs"
@@ -4386,12 +4386,12 @@ needs = ["cell"]
 class = "replace"
 lane = "L9e"
 laws = [
-  "a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure",
+  "a_lowering_worker_crash_is_never_a_recorded_host_cell_failure",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs::a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure"
+disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs::a_lowering_worker_crash_is_never_a_recorded_host_cell_failure"
 status = "deleted"
 owed = "a source analysis worker crash is never a recorded host cell failure"
-note = "FIG-5309 re-wrote the law through a host's send() of an RLM turn on the core's node: the pool's one worker is SIGKILLed before the cell's named request, the attempt fails retryably, and a replacement worker runs the cell; the model is asked once, the tool runs once, and no cell failure is recorded. The worker-recovery reservation the old law counted went with FIG-5198 (96558d9d7b)"
+note = "FIG-5760 re-aims the surviving crash guarantee at kernel Lower/Cell requests; the old References/Compile paths are gone. FIG-5309 re-wrote the law through a host's send() of an RLM turn on the core's node: the pool's one worker is SIGKILLed before the cell's named request, the attempt fails retryably, and a replacement worker runs the cell; the model is asked once, the tool runs once, and no cell failure is recorded. The worker-recovery reservation the old law counted went with FIG-5198 (96558d9d7b)"
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/worker_crashes.rs"
@@ -4401,12 +4401,12 @@ needs = ["cell"]
 class = "replace"
 lane = "L9e"
 laws = [
-  "a_compilation_worker_crash_is_never_a_recorded_host_cell_failure",
+  "a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs::a_compilation_worker_crash_is_never_a_recorded_host_cell_failure"
+disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs::a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure"
 status = "deleted"
 owed = "a compilation worker crash is never a recorded host cell failure"
-note = "FIG-5309 re-wrote the law through a host's send() of an RLM turn on the core's node: the pool's one worker is SIGKILLed before the cell's named request, the attempt fails retryably, and a replacement worker runs the cell; the model is asked once, the tool runs once, and no cell failure is recorded. The worker-recovery reservation the old law counted went with FIG-5198 (96558d9d7b)"
+note = "FIG-5760 re-aims the surviving crash guarantee at kernel Lower/Cell requests; the old References/Compile paths are gone. FIG-5309 re-wrote the law through a host's send() of an RLM turn on the core's node: the pool's one worker is SIGKILLed before the cell's named request, the attempt fails retryably, and a replacement worker runs the cell; the model is asked once, the tool runs once, and no cell failure is recorded. The worker-recovery reservation the old law counted went with FIG-5198 (96558d9d7b)"
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/worker_crashes.rs"
@@ -4460,10 +4460,10 @@ lane = "L9e"
 laws = [
   "a_refused_cell_reservation_is_never_the_cells_recorded_result",
 ]
-disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs::a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure"
+disposition = "replaced-by:crates/lash-durable-test/tests/worker_crashes.rs::a_lowering_worker_crash_is_never_a_recorded_host_cell_failure"
 status = "deleted"
 owed = "a refused cell reservation is never the cells recorded result"
-note = "the host's durable worker-recovery reservations went with FIG-5198 (96558d9d7b): an execution's attempts and CPU now count from zero per run, so no reservation is refused. What stays is that a host verdict fails the cell's attempt and is never its recorded result (the RLM executor's fail_attempt_on_host_verdict); the worker-crash laws pin it through send() on the core's node"
+note = "FIG-5760 re-aims the surviving crash guarantee at kernel Lower/Cell requests; the old References/Compile paths are gone. the host's durable worker-recovery reservations went with FIG-5198 (96558d9d7b): an execution's attempts and CPU now count from zero per run, so no reservation is refused. What stays is that a host verdict fails the cell's attempt and is never its recorded result (the RLM executor's fail_attempt_on_host_verdict); the worker-crash laws pin it through send() on the core's node"
 
 [[row]]
 path = "crates/lash-restate-test/tests/crash_windows/worker_verdicts.rs"

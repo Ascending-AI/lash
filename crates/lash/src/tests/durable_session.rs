@@ -1570,7 +1570,7 @@ async fn transcript_totally_projects_a_really_committed_rlm_trajectory() {
                         },
                         lash_core::LlmOutputPart::Text {
                             text: if call == 0 {
-                                "<typescript>print(\"committed corpus output\");</typescript>"
+                                "<typescript>console.log(\"committed corpus output\");</typescript>"
                             } else {
                                 "<typescript>finish(\"committed corpus reply\");</typescript>"
                             }
@@ -1629,7 +1629,7 @@ async fn transcript_totally_projects_a_really_committed_rlm_trajectory() {
     assert!(projection.visible().any(|entry| matches!(
         &entry.item,
         crate::transcript::TranscriptItem::Cell(cell)
-            if cell.code == "print(\"committed corpus output\");"
+            if cell.code == "console.log(\"committed corpus output\");"
                 && cell.prints.iter().map(|print| print.text.as_str()).eq(["committed corpus output"])
     )));
     assert!(
@@ -2101,7 +2101,7 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
     use crate::transcript::{CellOutcome, TranscriptBlock, TranscriptItem, TranscriptRole};
     use lash_protocol_rlm::RlmChannel;
 
-    const PROGRAM: &str = "print(\"counted\");\nfinish(\"three\");";
+    const PROGRAM: &str = "console.log(\"counted\");\nfinish(\"three\");";
     const PROSE: &str = "Counting first.";
 
     fn native_arguments() -> String {

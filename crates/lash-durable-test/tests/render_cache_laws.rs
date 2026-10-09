@@ -502,12 +502,12 @@ impl lash::rlm::CodeRenderer for CountingCodeRenderer {
 fn rlm_script(call: usize, request: &LlmRequest) -> LlmResponse {
     let text = match call {
         0 => {
-            "<typescript>\nlet saved = \"live value\"; print(\"ok\"); print(\"abcdefgh\");\n</typescript>"
+            "<typescript>\nlet saved = \"live value\"; console.log(\"ok\"); console.log(\"abcdefgh\");\n</typescript>"
         }
         1 => "first done",
-        2 => "<typescript>\nprint(history[1].output[1]);\n</typescript>",
+        2 => "<typescript>\nconsole.log(history[1].output[1]);\n</typescript>",
         3 => "second done",
-        4 => "<typescript>\nprint(\"run spec\");\n</typescript>",
+        4 => "<typescript>\nconsole.log(\"run spec\");\n</typescript>",
         5 => "run spec done",
         _ => "reopened done",
     };

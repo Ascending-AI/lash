@@ -272,7 +272,7 @@ const rows = [];
 for (let i = 0; i < 3000; i++) {
   rows.push({ index: i, text: "a row the cell prints and finishes with" });
 }
-print(rows);
+console.log(rows);
 finish({ rows });"#,
             )]),
             mock_llm_profile_spec(),
@@ -327,14 +327,15 @@ finish({ rows });"#,
         stored_text(&backend, &finished.reference).await,
         serde_json::to_string(&value).expect("encode the final value")
     );
-    assert_eq!(
-        serde_json::from_str::<Vec<lash_core::CellPrint>>(
-            &stored_text(&backend, &print.reference).await
-        )
-        .expect("the retained archive is JSON")[0]
-            .value,
-        value["rows"]
-    );
+    let archived: Vec<lash_core::CellPrint> =
+        serde_json::from_str(&stored_text(&backend, &print.reference).await)
+            .expect("the retained archive is JSON");
+    // The TypeScript console prints structured data as compact JSON text;
+    // retaining that observation must keep every row of the original value.
+    let printed: serde_json::Value =
+        serde_json::from_str(archived[0].value.as_str().expect("console text"))
+            .expect("the whole printed value");
+    assert_eq!(printed, value["rows"]);
     for retained in [print, finished] {
         assert!(retained.witness.len() <= 512);
     }
@@ -433,7 +434,7 @@ async fn many_subcap_prints_in_one_step_land_one_bounded_archive_on_sqlite() -> 
                 typescript_block(
                     r#"
 for (let i = 0; i < 200; i++) {
-  print({ index: i, text: "small printed value é🙂" });
+  console.log({ index: i, text: "small printed value é🙂" });
 }
 "#,
                 ),
@@ -493,9 +494,11 @@ for (let i = 0; i < 200; i++) {
             .expect("full observations");
     assert_eq!(observations.len(), 200);
     for (i, observation) in observations.iter().enumerate() {
-        let serialized = serde_json::to_value(observation).expect("observation");
+        let printed: serde_json::Value =
+            serde_json::from_str(observation.value.as_str().expect("console text"))
+                .expect("the whole printed value");
         assert_eq!(
-            serialized["value"],
+            printed,
             serde_json::json!({"index": i, "text": "small printed value é🙂"})
         );
     }

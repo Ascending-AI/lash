@@ -2,9 +2,9 @@
 //! cell (FIG-4459), through a host's `send()` with the core's node serving
 //! the turn.
 //!
-//! The pool has one worker. Once the model has answered with a cell, the
-//! worker is killed before the cell's first worker request (its source
-//! analysis) or its second (its compilation). The request meets the real
+//! The pool has one worker, prewarmed by a separate session. Once the model
+//! has answered with the tested cell, that worker is killed before dialect
+//! lowering or machine start. The request meets the real
 //! closed transport: a host verdict, read live outside any recorded step,
 //! so the attempt fails retryably and seals nothing. The retried pass runs
 //! the cell on a replacement worker: the turn finishes with the cell's own
@@ -123,32 +123,38 @@ fn model(
 ) -> lash_core::facade_support::ProviderHandle {
     let killer = Arc::clone(killer);
     let calls = Arc::clone(calls);
+    let warming = AtomicBool::new(true);
     lash_core::testing::TestProvider::builder()
         .kind("worker-setup-crash")
         .complete(move |_request: LlmRequest| {
-            calls.fetch_add(1, Ordering::SeqCst);
-            killer.arm();
-            async move { Ok(served::cell(CELL)) }
+            let response = if warming.swap(false, Ordering::SeqCst) {
+                served::cell("finish(\"warm\");")
+            } else {
+                calls.fetch_add(1, Ordering::SeqCst);
+                killer.arm();
+                served::cell(CELL)
+            };
+            async move { Ok(response) }
         })
         .build()
         .into_handle()
 }
 
-/// The cell's request the worker dies before: its source analysis, or its
-/// compilation.
+/// The kernel worker request the worker dies before: dialect lowering,
+/// or starting the cell's machine.
 #[derive(Clone, Copy, Debug)]
 enum Request {
-    References,
-    Compile,
+    Lower,
+    Cell,
 }
 
 impl Request {
-    /// How many checkouts the cell makes before this request: it reads its
-    /// VM state twice, then analyses its source, then compiles it.
+    /// A fresh kernel cell lowers its source, then starts its machine.
+    /// Compilation is part of that start, not a separate worker request.
     fn before(self) -> usize {
         match self {
-            Self::References => 2,
-            Self::Compile => 3,
+            Self::Lower => 0,
+            Self::Cell => 1,
         }
     }
 }
@@ -181,6 +187,11 @@ async fn setup_crash_case(tier: Tier, request: Request) {
     else {
         return;
     };
+    // Populate the idle pool through an ordinary cell, before arming the
+    // killer. Session setup itself makes no kernel-worker checkout.
+    let warm = world.session("worker-prewarm", served::spec(8)).await;
+    let warmed = world.send(&warm, "warm the worker").await;
+    assert_eq!(warmed.final_value(), Some(&serde_json::json!("warm")));
     let session = world.session("worker-setup-crash", served::spec(8)).await;
     let output = world.send(&session, "count once").await;
 
@@ -221,15 +232,15 @@ async fn setup_crash_case(tier: Tier, request: Request) {
     world.shutdown().await;
 }
 
-async fn a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure(tier: Tier) {
-    setup_crash_case(tier, Request::References).await;
+async fn a_lowering_worker_crash_is_never_a_recorded_host_cell_failure(tier: Tier) {
+    setup_crash_case(tier, Request::Lower).await;
 }
 
-async fn a_compilation_worker_crash_is_never_a_recorded_host_cell_failure(tier: Tier) {
-    setup_crash_case(tier, Request::Compile).await;
+async fn a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure(tier: Tier) {
+    setup_crash_case(tier, Request::Cell).await;
 }
 
 tiered_laws!(
-    a_source_analysis_worker_crash_is_never_a_recorded_host_cell_failure,
-    a_compilation_worker_crash_is_never_a_recorded_host_cell_failure,
+    a_lowering_worker_crash_is_never_a_recorded_host_cell_failure,
+    a_cell_start_worker_crash_is_never_a_recorded_host_cell_failure,
 );

@@ -89,9 +89,10 @@ struct Touch {
 #[async_trait::async_trait]
 impl StaticToolExecute for Touch {
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        if let Some(x) = call.args["x"].as_u64() {
-            self.touched.lock_recover().push(x);
-        }
+        // TypeScript numbers leave the kernel as floats (K-EFF-002).
+        let x = call.args["x"].as_f64().expect("a numeric member ordinal");
+        assert!(x.fract() == 0.0 && (0.0..WIDTH as f64).contains(&x));
+        self.touched.lock_recover().push(x as u64);
         ToolOutcome::ok(serde_json::json!({ TOUCHED: call.args["x"] })).into()
     }
 }
@@ -121,7 +122,7 @@ fn touch(touched: Arc<Mutex<Vec<u64>>>) -> Arc<dyn lash_core::ToolProvider> {
 fn cell() -> String {
     let last = WIDTH - 1;
     format!(
-        "<typescript>\nconst pending = Array.from({{ length: {last} }}, (_, x) => tools.{TOOL}({{ x }}));\nawait Promise.race(pending);\nconst last = await tools.{TOOL}({{ x: {last} }});\nprint([...(await Promise.all(pending)), last]);\n</typescript>"
+        "<typescript>\nconst pending = Array.from({{ length: {last} }}, (_, x) => tools.{TOOL}({{ x }}));\nawait Promise.race(pending);\nconst last = await tools.{TOOL}({{ x: {last} }});\nconsole.log([...(await Promise.all(pending)), last]);\n</typescript>"
     )
 }
 
