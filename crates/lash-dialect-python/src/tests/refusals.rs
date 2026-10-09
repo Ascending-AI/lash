@@ -174,6 +174,7 @@ fn a_missing_helper_is_named() {
 fn every_advertised_repair_form_lowers() {
     use Code::*;
     let examples = [
+        (ShadowsBuiltin, "len_ = 1\nlen_\n"),
         (
             CoroutineNotAwaited,
             "import asyncio\nasync def load_invoice(invoice):\n    return invoice\nawait load_invoice(42)\njob = asyncio.create_task(load_invoice(43))\nawait job\nawait echo(1)\nawait asyncio.sleep(0)\nawait asyncio.gather(echo(2))",

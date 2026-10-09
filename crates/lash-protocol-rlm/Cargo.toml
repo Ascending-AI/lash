@@ -33,6 +33,7 @@ lash-vm-worker = { workspace = true, optional = true, features = ["testing"] }
 lash-vm-broker = { workspace = true }
 lash-vm-protocol = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-dialect = { workspace = true }
 lash-kernel-vm = { workspace = true }
 lash-kernel-state = { workspace = true }
 lash-trace = { workspace = true }
@@ -65,6 +66,5 @@ lash-dialect-python = { workspace = true }
 # The prompt walker lowers every example a prompt shows with the dialect's
 # own front end.
 lash-dialect-typescript = { workspace = true }
-lash-kernel-dialect = { workspace = true }
 insta = "1"
 tempfile = { workspace = true }

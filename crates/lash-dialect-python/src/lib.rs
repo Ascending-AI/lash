@@ -37,6 +37,12 @@ pub const MAX_SOURCE_BYTES: usize = 1 << 20;
 /// session's (`K-SES-001`), and `environment.bindings` names those earlier
 /// cells left. A cell may `await` at its top level.
 pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
+    lower::check_binding_names(
+        environment
+            .bindings
+            .iter()
+            .map(lash_kernel_doc::Name::as_str),
+    )?;
     if source.len() > MAX_SOURCE_BYTES {
         return Err(diagnostics::unplaced(
             Code::SourceTooLarge,

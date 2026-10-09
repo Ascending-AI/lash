@@ -277,6 +277,21 @@ pub(crate) struct Lowerer<'a> {
     lifting: Option<HashSet<String>>,
 }
 
+/// Session names are checked before either source or saved state can mask a built-in.
+pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Lowering<()> {
+    for name in names.into_iter().collect::<BTreeSet<_>>() {
+        if builtins::is_global(name) || name == lash_kernel_dialect::FINISH_NAME {
+            return Err(Diagnostic::with_repair(
+                DiagnosticCode::ShadowsBuiltin,
+                format!("`{name}` is a built-in; a top-level binding cannot reuse its name"),
+                format!("rename `{name}` to `{name}_` and update its references"),
+                None,
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Lowers a parsed program against `environment`.
 pub(crate) fn lower(
     program: &ast::Program,
@@ -324,6 +339,7 @@ pub(crate) fn lower(
     lowerer.push_scope();
     lowerer.declare_vars(&program.statements);
     lowerer.declare_block(&program.statements)?;
+    check_binding_names(lowerer.scopes[0].bindings.keys().map(String::as_str))?;
     lowerer.lower_statements(&program.statements)?;
     lowerer.pop_scope();
     let main = std::mem::take(&mut lowerer.buf);

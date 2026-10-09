@@ -29,3 +29,6 @@ pub use source::{SourceError, define_functions};
 pub use imperative::{
     SourceExpr, SourcePlace, SourceStmt, Spelling, imperative_source, render_source,
 };
+
+/// The terminal name reserved by the dialects and taught by their prompts.
+pub const FINISH_NAME: &str = "finish";

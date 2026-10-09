@@ -81,6 +81,7 @@ impl DialectPrompts for PythonPrompts {
     }
 
     fn render_execution_section(&self, request: ExecutionSectionRequest<'_>) -> ExecutionSection {
+        let finish_name = lash_kernel_dialect::FINISH_NAME;
         let ExecutionSectionRequest {
             channel,
             tools,
@@ -133,7 +134,7 @@ impl DialectPrompts for PythonPrompts {
 {response_shape}
 {example}
 
-Top-level variables persist across executions as data. A function, a class or a task does not outlive the program that created it: define a function again where it is used, and keep a task's result, not the task.
+Built-in names, including `{finish_name}`, cannot be reused by top-level bindings. Top-level variables persist across executions as data. A function, a class or a task does not outlive the program that created it: define a function again where it is used, and keep a task's result, not the task.
 
 This is a Python subset, not CPython: there are no imports beyond `asyncio`, and no file, network or process access except through the tools.
 
@@ -156,7 +157,7 @@ const PYTHON_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabular
     print_call: "print",
     print_statement_prefix: "print(",
     print_statement_suffix: ")",
-    finish_name: "finish",
+    finish_name: lash_kernel_dialect::FINISH_NAME,
     finish_statement: "finish(value)",
     finish_null_statement: "finish(None)",
     continue_as_call: "control_continue_as(...)",

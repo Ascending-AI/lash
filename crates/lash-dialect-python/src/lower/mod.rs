@@ -152,6 +152,26 @@ pub(crate) struct Lowerer<'a> {
     nesting: usize,
 }
 
+/// No module or restored session binding may mask the dialect's built-ins.
+pub(crate) fn check_binding_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Lowering<()> {
+    for name in names {
+        if calls::is_builtin(name)
+            || crate::exceptions::is_builtin(name)
+            || name == lash_kernel_dialect::FINISH_NAME
+        {
+            let mut error = diagnostics::unplaced(
+                Code::ShadowsBuiltin,
+                format!("`{name}` is a built-in; a top-level binding cannot reuse its name"),
+            );
+            error.repairs.push(format!(
+                "rename `{name}` to `{name}_` and update its references"
+            ));
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
 /// Lowers a parsed module against `environment`.
 pub(crate) fn lower(
     module: &ast::ModModule,
@@ -175,6 +195,12 @@ pub(crate) fn lower(
     // A `global` statement anywhere makes the name the module's, and an
     // earlier cell's bindings are the module's too.
     bindings.locals.extend(globals);
+    check_binding_names(bindings.locals.iter().map(String::as_str))?;
+    for statement in &module.body {
+        if let ast::Stmt::ClassDef(class) = statement {
+            check_binding_names([class.name.id.as_str()])?;
+        }
+    }
     let declared: Vec<String> = bindings
         .locals
         .iter()

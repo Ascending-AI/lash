@@ -198,7 +198,7 @@ fn statement(statement: &k::Stmt) -> SourceStmt {
         k::Stmt::Throw { value } => SourceStmt::Throw(expression(value)),
         k::Stmt::Print { value } => SourceStmt::Expression(call("print", vec![expression(value)])),
         k::Stmt::Finish { value } => {
-            SourceStmt::Expression(call("finish", vec![expression(value)]))
+            SourceStmt::Expression(call(crate::FINISH_NAME, vec![expression(value)]))
         }
         k::Stmt::Fail { value } => SourceStmt::Expression(call("fail", vec![expression(value)])),
         k::Stmt::Try(scope) => SourceStmt::Try {

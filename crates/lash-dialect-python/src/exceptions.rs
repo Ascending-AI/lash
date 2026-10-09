@@ -47,6 +47,10 @@ pub(crate) enum Catches {
     Named(Vec<String>),
 }
 
+pub(crate) fn is_builtin(name: &str) -> bool {
+    BUILTIN.iter().any(|(builtin, _)| *builtin == name)
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Classes {
     parents: BTreeMap<String, String>,

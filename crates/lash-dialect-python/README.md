@@ -37,7 +37,10 @@ and f-string formatting are helpers.
 
 A source is a cell of a session: the names its top level binds are session
 bindings, which the next cell sees, and a cell may `await` at its top
-level. When a cell that made tasks ends, the tasks still running are
+level. Built-in names, including the configured terminal name, cannot be
+reused by module bindings (`PY_SHADOWS_BUILTIN`); function locals and
+comprehension targets may shadow them. Renaming `len` to `len_`, for
+example, leaves the built-in available in later cells. When a cell that made tasks ends, the tasks still running are
 cancelled and waited for with `tasks.cancel_all`, which asks the machine
 for them with `tasks.unfinished`; this is what `asyncio.run` does.
 

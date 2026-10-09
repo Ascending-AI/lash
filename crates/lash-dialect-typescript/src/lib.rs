@@ -35,6 +35,12 @@ use lash_kernel_dialect::{Environment, FrontEnd, Lowered};
 /// bindings are the session's (`K-SES-001`), and `environment.bindings`
 /// names those earlier cells left.
 pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
+    lower::check_binding_names(
+        environment
+            .bindings
+            .iter()
+            .map(lash_kernel_doc::Name::as_str),
+    )?;
     if let Some(lowered) = intrinsics::lower(source, environment) {
         return lowered;
     }
@@ -75,6 +81,12 @@ impl Parser {
         source: &str,
         environment: &Environment<'_>,
     ) -> Result<Lowered, Diagnostic> {
+        lower::check_binding_names(
+            environment
+                .bindings
+                .iter()
+                .map(lash_kernel_doc::Name::as_str),
+        )?;
         if let Some(lowered) = intrinsics::lower(source, environment) {
             return lowered;
         }

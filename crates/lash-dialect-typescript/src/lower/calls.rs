@@ -343,14 +343,16 @@ impl Lowerer<'_> {
             }
         }
         match callee {
-            ast::Expr::Ident(name, _) if name == "finish" && !self.is_bound(name) => {
+            ast::Expr::Ident(name, _)
+                if name == lash_kernel_dialect::FINISH_NAME && !self.is_bound(name) =>
+            {
                 let value = match args {
                     [] => Operand::undefined(),
                     [ast::CallArg::Value(value)] => self.lower_expr(value)?,
                     _ => {
                         return Err(Diagnostic::defect(
                             DiagnosticCode::UnsupportedExpression,
-                            "`finish` takes one value",
+                            format!("`{}` takes one value", lash_kernel_dialect::FINISH_NAME),
                             Some(span),
                         ));
                     }

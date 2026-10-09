@@ -91,7 +91,7 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
     print_call: "console.log",
     print_statement_prefix: "console.log(",
     print_statement_suffix: ")",
-    finish_name: "finish",
+    finish_name: lash_kernel_dialect::FINISH_NAME,
     finish_statement: "finish(value)",
     finish_null_statement: "finish(null)",
     continue_as_call: "control.continue_as(...)",
@@ -181,6 +181,7 @@ fn render_tool_example(example: &str) -> String {
 }
 
 fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSection {
+    let finish_name = lash_kernel_dialect::FINISH_NAME;
     let ExecutionSectionRequest {
         channel,
         tools,
@@ -228,7 +229,7 @@ fn render_execution_section(request: ExecutionSectionRequest<'_>) -> ExecutionSe
     };
     let sleep = "\n\n`await sleep(ms)` pauses the program. For a timeout, race a call against a timer — `await Promise.race([call, sleep(ms)])` is `undefined` when the timer wins, and the losing call is cancelled.";
     let host_api = format!(
-        r#"Top-level bindings persist across executions as data. A function or a pending promise does not outlive the cell that created it: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so define the function again where it is used and keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
+        r#"Built-in names, including `{finish_name}`, cannot be reused by top-level bindings. Top-level bindings persist across executions as data. A function or a pending promise does not outlive the cell that created it: a later cell that uses such a binding fails with `SESSION_BINDING_NOT_CARRIED`, so define the function again where it is used and keep a promise's awaited result, not the promise. Return exactly the value and type the task asks for with `finish(value)`; do not finish an unexamined whole tool result. Putting an object into a string — with `+`, `` `${{...}}` `` or `String(...)` — gives the placeholder `[object Object]`, never its contents; read the value with `console.log(value)` or serialize it with `JSON.stringify(value)`.
 
 `Math`, `Date` (UTC), `String`, `Array`, `Object`, `JSON`, `Map`/`Set`, `RegExp` and `URL` are available; this is not Node or a browser, and classes, generators and `new Promise(...)` are not supported.
 

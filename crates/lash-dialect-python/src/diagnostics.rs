@@ -58,6 +58,7 @@ codes! {
     KeywordCallDynamic => "PY_KEYWORD_CALL_DYNAMIC", Refusal;
     AttributeUnsupported => "PY_ATTRIBUTE_UNSUPPORTED", Refusal;
     MethodUnsupported => "PY_METHOD_UNSUPPORTED", Refusal;
+    ShadowsBuiltin => "PY_SHADOWS_BUILTIN", Refusal;
     BuiltinAsValue => "PY_BUILTIN_AS_VALUE", Refusal;
     BuiltinUnsupported => "PY_BUILTIN_UNSUPPORTED", Refusal;
     OperatorUnsupported => "PY_OPERATOR_UNSUPPORTED", Refusal;

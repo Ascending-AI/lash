@@ -51,6 +51,7 @@ pub enum DiagnosticCode {
     DeclareUnsupported,
     MissingInitializer,
     ReservedIdentifier,
+    ShadowsBuiltin,
     MutualRecursionUnsupported,
     DuplicateBinding,
     DuplicateNodeLabel,
@@ -128,6 +129,7 @@ impl DiagnosticCode {
         Self::DeclareUnsupported,
         Self::MissingInitializer,
         Self::ReservedIdentifier,
+        Self::ShadowsBuiltin,
         Self::MutualRecursionUnsupported,
         Self::DuplicateBinding,
         Self::DuplicateNodeLabel,
@@ -279,6 +281,9 @@ impl DiagnosticCode {
             Self::SourceNestingLimit => "name intermediate values instead of nesting expressions",
             Self::SourceTooLarge => "split the work across several cells",
             Self::ReservedIdentifier => "choose a different name",
+            Self::ShadowsBuiltin => {
+                "rename the binding and its references, preserving the built-in name"
+            }
             _ => return None,
         })
     }
@@ -357,6 +362,7 @@ impl DiagnosticCode {
             | Self::SourceNestingLimit
             | Self::SourceTooLarge
             | Self::ReservedIdentifier
+            | Self::ShadowsBuiltin
             | Self::ProcessParamTypeUnsupported
             | Self::ProcessReturnTypeUnsupported => CodeClassification::AlwaysRefusal,
 
@@ -432,6 +438,7 @@ impl DiagnosticCode {
             Self::DeclareUnsupported => "TS_DECLARE_UNSUPPORTED",
             Self::MissingInitializer => "TS_MISSING_INITIALIZER",
             Self::ReservedIdentifier => "TS_RESERVED_IDENTIFIER",
+            Self::ShadowsBuiltin => "TS_SHADOWS_BUILTIN",
             Self::MutualRecursionUnsupported => "TS_MUTUAL_RECURSION_UNSUPPORTED",
             Self::DuplicateBinding => "TS_DUPLICATE_BINDING",
             Self::DuplicateNodeLabel => "TS_DUPLICATE_NODE_LABEL",
@@ -947,6 +954,7 @@ mod tests {
             ),
             (SourceTooLarge, "const invoice = 1;"),
             (ReservedIdentifier, "const invoice = 1; invoice;"),
+            (ShadowsBuiltin, "const URL_ = 1; URL_;"),
         ];
         for code in DiagnosticCode::ALL {
             if code.accepted_idiom().is_some() {
