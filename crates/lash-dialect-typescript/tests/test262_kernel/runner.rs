@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use lash_dialect_typescript::{DiagnosticCode, define_helpers, provisional};
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
-use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Timestamp};
+use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Timestamp};
 use lash_kernel_vm::{
     Bindings, Bounds, End, Host, Machine, Program, RunError, Start, Step, Target,
 };
@@ -383,4 +383,57 @@ pub(crate) fn report(
         writeln!(out, "{code}\t{count}").expect("write to a string");
     }
     out
+}
+
+/// The printer law for every vendored program the front end accepts.
+/// Equality of the resulting kernel program preserves every possible machine
+/// outcome, including bounds, host reads, effects and session mutation.
+pub(crate) fn printing_relowers(relative: &str) -> bool {
+    let path = data_path(relative);
+    let meta = metadata::read_metadata(&path).unwrap_or_else(|error| panic!("{relative}: {error}"));
+    // A Test262 program is the test body; the harness is supplied by the
+    // test host. Lower the bridged body against its declared harness bindings.
+    let source = super::ingest::test_script(
+        &path,
+        &meta,
+        meta.negative.is_none() && !meta.flags.contains(&TestFlag::Async),
+    );
+    let effects = BTreeMap::new();
+    let bindings = [
+        "assert",
+        "__test262Assert",
+        "__test262SameValue",
+        "__test262Throws",
+        "__test262CompareArray",
+        "__test262ErrorThrower",
+        "Test262Error",
+        "$DONE",
+        "$DONOTEVALUATE",
+        "compareArray",
+        "verifyProperty",
+        "verifyEqualTo",
+        "verifyWritable",
+        "verifyNotWritable",
+        "verifyEnumerable",
+        "verifyNotEnumerable",
+        "verifyConfigurable",
+        "verifyNotConfigurable",
+    ]
+    .into_iter()
+    .map(Name::new)
+    .collect();
+    let environment = Environment {
+        library: library(),
+        effects: &effects,
+        bindings: &bindings,
+    };
+    let Ok(original) = lash_dialect_typescript::lower(&source, &environment) else {
+        return false;
+    };
+    let printed =
+        lash_dialect_typescript::print(&original.document).expect("an admitted document prints");
+    let re_lowered = lash_dialect_typescript::lower(&printed, &environment)
+        .unwrap_or_else(|error| panic!("{relative}: {error}\n{printed}"));
+    assert_eq!(original.document, re_lowered.document, "{relative}");
+    true
 }

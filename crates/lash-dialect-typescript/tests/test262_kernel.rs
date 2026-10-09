@@ -138,3 +138,19 @@ fn the_selection_runs_on_the_kernel_and_is_counted_by_directory() {
         }
     }
 }
+
+/// K-DIALECT-001 over every recorded Test262 program, rather than a sample.
+#[test]
+fn every_lowered_test262_program_prints_to_the_same_kernel_behavior() {
+    let recorded = runner::recorded_classes();
+    let accepted = recorded
+        .keys()
+        .filter(|path| runner::printing_relowers(path))
+        .count();
+    assert!(accepted > 0, "no Test262 program reached the printer law");
+    println!(
+        "printer law: considered={} lowered={accepted} refused_or_missing_harness={}",
+        recorded.len(),
+        recorded.len() - accepted
+    );
+}

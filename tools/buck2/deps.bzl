@@ -92,6 +92,9 @@ PACKAGE_DEPS = {
     "lash-dialect-typescript": {
         "build": {},
         "dev": {
+            "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
+            "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
             "serde": "//third-party/rust:p0308",
             "serde_yaml": "//third-party/rust:p0318"
@@ -100,6 +103,7 @@ PACKAGE_DEPS = {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "ryu_js": "//third-party/rust:p0297",
+            "serde": "//third-party/rust:p0308",
             "serde_json": "//third-party/rust:p0314",
             "swc_common": "//third-party/rust:p0352",
             "swc_ecma_ast": "//third-party/rust:p0353",
@@ -997,6 +1001,8 @@ PACKAGE_DEPS = {
         "dev": {},
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "serde": "//third-party/rust:p0308",
+            "serde_json": "//third-party/rust:p0314",
             "thiserror": "//third-party/rust:p0365"
         }
     },

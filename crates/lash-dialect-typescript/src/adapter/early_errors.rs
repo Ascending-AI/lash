@@ -88,6 +88,13 @@ impl Adapter<'_> {
         let span = Some(source_span(ident.span));
         self.validate_respelling(ident.span);
         self.check_identifier_spelling(ident.span, name)?;
+        if name == "k" {
+            return Err(Diagnostic::new(
+                DiagnosticCode::ReservedIdentifier,
+                "`k` is the reserved kernel namespace",
+                span,
+            ));
+        }
         if is_strict_reserved_word(name) {
             return Err(syntax_error(
                 format!("`{name}` is a reserved word and cannot be used as an identifier"),

@@ -45463,8 +45463,11 @@
     {
       "declared_features": [],
       "dependencies": [
+        "lash-kernel-check",
         "lash-kernel-dialect",
         "lash-kernel-doc",
+        "lash-kernel-edit",
+        "lash-kernel-lib",
         "lash-kernel-vm",
         "ryu-js",
         "serde",
@@ -46375,6 +46378,8 @@
       "declared_features": [],
       "dependencies": [
         "lash-kernel-doc",
+        "serde",
+        "serde_json",
         "thiserror"
       ],
       "doc": "//crates/lash-kernel-dialect:lash-kernel-dialect__doc",

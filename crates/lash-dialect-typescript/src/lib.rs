@@ -10,9 +10,11 @@
 mod adapter;
 mod builtins;
 mod diagnostics;
+mod intrinsics;
 mod lower;
 mod node_label;
 mod package;
+mod printer;
 pub mod provisional;
 mod types;
 
@@ -23,6 +25,7 @@ pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack};
 pub use builtins::{Receiver, Row};
 pub use diagnostics::{CodeClassification, Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 pub use package::define_helpers;
+pub use printer::print;
 
 use lash_kernel_dialect::{Environment, FrontEnd, Lowered};
 
@@ -32,6 +35,9 @@ use lash_kernel_dialect::{Environment, FrontEnd, Lowered};
 /// bindings are the session's (`K-SES-001`), and `environment.bindings`
 /// names those earlier cells left.
 pub fn lower(source: &str, environment: &Environment<'_>) -> Result<Lowered, Diagnostic> {
+    if let Some(lowered) = intrinsics::lower(source, environment) {
+        return lowered;
+    }
     let program = adapter::parse(source)?;
     lower::lower(&program, source, environment)
 }
@@ -59,6 +65,9 @@ impl Parser {
         source: &str,
         environment: &Environment<'_>,
     ) -> Result<Lowered, Diagnostic> {
+        if let Some(lowered) = intrinsics::lower(source, environment) {
+            return lowered;
+        }
         let program = self.parser.parse(source)?;
         lower::lower(&program, source, environment)
     }

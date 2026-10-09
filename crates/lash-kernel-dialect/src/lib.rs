@@ -14,6 +14,7 @@
 
 mod diagnostic;
 mod dialect;
+mod imperative;
 mod library;
 mod source;
 
@@ -24,3 +25,7 @@ pub use diagnostic::{Diagnostic, DiagnosticKind, Span};
 pub use dialect::{Environment, FrontEnd, Lowered, Package, Printer};
 pub use library::{Library, LibraryError, NamedLibrary};
 pub use source::{SourceError, define_functions};
+
+pub use imperative::{
+    SourceExpr, SourcePlace, SourceStmt, Spelling, imperative_source, render_source,
+};

@@ -14,6 +14,7 @@ mod hoisting;
 mod language;
 mod machine;
 mod package;
+mod printer;
 mod typed;
 
 /// The stand-in kernel library with the dialect's helpers defined in it.

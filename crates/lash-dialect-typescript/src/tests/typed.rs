@@ -126,8 +126,10 @@ fn an_unannotated_binding_is_typed_only_by_proof() {
         ["invoke ts.add(i, 1.0)"]
     );
     assert_eq!(
-        operations("{ const k = 1; const r = k + 1; } { const k = 'a'; const s = k + 1; }"),
-        ["invoke ts.add(k_1, 1.0)", "invoke ts.add(k_2, 1.0)"]
+        operations(
+            "{ const value = 1; const r = value + 1; } { const value = 'a'; const s = value + 1; }"
+        ),
+        ["invoke ts.add(value_1, 1.0)", "invoke ts.add(value_2, 1.0)"]
     );
     let lowered =
         lower_in_session("{ const total = 1; } const r = total + 1;", &["total"]).unwrap();
