@@ -176,64 +176,103 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
     );
 }
 
+/// A failure that already produced billed output, so no protocol position
+/// proves a retry free.
+fn paid_failure(verdict: TransportRetryVerdict, usage: LlmUsage) -> LlmTransportError {
+    LlmTransportError::new("stream disconnected")
+        .with_retry_verdict(verdict)
+        .with_partial_response(LlmResponse {
+            usage,
+            ..LlmResponse::default()
+        })
+}
+
+fn ground(
+    verdict: TransportRetryVerdict,
+    guarantee: GenerationRetryGuarantee,
+    usage: LlmUsage,
+) -> Option<RetryGround> {
+    let failure = paid_failure(verdict, usage);
+    RetryGround::of(&failure, failure_protocol_position(&failure), guarantee)
+}
+
+fn unguaranteed(usage: LlmUsage) -> UnguaranteedRetry {
+    match ground(
+        TransportRetryVerdict::RetryableTransient,
+        GenerationRetryGuarantee::None,
+        usage,
+    ) {
+        Some(RetryGround::Unguaranteed(retry)) => retry,
+        other => panic!("paid output without a guarantee is unguaranteed, got {other:?}"),
+    }
+}
+
 #[test]
 fn precedence_is_structural() {
-    let appetite = crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
-        max_unsafe_retries: 2,
-        max_duplicate_cost_tokens: Some(100),
-    };
     let usage = LlmUsage {
         input_tokens: 30,
         output_tokens: 20,
         ..LlmUsage::default()
     };
 
-    assert_eq!(
-        charge_safety_decision(
-            TransportRetryVerdict::Forbidden,
+    for verdict in [
+        TransportRetryVerdict::Forbidden,
+        TransportRetryVerdict::NotRetryable,
+    ] {
+        for guarantee in [
             GenerationRetryGuarantee::None,
-            &appetite,
-            Some(&usage),
-            1,
-        ),
-        ChargeSafetyEvaluation::NotEvaluated(ChargeSafetyPrecedence::Forbidden),
-        "Forbidden must win over the host waiver",
-    );
+            GenerationRetryGuarantee::Idempotent,
+            GenerationRetryGuarantee::Resumable,
+        ] {
+            assert_eq!(
+                ground(verdict, guarantee, usage.clone()),
+                None,
+                "{verdict:?} leaves nothing for a guarantee or the host waiver to authorize",
+            );
+        }
+    }
     assert_eq!(
-        charge_safety_decision(
-            TransportRetryVerdict::NotRetryable,
-            GenerationRetryGuarantee::None,
-            &appetite,
-            Some(&usage),
-            1,
-        ),
-        ChargeSafetyEvaluation::NotEvaluated(ChargeSafetyPrecedence::ServerPushback),
-        "server don't-retry pushback must win over the host waiver",
-    );
-    assert_eq!(
-        charge_safety_decision(
+        ground(
             TransportRetryVerdict::RetryableTransient,
             GenerationRetryGuarantee::Resumable,
-            &appetite,
-            Some(&usage),
-            1,
+            usage.clone(),
         ),
-        ChargeSafetyEvaluation::NotEvaluated(ChargeSafetyPrecedence::ProviderGuarantee),
+        Some(RetryGround::Automatic(RetryClass::ProviderResume)),
         "a provider guarantee must stay on the normal safe path",
     );
+
+    let retry = unguaranteed(usage);
+    let denied = |attempt_number, reason| crate::ChargeSafetyDecision::Denied {
+        tokens_at_stake: 50,
+        attempt_number,
+        reason,
+    };
+    let appetite = |max_duplicate_cost_tokens| crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+        max_unsafe_retries: 2,
+        max_duplicate_cost_tokens,
+    };
     assert_eq!(
-        charge_safety_decision(
-            TransportRetryVerdict::RetryableTransient,
-            GenerationRetryGuarantee::None,
-            &appetite,
-            Some(&usage),
+        retry.decision(&crate::ChargeSafetyPolicy::RequireGuarantee, 1),
+        denied(1, crate::ChargeSafetyDenialReason::GuaranteeRequired),
+    );
+    assert_eq!(
+        retry.decision(&appetite(Some(100)), 3),
+        denied(3, crate::ChargeSafetyDenialReason::UnsafeRetryLimitExceeded),
+    );
+    assert_eq!(
+        retry.decision(&appetite(Some(49)), 1),
+        denied(
             1,
+            crate::ChargeSafetyDenialReason::DuplicateCostLimitExceeded
         ),
-        ChargeSafetyEvaluation::Evaluated(crate::ChargeSafetyDecision::Authorized {
+    );
+    assert_eq!(
+        retry.decision(&appetite(Some(100)), 1),
+        crate::ChargeSafetyDecision::Authorized {
             tokens_at_stake: 50,
             attempt_number: 1,
-        }),
-        "the appetite may authorize only after higher-precedence facts permit evaluation",
+        },
+        "the appetite may authorize only an unguaranteed retry within its bounds",
     );
 }
 

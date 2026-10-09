@@ -30,7 +30,11 @@ fn replay_origin_conflict_with_provider_error(
     provider_error
 }
 
+mod charge_safety;
 mod completion;
+pub(super) use charge_safety::RetryGround;
+#[cfg(test)]
+pub(super) use charge_safety::UnguaranteedRetry;
 pub use completion::ProviderCompletionSideband;
 
 /// Component bundle returned by provider factories.
@@ -853,69 +857,51 @@ fn retry_verdict(
     charge_safety: &crate::ChargeSafetyPolicy,
     budget: &RetryBudget,
 ) -> (RetryVerdict, Option<ChargeSafetyDecision>) {
-    let automatic = automatic_retry_class(failure, position, guarantee);
-    let exceeds_cap = failure
-        .retry_after()
-        .is_some_and(|wait| policy.retry_after_within_cap(wait).is_none());
-    let charge = if failure.is_retryable() && automatic.is_none() {
-        match charge_safety_decision(
-            failure.retry_verdict,
-            guarantee,
-            charge_safety,
-            failure
-                .partial_response
-                .as_deref()
-                .map(|response| &response.usage),
-            budget.unsafe_retries.saturating_add(1),
-        ) {
-            ChargeSafetyEvaluation::Evaluated(decision) => Some(decision),
-            ChargeSafetyEvaluation::NotEvaluated(_) => None,
-        }
-    } else {
-        None
-    };
-    if let Some(ChargeSafetyDecision::Denied {
-        tokens_at_stake,
-        attempt_number,
-        reason,
-    }) = charge.as_ref()
-    {
+    let Some(ground) = RetryGround::of(failure, position, guarantee) else {
         return (
-            RetryVerdict::Declined(RetryDeclineCause::ChargeSafety {
-                tokens_at_stake: *tokens_at_stake,
-                attempt_number: *attempt_number,
-                reason: *reason,
-            }),
-            charge,
+            RetryVerdict::Declined(RetryDeclineCause::NotRetryable),
+            None,
         );
-    }
-    if failure.is_retryable() && exceeds_cap {
+    };
+    let (class, charge) = match ground {
+        RetryGround::Automatic(class) => (class, None),
+        RetryGround::Unguaranteed(retry) => {
+            let decision = retry.decision(charge_safety, budget.unsafe_retries.saturating_add(1));
+            let class = match decision {
+                ChargeSafetyDecision::Denied {
+                    tokens_at_stake,
+                    attempt_number,
+                    reason,
+                } => {
+                    return (
+                        RetryVerdict::Declined(RetryDeclineCause::ChargeSafety {
+                            tokens_at_stake,
+                            attempt_number,
+                            reason,
+                        }),
+                        Some(decision),
+                    );
+                }
+                ChargeSafetyDecision::Authorized {
+                    tokens_at_stake,
+                    attempt_number,
+                } => RetryClass::ChargeAuthorized {
+                    tokens_at_stake,
+                    attempt_number,
+                },
+            };
+            (class, Some(decision))
+        }
+    };
+    if failure
+        .retry_after()
+        .is_some_and(|wait| policy.retry_after_within_cap(wait).is_none())
+    {
         return (
             RetryVerdict::Declined(RetryDeclineCause::RetryAfterExceedsCap),
             charge,
         );
     }
-    if !failure.is_retryable() {
-        return (
-            RetryVerdict::Declined(RetryDeclineCause::NotRetryable),
-            charge,
-        );
-    }
-    let class = match automatic {
-        Some(class) => class,
-        None => match charge.as_ref() {
-            Some(ChargeSafetyDecision::Authorized {
-                tokens_at_stake,
-                attempt_number,
-            }) => RetryClass::ChargeAuthorized {
-                tokens_at_stake: *tokens_at_stake,
-                attempt_number: *attempt_number,
-            },
-            Some(ChargeSafetyDecision::Denied { .. }) | None => {
-                unreachable!("retryable failure requires retry permission")
-            }
-        },
-    };
     if let Some(wait) = budget.throttle_wait(policy, failure.retry_verdict) {
         return (RetryVerdict::Throttle { wait, class }, charge);
     }
@@ -959,78 +945,6 @@ fn announce_retry(
             },
         ));
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ChargeSafetyPrecedence {
-    Forbidden,
-    ServerPushback,
-    ProviderGuarantee,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum ChargeSafetyEvaluation {
-    NotEvaluated(ChargeSafetyPrecedence),
-    Evaluated(ChargeSafetyDecision),
-}
-
-pub(super) fn charge_safety_decision(
-    retry_verdict: TransportRetryVerdict,
-    guarantee: GenerationRetryGuarantee,
-    policy: &crate::ChargeSafetyPolicy,
-    usage: Option<&crate::llm::types::LlmUsage>,
-    attempt_number: u8,
-) -> ChargeSafetyEvaluation {
-    match retry_verdict {
-        TransportRetryVerdict::Forbidden => {
-            return ChargeSafetyEvaluation::NotEvaluated(ChargeSafetyPrecedence::Forbidden);
-        }
-        TransportRetryVerdict::NotRetryable => {
-            return ChargeSafetyEvaluation::NotEvaluated(ChargeSafetyPrecedence::ServerPushback);
-        }
-        TransportRetryVerdict::RetryableThrottle { .. }
-        | TransportRetryVerdict::RetryableTransient => {}
-    }
-    if guarantee != GenerationRetryGuarantee::None {
-        return ChargeSafetyEvaluation::NotEvaluated(ChargeSafetyPrecedence::ProviderGuarantee);
-    }
-
-    let tokens_at_stake = usage.map(duplicate_cost_tokens).unwrap_or_default();
-    let denied = |reason| {
-        ChargeSafetyEvaluation::Evaluated(ChargeSafetyDecision::Denied {
-            tokens_at_stake,
-            attempt_number,
-            reason,
-        })
-    };
-    match policy {
-        crate::ChargeSafetyPolicy::RequireGuarantee => {
-            denied(ChargeSafetyDenialReason::GuaranteeRequired)
-        }
-        crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
-            max_unsafe_retries,
-            max_duplicate_cost_tokens,
-        } => {
-            if attempt_number > *max_unsafe_retries {
-                return denied(ChargeSafetyDenialReason::UnsafeRetryLimitExceeded);
-            }
-            if max_duplicate_cost_tokens.is_some_and(|maximum| tokens_at_stake > maximum) {
-                return denied(ChargeSafetyDenialReason::DuplicateCostLimitExceeded);
-            }
-            ChargeSafetyEvaluation::Evaluated(ChargeSafetyDecision::Authorized {
-                tokens_at_stake,
-                attempt_number,
-            })
-        }
-    }
-}
-
-fn duplicate_cost_tokens(usage: &crate::llm::types::LlmUsage) -> u64 {
-    let total = i128::from(usage.input_tokens)
-        + i128::from(usage.output_tokens)
-        + i128::from(usage.cache_read_input_tokens)
-        + i128::from(usage.cache_write_input_tokens);
-    total.clamp(0, i128::from(u64::MAX)) as u64
 }
 
 pub(super) fn failure_protocol_position(failure: &LlmTransportError) -> ProtocolPosition {
