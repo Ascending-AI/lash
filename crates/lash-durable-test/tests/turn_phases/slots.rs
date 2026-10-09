@@ -596,33 +596,17 @@ pub(super) async fn hold_laws(
             seen.delivery_failures
         ));
     }
-    let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
-        backend,
-        lash_core::ProcessEngineRegistry::default(),
-    );
-    let referrers = backend.attachment_referrers();
-    let mut held = Vec::new();
-    // A relay visit before the turn ended defers its row by a backoff: each
-    // pass after the first moves the clock past the longest one.
-    for _ in 0..4 {
-        if let Err(error) = lash_core::runtime::obligations::relay::relay_due(
-            &relay,
-            clock.as_ref(),
-            std::num::NonZeroUsize::new(256).expect("a page"),
-        )
-        .await
-        {
-            return vec![format!("the cleanup relay's due pass: {error}")];
-        }
-        held = match referrers.attachment_referrers(&image.reference.id).await {
-            Ok(held) => held,
-            Err(error) => return vec![format!("read the image's referrers: {error}")],
-        };
-        if held.is_empty() {
-            break;
-        }
-        clock.advance_by(900_000).await;
+    if let Err(error) = sim::relay_ended_executions(backend, clock, &[&image.reference.id]).await {
+        return vec![error];
     }
+    let held = match backend
+        .attachment_referrers()
+        .attachment_referrers(&image.reference.id)
+        .await
+    {
+        Ok(held) => held,
+        Err(error) => return vec![format!("read the image's referrers: {error}")],
+    };
     if !held.is_empty() {
         violations.push(format!(
             "PUT/REFERRER: the settled turn's call still holds its attachment through {held:?}"

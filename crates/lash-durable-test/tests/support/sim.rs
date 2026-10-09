@@ -130,3 +130,50 @@ pub async fn file(path: impl AsRef<Path>, clock: Arc<SimClock>) -> SqliteStoreSe
     .await;
     stores
 }
+
+/// One visit of the artifact-cleanup relay over `backend` to every ended
+/// execution that still holds one of `attachments`.
+///
+/// A relay that visited an execution's guard while its turn ran deferred the
+/// row by its policy's longest backoff. The guard is made due now, as an end
+/// fact's nudge makes it, and the clock stays where it is. Moving the clock
+/// past the backoff instead wakes the deployment's own relay and then moves
+/// on under its PostgreSQL round trips, which the clock waits out only
+/// within a node step: its attempts outlive their budget one after another,
+/// and its claim and its retry backoff keep the row from every pass made
+/// here (FIG-5672).
+pub async fn relay_ended_executions(
+    backend: &Backend,
+    clock: &Arc<SimClock>,
+    attachments: &[&lash_core::AttachmentId],
+) -> Result<(), String> {
+    let referrers = backend.attachment_referrers();
+    let ledger = backend.artifact_cleanup();
+    let now_ms = lash_core::ClockWallTime::timestamp_ms(clock.as_ref());
+    for attachment in attachments {
+        let held = referrers
+            .attachment_referrers(attachment)
+            .await
+            .map_err(|error| format!("read an attachment's referrers: {error}"))?;
+        for referrer in held {
+            if matches!(referrer, lash_core::ArtifactReferrer::Execution(_)) {
+                ledger
+                    .nudge(&referrer, now_ms)
+                    .await
+                    .map_err(|error| format!("make `{referrer}`'s cleanup due: {error}"))?;
+            }
+        }
+    }
+    let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+        backend,
+        lash_core::ProcessEngineRegistry::default(),
+    );
+    lash_core::runtime::obligations::relay::relay_due(
+        &relay,
+        clock.as_ref(),
+        std::num::NonZeroUsize::new(256).expect("a page"),
+    )
+    .await
+    .map_err(|error| format!("the cleanup relay's due pass: {error}"))?;
+    Ok(())
+}

@@ -483,9 +483,13 @@ fn put_definition() -> lash_core::ToolDefinition {
 }
 
 /// [`PUT`]: puts [`KEPT`] and [`SCRATCH`] through the call's attachment
-/// store and answers [`KEPT`].
+/// store and answers [`KEPT`]. Before it answers, a cleanup relay visits
+/// its execution's guard: the turn still runs, so the visit severs nothing
+/// and defers the guard by the relay's longest backoff (FIG-5672).
 struct Puts {
     world: Arc<World>,
+    backend: lash::Backend,
+    clock: Arc<SimClock>,
 }
 
 #[async_trait::async_trait]
@@ -516,6 +520,21 @@ impl lash_core::ToolProvider for Puts {
             Err(error) => return ToolOutcome::err_fmt(error).into(),
         };
         if let Err(error) = put(SCRATCH).await {
+            return ToolOutcome::err_fmt(error).into();
+        }
+        // A deployment's cleanup relay visits whenever its tick falls: here,
+        // while the turn that holds the puts still runs.
+        let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+            &self.backend,
+            lash_core::ProcessEngineRegistry::default(),
+        );
+        if let Err(error) = lash_core::runtime::obligations::relay::relay_due(
+            &relay,
+            self.clock.as_ref(),
+            std::num::NonZeroUsize::new(256).expect("a page"),
+        )
+        .await
+        {
             return ToolOutcome::err_fmt(error).into();
         }
         ToolOutcome::from_output(lash_core::ToolCallOutput::success_tool_value(
@@ -719,6 +738,8 @@ impl Crash {
                 let builder = if self.turn == Turn::Put {
                     builder.tools(Arc::new(Puts {
                         world: Arc::clone(&self.world),
+                        backend: backend.clone(),
+                        clock: Arc::clone(&clock),
                     }))
                 } else {
                     builder
@@ -878,41 +899,23 @@ impl Crash {
             .lock_recover()
             .clone()
             .expect("the database is built first");
-        let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
-            &backend,
-            lash_core::ProcessEngineRegistry::default(),
-        );
         let referrers = backend.attachment_referrers();
         let (kept, scratch) = (
             lash_core::attachments::content_id(KEPT.as_bytes()),
             lash_core::attachments::content_id(SCRATCH.as_bytes()),
         );
         let held = [lash_core::ArtifactReferrer::Session(session())];
-        let mut found = (Vec::new(), Vec::new());
-        // A relay visit before the turn ended defers its row by a backoff:
-        // each pass after the first moves the clock past the longest one.
-        for _ in 0..4 {
-            if let Err(error) = lash_core::runtime::obligations::relay::relay_due(
-                &relay,
-                clock.as_ref(),
-                std::num::NonZeroUsize::new(256).expect("a page"),
-            )
-            .await
-            {
-                return vec![format!("the cleanup relay's due pass: {error}")];
-            }
-            found = match (
-                referrers.attachment_referrers(&kept).await,
-                referrers.attachment_referrers(&scratch).await,
-            ) {
-                (Ok(kept), Ok(scratch)) => (kept, scratch),
-                other => return vec![format!("read the puts' referrers: {other:?}")],
-            };
-            if found.0 == held && found.1.is_empty() {
-                break;
-            }
-            clock.advance_by(900_000).await;
+        if let Err(error) = sim::relay_ended_executions(&backend, &clock, &[&kept, &scratch]).await
+        {
+            return vec![error];
         }
+        let found = match (
+            referrers.attachment_referrers(&kept).await,
+            referrers.attachment_referrers(&scratch).await,
+        ) {
+            (Ok(kept), Ok(scratch)) => (kept, scratch),
+            other => return vec![format!("read the puts' referrers: {other:?}")],
+        };
         let mut violations = Vec::new();
         if found.0 != held {
             violations.push(format!(
