@@ -280,6 +280,25 @@ impl LashCore {
         self.node.drain(self).await
     }
 
+    /// Wait until this core's node stops serving, and answer why (ADR 0132
+    /// §3); `None` when the core runs no node. A node stops when the host
+    /// shuts the core down or drains it, and on its own when its lease is
+    /// lost (another node reaped it, or a newer boot of the same owner
+    /// replaced it) or went unrenewed past `self_stop_after`. A core whose
+    /// node stopped on its own still admits work, which other nodes serve;
+    /// a host that wants this process to serve again restarts it as a new
+    /// boot.
+    pub async fn node_stopped(
+        &self,
+    ) -> Option<
+        std::result::Result<
+            lash_core::durable_port::runner::Stopped,
+            lash_core::durable_port::DurableError,
+        >,
+    > {
+        self.node.stopped(self).await
+    }
+
     /// Shut down registered plugin factories after the host has stopped intake.
     ///
     /// This method releases plugin-factory resources; it does not stop intake,

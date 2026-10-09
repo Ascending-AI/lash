@@ -140,6 +140,13 @@ impl NodeSlot {
         }
     }
 
+    /// How `core`'s node stopped, once it has; `None` when it runs none.
+    pub(crate) async fn stopped(&self, core: &LashCore) -> Option<Served> {
+        // A core built outside a runtime starts its node now.
+        self.ensure(core);
+        self.ended().await
+    }
+
     /// Stop the node and wait for it.
     pub(crate) async fn stop(&self) {
         self.stop.cancel();

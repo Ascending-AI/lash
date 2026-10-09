@@ -151,6 +151,16 @@ impl ToolProvider for CountedEcho {
 
 /// One build's core over `stores`, serving as node `owner`.
 fn build_core(stores: Arc<dyn lash_core::StoreSet>, owner: &str, script: &Arc<Script>) -> LashCore {
+    build_boot(stores, owner, "boot-1", script)
+}
+
+/// `owner`'s boot `boot` over `stores`.
+fn build_boot(
+    stores: Arc<dyn lash_core::StoreSet>,
+    owner: &str,
+    boot: &str,
+    script: &Arc<Script>,
+) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(lash_conformance::backend_over(
         stores,
     )))
@@ -161,7 +171,7 @@ fn build_core(stores: Arc<dyn lash_core::StoreSet>, owner: &str, script: &Arc<Sc
     .tools(Arc::new(CountedEcho(Arc::clone(script))))
     .build(lash_core::LeaseOwnerIdentity::opaque(
         lash_core::LeaseOwnerId::new(owner),
-        lash_core::LeaseIncarnationId::new("boot-1"),
+        lash_core::LeaseIncarnationId::new(boot),
     ))
     .expect("core")
 }
@@ -322,4 +332,63 @@ async fn a_drained_nodes_sessions_resume_on_the_next_builds_node_on_postgres() {
         .attachment_store(),
     ));
     a_drained_nodes_sessions_resume_on_the_next_builds_node(stores).await;
+}
+
+/// FIG-5193: a host learns why its core's node stopped, so a host whose node
+/// stopped on its own can restart as a new boot. A newer boot of the same
+/// owner fences the old one, whose node stops `LeaseLost` while its core
+/// still admits work for the new boot to serve; a shut-down core's node
+/// stopped `Requested`; a core that serves no sessions runs no node.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_host_learns_why_its_cores_node_stopped() {
+    let stores: Arc<dyn lash_core::StoreSet> = sqlite_memory_store_set().await;
+    let script = Arc::new(Script::default());
+    let old = build_boot(Arc::clone(&stores), "restarted-owner", "boot-1", &script);
+    old.session(session_id("served"))
+        .create(crate::SessionCreation::root(mock_session_spec()))
+        .await
+        .expect("created");
+    // The old boot's node answered a turn, so it registered first.
+    let first = within("the old boot's turn", answered(&old, "served", "hello")).await;
+    assert_eq!(first.assistant_message(), Some("echo: hello"));
+
+    let new = build_boot(Arc::clone(&stores), "restarted-owner", "boot-2", &script);
+    let stopped = within("the old boot's node stopping", old.node_stopped()).await;
+    assert!(
+        matches!(
+            stopped,
+            Some(Ok(crate::durable::runner::Stopped::LeaseLost))
+        ),
+        "the replaced boot's node stops LeaseLost: {stopped:?}"
+    );
+    let next = within(
+        "a send through the replaced boot",
+        answered(&old, "served", "again"),
+    )
+    .await;
+    assert_eq!(next.assistant_message(), Some("echo: again"));
+
+    new.shutdown().await.expect("shutdown");
+    assert!(
+        matches!(
+            new.node_stopped().await,
+            Some(Ok(crate::durable::runner::Stopped::Requested))
+        ),
+        "a shut-down core's node stopped Requested"
+    );
+    let detached = explicit_ephemeral_facets(LashCore::standard_builder(
+        lash_conformance::backend_over(stores),
+    ))
+    .serve_test_llm_profile(scripted_provider(script), mock_llm_profile_spec())
+    .serve_sessions(false)
+    .build(lash_core::LeaseOwnerIdentity::opaque(
+        lash_core::LeaseOwnerId::new("detached-owner"),
+        lash_core::LeaseIncarnationId::new("boot-1"),
+    ))
+    .expect("core");
+    assert!(
+        detached.node_stopped().await.is_none(),
+        "a core that serves no sessions runs no node"
+    );
+    old.shutdown().await.expect("shutdown");
 }

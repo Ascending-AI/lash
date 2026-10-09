@@ -292,6 +292,10 @@ test_suite(
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+        "//runbooks/lash-facade-failover:failover__test",
+        "//runbooks/lash-facade-failover:lash-facade-failover[static]",
+        "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
+        "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
         "//runbooks/rlm-smoke:rlm-smoke",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test"
 ],
@@ -633,6 +637,10 @@ test_suite(
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test[check]",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin[check]",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test[check]",
+        "//runbooks/lash-facade-failover:failover__test[check]",
+        "//runbooks/lash-facade-failover:lash-facade-failover-node__bin[check]",
+        "//runbooks/lash-facade-failover:lash-facade-failover[check]",
+        "//runbooks/lash-facade-failover:lash-facade-failover__unit_test[check]",
         "//runbooks/rlm-smoke:rlm-smoke[check]",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test[check]"
 ],
@@ -866,6 +874,8 @@ test_suite(
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+        "//runbooks/lash-facade-failover:failover__test",
+        "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test"
 ],
     visibility = ["PUBLIC"],
@@ -1351,6 +1361,8 @@ test_suite(
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+        "//runbooks/lash-facade-failover:failover__test",
+        "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test"
 ],
     visibility = ["PUBLIC"],
@@ -1517,6 +1529,7 @@ test_suite(
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+        "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test"
 ],
     visibility = ["PUBLIC"],
@@ -1680,6 +1693,7 @@ test_suite(
         "//crates/lashctl:lashctl__unit_test",
         "//crates/lashctl:operator_json_contract__test",
         "//crates/transcript-contract:transcript-contract__unit_test",
+        "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test"
 ],
     visibility = ["PUBLIC"],
@@ -1706,7 +1720,8 @@ test_suite(
         "//examples/toolbench:toolbench__unit_test",
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
-        "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test"
+        "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+        "//runbooks/lash-facade-failover:failover__test"
 ],
     visibility = ["PUBLIC"],
 )
@@ -1998,6 +2013,10 @@ test_suite(
         "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test__clippy[clippy.txt]",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__clippy[clippy.txt]",
         "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test__clippy[clippy.txt]",
+        "//runbooks/lash-facade-failover:failover__test__clippy[clippy.txt]",
+        "//runbooks/lash-facade-failover:lash-facade-failover__clippy[clippy.txt]",
+        "//runbooks/lash-facade-failover:lash-facade-failover-node__bin__clippy[clippy.txt]",
+        "//runbooks/lash-facade-failover:lash-facade-failover__unit_test__clippy[clippy.txt]",
         "//runbooks/rlm-smoke:rlm-smoke__clippy[clippy.txt]",
         "//runbooks/rlm-smoke:rlm-smoke__unit_test__clippy[clippy.txt]"
 ],
@@ -2056,7 +2075,8 @@ test_suite(
         "//examples/codex-host-auth:codex-host-auth__doc",
         "//examples/delegation:delegation__doc",
         "//examples/integrator-contract:integrator-contract__doc",
-        "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__doc"
+        "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__doc",
+        "//runbooks/lash-facade-failover:lash-facade-failover__doc"
 ],
     visibility = ["PUBLIC"],
 )
@@ -3817,6 +3837,7 @@ lash_workspace_sources(
         "//examples/integrator-contract:rust_sources",
         "//examples/toolbench:rust_sources",
         "//examples/workflow-graph-roundtrip:rust_sources",
+        "//runbooks/lash-facade-failover:rust_sources",
         "//runbooks/rlm-smoke:rust_sources"
 ],
     visibility = ["PUBLIC"],

@@ -286,6 +286,10 @@ WORKSPACE_COMPILE_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover",
+    "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
@@ -575,6 +579,10 @@ WORKSPACE_CLIPPY_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover",
+    "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
@@ -630,6 +638,7 @@ WORKSPACE_DOC_TARGETS = [
     "//examples/delegation:delegation__doc",
     "//examples/integrator-contract:integrator-contract__doc",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__doc",
+    "//runbooks/lash-facade-failover:lash-facade-failover__doc",
 ]
 
 WORKSPACE_RUST_SOURCE_TARGETS = [
@@ -687,6 +696,7 @@ WORKSPACE_RUST_SOURCE_TARGETS = [
     "//examples/integrator-contract:rust_sources",
     "//examples/toolbench:rust_sources",
     "//examples/workflow-graph-roundtrip:rust_sources",
+    "//runbooks/lash-facade-failover:rust_sources",
     "//runbooks/rlm-smoke:rust_sources",
 ]
 
@@ -887,6 +897,8 @@ WORKSPACE_RUNNABLE_TEST_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
 
@@ -1057,6 +1069,8 @@ WORKSPACE_TEST_SUITE_LABELS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
 
@@ -1219,6 +1233,7 @@ WORKSPACE_DEV_SUITE_LABELS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
 
@@ -1242,6 +1257,7 @@ WORKSPACE_TAIL_SUITE_LABELS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
 ]
 
 WORKSPACE_DEV_TEST_TARGETS = [
@@ -1433,6 +1449,7 @@ WORKSPACE_DEV_TEST_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
 
@@ -1653,6 +1670,8 @@ WORKSPACE_TEST_TARGETS = [
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test",
 ]
 

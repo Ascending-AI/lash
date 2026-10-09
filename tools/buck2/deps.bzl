@@ -108,6 +108,25 @@ PACKAGE_DEPS = {
             "tokio": "//third-party/rust:p0371"
         }
     },
+    "lash-facade-failover": {
+        "build": {},
+        "dev": {
+            "lash_core_execution": "//crates/lash-core-execution:lash-core-execution",
+            "lash_durable": "//crates/lash-durable:lash-durable",
+            "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
+            "tempfile": "//third-party/rust:p0362",
+            "tokio": "//third-party/rust:p0371"
+        },
+        "normal": {
+            "async_trait": "//third-party/rust:p0015",
+            "lash": "//crates/lash:lash",
+            "serde": "//third-party/rust:p0307",
+            "serde_json": "//third-party/rust:p0313",
+            "sqlx": "//third-party/rust:p0333",
+            "tokio": "//third-party/rust:p0371",
+            "tokio_util": "//third-party/rust:p0378"
+        }
+    },
     "lash-internal-conformance": {
         "build": {},
         "dev": {

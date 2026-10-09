@@ -1,0 +1,40 @@
+[package]
+name = "lash-facade-failover"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Facade-host failover runbook: lash cores serving one PostgreSQL store as OS processes, killed, partitioned, stopped and restarted under a witness ledger"
+
+[lib]
+name = "lash_facade_failover"
+doctest = false
+
+[[bin]]
+name = "lash-facade-failover-node"
+path = "src/bin/node.rs"
+test = false
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+lash = { workspace = true, features = ["rlm", "postgres", "testing"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
+tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+tokio-util = { workspace = true }
+
+[dev-dependencies]
+# The test judges the cases as an operator reads the store, below the facade.
+lash-core-execution = { workspace = true, features = ["testing"] }
+lash-durable = { workspace = true }
+lash-postgres-store = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }

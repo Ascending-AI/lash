@@ -173,6 +173,20 @@ data = ["native//:postgres", "native//:nss_wrapper"]
 env = { LASH_WORKERS_POSTGRES = "$(location native//:postgres)", LASH_WORKERS_NSS_WRAPPER = "$(location native//:nss_wrapper)" }
 serial = true
 
+# The lash-facade-failover runbook (FIG-5193) runs the same seven cases with
+# facade-host nodes, so it owns its server the same way (the same pinned tree,
+# named the same way, so `with-service.sh pg17` hands it the 17 tree too) and
+# runs the same way.
+[[rule]]
+packages = ["lash-facade-failover"]
+kinds = ["test"]
+targets = ["failover"]
+tags = ["dev-deferred"]
+reason = "seven multi-process failover cases of facade-host nodes over a private PostgreSQL server, two of which wait out a 15 s node lease; about two minutes serially"
+data = ["native//:postgres", "native//:nss_wrapper"]
+env = { LASH_WORKERS_POSTGRES = "$(location native//:postgres)", LASH_WORKERS_NSS_WRAPPER = "$(location native//:nss_wrapper)" }
+serial = true
+
 # The PostgreSQL job's long poles (FIG-3572): serially the conformance binary
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
 # Each shard's action has a server of its own, so shards run in parallel

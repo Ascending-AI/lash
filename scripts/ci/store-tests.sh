@@ -320,6 +320,7 @@ release_legs() {
   echo "durable-crash-proof|shared|on_postgres|//crates/lash-durable-test:vertical_crash_proof__test //crates/lash-durable-test:turn_phases__test|-p lash-internal-durable-test --test vertical_crash_proof --test turn_phases"
   echo "crash-matrix|shared|the_crash_matrix_holds_on_postgres --include-ignored|//crates/lash-sim:crash_matrix__test|-p lash-sim --test crash_matrix"
   echo "failover|owned||//crates/lash-postgres-workers:failover__test|-p lash-internal-postgres-workers --test failover"
+  echo "facade-failover|owned||//runbooks/lash-facade-failover:failover__test|-p lash-facade-failover --test failover"
 }
 
 # Every label a suite executes, for the build that precedes the service.

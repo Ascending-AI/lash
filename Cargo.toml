@@ -57,6 +57,7 @@ members = [
     "examples/codex-host-auth",
     "crates/transcript-contract",
     "runbooks/rlm-smoke",
+    "runbooks/lash-facade-failover",
 ]
 # `cargo build` from the repo root compiles only the publishable SDK surface.
 # Internal bins/benches/examples build with `cargo build --workspace` or `-p <name>`.

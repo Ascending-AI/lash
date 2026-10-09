@@ -766,6 +766,8 @@ TEST_RUN_REQUESTS = {
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test": {"cpu_count": 1, "memory_kb": 262144},
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test": {"cpu_count": 1, "memory_kb": 262144},
+    "//runbooks/lash-facade-failover:failover__test": {"cpu_count": 2, "memory_kb": 524288},
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//runbooks/rlm-smoke:rlm-smoke__unit_test": {"cpu_count": 1, "memory_kb": 262144},
 }
 

@@ -62,7 +62,8 @@ readonly POSTGRES_SLOT_COUNT=4
 readonly PG18_IMAGE="postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873"
 readonly PG17_IMAGE="postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
 # The legs that own a server so they can stop and restart it
-# (//crates/lash-postgres-workers:failover__test) take a server tree, not a
+# (//crates/lash-postgres-workers:failover__test and its facade-host twin
+# //runbooks/lash-facade-failover:failover__test) take a server tree, not a
 # container. On `pg` the target's own `native//:postgres` is that tree; on
 # `pg17` it is this one, the zonky build of the same 17.11 the image runs,
 # handed to them as LASH_WORKERS_POSTGRES.

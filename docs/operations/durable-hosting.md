@@ -209,6 +209,15 @@ reasons (`lash::durable::runner::Stopped`):
   anyone could reap it.
 - `Drained`: it drained by release ([below](#drain-by-release)).
 
+`LashCore::node_stopped` waits until the core's node stops and answers which
+of these it was (`None` for a core built with `serve_sessions(false)`). A
+node that stopped `LeaseLost` or `Unrenewed` stopped on its own: the core
+still admits work, which other nodes serve, but this process serves none
+until it restarts as a new boot. A host that wants every process serving
+watches it and exits on such a stop, so its supervisor restarts it. The
+[facade-host failover runbook](../../runbooks/lash-facade-failover/README.md)
+does this.
+
 Call `shutdown` on SIGTERM, after the host stops intake and before the
 platform's kill deadline. A node killed without stopping costs one reap: one
 claim poll with the liveness lock, or `ttl` + `reap_every` without it. No

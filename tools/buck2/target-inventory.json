@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
-  "cargo_package_count": 55,
-  "cargo_target_count": 222,
+  "cargo_package_count": 56,
+  "cargo_target_count": 225,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -42520,7 +42520,7 @@
       "//crates/lash:lash__fv_cc442436"
     ]
   },
-  "generated_label_count": 288,
+  "generated_label_count": 292,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -43020,6 +43020,8 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
   "main_test_targets": [
@@ -43530,6 +43532,8 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
   "packages": [
@@ -48167,6 +48171,71 @@
     {
       "declared_features": [],
       "dependencies": [
+        "async-trait",
+        "lash-internal-core-execution",
+        "lash-internal-durable",
+        "lash-internal-postgres-store",
+        "lash-runtime",
+        "serde",
+        "serde_json",
+        "sqlx",
+        "tempfile",
+        "tokio",
+        "tokio-util"
+      ],
+      "doc": "//runbooks/lash-facade-failover:lash-facade-failover__doc",
+      "manifest": "runbooks/lash-facade-failover/Cargo.toml",
+      "package": "lash-facade-failover",
+      "resolved_features": [],
+      "targets": [
+        {
+          "build_label": "//runbooks/lash-facade-failover:lash-facade-failover[static]",
+          "cargo": "lash_facade_failover",
+          "check_label": "//runbooks/lash-facade-failover:lash-facade-failover[check]",
+          "clippy_label": "//runbooks/lash-facade-failover:lash-facade-failover__clippy[clippy.txt]",
+          "doc_label": "//runbooks/lash-facade-failover:lash-facade-failover[doc]",
+          "kind": "lib",
+          "label": "//runbooks/lash-facade-failover:lash-facade-failover"
+        },
+        {
+          "build_label": "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
+          "cargo": "lash_facade_failover",
+          "check_label": "//runbooks/lash-facade-failover:lash-facade-failover__unit_test[check]",
+          "clippy_label": "//runbooks/lash-facade-failover:lash-facade-failover__unit_test__clippy[clippy.txt]",
+          "kind": "unit-test",
+          "label": "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
+          "tags": []
+        },
+        {
+          "build_label": "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
+          "cargo": "lash-facade-failover-node",
+          "check_label": "//runbooks/lash-facade-failover:lash-facade-failover-node__bin[check]",
+          "clippy_label": "//runbooks/lash-facade-failover:lash-facade-failover-node__bin__clippy[clippy.txt]",
+          "kind": "bin",
+          "label": "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
+          "tags": []
+        },
+        {
+          "build_label": "//runbooks/lash-facade-failover:failover__test",
+          "cargo": "failover",
+          "cargo_only": "seven multi-process failover cases of facade-host nodes over a private PostgreSQL server, two of which wait out a 15 s node lease; about two minutes serially",
+          "check_label": "//runbooks/lash-facade-failover:failover__test[check]",
+          "clippy_label": "//runbooks/lash-facade-failover:failover__test__clippy[clippy.txt]",
+          "kind": "test",
+          "label": "//runbooks/lash-facade-failover:failover__test",
+          "tags": [
+            "dev-deferred"
+          ]
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
         "anyhow",
         "async-trait",
         "clap",
@@ -48799,6 +48868,8 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test": 300,
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test": 300,
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test": 300,
+    "//runbooks/lash-facade-failover:failover__test": 300,
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test": 300,
     "//runbooks/rlm-smoke:rlm-smoke__unit_test": 300
   },
   "workspace_build_targets": [
@@ -49088,6 +49159,10 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover[static]",
+    "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
@@ -49424,6 +49499,10 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test[check]",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin[check]",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test[check]",
+    "//runbooks/lash-facade-failover:failover__test[check]",
+    "//runbooks/lash-facade-failover:lash-facade-failover-node__bin[check]",
+    "//runbooks/lash-facade-failover:lash-facade-failover[check]",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test[check]",
     "//runbooks/rlm-smoke:rlm-smoke[check]",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test[check]"
   ],
@@ -49712,6 +49791,10 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__clippy[clippy.txt]",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test__clippy[clippy.txt]",
+    "//runbooks/lash-facade-failover:failover__test__clippy[clippy.txt]",
+    "//runbooks/lash-facade-failover:lash-facade-failover__clippy[clippy.txt]",
+    "//runbooks/lash-facade-failover:lash-facade-failover-node__bin__clippy[clippy.txt]",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test__clippy[clippy.txt]",
     "//runbooks/rlm-smoke:rlm-smoke__clippy[clippy.txt]",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test__clippy[clippy.txt]"
   ],
@@ -50000,6 +50083,10 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover",
+    "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
@@ -50290,6 +50377,10 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover",
+    "//runbooks/lash-facade-failover:lash-facade-failover-node__bin",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
@@ -50441,6 +50532,7 @@
     "//crates/lashctl:lashctl__unit_test",
     "//crates/lashctl:operator_json_contract__test",
     "//crates/transcript-contract:transcript-contract__unit_test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
   "workspace_deferred_test_targets": [
@@ -50605,6 +50697,7 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
   "workspace_dev_test_targets": [
@@ -50796,6 +50889,7 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
   "workspace_doc_targets": [
@@ -50848,7 +50942,8 @@
     "//examples/codex-host-auth:codex-host-auth__doc",
     "//examples/delegation:delegation__doc",
     "//examples/integrator-contract:integrator-contract__doc",
-    "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__doc"
+    "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__doc",
+    "//runbooks/lash-facade-failover:lash-facade-failover__doc"
   ],
   "workspace_rust_source_targets": [
     "//crates/lash-conformance:rust_sources",
@@ -50905,6 +51000,7 @@
     "//examples/integrator-contract:rust_sources",
     "//examples/toolbench:rust_sources",
     "//examples/workflow-graph-roundtrip:rust_sources",
+    "//runbooks/lash-facade-failover:rust_sources",
     "//runbooks/rlm-smoke:rust_sources"
   ],
   "workspace_tail_suite_labels": [
@@ -50926,7 +51022,8 @@
     "//examples/toolbench:toolbench__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
-    "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test"
+    "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test"
   ],
   "workspace_test_batches": {
     "//crates/lash-core-execution:test_batch": [
@@ -51166,6 +51263,8 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ],
   "workspace_test_targets": [
@@ -51372,6 +51471,8 @@
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test",
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__unit_test",
     "//examples/workflow-graph-roundtrip:workflow_contract_schema__bin__unit_test",
+    "//runbooks/lash-facade-failover:failover__test",
+    "//runbooks/lash-facade-failover:lash-facade-failover__unit_test",
     "//runbooks/rlm-smoke:rlm-smoke__unit_test"
   ]
 }
