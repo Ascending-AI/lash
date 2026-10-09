@@ -23,6 +23,8 @@ workspace = true
 [dependencies]
 lash-kernel-dialect = { workspace = true }
 lash-kernel-doc = { workspace = true }
+lash-kernel-lib = { path = "../lash-kernel-lib" }
+lash-ext-regex-ecma = { path = "../lash-ext-regex-ecma" }
 ryu-js = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

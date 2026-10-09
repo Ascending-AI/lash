@@ -46124,6 +46124,7 @@
     {
       "declared_features": [],
       "dependencies": [
+        "lash-ext-regex-ecma",
         "lash-kernel-check",
         "lash-kernel-dialect",
         "lash-kernel-doc",

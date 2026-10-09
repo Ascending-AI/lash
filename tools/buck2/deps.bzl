@@ -100,8 +100,10 @@ PACKAGE_DEPS = {
             "serde_yaml": "//third-party/rust:p0318"
         },
         "normal": {
+            "lash_ext_regex_ecma": "//crates/lash-ext-regex-ecma:lash-ext-regex-ecma",
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "ryu_js": "//third-party/rust:p0297",
             "serde": "//third-party/rust:p0308",
             "serde_json": "//third-party/rust:p0314",

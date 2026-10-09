@@ -15,11 +15,11 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::sync::Arc;
 
-use lash_dialect_typescript::{DiagnosticCode, define_helpers, provisional};
+use lash_dialect_typescript::{DiagnosticCode, define_helpers};
 use lash_kernel_dialect::{Environment, Lowered, NamedLibrary};
 use lash_kernel_doc::{Datum, ErrorDatum, FunctionRegistry, Handle, Integer, Name, Timestamp};
 use lash_kernel_vm::{
-    Bindings, Bounds, End, Host, Machine, Program, RunError, Start, Step, Target,
+    Bindings, Bounds, End, Host, KernelMachine, Machine, Program, RunError, Start, Step, Target,
 };
 
 use super::ingest::{data_path, harness_shim, source_for, source_without_unshimmed};
@@ -71,11 +71,35 @@ impl Observed {
     }
 }
 
-/// What runs a lowered program. `None` until a kernel machine exists; the
-/// lane that lands one returns `Some(Box::new(OnMachine::<TheMachine>::new(registry)))`
-/// here, with the kernel library's natives in the registry.
+/// Runs lowered programs on the production kernel machine.
 pub(crate) fn executor() -> Option<Box<dyn Executor>> {
-    None
+    Some(Box::new(OnMachine::<KernelMachine>::new(Arc::clone(
+        registry(),
+    ))))
+}
+
+/// All lowering and execution use the same content-addressed definitions.
+/// Missing library dependencies fail setup rather than being reported as a pass.
+fn registry() -> &'static Arc<FunctionRegistry> {
+    static REGISTRY: std::sync::OnceLock<Arc<FunctionRegistry>> = std::sync::OnceLock::new();
+    REGISTRY.get_or_init(|| {
+        let mut registry = FunctionRegistry::new();
+        lash_kernel_lib::register_text_json(&mut registry).expect("text library registration");
+        lash_kernel_vm::register_machine_functions(&mut registry)
+            .expect("machine library registration");
+        lash_ext_regex_ecma::register(
+            &mut registry,
+            &Arc::new(lash_ext_regex_ecma::Engine::new(32)),
+        )
+        .expect("regex extension registration");
+        let mut library = NamedLibrary::from_registry(&registry).expect("unique library names");
+        for definition in define_helpers(&mut library).expect("dialect library dependencies") {
+            registry
+                .register(definition, None)
+                .expect("dialect helper registration");
+        }
+        Arc::new(registry)
+    })
 }
 
 pub(crate) trait Executor: Sync {
@@ -89,7 +113,6 @@ pub(crate) struct OnMachine<M> {
 }
 
 impl<M: Machine> OnMachine<M> {
-    #[expect(dead_code, reason = "constructed by the lane that installs a machine")]
     pub(crate) fn new(registry: Arc<FunctionRegistry>) -> Self {
         Self {
             registry,
@@ -164,17 +187,10 @@ impl<M: Machine> Executor for OnMachine<M> {
     }
 }
 
-/// The stand-in kernel library with the dialect's helpers, until the
-/// kernel library crate replaces the stand-in.
+/// The same real definitions the executor runs, indexed by name for lowering.
 fn library() -> &'static NamedLibrary {
     static LIBRARY: std::sync::OnceLock<NamedLibrary> = std::sync::OnceLock::new();
-    LIBRARY.get_or_init(|| {
-        let mut library = provisional::kernel_library();
-        if let Err(error) = define_helpers(&mut library) {
-            panic!("{error}");
-        }
-        library
-    })
+    LIBRARY.get_or_init(|| NamedLibrary::from_registry(registry()).expect("unique library names"))
 }
 
 /// The JavaScript error class an uncaught value belongs to: the kernel's
