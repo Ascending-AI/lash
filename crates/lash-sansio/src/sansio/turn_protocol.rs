@@ -689,6 +689,21 @@ pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     ReportToolCalls {
         completed: Vec<CompletedToolCall<M::IntentOutcome>>,
     },
+    /// Refuse the parked state the driver was handed back: this build does
+    /// not decode it. It is the step's only action. The machine neither
+    /// finishes nor continues ([`TurnMachine::state_refusal`]), so the host
+    /// commits nothing of the step and the turn stays where its rows hold it.
+    RefuseState(UndecodableDriverState),
+}
+
+/// A protocol driver's refusal of state it parked while its work ran, handed
+/// back in a format this build does not decode: another build wrote it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UndecodableDriverState {
+    /// The driver that refused it.
+    pub driver: String,
+    /// The decoder's account.
+    pub reason: String,
 }
 
 pub struct DriverContextView<'a, M: TurnProtocol = UnitTurnProtocol> {

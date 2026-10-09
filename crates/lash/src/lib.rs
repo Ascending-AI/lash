@@ -217,6 +217,10 @@ pub use lash_core::async_trait;
 /// Store→engine delivery obligations (ADR 0109): what a stalled obligation
 /// reports, and how this deployment competes for the recovery leader lease.
 pub use lash_core::engine::{RecoveryLeaseConfig, RecoveryLeaseTimings, RecoveryPassBudget};
+/// Why a session's actor parked, read by
+/// [`DurableSession::park_reason`], and the state of its unfinished turn a
+/// build refused to decode.
+pub use lash_core::runtime::durable::session::{ParkedTurnState, SessionParkReason};
 mod pacing;
 pub use lash_core::facade_support::{
     TurnCancelAffectedInput, TurnCancelInputOutcome, TurnCancelMode,
@@ -775,7 +779,7 @@ pub mod plugins {
         DriverContextView, EffectId, ExpandedRow, ExpandedWrapper, ModelToolCalls, ModelToolReturn,
         PendingWork, ProjectorContext, ResponseToolCalls, SessionStreamEvent, StreamMessageKind,
         ToolCatalogBuildError, ToolContractResolver, ToolExpansionPlan, TurnMachineConfig,
-        TurnProtocol, UnitTurnProtocol, WriterFormats,
+        TurnProtocol, UndecodableDriverState, UnitTurnProtocol, WriterFormats,
     };
     /// The protocol-generic forms [`TurnDriverConfig`] and
     /// [`TurnDriverPreamble`] specialize to the host's turn protocol.

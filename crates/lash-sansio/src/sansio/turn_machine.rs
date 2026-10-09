@@ -63,6 +63,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
+            state_refusal: None,
         }
     }
 
@@ -209,7 +210,14 @@ impl<M: TurnProtocol> TurnMachine<M> {
     }
 
     pub fn is_done(&self) -> bool {
-        matches!(self.state, MachineState::Finished)
+        self.state_refusal.is_none() && matches!(self.state, MachineState::Finished)
+    }
+
+    /// The driver's refusal of the parked state its last step was handed
+    /// back, if it refused it: the machine did not finish and yields no
+    /// further work, and nothing its step queued is the turn's.
+    pub fn state_refusal(&self) -> Option<&UndecodableDriverState> {
+        self.state_refusal.as_ref()
     }
 
     pub fn messages(&self) -> crate::AppendVec<Message> {
@@ -396,6 +404,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             observed_cancellation: None,
             resume_work: None,
             run_abort: None,
+            state_refusal: None,
         })
     }
 
@@ -523,6 +532,9 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// Drain the next pending effect. Returns `None` when the host must call
     /// `handle_response()` before more effects become available.
     pub fn poll_effect(&mut self) -> Option<Effect<M>> {
+        if self.state_refusal.is_some() {
+            return None;
+        }
         if let Some(effect) = self.poll_scheduled_effect() {
             return Some(effect);
         }
@@ -690,6 +702,11 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         None => self.finish(outcome),
                     }
                     break;
+                }
+                DriverAction::RefuseState(refusal) => {
+                    self.run_abort = None;
+                    self.state_refusal = Some(refusal);
+                    return;
                 }
             }
         }

@@ -34,7 +34,7 @@ use crate::driver_state::{
     RLM_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, decode_rlm_driver_state,
     rlm_driver_state,
 };
-use crate::protocol::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
+use crate::protocol::actions::{invalid_turn_options_actions, refuse_driver_state};
 use crate::protocol::stall::{ExtractionCounts, ExtractionDiagnostic};
 
 #[derive(Clone)]
@@ -324,14 +324,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             }
             super::tool::NativeAction::Execute { code } => {
                 let Some(raw_state) = driver_state else {
-                    return invalid_driver_state_actions("missing native driver state".to_string());
+                    return refuse_driver_state("missing native driver state".to_string());
                 };
                 let mut state = match decode_rlm_driver_state(
                     raw_state,
                     lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
                 ) {
                     Ok(state) => state,
-                    Err(error) => return invalid_driver_state_actions(error),
+                    Err(error) => return refuse_driver_state(error),
                 };
                 state.code = code.clone();
                 state.reasoning = reasoning;
@@ -372,7 +372,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
         ) {
             Ok(state) => state,
-            Err(err) => return invalid_driver_state_actions(err),
+            Err(err) => return refuse_driver_state(err),
         };
         let mut actions = Vec::new();
 

@@ -1,12 +1,16 @@
 use lash_core::session_model::{TurnFailureCode, TurnFailureKind, make_error_event};
 use lash_core::{DriverAction, facade_support::TurnOutcome, facade_support::TurnStop};
 
-pub(crate) fn invalid_driver_state_actions(error: String) -> Vec<DriverAction> {
-    runtime_error_actions(
-        TurnFailureKind::RlmDriverState,
-        TurnFailureCode::InvalidDriverState,
-        error,
-    )
+/// Refuse the parked driver state the driver was handed back: `error` is why
+/// this build does not decode it. The turn neither finishes nor commits; its
+/// rows keep the state for a build that reads it.
+pub(crate) fn refuse_driver_state(error: String) -> Vec<DriverAction> {
+    vec![DriverAction::RefuseState(
+        lash_sansio::UndecodableDriverState {
+            driver: crate::plugin::RLM_PROTOCOL_PLUGIN_ID.to_string(),
+            reason: error,
+        },
+    )]
 }
 
 pub(crate) fn invalid_turn_options_actions(error: String) -> Vec<DriverAction> {

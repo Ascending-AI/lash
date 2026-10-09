@@ -536,8 +536,11 @@ fn terminal_provider_paths_emit_only_visible_prose() {
     }
 }
 
+/// FIG-5592: parked driver state this build does not decode is refused, typed.
+/// The machine neither runs the cell nor finishes, so no host commits the
+/// turn; it yields nothing further.
 #[test]
-fn rlm_driver_state_with_wrong_plugin_id_fails_loudly() {
+fn rlm_driver_state_this_build_cannot_decode_is_refused_and_never_finishes_the_turn() {
     let config = test_config();
     let msgs = vec![user_message("run some code")];
     let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
@@ -570,16 +573,18 @@ fn rlm_driver_state_with_wrong_plugin_id_fails_loudly() {
 
     let effects = drain_effects(&mut restored);
     assert!(
-        !effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { .. })),
-        "invalid driver state must not reach code execution"
+        effects.is_empty(),
+        "a refused step yields nothing: no cell, no outcome, no end"
     );
-    assert!(effects_include_runtime_error(
-        &effects,
-        "driver state belongs to plugin"
-    ));
-    assert!(find_done(&effects).is_some());
+    let refusal = restored
+        .state_refusal()
+        .expect("the driver refused its state");
+    assert_eq!(refusal.driver, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
+    assert!(
+        refusal.reason.contains("driver state belongs to plugin"),
+        "{refusal:?}"
+    );
+    assert!(!restored.is_done(), "a refused turn is not finished");
 }
 
 #[test]

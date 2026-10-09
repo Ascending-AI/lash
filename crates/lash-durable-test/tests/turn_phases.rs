@@ -24,9 +24,10 @@
 //! - **After-step cancel:** an `AfterStep` cancel requested from outside the
 //!   actor while the model streams lets that call finish, and the turn stops
 //!   at the next phase boundary, before its next model call.
-//! - **Poison (FIG-5230):** a turn whose checkpoint does not decode fails
-//!   every pass of its claim; the session parks at the activation-loop
-//!   budget instead of looping.
+//! - **Poison (FIG-5230, FIG-5592):** a turn that resumes from a state this
+//!   build does not decode (its checkpoint, or a resent call's admission)
+//!   commits and settles nothing; the session parks at once with the typed
+//!   refusal instead of looping, and the turn stays open.
 //! - **Colliding commit (FIG-5352):** a turn whose head commit the store
 //!   refuses for a node id collision, on every pass alike, ends its run
 //!   with that refusal and leaves the head where it was.
@@ -94,9 +95,9 @@ use lash_core::facade_support::{EffectId, Response};
 use lash_core::runtime::durable::head::{HeadCache, SessionHead};
 use lash_core::runtime::durable::session::{
     AdmittedInputs, CellExit, CodeCell, ComposedCall, ModelCallAttempt, ModelPin, OpenTurn,
-    PhaseCheckpoint, PreparedCall, SessionActivation, SessionParkReason, TurnCancelRequest,
-    TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow, TurnServices,
-    UnfinishedPhase, request_turn_cancel,
+    ParkedTurnState, PhaseCheckpoint, PreparedCall, SessionActivation, SessionParkReason,
+    TurnCancelRequest, TurnCommit, TurnDone, TurnDrive, TurnError, TurnRestore, TurnRow,
+    TurnServices, UnfinishedPhase, request_turn_cancel,
 };
 use lash_core::sansio::PendingToolCall;
 use lash_core::sansio::{ChatContextProjector, PendingWork, ProtocolDriverHandle};
@@ -180,6 +181,9 @@ enum Mode {
     /// The first send of the turn's first call loses the call's stored
     /// admission, then its node dies before the model answers.
     MaterialLost,
+    /// As [`Mode::MaterialLost`], but the admission is left in a format this
+    /// build does not decode, as another build would write it.
+    MaterialStale,
     /// The turn's head commit opens one frame twice: both nodes derive the
     /// frame's one node id, so the session store refuses the commit with a
     /// node id collision on every pass (FIG-5352).
@@ -449,6 +453,7 @@ impl TurnServices for L3Services {
             | Mode::QueuedCancel
             | Mode::CancelAtAdmission
             | Mode::MaterialLost
+            | Mode::MaterialStale
             | Mode::Slots
             | Mode::AdapterSlots
             | Mode::SlotHold
@@ -695,7 +700,7 @@ impl TurnDrive for L3Drive {
             );
             cancels && !after_cancel
         };
-        if self.services.mode == Mode::MaterialLost {
+        if matches!(self.services.mode, Mode::MaterialLost | Mode::MaterialStale) {
             let lose =
                 !std::mem::replace(&mut self.services.seen.lock_recover().material_lost, true);
             if lose {
@@ -704,6 +709,19 @@ impl TurnDrive for L3Drive {
                     session: session(),
                     run: Some(self.run.clone()),
                 }));
+                if self.services.mode == Mode::MaterialStale {
+                    tx.write(DomainWrite::Prompt(PromptWrite::Record {
+                        call: PromptCallKey {
+                            session: session(),
+                            call: ModelCallId::Turn {
+                                run: self.run.clone(),
+                                ordinal: 1,
+                            },
+                        },
+                        snapshot: r#"{"left_by_another_build":true}"#.to_owned(),
+                        texts: Vec::new(),
+                    }));
+                }
                 cx.commit(tx, MATERIAL_LOST).await?;
                 return Err(TurnError::Exec(
                     "the node died after the call's admission was lost".to_owned(),
@@ -1219,7 +1237,7 @@ impl Scenario for L3 {
                 violations.extend(colliding_commit_laws(&backend, database.as_ref(), &trace).await);
             }
             // Its own scenario checks it: the turn never ends.
-            Mode::OutsideWriterRange => {}
+            Mode::OutsideWriterRange | Mode::MaterialStale => {}
         }
 
         if self.mode == Mode::HeadMovesUnderTheTurn {
@@ -1640,6 +1658,7 @@ fn cut_laws(mode: Mode, cut: &Cut, seen: &Seen) -> Vec<String> {
         | Mode::QueuedCancel
         | Mode::CancelAtAdmission
         | Mode::MaterialLost
+        | Mode::MaterialStale
         | Mode::CollidingCommit
         | Mode::OutsideWriterRange => {}
     }

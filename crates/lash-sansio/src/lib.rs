@@ -155,7 +155,7 @@ pub use sansio::{
     ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SavedTurn,
     TURN_CHECKPOINT_SCHEMA_VERSION, ToolExpansionPlan, TurnCheckpoint, TurnCheckpointContent,
     TurnCheckpointRestoreError, TurnMachine, TurnMachineConfig, TurnProtocol, TurnWindow,
-    TurnWindowPin, UnitTurnProtocol,
+    TurnWindowPin, UndecodableDriverState, UnitTurnProtocol,
 };
 pub use schema_contract::{
     OmissionNullPath, OmissionNullPathSegment, ProjectionMode, ProviderSchemaCapabilities,

@@ -40,8 +40,8 @@ use lash_durable::domain::{
 
 use super::head::HeadCache;
 use super::session::{
-    CellExit, CodeCell, ComposedCall, OpenTurn, PhaseCheckpoint, PhaseExit, PreparedCall, TurnDone,
-    TurnDrive, TurnError, TurnRow, TurnServices, UnfinishedPhase,
+    CellExit, CodeCell, ComposedCall, OpenTurn, ParkedTurnState, PhaseCheckpoint, PhaseExit,
+    PreparedCall, TurnDone, TurnDrive, TurnError, TurnRow, TurnServices, UnfinishedPhase,
 };
 use super::session_mail::{agent_frame_switches, follow_on_mail};
 use super::tool_round::{self, RoundExit};
@@ -185,6 +185,16 @@ pub async fn run_phases(
     // An answered cell's tool calls, recorded with the turn's next commit.
     let mut answered_cell: Option<tool_round::AnsweredCell> = None;
     loop {
+        // The driver refused the parked state its last step was handed back:
+        // nothing the step left is the turn's, and nothing commits.
+        if let Some(refusal) = drive.machine().state_refusal() {
+            return Err(TurnError::UndecodableState {
+                state: ParkedTurnState::DriverState {
+                    driver: refusal.driver.clone(),
+                },
+                reason: refusal.reason.clone(),
+            });
+        }
         let effect = match pending.take() {
             Some(effect) => effect,
             None => match drive.machine().poll_effect() {
@@ -213,8 +223,7 @@ pub async fn run_phases(
                         // read back byte for byte, and reads the response
                         // under the context stored with it; nothing prepares
                         // it again.
-                        let key = call_key(&session, &run, pin.call);
-                        match admitted_send(cx, &key).await? {
+                        match admitted_send(cx, &session, &run, pin.call).await? {
                             Ok(admitted) => (Some(pin), request, admitted, None),
                             Err(unavailable) => {
                                 settle_unsent(drive.as_mut(), id, unavailable);
@@ -594,18 +603,23 @@ fn call_key(session: &crate::SessionId, run: &crate::TurnId, call: u32) -> Promp
     }
 }
 
-/// The request template admitted call `key` sends, read back as
+/// The request template admitted call `call` of `run` sends, read back as
 /// `model.start` stored it. The inner `Err` is the settlement of a call whose
 /// template is gone or does not assemble: it is never sent, and nothing
 /// rebuilds it (`AdmittedRequestUnavailable`).
 ///
 /// # Errors
 ///
-/// [`TurnError::Durable`] when the store cannot be read.
+/// [`TurnError::Durable`] when the store cannot be read, and
+/// [`TurnError::UndecodableState`] when the admission is in a format this
+/// build does not decode: the call settles nothing, and its turn stays open.
 async fn admitted_send(
     cx: &ActorContext,
-    key: &PromptCallKey,
+    session: &SessionId,
+    run: &TurnId,
+    call: u32,
 ) -> Result<Result<AdmittedSend, crate::LlmCallError>, TurnError> {
+    let key = &call_key(session, run, call);
     let unavailable = |message: String| crate::LlmCallError {
         message,
         retryable: false,
@@ -628,6 +642,12 @@ async fn admitted_send(
             key.call
         )))),
         Err(crate::plugin::prompt::AdmittedCallLoadError::Store(error)) => Err(error.into()),
+        Err(crate::plugin::prompt::AdmittedCallLoadError::Decode(error)) => {
+            Err(TurnError::UndecodableState {
+                state: ParkedTurnState::AdmittedCall { call },
+                reason: error.to_string(),
+            })
+        }
         Err(error) => Ok(Err(unavailable(format!(
             "{}'s admitted request template cannot be sent: {error}",
             key.call

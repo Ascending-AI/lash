@@ -1379,3 +1379,178 @@ async fn a_session_decodes_and_resumes_from_its_1_0_image() {
         nodes.script().rendered_trace()
     );
 }
+
+/// A session activation whose first claim rewrites the unfinished turn's
+/// checkpoint as another build left it: the driver state its protocol parked
+/// while the cell ran carries a field this build does not know.
+struct StaleDriverState {
+    rewritten: std::sync::atomic::AtomicBool,
+    database: Arc<dyn DurableStore>,
+    session: Arc<dyn Activation>,
+}
+
+/// Add an unknown field to the first parked driver state under `value`.
+fn stale_driver_state(value: &mut serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(state) = map
+                .get_mut("driver_state")
+                .and_then(|state| state.pointer_mut("/payload/state"))
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                state.insert("left_by_another_build".to_owned(), true.into());
+                return true;
+            }
+            map.values_mut().any(stale_driver_state)
+        }
+        serde_json::Value::Array(values) => values.iter_mut().any(stale_driver_state),
+        _ => false,
+    }
+}
+
+#[async_trait::async_trait]
+impl Activation for StaleDriverState {
+    async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
+        use lash_durable::DomainWrite;
+        use lash_durable::domain::{TurnWrite, UnfinishedPhase};
+        if !self
+            .rewritten
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let row = self
+                .database
+                .turn(&session())
+                .await
+                .expect("the turn reads")
+                .expect("the image holds an unfinished turn");
+            let UnfinishedPhase::Tools { run, checkpoint } = &row.phase else {
+                panic!(
+                    "the image's turn is not parked on its cell: {:?}",
+                    row.phase
+                );
+            };
+            let mut stale: serde_json::Value =
+                serde_json::from_str(checkpoint).expect("the image's checkpoint is JSON");
+            assert!(
+                stale_driver_state(&mut stale),
+                "the image's checkpoint parks no driver state"
+            );
+            let mut tx = owned
+                .begin()
+                .await
+                .expect("the first claim reads its actor");
+            tx.write(DomainWrite::Turn(TurnWrite::Advance {
+                session: session(),
+                run: row.run.clone(),
+                phase: UnfinishedPhase::Tools {
+                    run: *run,
+                    checkpoint: stale.to_string(),
+                },
+                iteration: row.iteration,
+            }));
+            owned
+                .commit(tx, CommitLabel::MODEL_DONE)
+                .await
+                .expect("the stale checkpoint commits");
+        }
+        self.session.activate(owned).await
+    }
+}
+
+/// D-PARKREFUSE (FIG-5592): a session resumed from an image whose parked
+/// driver state this build does not decode (it carries an unknown field)
+/// commits nothing of its turn. The session parks with the typed refusal,
+/// which a host reads through the facade, the turn stays open, the run has no
+/// end, and the model is not called.
+#[tokio::test]
+async fn a_parked_driver_state_this_build_cannot_decode_parks_the_session_with_its_turn_open() {
+    let mut resumed = V0::new(Protocol::Code, Dialect::SqliteFile, None);
+    resumed.image = Some(&images::SESSION);
+    let clock = SimClock::new();
+    let database = resumed.database(Arc::clone(&clock)).await;
+    let nodes = SimNodes::new(
+        Arc::clone(&database),
+        Arc::clone(&clock),
+        Script::new(),
+        resumed.config(),
+        Arc::new(StaleDriverState {
+            rewritten: std::sync::atomic::AtomicBool::new(false),
+            database: Arc::clone(&database),
+            session: resumed.activation(),
+        }),
+    );
+    nodes.start("b");
+    let horizon = clock.logical_ms() + 600_000;
+    let settled = loop {
+        let snapshot = database
+            .actor(&actor())
+            .await
+            .expect("the actor reads")
+            .expect("the image holds the session");
+        if matches!(snapshot.state, ActorState::Parked | ActorState::Idle) {
+            break snapshot;
+        }
+        assert!(
+            clock.logical_ms() < horizon,
+            "the resumed session neither parked nor ended in 600 s of virtual time:\n{}",
+            nodes.script().rendered_trace()
+        );
+        assert!(
+            nodes.step().await.is_some(),
+            "the resumed session stalled:\n{}",
+            nodes.script().rendered_trace()
+        );
+    };
+    nodes.quiesce().await;
+
+    let mut violations = Vec::new();
+    let labels: Vec<CommitLabel> = nodes
+        .script()
+        .trace()
+        .iter()
+        .filter(|write| write.kind == WriteKind::Actor && write.committed())
+        .map(|write| write.point.label)
+        .collect();
+    if labels.contains(&CommitLabel::TURN_COMMIT) {
+        violations.push(format!("the turn committed: {labels:?}"));
+    }
+    if settled.state != ActorState::Parked {
+        violations.push(format!("the session is {:?}, not parked", settled.state));
+    }
+    let parked = resumed
+        .core()
+        .session(session())
+        .durable()
+        .await
+        .expect("the durable session resolves")
+        .park_reason()
+        .await
+        .expect("the session's park reads");
+    match &parked {
+        Some(lash::SessionParkReason::UndecodableState {
+            state: lash::ParkedTurnState::DriverState { driver },
+            message,
+        }) if driver == lash::rlm::RLM_PROTOCOL_PLUGIN_ID
+            && message.contains("left_by_another_build") => {}
+        other => violations.push(format!(
+            "the facade reads the park {other:?}, not the refused driver state"
+        )),
+    }
+    if !matches!(database.turn(&session()).await, Ok(Some(row)) if row.run == run()) {
+        violations.push("the refused turn is no longer open".to_owned());
+    }
+    match database.turn_end(&session(), &run()).await {
+        Ok(None) => {}
+        other => violations.push(format!("the run ended: {other:?}")),
+    }
+    let requests = resumed.seen.lock_recover().requests.len();
+    if requests != 0 {
+        violations.push(format!("the model was called {requests} times"));
+    }
+    assert!(
+        violations.is_empty(),
+        "the stale driver state's resume:\n  {}\n{}",
+        violations.join("\n  "),
+        nodes.script().rendered_trace()
+    );
+}

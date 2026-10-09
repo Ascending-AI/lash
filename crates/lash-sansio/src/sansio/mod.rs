@@ -42,7 +42,8 @@ pub use turn_protocol::{
     ExecutionEnvironmentSyncFailure, ExecutionEnvironmentSyncFailureKind, ExpandedRow,
     ExpandedWrapper, LlmCallError, LogEvent, ModelToolCalls, PendingToolCall, PendingWork,
     ProjectorContext, ProtocolDriverHandle, Response, ResponseToolCalls, SyncedEnvironment,
-    ToolExpansionPlan, TurnMachineConfig, place_prompt, stored_history_refusal_actions,
+    ToolExpansionPlan, TurnMachineConfig, UndecodableDriverState, place_prompt,
+    stored_history_refusal_actions,
 };
 mod checkpoint_content;
 pub use checkpoint_content::{CheckpointContentRef, TurnCheckpointContent};

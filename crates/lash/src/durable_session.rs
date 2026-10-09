@@ -419,6 +419,36 @@ impl DurableSession {
             .map(|unfinished| unfinished.run))
     }
 
+    /// Why the session is parked, if it is: the typed reason its actor
+    /// parked with, as it recorded it. A parked session runs nothing until
+    /// an operator redrives it or a turn cancel readies it, and its
+    /// unfinished turn stays open ([`current_turn`](Self::current_turn)).
+    /// `None` while it is not parked, and for a session no node ever ran.
+    pub async fn park_reason(&self) -> Result<Option<crate::SessionParkReason>> {
+        let Ok(actor) = lash_core::durable_port::ActorKey::session(self.session_id.as_str()) else {
+            return Ok(None);
+        };
+        let snapshot = self
+            .effect_host
+            .backend()
+            .durable()
+            .actor(&actor)
+            .await
+            .map_err(EmbedError::from)?;
+        let Some(park) = snapshot
+            .filter(|snapshot| snapshot.state == lash_core::durable_port::ActorState::Parked)
+            .and_then(|snapshot| snapshot.park)
+        else {
+            return Ok(None);
+        };
+        serde_json::from_str(&park).map(Some).map_err(|error| {
+            EmbedError::Plugin(lash_core::PluginError::StoredDataCorrupt {
+                record_kind: "session park".to_owned(),
+                message: error.to_string(),
+            })
+        })
+    }
+
     /// Pin `target`: the revision it resolves to is retained through every
     /// collection until it is unpinned or the session is deleted. Idempotent.
     /// The target need not exist yet, and pinning never reads or moves the

@@ -31,7 +31,7 @@ use crate::dialect::SessionDialect;
 use crate::projection::rlm_protocol_event;
 use crate::rlm_support::decode_rlm_termination_options;
 
-use super::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
+use super::actions::{invalid_turn_options_actions, refuse_driver_state};
 use super::cell::{
     CellExtraction, CellExtractionError, extract_cell, malformed_cell_fence,
     project_visible_assistant_prose_with_tags,
@@ -457,14 +457,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         )]));
 
         let Some(raw_state) = driver_state else {
-            return invalid_driver_state_actions("missing RLM driver state".to_string());
+            return refuse_driver_state("missing RLM driver state".to_string());
         };
         let mut state = match decode_rlm_driver_state(
             raw_state,
             lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
         ) {
             Ok(state) => state,
-            Err(err) => return invalid_driver_state_actions(err),
+            Err(err) => return refuse_driver_state(err),
         };
         state.code = cell.code.clone();
         state.reasoning = reasoning;
@@ -511,7 +511,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
             lash_core::driver_writer_version!(ctx, RLM_DRIVER_STATE_VERSION),
         ) {
             Ok(state) => state,
-            Err(err) => return invalid_driver_state_actions(err),
+            Err(err) => return refuse_driver_state(err),
         };
         let mut actions = Vec::new();
 

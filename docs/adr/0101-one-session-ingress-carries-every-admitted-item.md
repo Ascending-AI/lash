@@ -436,6 +436,14 @@ Explicit control supports redrive, cancel, and fork. A park is neither a
 program failure nor a fabricated answer. Retry policy is recorded data under
 [ADR 0110](0110-the-engine-owns-process-recovery.md) and ADR 0132 §7.
 
+A turn that resumes from a state the running build does not decode (its
+phase checkpoint, the state its protocol driver parked in it, or a resent
+model call's admission) is such a park, taken at once: nothing of the turn is
+committed or settled for it, its rows keep the state for a build that reads
+it, and the session's park carries the typed refusal
+(`SessionParkReason::UndecodableState`), which a host reads with
+`DurableSession::park_reason`.
+
 Implementation: `crates/lash-core/src/runtime/durable/session.rs`
 (`SessionParkReason`) and `crates/lash/src/send.rs` (parked outcomes).
 

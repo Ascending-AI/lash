@@ -873,11 +873,17 @@ impl Activation for SessionActivation {
                     if !passes_by_itself(&error) {
                         failed_passes = failed_passes.saturating_add(1);
                     }
-                    if failed_passes >= budget {
-                        let reason = SessionParkReason::PassLoop {
+                    // A parked state this build does not decode fails every
+                    // pass of this build the same way: the session parks at
+                    // once with the typed refusal, its turn open (FIG-5592).
+                    let reason = match undecodable_state(&error) {
+                        Some(reason) => Some(reason),
+                        None => (failed_passes >= budget).then(|| SessionParkReason::PassLoop {
                             failed_passes,
                             error: error.to_string(),
-                        };
+                        }),
+                    };
+                    if let Some(reason) = reason {
                         match park(&cx, &reason).await {
                             Ok(()) | Err(DurableError::OwnershipLost(_)) => return Exit::Released,
                             Err(park_error) => tracing::warn!(
@@ -923,14 +929,65 @@ fn passes_by_itself(error: &TurnError) -> bool {
 #[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SessionParkReason {
     /// Its passes failed `failed_passes` times in a row within one claim,
-    /// each with an error a retry does not clear (an undecodable checkpoint
-    /// among them): the activation-loop budget (FIG-5230).
+    /// each with an error a retry does not clear: the activation-loop budget
+    /// (FIG-5230).
     PassLoop {
         /// The passes in a row that failed.
         failed_passes: u32,
         /// The last pass's error.
         error: String,
     },
+    /// Its unfinished turn resumes from a state this build does not decode:
+    /// another build wrote it. Nothing of the turn was committed or settled
+    /// for it, and its rows keep the state: a build that reads it resumes
+    /// the turn on a redrive, and a turn cancel ends it without reading it
+    /// (FIG-5592).
+    UndecodableState {
+        /// Which of the turn's states.
+        state: ParkedTurnState,
+        /// The decoder's account.
+        message: String,
+    },
+}
+
+/// One of the states an unfinished turn resumes from.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ParkedTurnState {
+    /// The phase checkpoint its row holds.
+    Checkpoint,
+    /// What its protocol driver parked in that checkpoint while a model
+    /// call or a code cell ran.
+    DriverState {
+        /// The driver that refused it.
+        driver: String,
+    },
+    /// The admission record of the model call it resends.
+    AdmittedCall {
+        /// The call's ordinal among the turn's calls.
+        call: u32,
+    },
+}
+
+/// The park of a pass that failed on a state its turn resumes from and this
+/// build does not decode; `None` for every other failure.
+fn undecodable_state(error: &TurnError) -> Option<SessionParkReason> {
+    use lash_sansio::TurnCheckpointRestoreError as Checkpoint;
+    let (state, reason) = match error {
+        TurnError::UndecodableState { state, reason } => (state.clone(), reason.clone()),
+        TurnError::Restore(
+            restore @ (TurnRestoreError::Undecodable { .. }
+            | TurnRestoreError::Checkpoint(
+                Checkpoint::IncompatibleSchemaVersion { .. }
+                | Checkpoint::IncompatibleFormat { .. },
+            )),
+        ) => (ParkedTurnState::Checkpoint, restore.to_string()),
+        _ => return None,
+    };
+    Some(SessionParkReason::UndecodableState {
+        state,
+        message: reason,
+    })
 }
 
 impl SessionParkReason {
@@ -1150,6 +1207,16 @@ pub enum TurnError {
         pinned: String,
         /// The re-delivered request's reference.
         redelivered: String,
+    },
+    /// A state the turn resumes from is in a format this build does not
+    /// decode. The turn commits nothing for it: its session parks with the
+    /// refusal ([`SessionParkReason::UndecodableState`]).
+    #[error("the turn's {state:?} is in a format this build does not decode: {reason}")]
+    UndecodableState {
+        /// Which state.
+        state: ParkedTurnState,
+        /// The decoder's account.
+        reason: String,
     },
     /// An effect the turn yielded could not run, or its lane does not run it
     /// on this path yet.

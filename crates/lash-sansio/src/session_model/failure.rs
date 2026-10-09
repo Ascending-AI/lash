@@ -37,8 +37,6 @@ pub enum TurnFailureKind {
     ProtocolBeforeLlmCall,
     /// The RLM protocol refused the model's cell.
     RlmProtocol,
-    /// The RLM driver was handed an invalid state.
-    RlmDriverState,
     /// The RLM driver was handed invalid turn options.
     RlmTurnOptions,
     /// The runtime itself refused to continue the turn.
@@ -63,7 +61,6 @@ impl TurnFailureKind {
             Self::Plugin => "plugin",
             Self::ProtocolBeforeLlmCall => "protocol_before_llm_call",
             Self::RlmProtocol => "rlm_protocol",
-            Self::RlmDriverState => "rlm_driver_state",
             Self::RlmTurnOptions => "rlm_turn_options",
             Self::Runtime => "runtime",
             Self::RuntimeEffectController => "runtime_effect_controller",
@@ -82,7 +79,6 @@ impl TurnFailureKind {
             "plugin" => Self::Plugin,
             "protocol_before_llm_call" => Self::ProtocolBeforeLlmCall,
             "rlm_protocol" => Self::RlmProtocol,
-            "rlm_driver_state" => Self::RlmDriverState,
             "rlm_turn_options" => Self::RlmTurnOptions,
             "runtime" => Self::Runtime,
             "runtime_effect_controller" => Self::RuntimeEffectController,
@@ -135,8 +131,6 @@ pub enum TurnFailureCode {
     EmptyResponse,
     /// The model emitted a native tool call the RLM protocol does not allow.
     NativeToolCallNotAllowed,
-    /// The RLM driver was resumed in a state it cannot work.
-    InvalidDriverState,
     /// The RLM driver was handed turn options it cannot honour.
     InvalidTurnOptions,
     /// A protocol extension's before-LLM-call hook failed.
@@ -314,7 +308,6 @@ impl TurnFailureCode {
             Self::MalformedCapability => "malformed_capability",
             Self::EmptyResponse => "empty_response",
             Self::NativeToolCallNotAllowed => "native_tool_call_not_allowed",
-            Self::InvalidDriverState => "invalid_driver_state",
             Self::InvalidTurnOptions => "invalid_turn_options",
             Self::BeforeLlmCallFailed => "before_llm_call_failed",
             Self::AttachmentResolutionFailed => "attachment_resolution_failed",
@@ -418,7 +411,6 @@ impl TurnFailureCode {
             "malformed_capability" => Self::MalformedCapability,
             "empty_response" => Self::EmptyResponse,
             "native_tool_call_not_allowed" => Self::NativeToolCallNotAllowed,
-            "invalid_driver_state" => Self::InvalidDriverState,
             "invalid_turn_options" => Self::InvalidTurnOptions,
             "before_llm_call_failed" => Self::BeforeLlmCallFailed,
             "attachment_resolution_failed" => Self::AttachmentResolutionFailed,
@@ -508,7 +500,6 @@ impl TurnFailureCode {
         Self::MalformedCapability,
         Self::EmptyResponse,
         Self::NativeToolCallNotAllowed,
-        Self::InvalidDriverState,
         Self::InvalidTurnOptions,
         Self::BeforeLlmCallFailed,
         Self::AttachmentResolutionFailed,

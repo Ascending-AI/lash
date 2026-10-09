@@ -626,6 +626,10 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     /// delivered (ADR 0128). The driver still records those results; the
     /// machine then finishes instead of starting further work.
     pub(super) run_abort: Option<RunAbort>,
+    /// The driver's refusal of the parked state its last step was handed
+    /// ([`DriverAction::RefuseState`]). Runtime-only: a refused machine is
+    /// never checkpointed, and the turn's rows still hold the state.
+    pub(super) state_refusal: Option<UndecodableDriverState>,
 }
 
 /// The Run control a tool result carried: the namespaced code and message
