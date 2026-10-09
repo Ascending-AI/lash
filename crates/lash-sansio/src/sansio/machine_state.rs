@@ -271,6 +271,7 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) events: CheckpointContentRef,
     #[serde(default)]
     pub(super) progress_event_cursor: usize,
+    pub(super) progress_boundaries: Vec<ProgressBoundary>,
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: LlmUsage,
@@ -281,6 +282,17 @@ pub struct TurnCheckpoint<M: TurnProtocol = UnitTurnProtocol> {
     /// The environment the machine last synced, and the iteration it was
     /// synced for. `None` only before the protocol-start sync is answered.
     pub(super) environment: Option<SyncedEnvironment>,
+}
+
+/// A progress boundary that delivered protocol records: how many messages
+/// the machine held at it, and the span of its history the boundary's delta
+/// was. The owner that resumes the turn replays each one, messages first, so
+/// its commit interleaves the two streams as an uncut owner's does.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ProgressBoundary {
+    pub(super) messages: usize,
+    pub(super) events: std::ops::Range<usize>,
 }
 
 /// The window a checkpoint names: the host's pin and the window's size.
@@ -590,6 +602,8 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) prompt_messages: MessageSequence,
     pub(super) events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
     pub(super) progress_event_cursor: usize,
+    /// The boundaries behind the cursor that delivered protocol records.
+    pub(super) progress_boundaries: Vec<ProgressBoundary>,
     pub(super) protocol_iteration: usize,
     pub(super) protocol_run_offset: usize,
     pub(super) cumulative_usage: LlmUsage,

@@ -119,6 +119,20 @@ enum Protocol {
     /// A tool round whose protocol appends a record of its own while the
     /// model's call is unanswered ([`noted`]).
     Noted,
+    /// [`Protocol::Noted`] over two tool rounds: two progress boundaries
+    /// that each carry a protocol record.
+    NotedTwice,
+}
+
+impl Protocol {
+    /// How many times the scripted model calls the operation before it
+    /// answers in prose.
+    fn rounds(self) -> usize {
+        match self {
+            Self::Code | Self::Tools | Self::Noted => 1,
+            Self::NotedTwice => 2,
+        }
+    }
 }
 
 /// The outside world: what `ext_write` wrote, per call. It survives every
@@ -198,13 +212,14 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
             async move {
                 let rendered = serde_json::to_string(&request.messages).expect("a request encodes");
                 seen.lock_recover().requests.push(rendered.clone());
-                // The model's own call is in the transcript once the
-                // operation answered it, however it ended.
-                let answered = request
+                // Each of the model's own calls is in the transcript once
+                // the operation answered it, however it ended.
+                let called = request
                     .messages
                     .iter()
-                    .any(|message| message.role == lash_core::llm::types::LlmRole::Assistant);
-                let response = match (answered, protocol) {
+                    .filter(|message| message.role == lash_core::llm::types::LlmRole::Assistant)
+                    .count();
+                let response = match (called >= protocol.rounds(), protocol) {
                     (true, _) => {
                         let told = if rendered.contains(WROTE) {
                             "the write completed"
@@ -214,15 +229,20 @@ fn model(protocol: Protocol, seen: Arc<Mutex<Seen>>) -> ProviderHandle {
                         text(&request, &format!("{FINAL}{told}"))
                     }
                     (false, Protocol::Code) => text(&request, CELL),
-                    (false, Protocol::Tools | Protocol::Noted) => LlmResponse {
-                        parts: vec![LlmOutputPart::ToolCall {
-                            call_id: "v0-call".to_owned(),
-                            tool_name: TOOL.to_owned(),
-                            input_json: r#"{"x":7}"#.to_owned(),
-                            replay: None,
-                        }],
-                        ..LlmResponse::default()
-                    },
+                    (false, Protocol::Tools | Protocol::Noted | Protocol::NotedTwice) => {
+                        LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: match called {
+                                    0 => "v0-call".to_owned(),
+                                    round => format!("v0-call-{round}"),
+                                },
+                                tool_name: TOOL.to_owned(),
+                                input_json: r#"{"x":7}"#.to_owned(),
+                                replay: None,
+                            }],
+                            ..LlmResponse::default()
+                        }
+                    }
                 };
                 Ok(response)
             }
@@ -281,7 +301,7 @@ fn core(
             .with_worker_service(sim::workers(clock)),
         ),
         Protocol::Tools => lash::LashCore::standard_builder(backend.clone()),
-        Protocol::Noted => lash::LashCore::builder(backend.clone())
+        Protocol::Noted | Protocol::NotedTwice => lash::LashCore::builder(backend.clone())
             .protocol_plugin(Arc::new(noted::NotedProtocolFactory)),
     };
     builder
@@ -490,8 +510,9 @@ impl V0 {
         nodes.quiesce().await;
     }
 
-    /// The protocol records the session's committed head holds.
-    async fn committed_protocol_records(&self) -> Vec<serde_json::Value> {
+    /// The history the session's committed head holds, messages and protocol
+    /// records in commit order.
+    async fn committed_history(&self) -> Vec<lash_core::SessionHistoryRecord> {
         let view = self
             .core()
             .session(session())
@@ -502,11 +523,7 @@ impl V0 {
             .await
             .expect("the session's head reads")
             .expect("the session has a head");
-        view.active_events()
-            .iter()
-            .filter(|record| matches!(record, lash_core::SessionHistoryRecord::Protocol(_)))
-            .map(|record| serde_json::to_value(record).expect("a record encodes"))
-            .collect()
+        view.active_events().to_vec()
     }
 
     /// Create the session and send it the turn's input through the core,
@@ -793,6 +810,18 @@ fn uncut_labels(protocol: Protocol) -> Vec<CommitLabel> {
             CommitLabel::TURN_COMMIT,
             CommitLabel::SESSION_RELEASE,
         ],
+        Protocol::NotedTwice => vec![
+            CommitLabel::TURN_ADMIT,
+            CommitLabel::MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::MODEL_DONE,
+            CommitLabel::ROUND_OUTCOME,
+            CommitLabel::ROUND_PRESENT_MODEL_START,
+            CommitLabel::TURN_COMMIT,
+            CommitLabel::SESSION_RELEASE,
+        ],
     }
 }
 
@@ -998,16 +1027,23 @@ async fn resumed_history(dialect: Dialect, postgres_url: Option<String>) {
     .await;
 }
 
-/// The protocol records `protocol`'s turn commits uncut, which the turn
-/// commits too when node A is killed right after its `cut` write committed
-/// and a cold owner resumes it.
-async fn resumed_as_uncut(
+/// The protocol records of a committed history, encoded.
+fn protocol_records(history: &[lash_core::SessionHistoryRecord]) -> Vec<serde_json::Value> {
+    history
+        .iter()
+        .filter(|record| matches!(record, lash_core::SessionHistoryRecord::Protocol(_)))
+        .map(|record| serde_json::to_value(record).expect("a record encodes"))
+        .collect()
+}
+
+/// `protocol`'s turn run uncut on one node: the history it commits, and its
+/// owner commits in order.
+async fn uncut_history(
     protocol: Protocol,
-    (label, nth): (CommitLabel, usize),
     dialect: Dialect,
     postgres_url: Option<String>,
-) -> Vec<serde_json::Value> {
-    let uncut = V0::new(protocol, dialect, postgres_url.clone());
+) -> (Vec<lash_core::SessionHistoryRecord>, Vec<CommitLabel>) {
+    let uncut = V0::new(protocol, dialect, postgres_url);
     let clock = SimClock::new();
     let database = uncut.database(Arc::clone(&clock)).await;
     let nodes = SimNodes::new(
@@ -1020,12 +1056,24 @@ async fn resumed_as_uncut(
     uncut.send().await.expect("the turn is sent");
     nodes.start("a");
     uncut.run_until_done(&nodes, &clock, "the uncut turn").await;
-    let expected = uncut.committed_protocol_records().await;
-    assert!(
-        !expected.is_empty(),
-        "the uncut {protocol:?} turn committed no protocol record"
-    );
+    let labels = nodes
+        .script()
+        .trace()
+        .iter()
+        .filter(|write| write.kind == WriteKind::Actor && write.committed())
+        .map(|write| write.point.label)
+        .collect();
+    (uncut.committed_history().await, labels)
+}
 
+/// The history `protocol`'s turn commits when node A is killed right after
+/// its `nth` `label` write committed and a cold owner resumes it.
+async fn resumed_history_after(
+    protocol: Protocol,
+    (label, nth): (CommitLabel, usize),
+    dialect: Dialect,
+    postgres_url: Option<String>,
+) -> Vec<lash_core::SessionHistoryRecord> {
     let first = V0::new(protocol, dialect, postgres_url.clone());
     let clock = SimClock::new();
     let database = first.database(Arc::clone(&clock)).await;
@@ -1064,10 +1112,30 @@ async fn resumed_as_uncut(
     after.start("c");
     cold.run_until_done(&after, &clock, "the resumed turn")
         .await;
+    cold.committed_history().await
+}
+
+/// The protocol records `protocol`'s turn commits uncut, which the turn
+/// commits too when node A is killed right after its `cut` write committed
+/// and a cold owner resumes it.
+async fn resumed_as_uncut(
+    protocol: Protocol,
+    cut: (CommitLabel, usize),
+    dialect: Dialect,
+    postgres_url: Option<String>,
+) -> Vec<serde_json::Value> {
+    let (uncut, _) = uncut_history(protocol, dialect, postgres_url.clone()).await;
+    let expected = protocol_records(&uncut);
+    assert!(
+        !expected.is_empty(),
+        "the uncut {protocol:?} turn committed no protocol record"
+    );
+    let resumed = resumed_history_after(protocol, cut, dialect, postgres_url).await;
     assert_eq!(
-        cold.committed_protocol_records().await,
+        protocol_records(&resumed),
         expected,
-        "the {protocol:?} turn resumed after {label} on {dialect:?} committed other protocol history than the uncut one"
+        "the {protocol:?} turn resumed after {} on {dialect:?} committed other protocol history than the uncut one",
+        cut.0
     );
     expected
 }
@@ -1116,6 +1184,59 @@ async fn a_protocol_record_appended_while_a_call_is_unanswered_is_committed_uncu
             committed,
             vec![note.clone()],
             "the turn's commit holds the record appended mid-call once"
+        );
+    }
+}
+
+/// One line per committed record, in commit order: a message by its role and
+/// id, a protocol record by its content.
+fn interleaving(history: &[lash_core::SessionHistoryRecord]) -> Vec<String> {
+    history
+        .iter()
+        .map(|record| match record {
+            lash_core::SessionHistoryRecord::Conversation(record) => {
+                let message = record.to_message();
+                format!("message {:?} {}", message.role, message.id)
+            }
+            lash_core::SessionHistoryRecord::Protocol(event) => {
+                format!("protocol {} {}", event.plugin_id, event.payload)
+            }
+        })
+        .collect()
+}
+
+/// FIG-5593: replay equivalence covers the order across the two streams of
+/// a turn's history. The twice-Noted turn passes two progress boundaries
+/// that each carry a protocol record; the history it commits, messages and
+/// protocol records in commit order, is the uncut one whichever of its
+/// owner commits its first owner died after.
+#[tokio::test]
+async fn a_turn_resumed_at_any_checkpoint_commits_messages_and_protocol_records_in_the_uncut_order()
+{
+    let protocol = Protocol::NotedTwice;
+    let (uncut, labels) = uncut_history(protocol, Dialect::SqliteMemory, None).await;
+    assert_eq!(labels, uncut_labels(protocol));
+    let expected = interleaving(&uncut);
+    let notes: Vec<usize> = uncut
+        .iter()
+        .enumerate()
+        .filter(|(_, record)| matches!(record, lash_core::SessionHistoryRecord::Protocol(_)))
+        .map(|(at, _)| at)
+        .collect();
+    assert!(
+        matches!(notes[..], [first, second] if first + 1 < second && second + 1 < uncut.len()),
+        "the uncut turn commits two protocol records with messages between and after them: {expected:#?}"
+    );
+    let mut seen = BTreeMap::<&str, usize>::new();
+    for label in &labels {
+        let nth = seen.entry(label.as_str()).or_default();
+        *nth += 1;
+        let cut = (*label, *nth);
+        let resumed = resumed_history_after(protocol, cut, Dialect::SqliteMemory, None).await;
+        assert_eq!(
+            interleaving(&resumed),
+            expected,
+            "the turn resumed after its {label} write {nth} committed its history in another order than the uncut one"
         );
     }
 }

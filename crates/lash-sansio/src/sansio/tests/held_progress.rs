@@ -175,7 +175,7 @@ fn a_record_appended_while_a_call_is_unanswered_rides_the_next_resume_safe_bound
     )
     .expect("the round's checkpoint restores");
     assert!(
-        !holds_note(restored.progressed_events()),
+        restored.progressed_boundaries().next().is_none(),
         "the record counts as delivered before any boundary carried it"
     );
     restored.handle_response(Response::ToolResults {
@@ -199,5 +199,10 @@ fn a_record_appended_while_a_call_is_unanswered_rides_the_next_resume_safe_bound
         })
         .collect::<Vec<_>>();
     assert_eq!(delivered, ["call", NOTE, "result"]);
-    assert!(holds_note(restored.progressed_events()));
+    let progressed = restored.progressed_boundaries().collect::<Vec<_>>();
+    let [(progressed_messages, progressed_delta)] = progressed.as_slice() else {
+        panic!("the machine lists the one boundary that delivered the record");
+    };
+    assert_eq!(progressed_messages.len(), messages.len());
+    assert!(holds_note(progressed_delta));
 }

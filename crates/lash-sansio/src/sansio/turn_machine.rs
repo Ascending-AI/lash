@@ -53,6 +53,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             prompt_messages: messages.clone(),
             messages,
             progress_event_cursor: events.len(),
+            progress_boundaries: Vec::new(),
             events,
             protocol_iteration: protocol_run_offset,
             protocol_run_offset,
@@ -219,15 +220,29 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.events.clone()
     }
 
-    /// The history records the machine has delivered through its progress
-    /// boundaries: its history up to its progress cursor, the history it
-    /// started from leading it. A restored machine's cursor is its
-    /// checkpoint's, so these are the records an earlier owner consumed;
-    /// the ones appended since, while a tool call was unanswered, are still
-    /// to be delivered.
-    pub fn progressed_events(&self) -> &[SessionHistoryRecord<M::Event>] {
+    /// The progress boundaries the machine delivered protocol records
+    /// through, in order: each one's messages and its event delta. A restored
+    /// machine's are its checkpoint's, so these are the boundaries an earlier
+    /// owner consumed; the records appended since the last one, while a tool
+    /// call was unanswered, are still to be delivered. A boundary that
+    /// delivered no protocol record is not listed: its messages lead the
+    /// next one's.
+    pub fn progressed_boundaries(
+        &self,
+    ) -> impl Iterator<Item = (MessageSequence, &[SessionHistoryRecord<M::Event>])> {
+        let messages = self.messages.as_slice();
         let events = self.events.as_slice();
-        events.get(..self.progress_event_cursor).unwrap_or(events)
+        self.progress_boundaries.iter().map(move |boundary| {
+            (
+                MessageSequence::from_owned(
+                    messages
+                        .get(..boundary.messages)
+                        .unwrap_or(messages)
+                        .to_vec(),
+                ),
+                events.get(boundary.events.clone()).unwrap_or_default(),
+            )
+        })
     }
 
     pub fn message_sequence(&self) -> MessageSequence {
@@ -305,6 +320,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     .unwrap_or_default(),
             ),
             progress_event_cursor: self.progress_event_cursor,
+            progress_boundaries: self.progress_boundaries.clone(),
             protocol_iteration: self.protocol_iteration,
             protocol_run_offset: self.protocol_run_offset,
             cumulative_usage: self.cumulative_usage.clone(),
@@ -371,6 +387,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             prompt_messages,
             events,
             progress_event_cursor: checkpoint.progress_event_cursor,
+            progress_boundaries: checkpoint.progress_boundaries,
             protocol_iteration: checkpoint.protocol_iteration,
             protocol_run_offset: checkpoint.protocol_run_offset,
             cumulative_usage: checkpoint.cumulative_usage,
@@ -439,7 +456,17 @@ impl<M: TurnProtocol> TurnMachine<M> {
         if !crate::session_model::messages_are_prompt_resume_safe(self.messages.iter()) {
             return;
         }
+        let delivered = self.progress_event_cursor.min(self.events.len());
         let event_delta = self.next_event_delta();
+        if event_delta
+            .iter()
+            .any(|record| matches!(record, SessionHistoryRecord::Protocol(_)))
+        {
+            self.progress_boundaries.push(ProgressBoundary {
+                messages: self.messages.len(),
+                events: delivered..self.progress_event_cursor,
+            });
+        }
         self.side_effect_outbox.push_back(Effect::Progress {
             messages: self.messages.clone(),
             event_delta,

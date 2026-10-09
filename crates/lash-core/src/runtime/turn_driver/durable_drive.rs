@@ -143,19 +143,16 @@ impl RuntimeDrive {
                     "the turn's plugin state did not reinstall: {error}"
                 ))
             })?;
-        // The records the restored machine already delivered through its
-        // progress boundaries reached only the previous owner's draft: they
-        // join this one, so the turn's commit holds the history an uncut run
-        // commits. The draft holds the history the turn started from, which
-        // the machine's leads with.
-        let started = driver.turn_pipeline.active_events().len();
-        driver.turn_pipeline.apply_event_delta(
-            machine
-                .progressed_events()
-                .get(started..)
-                .unwrap_or_default()
-                .to_vec(),
-        );
+        // The protocol records the restored machine already delivered
+        // through its progress boundaries reached only the previous owner's
+        // draft: each boundary is applied to this one again, its messages
+        // and then its records, so the turn's commit holds the history an
+        // uncut run commits, in its order.
+        for (messages, event_delta) in machine.progressed_boundaries() {
+            driver
+                .turn_pipeline
+                .replay_progress_boundary(&messages, event_delta.to_vec());
+        }
         // The tool surface a sync before the checkpoint recorded: pinned
         // again from the session's live registry.
         driver.reinstall_tool_surface()?;

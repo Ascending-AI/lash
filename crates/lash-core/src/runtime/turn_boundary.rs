@@ -384,6 +384,19 @@ impl TurnBoundary {
         Ok(ProgressBoundaryResult { protocol_events })
     }
 
+    /// Applies to the draft a progress boundary an earlier owner's draft
+    /// held, as [`Self::progress_boundary`] ordered it: the boundary's
+    /// messages, then its protocol records. The state the boundary captured
+    /// is the restored run's, which the turn's restore reinstalls.
+    pub(super) fn replay_progress_boundary(
+        &mut self,
+        messages: &MessageSequence,
+        event_delta: Vec<SessionHistoryRecord>,
+    ) {
+        self.draft_mut().apply_prepared_messages(messages);
+        self.apply_event_delta(event_delta);
+    }
+
     pub(super) fn apply_event_delta(
         &mut self,
         event_delta: Vec<SessionHistoryRecord>,

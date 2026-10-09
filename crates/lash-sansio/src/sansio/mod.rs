@@ -51,7 +51,7 @@ pub use turn_window::{TurnWindow, TurnWindowPin};
 mod machine_state;
 use machine_state::{
     CheckpointMessages, CheckpointState, CheckpointWindow, EffectDeliveryStatus, MachineState,
-    RunAbort,
+    ProgressBoundary, RunAbort,
 };
 pub use machine_state::{
     SavedTurn, TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnCheckpointRestoreError,
