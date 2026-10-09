@@ -77,10 +77,9 @@ pub(crate) struct SessionBindings {
 }
 
 /// Whether `dialect`'s front end declares the saved functions a cell names
-/// (`lash_kernel_dialect::install`). The Python front end does not yet, so
-/// a Python session keeps no function between cells.
+/// (`lash_kernel_dialect::install`).
 fn declares_saved_functions(dialect: &str) -> bool {
-    dialect == "typescript"
+    matches!(dialect, "typescript" | "python")
 }
 
 /// A saved function as a session holds it.

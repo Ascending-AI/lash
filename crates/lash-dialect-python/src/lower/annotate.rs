@@ -32,12 +32,17 @@ fn block(statements: &[Stmt], notes: &[Note], site: &Site, out: &mut Vec<NodeAnn
     for (index, (statement, note)) in statements.iter().zip(notes).enumerate() {
         let index = u32::try_from(index).unwrap_or(u32::MAX);
         let statement_site = site.child(index);
-        if let Some(span) = note.span {
+        if note.span.is_some() || note.written.is_some() {
             let mut data = BTreeMap::new();
-            data.insert(
-                "span".to_string(),
-                serde_json::json!([span.start, span.end]),
-            );
+            if let Some(span) = note.span {
+                data.insert(
+                    "span".to_string(),
+                    serde_json::json!([span.start, span.end]),
+                );
+            }
+            if let Some(written) = &note.written {
+                data.insert(lash_kernel_dialect::WRITTEN.to_string(), written.clone());
+            }
             out.push(NodeAnnotation {
                 site: statement_site.clone(),
                 label: None,

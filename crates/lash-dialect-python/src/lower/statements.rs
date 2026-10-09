@@ -44,6 +44,7 @@ impl Lowerer<'_> {
             notes: vec![Note {
                 span: self.span,
                 blocks: Vec::new(),
+                written: None,
             }],
         }
     }
@@ -875,6 +876,8 @@ impl Lowerer<'_> {
             &defaults,
             name,
         )?;
+        let written =
+            self.function_written(Some(&def.parameters), def.is_async, def.returns.as_deref());
         let variable = self.written(name, def.name.range)?;
         self.span_of(def);
         self.push(
@@ -887,6 +890,9 @@ impl Lowerer<'_> {
             },
             vec![body.notes],
         );
+        if let Some(note) = self.buf.notes.last_mut() {
+            note.written = Some(written);
+        }
         Ok(())
     }
 

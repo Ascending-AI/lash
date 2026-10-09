@@ -17,6 +17,7 @@ mod calls;
 mod expressions;
 mod format;
 mod repairs;
+mod saved;
 mod statements;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -46,6 +47,7 @@ const MAX_SOURCE_NESTING: usize = 96;
 pub(crate) struct Note {
     span: Option<Span>,
     blocks: Vec<Vec<Note>>,
+    written: Option<serde_json::Value>,
 }
 
 /// Kernel statements with their notes.
@@ -150,6 +152,11 @@ pub(crate) struct Lowerer<'a> {
     kernel_depth: usize,
     span: Option<Span>,
     nesting: usize,
+    saved: &'a BTreeMap<Name, lash_kernel_dialect::SavedFunction>,
+    saved_used: BTreeSet<Name>,
+    saved_startable: BTreeSet<Name>,
+    declared: BTreeMap<Name, lash_kernel_doc::Function>,
+    entries: BTreeMap<Name, Signature>,
 }
 
 /// No module or restored session binding may mask the dialect's built-ins.
@@ -192,6 +199,19 @@ pub(crate) fn lower(
     let (globals, nonlocals) = scope::rebound(&module.body);
     let rebound: BTreeSet<String> = globals.union(&nonlocals).cloned().collect();
     let mut bindings = scope::bindings(&module.body, None, &rebound);
+    let saved_startable = environment
+        .functions
+        .keys()
+        .filter(|name| !bindings.locals.contains(name.as_str()) && !rebound.contains(name.as_str()))
+        .cloned()
+        .collect();
+    for (name, saved) in environment.functions {
+        if !bindings.locals.contains(name.as_str())
+            && let Some(signature) = saved::call_signature(saved)
+        {
+            bindings.defs.insert(name.to_string(), signature);
+        }
+    }
     // A `global` statement anywhere makes the name the module's, and an
     // earlier cell's bindings are the module's too.
     bindings.locals.extend(globals);
@@ -235,6 +255,11 @@ pub(crate) fn lower(
         kernel_depth: 0,
         span: None,
         nesting: 0,
+        saved: environment.functions,
+        saved_used: BTreeSet::new(),
+        saved_startable,
+        declared: BTreeMap::new(),
+        entries: BTreeMap::new(),
     };
     lowerer.declare_classes(&module.body)?;
     for name in &declared {
@@ -258,6 +283,7 @@ pub(crate) fn lower(
             notes: vec![Note {
                 span: None,
                 blocks: Vec::new(),
+                written: None,
             }],
         };
         lowerer.span = None;
@@ -268,8 +294,28 @@ pub(crate) fn lower(
     let main = std::mem::take(&mut lowerer.buf);
     let mut document = Document::new(NumberPolicy::BySpelling, main.stmts);
     document.private_bindings = lowerer.private;
+    document.functions = lowerer.declared;
+    document.entries = lowerer.entries;
     document.manifest.functions = reachable(lowerer.used, environment.library);
     document.manifest.effects = lowerer.performed;
+    if !lowerer.saved_used.is_empty() {
+        let catalog: &dyn FunctionCatalog = environment.library;
+        lash_kernel_dialect::install(
+            &mut document,
+            environment.functions,
+            &lowerer.saved_used,
+            environment.effects,
+            &|function| catalog.definition(function).is_some(),
+        ).map_err(|unusable| {
+            let mut error = diagnostics::unplaced(Code::SavedFunctionUnusable, unusable.to_string());
+            error.repairs.push("provide the saved function's required tools and library functions, or define a function using this session's tools".to_owned());
+            error
+        })?;
+        document.manifest.functions = reachable(
+            std::mem::take(&mut document.manifest.functions),
+            environment.library,
+        );
+    }
     validate_document(&document, environment.library).map_err(|invalid| {
         diagnostics::unplaced(
             Code::InvalidDocument,
@@ -417,6 +463,9 @@ impl Lowerer<'_> {
         let Some(found) = self.variable(id) else {
             return Err(self.not_a_variable(id, range));
         };
+        if found.scope == Some(0) && !self.is_bound(0, id) && self.saved.contains_key(&found.name) {
+            self.saved_used.insert(found.name.clone());
+        }
         let ty = self.type_of(&found, id);
         if let Some(scope) = found.scope
             && !self.is_bound(scope, id)
@@ -496,6 +545,7 @@ impl Lowerer<'_> {
         self.buf.notes.push(Note {
             span: self.span,
             blocks,
+            written: None,
         });
     }
 
@@ -707,7 +757,12 @@ impl Lowerer<'_> {
     /// Writes `value` to a place.
     fn store(&mut self, place: Place, value: Operand) {
         match self.take_binding(&value) {
-            Some((rhs, note)) => self.push(Stmt::Assign { place, value: rhs }, note.blocks),
+            Some((rhs, note)) => {
+                self.push(Stmt::Assign { place, value: rhs }, note.blocks);
+                if let Some(assigned) = self.buf.notes.last_mut() {
+                    assigned.written = note.written;
+                }
+            }
             None => self.emit(Stmt::Assign {
                 place,
                 value: Rhs::Expr(value.expr),

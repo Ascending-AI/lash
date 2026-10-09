@@ -185,12 +185,28 @@ fn rlm_core_with_plugins(
 }
 
 /// A core whose model-started processes take `lifetime`.
-#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
 fn rlm_core_with_lifetime(
     fixture: &Fixture,
     queue: Arc<Mutex<VecDeque<LlmResponse>>>,
     plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     lifetime: fn(&lash_core::StartCx) -> lash_core::Lifetime,
+) -> LashCore {
+    rlm_core_in_dialect(
+        fixture,
+        queue,
+        plugins,
+        lifetime,
+        lash_protocol_rlm::CellDialect::typescript(),
+    )
+}
+
+#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
+fn rlm_core_in_dialect(
+    fixture: &Fixture,
+    queue: Arc<Mutex<VecDeque<LlmResponse>>>,
+    plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+    lifetime: fn(&lash_core::StartCx) -> lash_core::Lifetime,
+    dialect: lash_protocol_rlm::CellDialect,
 ) -> LashCore {
     let provider = lash::testing::TestProvider::builder()
         .kind("artifact-referrers")
@@ -206,14 +222,24 @@ fn rlm_core_with_lifetime(
         .build()
         .into_handle();
     let backend = fixture.backend.clone();
+    let python = dialect.name() == "python";
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        lash_protocol_rlm::CellDialect::typescript(),
+        dialect,
     );
+    let factory = if python {
+        let embedding =
+            python_process_embedding(&lash::vm::WorkerTuning::default()).expect("Python embedding");
+        factory
+            .with_worker_service(python_process_workers())
+            .with_worker_functions(Arc::clone(embedding.registry()))
+    } else {
+        factory
+    };
     let builder = LashCore::rlm_builder(backend, factory);
     let builder = plugins
         .into_iter()
@@ -1008,20 +1034,46 @@ async fn created_definition_is_reclaimed_after_session_deletion(backend: Backend
 async fn a_saved_function_started_as_a_process_finishes_after_its_session_is_deleted(
     backend: Backend,
 ) {
+    saved_function_process(backend, lash_protocol_rlm::CellDialect::typescript(),
+        "const factor = 2;\nasync function work(n: number) { await sleep(1500); return n * factor; }\nfinish('bound');",
+        "const run = await processes.start({ definition: work, args: { n: 21 } }); finish(run);",
+        serde_json::json!(42.0)).await;
+}
+
+/// FIG-5778 / K-FN-004: a Python saved function is a self-contained process definition;
+/// its detached process finishes after the originating session is deleted.
+async fn a_python_saved_function_process_outlives_its_session(backend: Backend) {
+    saved_function_process(backend, lash_protocol_rlm::CellDialect::python(),
+        "import asyncio\nfactor = 2\nasync def work(n: int = 21) -> int:\n    await asyncio.sleep(1.5)\n    return n * factor\nfinish('bound')",
+        "run = await processes_start({'definition': work, 'args': {}})\nfinish(run)",
+        serde_json::json!(42)).await;
+}
+
+async fn saved_function_process(
+    backend: Backend,
+    dialect: lash_protocol_rlm::CellDialect,
+    define: &str,
+    start: &str,
+    expected: serde_json::Value,
+) {
     let fixture = Fixture::new(backend).await;
+    let response = |code| LlmResponse {
+        parts: vec![LlmOutputPart::Text {
+            text: format!("<{}>\n{code}\n</{}>", dialect.name(), dialect.name()),
+            response_meta: None,
+        }],
+        ..Default::default()
+    };
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
-        response(
-            "const factor = 2;\nasync function work(n: number) { await sleep(1500); return n * factor; }\nfinish('bound');",
-        ),
-        response(
-            "const run = await processes.start({ definition: work, args: { n: 21 } }); finish(run);",
-        ),
+        response(define),
+        response(start),
     ])));
-    let core = rlm_core_with_lifetime(
+    let core = rlm_core_in_dialect(
         &fixture,
         Arc::clone(&responses),
         Vec::new(),
         lash_core::lifetime::detached,
+        dialect,
     );
     let session_id = "saved-function-process";
     let session = created_session(&core, session_id)
@@ -1072,7 +1124,7 @@ async fn a_saved_function_started_as_a_process_finishes_after_its_session_is_del
         panic!("the process settles with an output: {output:?}");
     };
     assert!(output.is_success(), "the process finishes: {output:?}");
-    assert_eq!(output.value_for_projection(), serde_json::json!(42.0));
+    assert_eq!(output.value_for_projection(), expected);
 }
 
 /// This test crate's one path to a session that may not exist yet
@@ -1152,7 +1204,8 @@ tiered!(
     host_pin_keeps_a_definition_across_an_uncarried_switch,
     created_definition_survives_cold_reopen_and_starts_by_value,
     created_definition_is_reclaimed_after_session_deletion,
-    a_saved_function_started_as_a_process_finishes_after_its_session_is_deleted
+    a_saved_function_started_as_a_process_finishes_after_its_session_is_deleted,
+    a_python_saved_function_process_outlives_its_session
 );
 
 tiered_ignored!(
@@ -1191,4 +1244,39 @@ fn postgres_variants_never_pass_without_a_database_url() {
             "{stdout}\n{stderr}"
         );
     }
+}
+
+fn python_process_embedding(
+    _tuning: &lash::vm::WorkerTuning,
+) -> Result<lash::vm::WorkerEmbedding, lash::vm::WorkerEmbedError> {
+    let mut embedder = lash::vm::WorkerEmbedder::kernel()?;
+    let mut library = embedder.library()?;
+    let functions = lash_dialect_python::define_helpers(&mut library).map_err(|error| {
+        lash::vm::WorkerEmbedError::Dialect {
+            dialect: "python".to_owned(),
+            message: error.to_string(),
+        }
+    })?;
+    embedder.install(lash_dialect_python::package(functions))?;
+    embedder.finish()
+}
+
+// This support entry becomes a worker only when the pool reexecs it.
+#[test]
+fn python_saved_function_worker_entry() {
+    if lash::vm::worker_entry_with(&python_process_embedding).expect("Python worker") {
+        std::process::exit(0);
+    }
+}
+
+fn python_process_workers() -> lash::vm::WorkerService {
+    let mut entry = lash::vm::WorkerEntry::reexec().expect("this test binary");
+    entry.args = vec![
+        "--exact".into(),
+        "--nocapture".into(),
+        "--test-threads=1".into(),
+        "--".into(),
+        "python_saved_function_worker_entry".into(),
+    ];
+    lash::vm::WorkerService::new(lash::vm::WorkerPoolConfig::rlm(entry))
 }

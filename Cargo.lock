@@ -2921,6 +2921,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "insta",
+ "lash-dialect-python",
  "lash-dialect-typescript",
  "lash-internal-conformance",
  "lash-internal-core",

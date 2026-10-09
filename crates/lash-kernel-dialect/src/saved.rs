@@ -59,6 +59,9 @@ pub struct Written {
     /// parameter is one a start can name and type.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub start: Option<Signature>,
+    /// Dialect-owned call metadata, interpreted only by that dialect's lowerer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 /// Why a binding that holds a function was not saved.
@@ -157,6 +160,7 @@ fn written(annotations: &Annotations, site: &Site) -> Option<Written> {
             .and_then(|signature| signature.as_str())
             .map(str::to_owned),
         source: source.map(str::to_owned),
+        metadata: stated.and_then(|stated| stated.get("metadata")).cloned(),
         start: stated
             .and_then(|stated| stated.get("start"))
             .and_then(|start| serde_json::from_value(start.clone()).ok()),

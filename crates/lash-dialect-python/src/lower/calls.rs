@@ -256,6 +256,16 @@ impl Lowerer<'_> {
                 Some("gather") => Ok(()),
                 _ => Err(error),
             })?;
+        if matches!(call.func.as_ref(), PyExpr::Name(name) if name.id.as_str() == lash_kernel_dialect::FINISH_NAME && self.variable(name.id.as_str()).is_none())
+        {
+            self.plain_arguments(&call.arguments, "finish")?;
+            let [value] = &*call.arguments.args else {
+                return Err(arguments_error("finish takes one value", call.range()));
+            };
+            let value = self.expr(value)?;
+            self.emit(Stmt::Finish { value: value.expr });
+            return Ok(Operand::none());
+        }
         if let Some(class) = self.exception_class(&call.func) {
             self.plain_arguments(&call.arguments, "an exception")?;
             let exprs: Vec<&PyExpr> = call.arguments.args.iter().collect();
@@ -446,7 +456,15 @@ impl Lowerer<'_> {
         }
         let mut exprs: Vec<&PyExpr> = call.arguments.args.iter().collect();
         exprs.extend(call.arguments.keywords.iter().map(|keyword| &keyword.value));
-        let mut operands = self.operands(&exprs)?;
+        let mut operands = Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            let value = if effect.as_str() == "processes_start" {
+                self.process_input(expr)?
+            } else {
+                self.expr(expr)?
+            };
+            operands.push(self.pin(value));
+        }
         let keyword_values = operands.split_off(positional);
         let mut slots: Vec<Option<Operand>> = operands.into_iter().map(Some).collect();
         slots.resize(signature.params.len(), None);

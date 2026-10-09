@@ -69,7 +69,7 @@ async fn cell(
 }
 
 /// A provider that offers no tool at all.
-struct NoTools;
+pub(super) struct NoTools;
 
 #[async_trait::async_trait]
 impl lash_core::ToolProvider for NoTools {

@@ -768,13 +768,21 @@ fn a_start_that_does_not_fit_the_document_is_refused() {
         .map(|_| ())
     };
     assert_eq!(start("go", vec![int(1)]), Ok(()));
+    // K-FN-004: a supplied absent in an optional slot also means omitted.
+    assert_eq!(start("go", vec![int(1), Datum::Absent]), Ok(()));
     assert_eq!(
         start("gone", vec![]),
         Err(StartError::UnknownEntry {
             entry: Name::new("gone")
         })
     );
-    for args in [vec![], vec![text("one")], vec![int(1), text("l"), int(3)]] {
+    for args in [
+        vec![],
+        vec![Datum::Absent],
+        vec![text("one")],
+        vec![int(1), int(2)],
+        vec![int(1), text("l"), int(3)],
+    ] {
         assert!(matches!(
             start("go", args),
             Err(StartError::Arguments { .. })

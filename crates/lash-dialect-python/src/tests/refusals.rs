@@ -175,6 +175,10 @@ fn a_missing_helper_is_named() {
 fn every_advertised_repair_form_lowers() {
     use Code::*;
     let examples = [
+        (
+            SavedFunctionUnusable,
+            "def invoice(total):\n    return total\ninvoice(42)",
+        ),
         (ShadowsBuiltin, "len_ = 1\nlen_\n"),
         (
             CoroutineNotAwaited,

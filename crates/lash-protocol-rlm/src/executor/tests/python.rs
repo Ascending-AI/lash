@@ -255,3 +255,260 @@ async fn prints_are_ordered_and_retained_without_losing_values() {
     );
     assert_eq!(prints[2].value, serde_json::json!("after"));
 }
+
+/// FIG-5778: both def and lambda bindings survive two cell boundaries,
+/// including calls to another saved function by name.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_function_a_cell_defines_is_called_two_cells_later() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let services = python_services();
+    let mut state = state();
+    for (key, code) in [
+        (
+            "exec-code:0",
+            "step = 2\ndef advance(value):\n    return value + step\ntwice = lambda value: advance(advance(value))",
+        ),
+        ("exec-code:1", "base = 38"),
+    ] {
+        let response = run_cell(
+            &mut state,
+            cell_context(&host, SESSION, TURN, key, tools.clone()),
+            &services,
+            code,
+        )
+        .await;
+        assert!(response.error().is_none(), "{:?}", response.error());
+    }
+    let called = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:2", tools),
+        &services,
+        "print(twice(base))",
+    )
+    .await;
+    assert!(called.error().is_none(), "{:?}", called.error());
+    assert_eq!(called.prints[0].value, serde_json::json!("42"));
+}
+
+async fn saved_cell(
+    state: &mut RlmExecutionState,
+    host: &crate::testing::DurableHost,
+    key: &'static str,
+    tools: Arc<dyn lash_core::ToolProvider>,
+    code: &str,
+) -> lash_core::ExecResponse {
+    let response = run_cell(
+        state,
+        cell_context(host, SESSION, TURN, key, tools),
+        &python_services(),
+        code,
+    )
+    .await;
+    assert!(response.error().is_none(), "{:?}", response.error());
+    response
+}
+
+/// FIG-5778: cold restore retains Python's keyword/default and async call
+/// metadata as well as the frozen captures and original source.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_function_is_called_after_a_cold_restore() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut source = state();
+    let code = "rate = 3\nasync def scale(value: int = 14) -> int:\n    return value * rate";
+    saved_cell(&mut source, &host, "exec-code:0", tools.clone(), code).await;
+    let held = source.bindings().held_functions();
+    let written = held[&lash_kernel_doc::Name::new("scale")]
+        .function
+        .written
+        .as_ref()
+        .expect("Python metadata");
+    assert_eq!(
+        written.signature.as_deref(),
+        Some("async (value: int = 14) -> int")
+    );
+    assert_eq!(
+        written.source.as_deref(),
+        Some(code.split_once('\n').expect("def text").1)
+    );
+    assert_eq!(
+        written.metadata.as_ref().expect("call metadata")["is_async"],
+        true
+    );
+    let fleet = lash_core::FleetFormat::current();
+    source
+        .snapshot_execution_state(fleet)
+        .await
+        .expect("snapshot");
+    source.acknowledge_execution_state_capture();
+    let saved = source
+        .hydrated_execution_state(fleet)
+        .await
+        .expect("saved state");
+    drop(source);
+    let mut restored = state();
+    restored
+        .restore_execution_state(&saved, fleet)
+        .await
+        .expect("cold restore");
+    let called = saved_cell(
+        &mut restored,
+        &host,
+        "exec-code:1",
+        tools,
+        "finish([await scale(), await scale(value=7)])",
+    )
+    .await;
+    assert_eq!(finish_of(&called), serde_json::json!([42, 21]));
+}
+
+/// FIG-5778: seeding is an explicit creation input, and the new session
+/// holds no data of the old session; a lambda keeps its keyword signature.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_session_created_with_a_saved_function_calls_it() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut source = state();
+    saved_cell(
+        &mut source,
+        &host,
+        "exec-code:0",
+        tools.clone(),
+        "greeting = 'hello'\ngreet = lambda name='lash': f'{greeting}, {name}'",
+    )
+    .await;
+    let functions = source.saved_functions();
+    assert_eq!(
+        functions["greet"]["written"]["metadata"]["params"][0]["name"], "name",
+        "{}",
+        functions["greet"]
+    );
+    drop(source);
+    let mut seeded = state();
+    seeded
+        .seed_functions(&functions, &std::collections::BTreeSet::new())
+        .await
+        .expect("seed functions");
+    assert_eq!(seeded.binding_names().count(), 0);
+    let called = saved_cell(
+        &mut seeded,
+        &host,
+        "exec-code:1",
+        tools,
+        "finish([greet(), greet(name='world')])",
+    )
+    .await;
+    assert_eq!(
+        finish_of(&called),
+        serde_json::json!(["hello, lash", "hello, world"])
+    );
+}
+
+/// FIG-5778: installing a function validates its required effects in the
+/// calling environment before any code in the cell runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_function_is_refused_where_a_tool_it_calls_is_missing() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut source = state();
+    saved_cell(&mut source, &host, "exec-code:0", tools.clone(), "async def shout(text):\n    return await echo_say({'text': text})\nonce = await shout('a')").await;
+    assert!(
+        source.saved_functions().contains_key("shout"),
+        "{:?}",
+        source.bindings().not_carried()
+    );
+    let mut seeded = state();
+    seeded
+        .seed_functions(
+            &source.saved_functions(),
+            &std::collections::BTreeSet::new(),
+        )
+        .await
+        .expect("seed");
+    let refused = run_cell(
+        &mut seeded,
+        cell_context(
+            &host,
+            SESSION,
+            TURN,
+            "exec-code:1",
+            Arc::new(super::saved_functions::NoTools),
+        ),
+        &python_services(),
+        "finish(await shout('b'))",
+    )
+    .await;
+    let error = refused.error().expect("missing tool refuses the cell");
+    assert!(
+        error.message.contains("PY_SAVED_FUNCTION_UNUSABLE")
+            && error.message.contains(
+                "the saved function `shout` calls `echo_say`, which this session does not offer"
+            ),
+        "{}",
+        error.message
+    );
+    assert_eq!(tools.answered(), ["a"]);
+}
+
+/// FIG-5778: later rebinding and mutation do not change frozen captures.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_saved_function_keeps_the_captures_its_cell_left() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = state();
+    saved_cell(&mut state, &host, "exec-code:0", tools.clone(), "factor = 2\nlimits = {'top': 10}\nclamp = lambda value: min(value * factor, limits['top'])").await;
+    saved_cell(
+        &mut state,
+        &host,
+        "exec-code:1",
+        tools.clone(),
+        "factor = 100\nlimits['top'] = 1000",
+    )
+    .await;
+    let called = saved_cell(
+        &mut state,
+        &host,
+        "exec-code:2",
+        tools,
+        "finish([clamp(3), clamp(50), factor, limits['top']])",
+    )
+    .await;
+    assert_eq!(finish_of(&called), serde_json::json!([6, 10, 100, 1000]));
+}
+
+/// FIG-5778 / K-SES-003: task captures cannot be frozen, even after await;
+/// the binding is not carried and its recorded reason names the capture.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_function_that_captures_a_task_is_not_carried_and_says_so() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let mut state = state();
+    let defined = saved_cell(&mut state, &host, "exec-code:0", tools.clone(), "import asyncio\nasync def work():\n    return 1\npending = asyncio.create_task(work())\nawait pending\nlater = lambda: pending").await;
+    assert_eq!(
+        *defined.bindings,
+        lash_core::BindingChanges {
+            added: vec!["work".into()],
+            not_carried: vec!["later".into(), "pending".into()],
+            ..Default::default()
+        }
+    );
+    assert_eq!(
+        state
+            .bindings()
+            .not_carried()
+            .get(&lash_kernel_doc::Name::new("later")),
+        Some(&lash_kernel_dialect::NotSaved::Capture {
+            name: lash_kernel_doc::Name::new("pending"),
+            why: lash_kernel_dialect::CaptureRefusal::Task,
+        })
+    );
+    let refused = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:1", tools),
+        &python_services(),
+        "finish(later())",
+    )
+    .await;
+    assert!(refused.error().is_some());
+}

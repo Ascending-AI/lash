@@ -37,7 +37,14 @@ and f-string formatting are helpers.
 
 A source is a cell of a session: the names its top level binds are session
 bindings, which the next cell sees, and a cell may `await` at its top
-level. Built-in names, including the configured terminal name, cannot be
+level. In an RLM session, a top-level `def` or lambda is saved as a
+self-contained function when the cell succeeds. Captures are frozen then;
+later cells copy the definition into their own documents. Captures must be
+data or other saved functions; a task capture prevents saving. Saved functions
+can seed a new session explicitly, and `await processes_start({"definition":
+work, "args": {"n": 21}})` starts one as a durable process when the host offers
+the process tools. `finish(value)` answers the turn through the kernel.
+Built-in names, including the configured terminal name, cannot be
 reused by module bindings (`PY_SHADOWS_BUILTIN`); function locals and
 comprehension targets may shadow them. Renaming `len` to `len_`, for
 example, leaves the built-in available in later cells. When a cell that made tasks ends, the tasks still running are

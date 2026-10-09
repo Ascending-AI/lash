@@ -56,7 +56,8 @@ impl Ty {
 }
 
 /// One parameter of a function the front end can see.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Param {
     pub(crate) name: String,
     pub(crate) has_default: bool,
@@ -64,7 +65,8 @@ pub(crate) struct Param {
 
 /// A `def` whose name nothing else binds, so a call of the name is a call
 /// of this function.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Signature {
     pub(crate) params: Vec<Param>,
     pub(crate) is_async: bool,

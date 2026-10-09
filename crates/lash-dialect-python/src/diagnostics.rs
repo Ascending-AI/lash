@@ -41,6 +41,7 @@ codes! {
     SourceTooLarge => "PY_SOURCE_TOO_LARGE", Refusal;
     TooDeep => "PY_TOO_DEEP", Refusal;
     InvalidDocument => "PY_INVALID_DOCUMENT", Refusal;
+    SavedFunctionUnusable => "PY_SAVED_FUNCTION_UNUSABLE", Refusal;
     LibraryMissing => "PY_LIBRARY_MISSING", Refusal;
     UnknownName => "PY_UNKNOWN_NAME", ProgramDefect;
     Arguments => "PY_ARGUMENTS", ProgramDefect;

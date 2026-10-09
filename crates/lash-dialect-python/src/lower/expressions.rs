@@ -118,7 +118,13 @@ impl Lowerer<'_> {
                     &defaults,
                     "<lambda>",
                 )?;
-                Ok(self.emit_closure(params, body))
+                let written = self.function_written(lambda.parameters.as_deref(), false, None);
+                let closure = self.emit_closure(params, body);
+                if let Some(note) = self.buf.notes.last_mut() {
+                    note.span = Some(diagnostics::span(lambda.range));
+                    note.written = Some(written);
+                }
+                Ok(closure)
             }
             PyExpr::Dict(dict) => {
                 let mut exprs = Vec::with_capacity(dict.items.len() * 2);

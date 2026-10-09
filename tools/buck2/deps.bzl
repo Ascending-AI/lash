@@ -103,8 +103,7 @@ PACKAGE_DEPS = {
         "dev": {
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
-            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",
-            "serde": "//third-party/rust:p0314"
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
         },
         "normal": {
             "lash_kernel_dialect": "//crates/lash-kernel-dialect:lash-kernel-dialect",
@@ -112,6 +111,7 @@ PACKAGE_DEPS = {
             "ruff_python_ast": "//third-party/rust:p0285",
             "ruff_python_parser": "//third-party/rust:p0286",
             "ruff_text_size": "//third-party/rust:p0289",
+            "serde": "//third-party/rust:p0314",
             "serde_json": "//third-party/rust:p0319"
         }
     },
@@ -1134,6 +1134,7 @@ PACKAGE_DEPS = {
             "insta": "//third-party/rust:p0169",
             "lash_conformance": "//crates/lash-conformance:lash-conformance",
             "lash_core": "//crates/lash-core:lash-core",
+            "lash_dialect_python": "//crates/lash-dialect-python:lash-dialect-python",
             "lash_postgres_store": "//crates/lash-postgres-store:lash-postgres-store",
             "lash_protocol_rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm",
             "lash_provider_anthropic": "//crates/lash-provider-anthropic:lash-provider-anthropic",

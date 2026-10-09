@@ -134,7 +134,7 @@ impl DialectPrompts for PythonPrompts {
 {response_shape}
 {example}
 
-Built-in names, including `{finish_name}`, cannot be reused by top-level bindings. Top-level variables persist across executions as data. A function, a class or a task does not outlive the program that created it: define a function again where it is used, and keep a task's result, not the task.
+Built-in names, including `{finish_name}`, cannot be reused by top-level bindings. Top-level variables persist across executions as data. A function bound to a top-level name persists as a self-contained copy: its captures are frozen when its cell ends, so later changes to those variables are not seen and changes the function makes to them are not kept. Functions capturing tasks, and functions held inside data, are not carried. Keep a task's result, not the task. A saved function can start a durable process with `await processes_start({{"definition": saved_fn, "args": {{"parameter": value}}}})` when the process tools are offered.
 
 This is a Python subset, not CPython: there are no imports beyond `asyncio`, and no file, network or process access except through the tools.
 
@@ -162,7 +162,7 @@ const PYTHON_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocabular
     finish_null_statement: "finish(None)",
     continue_as_call: "control_continue_as(...)",
     continue_as_example: "await control_continue_as({\"task\": \"continue the audit from the summarized findings\", \"seed\": {\"problem\": input[\"prompt\"], \"findings\": findings}})",
-    not_carried_repair: "Define the function again in this cell, or await the task and keep its result; keep data, not functions or pending work, in session variables.",
+    not_carried_repair: "Await the task and keep its result, or define the function using captures that are data or other saved functions.",
     unjoined_task_repair: "Await every task before the cell ends: `await` it, or collect them with `await asyncio.gather(...)`. A cell does not leave work running behind it.",
     field_miss_rule: "Never write a key you haven't seen in the key sets below: reading a key that is not there raises `KeyError`. If a name is not listed, it does not exist on that value.",
 };

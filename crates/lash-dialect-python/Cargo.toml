@@ -27,9 +27,9 @@ ruff_python_ast = { workspace = true }
 ruff_python_parser = { workspace = true }
 ruff_text_size = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 lash-kernel-check = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
 lash-kernel-vm = { workspace = true }
-serde = { workspace = true, features = ["derive"] }

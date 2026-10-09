@@ -107,9 +107,15 @@ pub(super) fn start(
             }
             let mut args = Vec::with_capacity(given);
             for (datum, param) in start.args.iter().zip(&signature.params) {
-                let value = machine
-                    .decode(&exe, datum, &param.ty)
-                    .map_err(|interrupt| arguments(describe(param.name.as_str(), interrupt)))?;
+                // K-FN-004: an explicit absent in an optional slot is
+                // the omitted argument, just as a shortened argument list is.
+                let value = if param.optional && matches!(datum, Datum::Absent) {
+                    Value::Absent
+                } else {
+                    machine
+                        .decode(&exe, datum, &param.ty)
+                        .map_err(|interrupt| arguments(describe(param.name.as_str(), interrupt)))?
+                };
                 args.push(value);
             }
             // Decoding an argument is the embedder's act, not the run's.
