@@ -150,7 +150,10 @@ pub(super) async fn send(session: &lash::DurableSession, name: &str, meter: &Met
     Ok(())
 }
 
-pub(super) async fn run(args: &Args) -> Result<Receipt> {
+pub(super) async fn run(
+    args: &Args,
+    instrument: Option<(&super::pg_statements::Instrument, usize)>,
+) -> Result<Receipt> {
     let meter = Meter::default();
     let mut storage = Vec::new();
     let mut cores = Vec::new();
@@ -166,9 +169,9 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     };
     for n in 0..nodes {
         let stores: Arc<dyn lash_core::StoreSet> = if matches!(args.case, Case::PgFacade) {
-            let url = args
-                .postgres_url
-                .as_deref()
+            let url = instrument
+                .map(|(instrument, _)| instrument.workload_url.as_str())
+                .or(args.postgres_url.as_deref())
                 .ok_or_else(|| anyhow::anyhow!("PG18 case requires --postgres-url"))?;
             let endpoints = lash_postgres_store::PostgresEndpoints::from_url(url)?;
             let pg = lash_postgres_store::PostgresStorage::connect(
@@ -214,7 +217,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         Case::ParkedTakeover => takeover(args.operations, &cores[0], &meter).await,
         Case::ProcessLifecycle => lifecycle(args.operations, &cores[0], &meter).await,
         Case::TypedHistory => history(args.operations, &cores[0], &meter).await,
-        Case::PgFacade => traffic(args.operations, &cores, &meter).await,
+        Case::PgFacade => traffic(args, &cores, &meter, instrument).await,
         _ => anyhow::bail!("not a facade workload"),
     };
     for core in &cores {
@@ -239,14 +242,20 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
 }
 
 async fn traffic(
-    operations: usize,
+    args: &Args,
     cores: &[lash::LashCore],
     meter: &Meter,
+    instrument: Option<(&super::pg_statements::Instrument, usize)>,
 ) -> Result<serde_json::Value> {
+    let operations = args.operations;
     let mut sessions = Vec::new();
     for (n, core) in cores.iter().enumerate() {
         sessions.push(create(core, &format!("traffic-{n}")).await?);
     }
+    let before = match instrument {
+        Some((instrument, _)) => Some(instrument.snapshot().await?),
+        None => None,
+    };
     futures_util::future::try_join_all(sessions.iter().enumerate().map(
         |(lane, session)| async move {
             for n in (lane..operations).step_by(cores.len()) {
@@ -260,6 +269,9 @@ async fn traffic(
         meter.count("send.settle") == operations,
         "traffic lost sends"
     );
+    if let (Some((instrument, top)), Some(before)) = (instrument, before) {
+        instrument.finish(args, before, top).await?;
+    }
     Ok(serde_json::json!({"nodes": cores.len(), "settled": operations}))
 }
 

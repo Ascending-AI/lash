@@ -3,6 +3,7 @@
 mod attachments;
 mod facade;
 mod observation;
+mod pg_statements;
 mod seeded;
 mod tokens;
 mod waves;
@@ -271,6 +272,28 @@ impl Receipt {
 }
 
 pub async fn run(args: &Args) -> Result<Receipt> {
+    run_observed(args, None).await
+}
+
+/// Run the PG facade population with statement deltas isolated to its database
+/// and role. `postgres_url` must permit creating databases, roles and extensions.
+pub async fn run_pg_statements(args: &Args, top: usize) -> Result<Receipt> {
+    ensure!(
+        matches!(args.case, Case::PgFacade),
+        "--pg-statements requires --case pg-facade"
+    );
+    ensure!(top > 0, "--pg-statements-top must be positive");
+    let instrument = pg_statements::Instrument::open(args).await?;
+    let result = run_observed(args, Some((&instrument, top))).await;
+    let cleanup = instrument.close().await;
+    cleanup?;
+    result
+}
+
+async fn run_observed(
+    args: &Args,
+    instrument: Option<(&pg_statements::Instrument, usize)>,
+) -> Result<Receipt> {
     ensure!(
         args.operations > 0 && args.callers > 0,
         "population must be positive"
@@ -289,7 +312,7 @@ pub async fn run(args: &Args) -> Result<Receipt> {
         | Case::ParkedTakeover
         | Case::PgFacade
         | Case::TypedHistory
-        | Case::ProcessLifecycle => facade::run(args).await?,
+        | Case::ProcessLifecycle => facade::run(args, instrument).await?,
         _ => Box::pin(observation::run(args)).await?,
     };
     let after = allocator_stats();

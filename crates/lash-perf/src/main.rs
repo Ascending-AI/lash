@@ -139,7 +139,16 @@ enum Command {
         slowest: usize,
     },
     /// Run one synthetic 1.0 boundary population and write its functional receipt.
-    Boundary(lash_perf::boundary::Args),
+    Boundary {
+        #[command(flatten)]
+        options: lash_perf::boundary::Args,
+        /// Report PG18 statements in a private run database and role.
+        #[arg(long)]
+        pg_statements: bool,
+        /// Shapes to print in each statement ranking.
+        #[arg(long, default_value_t = 10, requires = "pg_statements")]
+        pg_statements_top: usize,
+    },
     #[command(hide = true)]
     BoundaryWorker(lash_perf::boundary::WorkerArgs),
     /// Sweep scheduled arrival rates over one population and write the
@@ -282,7 +291,11 @@ fn run_main() -> anyhow::Result<()> {
         }) => {
             return lash_perf::receipt_tail::run(receipt, samples.as_deref(), *slowest);
         }
-        Some(Command::Boundary(options)) => {
+        Some(Command::Boundary {
+            options,
+            pg_statements,
+            pg_statements_top,
+        }) => {
             let window = lash_perf::perf_support::dhat::ProfileWindow::start(
                 "boundary-node",
                 "before_runtime_setup_through_workload_and_runtime_teardown",
@@ -299,7 +312,13 @@ fn run_main() -> anyhow::Result<()> {
                 runtime.thread_stack_size(stack_bytes);
             }
             let runtime = runtime.build()?;
-            let result = runtime.block_on(lash_perf::boundary::run(options));
+            let result = runtime.block_on(async {
+                if *pg_statements {
+                    lash_perf::boundary::run_pg_statements(options, *pg_statements_top).await
+                } else {
+                    lash_perf::boundary::run(options).await
+                }
+            });
             drop(runtime);
             window.finish(result.is_ok())?;
             return result.map(|_| ());
