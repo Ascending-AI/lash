@@ -39,21 +39,3 @@ fn rendered_history_cell_round_trips_through_extractor() {
     assert_eq!(extraction.prose, "Found it.");
     assert_eq!(extraction.code, code);
 }
-
-#[test]
-fn standalone_close_tag_line_inside_multiline_source_is_the_cell_boundary() {
-    let text = concat!(
-        "<typescript>\n",
-        "const payload = `\n",
-        "</typescript>\n",
-        "this text is outside the cell\n",
-        "`;\n",
-        "finish(payload);\n",
-        "</typescript>",
-    );
-    let extraction = extract_typescript_cell(text)
-        .expect("the first standalone closing-tag line owns the boundary")
-        .expect("cell extracts");
-
-    assert_eq!(extraction.code, "const payload = `");
-}

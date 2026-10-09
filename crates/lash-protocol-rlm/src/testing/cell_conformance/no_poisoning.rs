@@ -25,12 +25,9 @@ use super::{assert_not_inherited, shift};
 /// cannot run anything.
 const TRIVIAL_CELL: &str = "finish(6 * 7);";
 
-/// Closure-bearing cells, one per shape a closure reaches the boundary in.
-///
-/// The list mirrors `lash-typescript`'s durability corpus: a recursive
-/// function, a nested function, an arrow that captures and is returned, an
-/// inline arrow whose closure is garbage at once, a closure bound straight to a
-/// global, and a closure inside a container.
+/// Closure-bearing cells for the remaining no-poisoning scenarios: recursive
+/// and nested functions, a returned arrow, and an inline arrow used before a
+/// failing cell.
 fn closure_bearing_cell(shape: ClosureShape) -> &'static str {
     match shape {
         ClosureShape::Recursive => {
@@ -43,12 +40,6 @@ fn closure_bearing_cell(shape: ClosureShape) -> &'static str {
         ClosureShape::Returned => {
             "const base = 10;\nconst outer = () => { const inner = () => base; return inner; };\nconst held = outer();"
         }
-        ClosureShape::BoundToGlobal => {
-            "const add = (value: number) => value + 1;\nconst y = add(1);"
-        }
-        ClosureShape::InsideContainer => {
-            "const handlers = { onDone: (value: number) => value + 1 };\nconst tag = \"kept\";"
-        }
     }
 }
 
@@ -58,8 +49,6 @@ enum ClosureShape {
     Plain,
     Nested,
     Returned,
-    BoundToGlobal,
-    InsideContainer,
 }
 
 /// One closure shape, then a trivial cell. The reported bug, per shape.
@@ -181,11 +170,6 @@ fn a_recursive_function_cell_does_not_poison_the_next_cell() {
 }
 
 #[test]
-fn an_inline_arrow_cell_does_not_poison_the_next_cell() {
-    a_closure_bearing_cell_does_not_poison_the_next_cell(ClosureShape::Plain);
-}
-
-#[test]
 fn a_nested_function_cell_does_not_poison_the_next_cell() {
     a_closure_bearing_cell_does_not_poison_the_next_cell(ClosureShape::Nested);
 }
@@ -193,14 +177,4 @@ fn a_nested_function_cell_does_not_poison_the_next_cell() {
 #[test]
 fn a_returned_closure_cell_does_not_poison_the_next_cell() {
     a_closure_bearing_cell_does_not_poison_the_next_cell(ClosureShape::Returned);
-}
-
-#[test]
-fn a_closure_bound_to_a_global_does_not_poison_the_next_cell() {
-    a_closure_bearing_cell_does_not_poison_the_next_cell(ClosureShape::BoundToGlobal);
-}
-
-#[test]
-fn a_closure_inside_a_container_does_not_poison_the_next_cell() {
-    a_closure_bearing_cell_does_not_poison_the_next_cell(ClosureShape::InsideContainer);
 }

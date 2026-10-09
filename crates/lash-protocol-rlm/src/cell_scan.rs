@@ -416,16 +416,6 @@ mod tests {
         assert_eq!(code("<typescript></typescript>"), Some(""));
     }
 
-    /// A block-shape cell still wins when both could match, because the block
-    /// starts first.
-    #[test]
-    fn block_shape_takes_precedence_over_a_later_one_line_cell() {
-        assert_eq!(
-            code("<typescript>\nfinish 1\n</typescript>\n<typescript>finish 2</typescript>"),
-            Some("finish 1")
-        );
-    }
-
     /// Prose that merely *names* both tags on one line is not a cell: the line
     /// has to start with the open tag and end with the close tag.
     #[test]
@@ -437,7 +427,7 @@ mod tests {
         assert!(first_cell_span_for_tests("<typescript>finish 1</typescript> — done.").is_none());
     }
 
-    /// The inline close is greedy, and both documented residues follow from it.
+    /// Inline closes are greedy; block closes use the first standalone tag line.
     #[test]
     fn one_line_cell_closes_at_the_last_closing_tag() {
         // A closing tag inside a string survives, which non-greedy would truncate.
@@ -449,6 +439,24 @@ mod tests {
         assert_eq!(
             code("<typescript>print 1</typescript><typescript>print 2</typescript>"),
             Some("print 1</typescript><typescript>print 2")
+        );
+        // The first block wins over a later inline cell.
+        assert_eq!(
+            code("<typescript>\nfinish 1\n</typescript>\n<typescript>finish 2</typescript>"),
+            Some("finish 1")
+        );
+        // A standalone closing tag owns the boundary, even inside template source.
+        assert_eq!(
+            code(concat!(
+                "<typescript>\n",
+                "const payload = `\n",
+                "</typescript>\n",
+                "this text is outside the cell\n",
+                "`;\n",
+                "finish(payload);\n",
+                "</typescript>",
+            )),
+            Some("const payload = `")
         );
     }
 
@@ -575,11 +583,5 @@ mod tests {
             ),
             Some("payload = r\"\"\"```markdown\nbody\n```\"\"\"\nfinish payload")
         );
-    }
-
-    #[test]
-    fn second_block_is_ignored_after_first_close() {
-        let text = "<typescript>\nfinish 1\n</typescript>\n<typescript>\nfinish 2\n</typescript>";
-        assert_eq!(code(text), Some("finish 1"));
     }
 }

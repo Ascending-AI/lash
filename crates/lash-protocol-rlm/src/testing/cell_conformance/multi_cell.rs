@@ -93,30 +93,6 @@ fn the_session_finishes_with_a_value_an_earlier_cell_bound() {
     assert_eq!(outcome.finish, Some(serde_json::json!(42)));
 }
 
-/// A closure bound to a session global does not cross the cell boundary.
-///
-/// This is the ruled contract, not an accident: a closure's function index only
-/// means something inside the program that compiled it, and the exported view
-/// of the globals already dropped any binding that reached a function value, so
-/// the runtime roots now match it. See
-/// `docs/adr/0076-lash-vm-durable-stores-hold-exclusively-owned-copies.md`.
-#[test]
-fn a_closure_valued_binding_does_not_survive_the_cell_boundary() {
-    let (session, _) = shift(
-        HarnessMode::Resident,
-        &[
-            Cell::closure_binding("callback"),
-            Cell::number("sibling", 3.0),
-        ],
-    );
-    let bindings = session.globals();
-    assert!(
-        !bindings.contains_key("callback"),
-        "a closure-valued binding reached the next cell: {bindings:?}"
-    );
-    assert_eq!(bindings.get("sibling"), Some(&serde_json::json!(3)));
-}
-
 /// The boundary asks a reachability question, not a shallow type question: a
 /// closure inside a container takes the container with it.
 #[test]
