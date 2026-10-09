@@ -17,9 +17,11 @@ use crate::{
 
 mod accumulator;
 mod model;
+mod settlement;
 use accumulator::TraceLashlangGraphAccumulator as GraphAccumulator;
 pub use accumulator::TraceLashlangGraphAccumulator;
 pub use model::*;
+use settlement::{observed_execution_status, settle_incomplete_nodes, settle_retained_nodes};
 
 /// Process-local indexed accumulator with snapshots matching the pure fold.
 #[derive(Default)]
@@ -41,6 +43,8 @@ struct ObservedGraph {
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum TraceLashlangGraphFoldError {
+    #[error("language observation timestamp {observed_at_ms}ms is out of range")]
+    InvalidObservationTimestamp { observed_at_ms: u64 },
     #[error("the fold requires at least one language-execution event")]
     NoLanguageExecutionEvents,
     #[error("the fold input spans graph keys `{first}` and `{other}`")]
@@ -224,12 +228,7 @@ pub fn fold_lashlang_graph(
     let identity = canonical_language_identity(previous, &incoming);
     let status = incoming.iter().fold(
         previous.map_or(LanguageExecutionStatus::Running, |graph| graph.status),
-        |status, (_, event)| match &event.payload {
-            TraceLanguageExecutionPayload::ExecutionFinished { status: next, .. } => {
-                canonical_execution_status(status, *next)
-            }
-            _ => status,
-        },
+        |status, (_, event)| observed_execution_status(status, event),
     );
     let mut history = previous
         .map(|graph| {
@@ -382,7 +381,10 @@ pub fn fold_lashlang_graph(
         conflicts,
         history_limit,
         node_retention.into_values().collect(),
-        status,
+        ExecutionProjection {
+            status,
+            settlement: previous.and_then(|graph| graph.settlement),
+        },
     ))
 }
 
@@ -429,6 +431,21 @@ fn canonical_identity_fields(left: LanguageIdentity, right: LanguageIdentity) ->
     }
 }
 
+#[derive(Clone, Copy)]
+struct ExecutionProjection {
+    status: LanguageExecutionStatus,
+    settlement: Option<TraceLashlangGraphSettlement>,
+}
+
+impl ExecutionProjection {
+    fn provisional(status: LanguageExecutionStatus) -> Self {
+        Self {
+            status,
+            settlement: None,
+        }
+    }
+}
+
 fn materialize_graph(
     identity: LanguageIdentity,
     execution_map: Option<LanguageExecutionMap>,
@@ -436,7 +453,7 @@ fn materialize_graph(
     conflicts: Vec<TraceLashlangGraphConflict>,
     history_limit: usize,
     mut node_retention: Vec<TraceLashlangNodeRetention>,
-    status: LanguageExecutionStatus,
+    execution: ExecutionProjection,
 ) -> TraceLashlangGraph {
     let mut nodes = BTreeMap::new();
     let mut edges = BTreeMap::new();
@@ -731,7 +748,24 @@ fn materialize_graph(
             }
         }
     }
+    if let Some(settlement) = execution.settlement {
+        settle_retained_nodes(nodes.values_mut(), settlement);
+        if let (TraceLashlangGraphTerminal::Cancelled, Some(end)) =
+            (settlement.terminal, settlement.occurred_at)
+        {
+            for folded in occurrences.values_mut() {
+                if folded_terminal(folded).is_none()
+                    && (folded.start.is_some() || folded.waiting.is_some())
+                {
+                    folded.explicit_terminal = Some(OccurrenceTerminal::Cancelled(end));
+                }
+            }
+        }
+    }
     apply_occurrences(&mut nodes, &occurrences, &skipped);
+    if let Some(settlement) = execution.settlement {
+        settle_incomplete_nodes(nodes.values_mut(), settlement);
+    }
     TraceLashlangGraph {
         schema_version: TRACE_SCHEMA_VERSION,
         graph_key: identity.graph_key(),
@@ -742,7 +776,10 @@ fn materialize_graph(
         entry_kind: identity.entry_kind,
         entry_ref: identity.entry_ref,
         entry_name: identity.entry_name,
-        status,
+        status: execution.settlement.map_or(execution.status, |settlement| {
+            settlement.terminal.execution_status()
+        }),
+        settlement: execution.settlement,
         completeness: if execution_map.is_some() {
             TraceLashlangGraphCompleteness::Complete
         } else {
@@ -951,6 +988,7 @@ fn apply_occurrences(
 fn observation_timestamp(observation: &TraceLashlangNodeObservation) -> Option<DateTime<Utc>> {
     match observation {
         TraceLashlangNodeObservation::Unobserved => None,
+        TraceLashlangNodeObservation::Incomplete { settled_at, .. } => *settled_at,
         TraceLashlangNodeObservation::Running { start, .. } => Some(*start),
         TraceLashlangNodeObservation::Waiting { since, .. } => Some(*since),
         TraceLashlangNodeObservation::Completed { end, .. }
@@ -1012,7 +1050,7 @@ fn merge_node_retention(
         Vec::new(),
         1,
         prior,
-        LanguageExecutionStatus::Running,
+        ExecutionProjection::provisional(LanguageExecutionStatus::Running),
     );
     let node = graph
         .nodes
@@ -1078,7 +1116,7 @@ fn merge_late_retained_event(
             Vec::new(),
             1,
             Vec::new(),
-            LanguageExecutionStatus::Running,
+            ExecutionProjection::provisional(LanguageExecutionStatus::Running),
         );
         let mut watermark_node = watermark_graph
             .nodes
@@ -1198,6 +1236,7 @@ fn merge_late_retained_event(
                         end: *end,
                     },
                     TraceLashlangNodeObservation::Unobserved
+                    | TraceLashlangNodeObservation::Incomplete { .. }
                     | TraceLashlangNodeObservation::Skipped { .. } => return,
                 };
                 if previously_missing {

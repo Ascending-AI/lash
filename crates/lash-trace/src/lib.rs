@@ -74,9 +74,10 @@ pub use lashlang_graph::{
     TraceLashlangEventTransition, TraceLashlangGraph, TraceLashlangGraphAccumulator,
     TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
     TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
-    TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphStore,
-    TraceLashlangNodeObservation, TraceLashlangNodeReport, TraceLashlangNodeRetention,
-    TraceLashlangNodeTerminalRecord, TraceLashlangNodeTerminalStatus, fold_lashlang_graph,
+    TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphSettlement,
+    TraceLashlangGraphStore, TraceLashlangGraphTerminal, TraceLashlangNodeObservation,
+    TraceLashlangNodeReport, TraceLashlangNodeRetention, TraceLashlangNodeTerminalRecord,
+    TraceLashlangNodeTerminalStatus, fold_lashlang_graph,
 };
 pub use telemetry::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,

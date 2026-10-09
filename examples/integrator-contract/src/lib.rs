@@ -388,6 +388,9 @@ impl LiveReplayStore for Integrator {
     async fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         unreachable!("external signature witness")
     }
+    async fn invalidate_all(&self) -> Result<(), LiveReplayStoreError> {
+        unreachable!("external signature witness")
+    }
     async fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         unreachable!("external signature witness")
     }

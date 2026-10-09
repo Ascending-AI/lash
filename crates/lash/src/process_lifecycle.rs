@@ -42,18 +42,21 @@ pub(crate) struct ProcessLifecycleFeed {
     store: Arc<dyn LiveReplayStore>,
     /// Durable commits reach the process observation hub as `Committed` items.
     observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
+    language_publisher: Arc<crate::language_observation::LanguageObservationPublisher>,
 }
 
 impl ProcessLifecycleFeed {
     pub(crate) fn new(
         store: Arc<dyn LiveReplayStore>,
         observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
+        language_publisher: Arc<crate::language_observation::LanguageObservationPublisher>,
     ) -> Self {
         Self {
             registry: OnceLock::new(),
             routes: Mutex::new(HashMap::new()),
             store,
             observation_hub,
+            language_publisher,
         }
     }
 
@@ -115,6 +118,10 @@ impl ProcessLifecycleFeed {
 #[async_trait::async_trait]
 impl ProcessEventSink for ProcessLifecycleFeed {
     async fn emit(&self, event: &ProcessEvent) {
+        self.language_publisher.enqueue_committed(
+            &event.process_id,
+            lash_core::facade_support::ObservedProcessEvent::from(event.clone()),
+        );
         self.observation_hub.publish_committed(event);
         if let Some(kind) =
             SessionProcessEventKind::from_durable_event(event.fact.event_type(), event.sequence)

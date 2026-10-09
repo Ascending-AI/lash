@@ -46,8 +46,8 @@ use lash_core::{
     ProcessEffectReport, ProcessEventHistoryRetention, ProcessEventPageEvents,
     ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome, ProcessObservation,
     ProcessObservationCursor, ProcessObservationEvent, ProcessObservationEventPayload,
-    ProcessObservationGapCause, ProcessReadView, ProcessRegistry, ProcessReplayEventDraft,
-    ProcessReplayGap, ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
+    ProcessObservationGapCause, ProcessReadView, ProcessRegistry, ProcessReplayGap,
+    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
     ProcessReplaySubscription, ProcessSequence, RetainedProcessView, RetiredProcessStatus,
 };
 use lash_sansio::ProcessId;
@@ -152,6 +152,8 @@ pub(crate) async fn fold_effects(
 /// consumer holds.
 #[derive(Clone)]
 pub(crate) struct FeedReconcile {
+    /// The core's ordered publication barrier, shared with its language sink.
+    pub(crate) publisher: Arc<crate::language_observation::LanguageObservationPublisher>,
     /// Ticks when a commit grew a process's log, on this node or another.
     pub(crate) changes: ProcessChangeHub,
     /// How long a feed waits without a tick before it compares anyway: from
@@ -664,17 +666,14 @@ impl FeedState {
             let Some(last) = facts.last().map(|event| event.sequence) else {
                 break;
             };
-            self.source
-                .replay
-                .publish(
-                    &self.source.process_id,
-                    facts
-                        .into_iter()
-                        .map(|event| ProcessReplayEventDraft::committed(event.into()))
-                        .collect(),
-                )
-                .await
-                .map_err(process_replay_error)?;
+            for event in facts {
+                self.source
+                    .reconcile
+                    .publisher
+                    .publish_committed(&self.source.process_id, event.into())
+                    .await
+                    .map_err(process_replay_error)?;
+            }
             after = last;
         }
         Ok(None)

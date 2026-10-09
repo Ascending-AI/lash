@@ -210,6 +210,10 @@ impl lash_core::LiveReplayStore for FaultyReplay {
         self.inner.earliest_cursor(session, revision)
     }
 
+    async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_all().await
+    }
+
     async fn invalidate_session(
         &self,
         session: &lash_core::SessionId,

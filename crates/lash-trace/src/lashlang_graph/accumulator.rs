@@ -9,6 +9,7 @@ pub struct TraceLashlangGraphAccumulator {
     identity: Option<LanguageIdentity>,
     execution_map: Option<LanguageExecutionMap>,
     status: Option<LanguageExecutionStatus>,
+    settlement: Option<TraceLashlangGraphSettlement>,
     execution_history: BTreeMap<TraceLashlangEventIdentity, HistoryEntry>,
     nodes: HashMap<String, NodeHistory>,
 }
@@ -61,6 +62,7 @@ impl TraceLashlangGraphAccumulator {
             identity: None,
             execution_map: None,
             status: None,
+            settlement: None,
             execution_history: Default::default(),
             nodes: Default::default(),
         }
@@ -103,6 +105,43 @@ impl TraceLashlangGraphAccumulator {
         Ok(())
     }
 
+    /// Fold a canonical language observation without a diagnostic trace envelope.
+    pub fn observe(
+        &mut self,
+        observation: &crate::LanguageExecutionObservation,
+    ) -> Result<(), TraceLashlangGraphFoldError> {
+        let timestamp = i64::try_from(observation.observed_at_ms)
+            .ok()
+            .and_then(DateTime::from_timestamp_millis)
+            .ok_or(TraceLashlangGraphFoldError::InvalidObservationTimestamp {
+                observed_at_ms: observation.observed_at_ms,
+            })?;
+        let event = &observation.execution;
+        if let Some(previous) = &self.identity
+            && previous.graph_key() != event.identity.graph_key()
+        {
+            return Err(TraceLashlangGraphFoldError::PreviousGraphMismatch {
+                previous: previous.graph_key(),
+                event: event.identity.graph_key(),
+            });
+        }
+        self.append(timestamp, event);
+        Ok(())
+    }
+
+    /// Reconcile committed or snapshot terminal evidence, even before replay arrives.
+    pub fn settle(&mut self, settlement: TraceLashlangGraphSettlement) {
+        self.settlement = Some(settlement.refine(self.settlement));
+    }
+
+    /// Discard provisional continuity after a gap or reexecution boundary.
+    /// The static definition and durable terminal authority survive the reset.
+    pub fn reset_live(&mut self) {
+        self.execution_history.clear();
+        self.nodes.clear();
+        self.status = None;
+    }
+
     pub(super) fn identity(&self) -> Option<&LanguageIdentity> {
         self.identity.as_ref()
     }
@@ -113,12 +152,7 @@ impl TraceLashlangGraphAccumulator {
             None => event.identity.clone(),
         };
         let status = self.status.unwrap_or(LanguageExecutionStatus::Running);
-        self.status = Some(match &event.payload {
-            TraceLanguageExecutionPayload::ExecutionFinished { status: next, .. } => {
-                canonical_execution_status(status, *next)
-            }
-            _ => status,
-        });
+        self.status = Some(observed_execution_status(status, event));
         if let TraceLanguageExecutionPayload::ExecutionStarted { execution_map: map } =
             &event.payload
         {
@@ -209,7 +243,10 @@ impl TraceLashlangGraphAccumulator {
             conflicts,
             self.history_limit,
             retention,
-            self.status.unwrap_or(LanguageExecutionStatus::Running),
+            ExecutionProjection {
+                status: self.status.unwrap_or(LanguageExecutionStatus::Running),
+                settlement: self.settlement,
+            },
         ))
     }
 }

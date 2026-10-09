@@ -67,6 +67,7 @@ mod layered_backend;
 mod live_replay;
 pub use live_replay::{
     process_committed_event, process_language_observation, process_observation_label,
+    session_language_observation,
 };
 mod poll;
 mod recording_store;

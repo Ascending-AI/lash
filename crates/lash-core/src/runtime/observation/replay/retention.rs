@@ -12,6 +12,19 @@ pub(super) struct ReplayRetention {
 }
 
 impl ReplayRetention {
+    pub(super) fn invalidate_all(&mut self) -> Result<(), LiveReplayStoreError> {
+        // Advance even with no resident window: cursors issued for an unknown
+        // subject must also be behind the invalidation fence.
+        self.high_watermark = self
+            .high_watermark
+            .checked_add(1)
+            .ok_or_else(|| LiveReplayStoreError::Store("live replay position overflow".into()))?;
+        self.buffers.clear();
+        self.idle.clear();
+        self.retained_bytes = 0;
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(super) fn expiry_entry_count(&self) -> usize {
         self.idle.len()

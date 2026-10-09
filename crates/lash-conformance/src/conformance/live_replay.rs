@@ -19,6 +19,8 @@ use pretty_assertions::assert_eq;
 
 /// The session live replay store, as the generic replay laws drive it.
 pub struct SessionReplayLaws;
+#[path = "live_replay/language.rs"]
+mod language;
 
 #[async_trait::async_trait]
 impl ReplayLawKind for SessionReplayLaws {
@@ -151,6 +153,20 @@ impl ReplayLawKind for SessionReplayLaws {
     }
 }
 
+#[async_trait::async_trait]
+impl super::replay_laws::ReplayLawInvalidateAll for SessionReplayLaws {
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance fixture: failure to invalidate is a law failure"
+    )]
+    async fn invalidate_all(store: &Self::Store) {
+        store
+            .invalidate_all()
+            .await
+            .expect("invalidate every session window");
+    }
+}
+
 fn law_gap(reason: LiveReplayGapReason) -> ReplayLawGap {
     match reason {
         LiveReplayGapReason::Trimmed => ReplayLawGap::Trimmed,
@@ -169,7 +185,10 @@ where
     F: Fn() -> Arc<dyn LiveReplayStore>,
 {
     replay_store_laws::<SessionReplayLaws, _>(&make).await;
+    super::replay_laws::store_wide_invalidation_gaps_every_subscriber::<SessionReplayLaws>(make())
+        .await;
     session_payloads_and_turns_survive_the_store(make()).await;
+    language::language_identity_is_window_scoped_and_conflicts_retire_continuity(make()).await;
     a_redrive_adds_no_streamed_text_twice_and_loses_none(make()).await;
 }
 
@@ -453,6 +472,9 @@ fn live_replay_event_label(event: &SessionObservationEvent) -> String {
             other => format!("turn:{other:?}"),
         },
         SessionObservationEventPayload::Committed { .. } => "committed".to_string(),
+        SessionObservationEventPayload::LanguageExecution(observation) => {
+            observation.execution.event_key.clone()
+        }
         SessionObservationEventPayload::ResidentChanged => "resident_changed".to_string(),
         SessionObservationEventPayload::AgentFrameSwitched { frame_id, .. } => {
             format!("frame:{frame_id}")

@@ -113,6 +113,9 @@ pub struct TraceLashlangGraph {
     pub entry_ref: Option<String>,
     pub entry_name: String,
     pub status: LanguageExecutionStatus,
+    /// Authoritative process settlement, independent of provisional VM outcomes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settlement: Option<TraceLashlangGraphSettlement>,
     pub completeness: TraceLashlangGraphCompleteness,
     pub nodes: Vec<TraceLashlangGraphNode>,
     pub edges: Vec<TraceLashlangGraphEdge>,
@@ -137,6 +140,7 @@ struct TraceLashlangGraphWire {
     entry_ref: Option<String>,
     entry_name: String,
     status: LanguageExecutionStatus,
+    settlement: Option<TraceLashlangGraphSettlement>,
     completeness: TraceLashlangGraphCompleteness,
     nodes: Vec<TraceLashlangGraphNode>,
     edges: Vec<TraceLashlangGraphEdge>,
@@ -173,6 +177,7 @@ impl<'de> Deserialize<'de> for TraceLashlangGraph {
             entry_ref: wire.entry_ref,
             entry_name: wire.entry_name,
             status: wire.status,
+            settlement: wire.settlement,
             completeness: wire.completeness,
             nodes: wire.nodes,
             edges: wire.edges,
@@ -239,6 +244,17 @@ pub enum TraceLashlangNodeObservation {
         start: Option<DateTime<Utc>>,
         end: DateTime<Utc>,
     },
+    /// The process settled without complete terminal evidence for this
+    /// observed occurrence. The category is authoritative; node success,
+    /// failure and timing are not inferred from it.
+    Incomplete {
+        occurrence: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<DateTime<Utc>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        settled_at: Option<DateTime<Utc>>,
+        terminal: TraceLashlangGraphTerminal,
+    },
     Skipped {
         end: DateTime<Utc>,
         branch_node_id: String,
@@ -247,14 +263,16 @@ pub enum TraceLashlangNodeObservation {
 }
 
 impl TraceLashlangNodeObservation {
-    /// Whether no later transition for this occurrence may replace it.
+    /// Whether this occurrence is no longer in flight. An incomplete outcome
+    /// can still be refined by retained evidence without reopening execution.
     pub const fn is_terminal(&self) -> bool {
         match self {
             Self::Unobserved | Self::Running { .. } | Self::Waiting { .. } => false,
             Self::Completed { .. }
             | Self::Failed { .. }
             | Self::Cancelled { .. }
-            | Self::Skipped { .. } => true,
+            | Self::Skipped { .. }
+            | Self::Incomplete { .. } => true,
         }
     }
 }
@@ -367,4 +385,24 @@ pub struct TraceLashlangGraphChildLink {
     pub child_entry_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_entry_name: Option<String>,
+}
+
+/// The actual durable terminal category; abandonment is not a VM failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TraceLashlangGraphTerminal {
+    Completed,
+    Failed,
+    Cancelled,
+    Abandoned,
+}
+
+/// Terminal evidence supplied by a committed process fact or durable snapshot.
+/// This does not manufacture a language execution or node observation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TraceLashlangGraphSettlement {
+    pub terminal: TraceLashlangGraphTerminal,
+    /// None when the snapshot has no canonical terminal occurrence time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<DateTime<Utc>>,
 }

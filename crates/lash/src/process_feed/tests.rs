@@ -83,16 +83,26 @@ impl Fixture {
             )
             .await
             .expect("record the execution start");
+        let replay = Arc::new(InMemoryProcessReplayStore::new(
+            InMemoryProcessReplayStoreConfig::standard(),
+        ));
+        let publisher = Arc::new(
+            crate::language_observation::LanguageObservationPublisher::new(
+                replay.clone(),
+                Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+                    lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+                )),
+            ),
+        );
         Self {
             reconcile: FeedReconcile {
+                publisher,
                 changes: ProcessChangeHub::new(),
                 pacing: PollPacing::new(NO_CADENCE, NO_CADENCE).expect("pacing"),
             },
             commits,
             registry,
-            replay: Arc::new(InMemoryProcessReplayStore::new(
-                InMemoryProcessReplayStoreConfig::standard(),
-            )),
+            replay,
             process_id,
             authority,
             ticks: std::sync::atomic::AtomicU64::new(0),

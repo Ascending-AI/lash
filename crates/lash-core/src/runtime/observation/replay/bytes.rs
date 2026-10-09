@@ -21,6 +21,9 @@ pub(super) fn event_bytes(
         counter.write_all(turn_id.as_bytes()).map_err(byte_error)?;
     }
     match &event.payload {
+        SessionObservationEventPayload::LanguageExecution(observation) => {
+            counter.count(observation)?
+        }
         SessionObservationEventPayload::TurnActivity(activity) => counter.count(activity)?,
         SessionObservationEventPayload::Committed {
             base_revision,

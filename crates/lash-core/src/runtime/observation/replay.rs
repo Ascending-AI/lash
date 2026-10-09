@@ -28,8 +28,10 @@ mod activity_spans;
 mod bytes;
 #[path = "replay/retention.rs"]
 mod retention;
-use activity_spans::{Claim, DeliveredActivities};
+use activity_spans::DeliveredActivities;
 use retention::ReplayRetention;
+#[path = "replay/publication.rs"]
+mod publication;
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -304,6 +306,8 @@ pub enum SessionQueueEventKind {
 // justification: the enclosing replay event is already Arc-owned, so another allocation would not bound retained event storage.
 #[allow(clippy::large_enum_variant)]
 pub enum SessionObservationEventPayload {
+    /// Provisional language evidence with its stable producer identity.
+    LanguageExecution(lash_trace::LanguageExecutionObservation),
     TurnActivity(crate::TurnActivity),
     /// A durable commit, by reference: the event's cursor names the
     /// committed revision, and `entries` are the transcript entries the
@@ -355,6 +359,13 @@ pub enum LiveReplayGapReason {
 #[derive(Clone, Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum LiveReplayStoreError {
+    #[error(
+        "session `{session_id}` republished language event `{event_key}` with a different fact"
+    )]
+    ConflictingLanguageRedelivery {
+        session_id: SessionId,
+        event_key: String,
+    },
     #[error("{0}")]
     Cursor(#[from] SessionCursorError),
     #[error("live replay store error: {0}")]
@@ -702,6 +713,11 @@ pub trait LiveReplayStore: Send + Sync {
     /// A cursor acquired after that snapshot establishes fresh continuity.
     async fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
 
+    /// Retire every session's continuity after a publisher loses an unbounded
+    /// set of subjects. Every existing cursor returns `Gap(Unavailable)` and
+    /// every live subscription closes. New windows cannot reuse old positions.
+    async fn invalidate_all(&self) -> Result<(), LiveReplayStoreError>;
+
     /// Apply retention to the session's window.
     async fn trim_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError>;
 }
@@ -1045,29 +1061,19 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             self.work_limits.replay_expiry_batch.get(),
         );
         sessions.ensure_session(&self.config, session_id, now, &self.replay_incarnation_id)?;
-        let (drafts, overlapping) = sessions
+        let filtered = sessions
             .update(session_id, |buffer| {
                 Self::trim_locked(&self.config, buffer, now);
-                let mut claimed = Vec::new();
-                let mut overlapping = false;
-                let drafts = drafts
-                    .into_iter()
-                    .filter(|draft| {
-                        let SessionObservationEventPayload::TurnActivity(activity) = &draft.payload
-                        else {
-                            return true;
-                        };
-                        let claim = buffer
-                            .delivered_activities
-                            .claim(&activity.id, claimed.iter());
-                        claimed.push(activity.id.clone());
-                        overlapping |= claim == Claim::Overlapping;
-                        claim == Claim::Fresh
-                    })
-                    .collect::<Vec<_>>();
-                (drafts, overlapping)
+                publication::filter(buffer, drafts, session_id)
             })
             .ok_or_else(|| LiveReplayStoreError::Store("live replay session is missing".into()))?;
+        let (drafts, overlapping) = match filtered {
+            Ok(filtered) => filtered,
+            Err(error) => {
+                sessions.remove(session_id);
+                return Err(error);
+            }
+        };
         if overlapping {
             // A redelivery that is only partly delivered is a gap: its
             // undelivered text cannot be cut out of the delivered part, so
@@ -1320,6 +1326,10 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
             .unwrap_or_else(|| {
                 SessionCursor::new(uuid::Uuid::new_v4().to_string(), session_id, revision, 0)
             })
+    }
+
+    async fn invalidate_all(&self) -> Result<(), LiveReplayStoreError> {
+        self.sessions.lock_recover().invalidate_all()
     }
 
     async fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {

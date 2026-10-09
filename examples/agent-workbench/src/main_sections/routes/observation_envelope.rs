@@ -29,6 +29,9 @@ pub(crate) struct ObservationEvent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum ObservationPayload {
+    LanguageExecution {
+        observation: Box<lash::process::LanguageExecutionObservation>,
+    },
     TurnActivity {
         activity: Box<ObservationActivity>,
     },
@@ -62,6 +65,11 @@ pub(crate) struct ObservationActivity {
 impl ObservationEvent {
     pub(crate) fn from_core(sequence: u64, event: &SessionObservationEvent) -> Self {
         let payload = match &event.payload {
+            SessionObservationEventPayload::LanguageExecution(observation) => {
+                ObservationPayload::LanguageExecution {
+                    observation: Box::new(observation.clone()),
+                }
+            }
             SessionObservationEventPayload::TurnActivity(activity) => {
                 ObservationPayload::TurnActivity {
                     activity: Box::new(ObservationActivity {

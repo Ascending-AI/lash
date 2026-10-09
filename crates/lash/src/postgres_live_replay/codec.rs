@@ -15,6 +15,9 @@ use lash_sansio::SessionId;
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum StoredPayload {
+    LanguageExecution {
+        observation: Box<lash_trace::LanguageExecutionObservation>,
+    },
     TurnActivity {
         activity: Box<TurnActivity>,
     },
@@ -48,6 +51,7 @@ fn codec_error(context: &str, error: impl std::fmt::Display) -> LiveReplayStoreE
 pub(super) enum Identity {
     Opaque(String),
     Span { key: String, first: u32, last: u32 },
+    Language(Box<lash_trace::LanguageExecutionObservation>),
 }
 
 /// A draft ready to write: its encoded payload, identity and charge.
@@ -70,6 +74,11 @@ pub(super) fn encode(
     draft: LiveReplayEventDraft,
 ) -> Result<EncodedDraft, LiveReplayStoreError> {
     let stored = match &draft.payload {
+        SessionObservationEventPayload::LanguageExecution(observation) => {
+            StoredPayload::LanguageExecution {
+                observation: Box::new(observation.clone()),
+            }
+        }
         SessionObservationEventPayload::TurnActivity(activity) => StoredPayload::TurnActivity {
             activity: Box::new(activity.clone()),
         },
@@ -102,6 +111,9 @@ pub(super) fn encode(
     };
     let bytes = serde_json::to_vec(&stored).map_err(|error| codec_error("encode", error))?;
     let identity = match &draft.payload {
+        SessionObservationEventPayload::LanguageExecution(observation) => {
+            Some(Identity::Language(Box::new(observation.clone())))
+        }
         SessionObservationEventPayload::TurnActivity(activity) => {
             Some(match activity.id.observed_span() {
                 Some((key, ordinals)) => Identity::Span {
@@ -116,6 +128,11 @@ pub(super) fn encode(
     };
     let charge = ROW_CHARGE
         + bytes.len() as u64
+        + if matches!(identity, Some(Identity::Language(_))) {
+            bytes.len() as u64
+        } else {
+            0
+        }
         + session_id.len() as u64
         + draft.turn_id.as_ref().map_or(0, |turn| turn.len() as u64);
     Ok(EncodedDraft {
@@ -136,6 +153,9 @@ pub(super) fn decode(
     let stored: StoredPayload =
         serde_json::from_slice(payload).map_err(|error| codec_error("decode", error))?;
     let payload = match stored {
+        StoredPayload::LanguageExecution { observation } => {
+            SessionObservationEventPayload::LanguageExecution(*observation)
+        }
         StoredPayload::TurnActivity { activity } => {
             SessionObservationEventPayload::TurnActivity(*activity)
         }
@@ -290,6 +310,20 @@ pub(super) fn unpack_doorbells(payload: &str) -> Vec<Doorbell> {
         tracing::warn!(%error, "ignoring a live replay notification this store cannot read");
         Vec::new()
     })
+}
+
+/// Read only language identity data while loading the bounded retained window.
+pub(super) fn language_observation(
+    payload: &[u8],
+) -> Result<Option<lash_trace::LanguageExecutionObservation>, LiveReplayStoreError> {
+    Ok(
+        match serde_json::from_slice::<StoredPayload>(payload)
+            .map_err(|error| codec_error("language identity", error))?
+        {
+            StoredPayload::LanguageExecution { observation } => Some(*observation),
+            _ => None,
+        },
+    )
 }
 
 #[cfg(test)]

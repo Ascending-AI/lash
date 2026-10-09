@@ -203,6 +203,10 @@ impl crate::LiveReplayStore for FailingQueuePublication {
     async fn trim_session(&self, session: &SessionId) -> Result<(), crate::LiveReplayStoreError> {
         self.inner.trim_session(session).await
     }
+    async fn invalidate_all(&self) -> Result<(), crate::LiveReplayStoreError> {
+        self.inner.invalidate_all().await
+    }
+
     async fn invalidate_session(
         &self,
         session: &SessionId,

@@ -38,6 +38,8 @@ pub struct LashCore {
     pub(crate) live_replay_store: Arc<dyn LiveReplayStore>,
     /// The tail of every process feed, apart from session live replay.
     pub(crate) process_replay_store: Arc<dyn lash_core::ProcessReplayStore>,
+    pub(crate) language_observation_publisher:
+        Arc<crate::language_observation::LanguageObservationPublisher>,
     /// What one process snapshot may read to fold its effect evidence.
     pub(crate) process_effect_fold_budget: crate::process_feed::EffectFoldBudget,
     pub(crate) process_observation_hub: Arc<crate::process_observation::ProcessObservationHub>,
@@ -300,6 +302,7 @@ impl LashCore {
         self.recovery.resign().await;
         // The node stops before the plugins its turns run go.
         self.node.stop().await;
+        self.language_observation_publisher.shutdown().await;
         let factories = self
             .protocol_factory
             .iter()
@@ -1155,15 +1158,6 @@ impl LashCoreBuilder {
             )
             .with_work_limits(self.process_observation_work_limits),
         );
-        let observation_sink: Arc<dyn lash_trace::TraceSink> = process_observation_hub.clone();
-        let observation_sink = match core.tracing.emitter().product_observer() {
-            Some(configured) => Arc::new(lash_trace::TeeTraceSink::new([
-                Arc::clone(configured),
-                observation_sink,
-            ])) as Arc<dyn lash_trace::TraceSink>,
-            None => observation_sink,
-        };
-        let core = core.with_process_observation_sink(observation_sink);
         let live_replay_store = self.live_replay_store.take().unwrap_or_else(|| {
             Arc::new(
                 InMemoryLiveReplayStore::with_clock(
@@ -1182,6 +1176,22 @@ impl LashCoreBuilder {
                 .with_work_limits(core.observation_work_limits),
             )
         });
+        let language_observation_publisher = Arc::new(
+            crate::language_observation::LanguageObservationPublisher::new(
+                Arc::clone(&process_replay_store),
+                Arc::clone(&live_replay_store),
+            ),
+        );
+        let observation_sink: Arc<dyn lash_trace::TraceSink> =
+            language_observation_publisher.clone();
+        let observation_sink = match core.tracing.emitter().product_observer() {
+            Some(configured) => Arc::new(lash_trace::TeeTraceSink::new([
+                Arc::clone(configured),
+                observation_sink,
+            ])) as Arc<dyn lash_trace::TraceSink>,
+            None => observation_sink,
+        };
+        let core = core.with_process_observation_sink(observation_sink);
         let process_effect_fold_budget = crate::process_feed::EffectFoldBudget {
             pages: data_retention.process_observation.snapshot_page_budget,
             page_size: data_retention.process_observation.snapshot_page_size,
@@ -1200,6 +1210,7 @@ impl LashCoreBuilder {
         let process_lifecycle_feed = Arc::new(crate::process_lifecycle::ProcessLifecycleFeed::new(
             Arc::clone(&live_replay_store),
             Arc::clone(&process_observation_hub),
+            Arc::clone(&language_observation_publisher),
         ));
         let process_lifecycle_sink: Arc<dyn facade_support::ProcessEventSink> =
             process_lifecycle_feed.clone();
@@ -1285,6 +1296,7 @@ impl LashCoreBuilder {
             plugin_factories,
             live_replay_store,
             process_replay_store,
+            language_observation_publisher,
             process_effect_fold_budget,
             process_observation_hub,
             process_lifecycle_feed,

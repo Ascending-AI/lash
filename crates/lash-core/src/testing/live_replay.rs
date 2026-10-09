@@ -100,3 +100,23 @@ pub fn process_committed_event(
         occurred_at_ms: sequence,
     }
 }
+
+/// A session-cell language observation for the session replay identity law.
+pub fn session_language_observation(
+    session_id: &crate::SessionId,
+    event_key: &str,
+    label: &str,
+) -> crate::LanguageExecutionObservation {
+    let mut observation =
+        process_language_observation(&crate::ProcessId::fixture("session-cell"), event_key, label);
+    observation.execution.identity.subject = lash_trace::TraceRuntimeSubject::Effect {
+        address: lash_sansio::EffectAddress::new(
+            lash_sansio::ExecutionScope::session_operation(session_id.clone(), "cell"),
+            "cell-execution",
+        )
+        .expect("fixture effect address"),
+        effect_id: "cell".into(),
+    };
+    observation.execution.identity.entry_kind = "cell".into();
+    observation
+}

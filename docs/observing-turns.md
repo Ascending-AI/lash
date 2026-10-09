@@ -36,6 +36,44 @@ bounded window of 4,096; seed the window with the identities your host applied
 nothing twice. A gap or a commit clears the window. Dropping the stream only
 disconnects observation; it never cancels work.
 
+A replay store's `invalidate_all` retires every session window and wakes all
+open subscribers. Each feed reports an unavailable gap with a durable replacement
+snapshot, then continues from its replacement cursor. Store-wide invalidation is
+available when bounded publication ingress loses continuity for more subjects
+than it can remember individually. It discards live evidence; durable history
+remains authoritative.
+
+## Language execution evidence
+
+`LanguageExecution` carries the language, its canonical execution identity and
+payload, and the observation time. Routing uses the execution's typed subject:
+process executions and process-scoped effects reach process replay, while
+turn and session effects reach session replay. The language name does not
+decide admission. Provisional observations move the live position without
+proving a durable revision advance.
+
+Language ingress admits at most 256 events and 4 MiB of charged serialized
+payload per class, including its publication in flight. Process and session
+classes drain independently outside VM execution. Process observations and
+after-commit facts share a FIFO: a terminal follows every accepted preceding
+observation. Recovery publishes through the same FIFO and awaits its
+completion before checking the committed bridge; execution only enqueues and
+never awaits that completion. Overflow clears that class's pending queue and coalesces one
+store-wide invalidation, so loss cannot silently preserve an old cursor's
+continuity.
+
+A host folds the typed observations with the pure graph accumulator. Only a
+committed terminal or terminal durable snapshot settles a process graph;
+`ExecutionFinished` is provisional. Cancellation settles observed in-flight
+occurrences and leaves unobserved and already terminal nodes alone. A snapshot
+without the canonical terminal occurrence time carries an unknown time:
+in-flight nodes become incomplete with the durable category, without invented
+end timestamps. A later committed terminal supplies its actual time. Other
+terminal categories retain incomplete node outcomes rather than fabricating
+node success or failure. On a gap, reset provisional evidence and refold the
+retained window; durable settlement survives the reset and delayed starts
+cannot reopen it.
+
 ## Placing committed entries
 
 A live activity is provisional. `Committed { base_revision, entries }`

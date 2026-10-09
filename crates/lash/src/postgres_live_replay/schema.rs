@@ -50,6 +50,7 @@ pub(super) struct Statements {
     pub(super) lock_heads: String,
     pub(super) create_heads: String,
     pub(super) delivered: String,
+    pub(super) delivered_languages: String,
     pub(super) expire_sessions: String,
     pub(super) delete_below: String,
     pub(super) trim_bytes: String,
@@ -126,6 +127,9 @@ impl Statements {
                  SELECT l.session_id, NULL, l.activity_id, NULL, NULL \
                  FROM {log} l JOIN unnest($3::text[], $4::text[]) AS k(s, id) \
                    ON l.session_id = k.s AND l.activity_id = k.id AND l.activity_key IS NULL"
+            ),
+            delivered_languages: format!(
+                "SELECT l.session_id, l.payload FROM {log} l JOIN {head} h USING (session_id) WHERE l.session_id = ANY($1) AND l.position > h.floor_position AND l.position >= h.first_retained AND l.activity_id IS NULL AND l.activity_key IS NULL"
             ),
             expire_sessions: format!(
                 "DELETE FROM {log} WHERE session_id = ANY($1) AND position > 0 \
@@ -324,9 +328,23 @@ pub(super) async fn ensure_incarnation(
         return Ok(incarnation);
     }
     let mut tx = pool.begin().await.map_err(db_error("rotate"))?;
-    let rotated = rotate(&mut tx, sql).await?;
+    let rotated = rotate(&mut tx, sql, false).await?;
     tx.commit().await.map_err(db_error("rotate commit"))?;
     Ok(rotated)
+}
+
+/// Explicitly retire all replay history and wake every replica's subscribers.
+/// Rotation and publication serialize through the replay tables' locks.
+pub(super) async fn invalidate_all(
+    pool: &PgPool,
+    sql: &Statements,
+) -> Result<Incarnation, LiveReplayStoreError> {
+    let mut tx = pool.begin().await.map_err(db_error("invalidate all"))?;
+    let incarnation = rotate(&mut tx, sql, true).await?;
+    tx.commit()
+        .await
+        .map_err(db_error("invalidate all commit"))?;
+    Ok(incarnation)
 }
 
 /// The current incarnation when its sentinel holds; `None` when it must
@@ -353,6 +371,7 @@ async fn current_incarnation(
 async fn rotate(
     tx: &mut Transaction<'_, Postgres>,
     sql: &Statements,
+    force: bool,
 ) -> Result<Incarnation, LiveReplayStoreError> {
     let channel = &sql.channel;
     let inc = format!("\"{channel}\".live_replay_incarnation");
@@ -366,6 +385,7 @@ async fn rotate(
         .fetch_optional(&mut **tx)
         .await
         .map_err(db_error("read incarnation"))?
+        && !force
         && row.get::<bool, _>("valid")
     {
         return Ok(Incarnation {

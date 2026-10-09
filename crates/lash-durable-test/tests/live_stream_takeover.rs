@@ -570,6 +570,10 @@ impl LiveReplayStore for Resumed {
         self.inner.current_cursor(session_id, revision)
     }
 
+    async fn invalidate_all(&self) -> Result<(), LiveReplayStoreError> {
+        self.inner.invalidate_all().await
+    }
+
     async fn invalidate_session(&self, session_id: &SessionId) -> Result<(), LiveReplayStoreError> {
         self.inner.invalidate_session(session_id).await
     }

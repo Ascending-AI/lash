@@ -53,6 +53,221 @@ fn append_at(store: &TraceLashlangGraphStore, event: TraceLanguageExecution, ms:
         .expect("append lashlang execution event");
 }
 
+fn observe_at(
+    accumulator: &mut TraceLashlangGraphAccumulator,
+    timestamp: chrono::DateTime<Utc>,
+    event: &TraceLanguageExecution,
+) -> Result<(), TraceLashlangGraphFoldError> {
+    accumulator.observe(&crate::LanguageExecutionObservation {
+        language: "fixture-language".into(),
+        execution: event.clone(),
+        observed_at_ms: timestamp
+            .timestamp_millis()
+            .try_into()
+            .expect("fixture time"),
+    })
+}
+
+/// FIG-5548: durable settlement survives delayed provisional starts and gaps,
+/// and cancellation changes only occurrences that were actually observed.
+#[test]
+fn durable_settlement_dominates_provisional_graph_evidence() {
+    let at = |ms| Utc.timestamp_millis_opt(ms).single().expect("timestamp");
+    let mut accumulator = TraceLashlangGraphAccumulator::default();
+    let mut seed = started_event("seed");
+    if let TraceLanguageExecutionPayload::ExecutionStarted { execution_map } = &mut seed.payload {
+        let mut untouched = execution_map.nodes[0].clone();
+        untouched.id = "untouched".into();
+        execution_map.nodes.push(untouched);
+    }
+    observe_at(&mut accumulator, at(0), &seed).unwrap();
+    observe_at(&mut accumulator, at(1), &node_started("start", 1)).unwrap();
+    observe_at(
+        &mut accumulator,
+        at(2),
+        &node_completed_for("done", "then", "call", 1),
+    )
+    .unwrap();
+    let mut waiting = node_started("wait", 1);
+    waiting.payload = TraceLanguageExecutionPayload::NodeWaiting {
+        node_id: "branch".into(),
+        node_kind: ExecutionNodeKind::Branch,
+        label: "branch".into(),
+        occurrence: 1,
+        awaited: crate::TraceNodeAwaited::Sleep { deadline_ms: None },
+    };
+    observe_at(&mut accumulator, at(3), &waiting).unwrap();
+    observe_at(&mut accumulator, at(4), &node_started("concurrent", 2)).unwrap();
+    waiting.payload = TraceLanguageExecutionPayload::NodeWaiting {
+        node_id: "else".into(),
+        node_kind: ExecutionNodeKind::Call,
+        label: "else".into(),
+        occurrence: 1,
+        awaited: crate::TraceNodeAwaited::Sleep { deadline_ms: None },
+    };
+    observe_at(&mut accumulator, at(5), &waiting).unwrap();
+    let before = accumulator.snapshot().unwrap();
+    let settlement = TraceLashlangGraphSettlement {
+        terminal: TraceLashlangGraphTerminal::Cancelled,
+        occurred_at: Some(at(10)),
+    };
+    let unknown = TraceLashlangGraphSettlement {
+        occurred_at: None,
+        ..settlement
+    };
+    let mut snapshot_only = before.clone();
+    snapshot_only.settle(unknown);
+    assert_eq!(snapshot_only.status, LanguageExecutionStatus::Cancelled);
+    for original in &before.nodes {
+        let node = snapshot_only
+            .nodes
+            .iter()
+            .find(|node| node.id == original.id)
+            .unwrap();
+        match original.observation {
+            TraceLashlangNodeObservation::Running { occurrence, .. }
+            | TraceLashlangNodeObservation::Waiting { occurrence, .. } => assert!(matches!(
+                node.observation,
+                TraceLashlangNodeObservation::Incomplete { occurrence: ended, settled_at: None, terminal: TraceLashlangGraphTerminal::Cancelled, .. } if ended == occurrence
+            )),
+            _ => assert_eq!(node.observation, original.observation),
+        }
+        assert_eq!(
+            node.summary, original.summary,
+            "unknown time cannot invent a dated terminal record"
+        );
+    }
+    snapshot_only.settle(settlement);
+    accumulator.settle(settlement);
+    accumulator.settle(unknown);
+    let cancelled = accumulator.snapshot().unwrap();
+    assert_eq!(
+        snapshot_only, cancelled,
+        "committed time refines an undated snapshot"
+    );
+    assert_eq!(cancelled.status, LanguageExecutionStatus::Cancelled);
+    for original in &before.nodes {
+        let node = cancelled
+            .nodes
+            .iter()
+            .find(|node| node.id == original.id)
+            .unwrap();
+        match original.observation {
+            TraceLashlangNodeObservation::Running { occurrence, .. }
+            | TraceLashlangNodeObservation::Waiting { occurrence, .. } => assert!(matches!(
+                node.observation,
+                TraceLashlangNodeObservation::Cancelled { occurrence: ended, .. } if ended == occurrence
+            )),
+            _ => assert_eq!(node.observation, original.observation),
+        }
+    }
+    assert_eq!(
+        cancelled
+            .nodes
+            .iter()
+            .find(|node| node.id == "branch")
+            .unwrap()
+            .summary
+            .terminal_count,
+        2,
+        "every observed in-flight occurrence settles"
+    );
+    let delayed = record_at(node_started("delayed", 3), 6);
+    accumulator.fold(std::slice::from_ref(&delayed)).unwrap();
+    let incremental = accumulator.snapshot().unwrap();
+    let partitioned = fold_lashlang_graph(
+        Some(&cancelled),
+        &[delayed],
+        DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+    )
+    .unwrap();
+    assert_eq!(incremental, partitioned);
+    assert_eq!(incremental.status, LanguageExecutionStatus::Cancelled);
+    assert!(incremental.nodes.iter().all(|node| !matches!(
+        node.observation,
+        TraceLashlangNodeObservation::Running { .. } | TraceLashlangNodeObservation::Waiting { .. }
+    )));
+    accumulator.reset_live();
+    let reset = accumulator.snapshot().unwrap();
+    assert_eq!(reset.settlement, Some(settlement));
+    assert!(
+        reset
+            .nodes
+            .iter()
+            .all(|node| node.observation == TraceLashlangNodeObservation::Unobserved)
+    );
+    observe_at(&mut accumulator, at(1), &node_started("replayed", 1)).unwrap();
+    assert_eq!(
+        accumulator.snapshot().unwrap().status,
+        LanguageExecutionStatus::Cancelled
+    );
+    let mut late_attach = TraceLashlangGraphAccumulator::default();
+    late_attach.settle(settlement);
+    assert!(
+        late_attach.snapshot().is_none(),
+        "settlement never invents execution"
+    );
+    observe_at(&mut late_attach, at(0), &started_event("seed")).unwrap();
+    assert_eq!(
+        late_attach.snapshot().unwrap().status,
+        LanguageExecutionStatus::Cancelled
+    );
+    let mut reported = started_event("reported");
+    reported.identity.subject = TraceRuntimeSubject::Process {
+        process_id: lash_sansio::ProcessId::fixture("provisional"),
+    };
+    let mut process = TraceLashlangGraphAccumulator::default();
+    observe_at(&mut process, at(0), &reported).unwrap();
+    reported.payload = TraceLanguageExecutionPayload::ExecutionFinished {
+        status: LanguageExecutionStatus::Completed,
+        error: None,
+    };
+    observe_at(&mut process, at(9), &reported).unwrap();
+    assert_eq!(
+        process.snapshot().unwrap().status,
+        LanguageExecutionStatus::Running,
+        "VM completion is provisional"
+    );
+    process.settle(settlement);
+    observe_at(&mut process, at(9), &reported).unwrap();
+    assert_eq!(
+        process.snapshot().unwrap().status,
+        LanguageExecutionStatus::Cancelled
+    );
+    for terminal in [
+        TraceLashlangGraphTerminal::Completed,
+        TraceLashlangGraphTerminal::Failed,
+        TraceLashlangGraphTerminal::Abandoned,
+    ] {
+        let mut graph = before.clone();
+        graph.settle(TraceLashlangGraphSettlement {
+            terminal,
+            occurred_at: Some(at(10)),
+        });
+        assert_eq!(graph.settlement.unwrap().terminal, terminal);
+        for original in &before.nodes {
+            let node = graph
+                .nodes
+                .iter()
+                .find(|node| node.id == original.id)
+                .unwrap();
+            match original.observation {
+                TraceLashlangNodeObservation::Running { occurrence, .. }
+                | TraceLashlangNodeObservation::Waiting { occurrence, .. } => assert!(matches!(
+                    node.observation,
+                    TraceLashlangNodeObservation::Incomplete { occurrence: ended, terminal: category, .. }
+                        if ended == occurrence && category == terminal
+                )),
+                _ => assert_eq!(node.observation, original.observation),
+            }
+            assert_eq!(
+                node.summary, original.summary,
+                "an unknown node outcome is not a proven terminal"
+            );
+        }
+    }
+}
+
 #[test]
 fn appending_an_observation_clones_only_the_evicted_occurrence() {
     for (use_store, retained) in [(true, 16), (true, 256), (false, 16), (false, 256)] {

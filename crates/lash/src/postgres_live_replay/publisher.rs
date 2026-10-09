@@ -172,6 +172,7 @@ fn answer(
 struct Delivered {
     spans: HashMap<String, (u32, u32)>,
     opaque: HashSet<String>,
+    languages: HashMap<String, lash_trace::LanguageExecutionObservation>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -179,6 +180,7 @@ enum Claim {
     Fresh,
     Delivered,
     Overlapping,
+    Conflicting,
 }
 
 impl Delivered {
@@ -187,6 +189,23 @@ impl Delivered {
     /// wholly outside is fresh, across its edge cannot be cut (FIG-5098).
     fn claim(&self, identity: &Identity, claimed: &[&Identity]) -> Claim {
         match identity {
+            Identity::Language(observation) => {
+                let key = &observation.execution.event_key;
+                let previous = claimed
+                    .iter()
+                    .find_map(|identity| match identity {
+                        Identity::Language(other) if other.execution.event_key == *key => {
+                            Some(other.as_ref())
+                        }
+                        _ => None,
+                    })
+                    .or_else(|| self.languages.get(key));
+                match previous {
+                    None => Claim::Fresh,
+                    Some(previous) if observation.same_fact(previous) => Claim::Delivered,
+                    Some(_) => Claim::Conflicting,
+                }
+            }
             Identity::Opaque(id) => {
                 let delivered = self.opaque.contains(id)
                     || claimed
@@ -223,6 +242,12 @@ impl Delivered {
 
     fn insert(&mut self, identity: &Identity) {
         match identity {
+            Identity::Language(observation) => {
+                self.languages.insert(
+                    observation.execution.event_key.clone(),
+                    observation.as_ref().clone(),
+                );
+            }
             Identity::Opaque(id) => {
                 self.opaque.insert(id.clone());
             }
@@ -252,7 +277,7 @@ struct Rows {
 impl Rows {
     fn push(&mut self, session: &str, position: u64, revision: u64, draft: &EncodedDraft) {
         let (id, key, first, last) = match &draft.identity {
-            None => (None, None, None, None),
+            None | Some(Identity::Language(_)) => (None, None, None, None),
             Some(Identity::Opaque(id)) => (Some(id.clone()), None, None, None),
             Some(Identity::Span { key, first, last }) => (
                 None,
@@ -367,6 +392,7 @@ async fn write_once(shared: &Shared, batch: &[PublishRequest]) -> Result<Written
             let mut claimed = Vec::new();
             let mut accepted = Vec::new();
             let mut overlapping = false;
+            let mut conflict = None;
             for (offset, draft) in request.drafts.iter().enumerate() {
                 let Some(identity) = &draft.identity else {
                     accepted.push(offset);
@@ -375,6 +401,11 @@ async fn write_once(shared: &Shared, batch: &[PublishRequest]) -> Result<Written
                 let claim = window.claim(identity, &claimed);
                 claimed.push(identity);
                 overlapping |= claim == Claim::Overlapping;
+                if claim == Claim::Conflicting
+                    && let Identity::Language(observation) = identity
+                {
+                    conflict = Some(observation.execution.event_key.clone());
+                }
                 if claim == Claim::Fresh {
                     accepted.push(offset);
                 }
@@ -384,7 +415,7 @@ async fn write_once(shared: &Shared, batch: &[PublishRequest]) -> Result<Written
                 .map(|offset| request.drafts[*offset].charge)
                 .sum::<u64>();
             let oversized = charge > config.max_bytes_per_session as u64;
-            if overlapping || oversized {
+            if overlapping || oversized || conflict.is_some() {
                 // A redelivery straddling what was delivered cannot be cut
                 // (FIG-5098), and a batch larger than the window cannot be
                 // held: either way the session's continuity ends here.
@@ -395,6 +426,14 @@ async fn write_once(shared: &Shared, batch: &[PublishRequest]) -> Result<Written
                     session: session.clone(),
                     floor: head.floor,
                 });
+            }
+            if let Some(event_key) = conflict {
+                plans[index] =
+                    Planned::Refused(LiveReplayStoreError::ConflictingLanguageRedelivery {
+                        session_id: request.session_id.clone(),
+                        event_key,
+                    });
+                continue;
             }
             if oversized {
                 plans[index] = Planned::Refused(LiveReplayStoreError::Store(
@@ -490,6 +529,7 @@ async fn delivered(
 ) -> Result<HashMap<String, Delivered>, Attempt> {
     let mut spans = BTreeSet::new();
     let mut opaque = BTreeSet::new();
+    let mut language_sessions = BTreeSet::new();
     for request in batch {
         for draft in &request.drafts {
             match &draft.identity {
@@ -499,11 +539,34 @@ async fn delivered(
                 Some(Identity::Opaque(id)) => {
                     opaque.insert((request.session_id.to_string(), id.clone()));
                 }
+                Some(Identity::Language(_)) => {
+                    language_sessions.insert(request.session_id.to_string());
+                }
                 None => {}
             }
         }
     }
     let mut delivered: HashMap<String, Delivered> = HashMap::new();
+    if !language_sessions.is_empty() {
+        let subjects = language_sessions.into_iter().collect::<Vec<_>>();
+        for row in sqlx::query(&shared.sql.delivered_languages)
+            .bind(&subjects)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(attempt("read delivered language observations"))?
+        {
+            if let Some(observation) =
+                super::codec::language_observation(row.get::<Vec<u8>, _>("payload").as_slice())
+                    .map_err(Attempt::Failed)?
+            {
+                delivered
+                    .entry(row.get("session_id"))
+                    .or_default()
+                    .languages
+                    .insert(observation.execution.event_key.clone(), observation);
+            }
+        }
+    }
     if spans.is_empty() && opaque.is_empty() {
         return Ok(delivered);
     }

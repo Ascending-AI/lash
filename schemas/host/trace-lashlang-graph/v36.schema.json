@@ -1172,6 +1172,43 @@
           "type": "object"
         },
         {
+          "description": "The process settled without complete terminal evidence for this\nobserved occurrence. The category is authoritative; node success,\nfailure and timing are not inferred from it.",
+          "properties": {
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "settled_at": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "incomplete",
+              "type": "string"
+            },
+            "terminal": {
+              "$ref": "#/$defs/TraceLashlangGraphTerminal"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "terminal"
+          ],
+          "type": "object"
+        },
+        {
           "properties": {
             "branch_node_id": {
               "type": "string"
@@ -1241,6 +1278,36 @@
         "summary"
       ],
       "type": "object"
+    },
+    "TraceLashlangGraphSettlement": {
+      "description": "Terminal evidence supplied by a committed process fact or durable snapshot.\nThis does not manufacture a language execution or node observation.",
+      "properties": {
+        "occurred_at": {
+          "description": "None when the snapshot has no canonical terminal occurrence time.",
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminal": {
+          "$ref": "#/$defs/TraceLashlangGraphTerminal"
+        }
+      },
+      "required": [
+        "terminal"
+      ],
+      "type": "object"
+    },
+    "TraceLashlangGraphTerminal": {
+      "description": "The actual durable terminal category; abandonment is not a VM failure.",
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "abandoned"
+      ],
+      "type": "string"
     },
     "TraceLashlangNodeReport": {
       "properties": {
@@ -1681,6 +1748,17 @@
     },
     "scope": {
       "$ref": "#/$defs/TraceRuntimeScope"
+    },
+    "settlement": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TraceLashlangGraphSettlement"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Authoritative process settlement, independent of provisional VM outcomes."
     },
     "source_identity": {
       "type": "string"

@@ -14,6 +14,92 @@ fn bid() -> lash_core::llm::types::StreamBlockIdentity {
     lash_core::llm::types::StreamBlockIdentity::new("text:0", 0)
 }
 
+/// FIG-5548: losing ingress continuity wakes every session observer, which
+/// replaces its provisional evidence from a durable snapshot exactly once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn store_wide_invalidation_resnapshots_every_session_feed() -> Result<()> {
+    use lash_core::LiveReplayStore as _;
+    use std::time::Duration;
+    let replay = Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+        lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+    ));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        sqlite_memory_store_backend().await,
+    ))
+    .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    .live_replay_store(replay.clone())
+    .build(crate::testing::runtime_lease_owner())?;
+    let mut feeds = Vec::new();
+    for name in ["invalidation-first", "invalidation-second"] {
+        let session = core
+            .session(SessionId::from(name))
+            .created()
+            .await
+            .open()
+            .await?;
+        let snapshot = session.observe().snapshot().await?;
+        let revision = snapshot.cursor.parse().expect("snapshot cursor").revision;
+        let mut feed = session.observe().subscribe_and_recover(snapshot.cursor);
+        replay
+            .publish(
+                &session.session_id(),
+                revision,
+                vec![lash_core::LiveReplayEventDraft::new(
+                    None::<TurnId>,
+                    lash_core::SessionObservationEventPayload::ResidentChanged,
+                )],
+            )
+            .await
+            .expect("publish before invalidation");
+        assert!(matches!(
+            feed.next().await.expect("initial event")?,
+            crate::observe::SessionObservationStreamItem::Event(_)
+        ));
+        feeds.push((session, revision, feed));
+    }
+    replay
+        .invalidate_all()
+        .await
+        .expect("retire every replay window");
+    for (session, revision, mut feed) in feeds {
+        let gap = tokio::time::timeout(Duration::from_secs(10), feed.next())
+            .await
+            .expect("invalidation wakes the observer")
+            .expect("gap item")?;
+        let crate::observe::SessionObservationStreamItem::Gap { observation, gap } = gap else {
+            panic!("lost continuity requires a replacement snapshot");
+        };
+        assert_eq!(gap.reason, lash_core::LiveReplayGapReason::Unavailable);
+        assert_eq!(gap.latest_revision, revision);
+        assert_eq!(observation.cursor, gap.latest_cursor);
+        assert_eq!(
+            observation.read_view.session_id(),
+            session.session_id().as_str()
+        );
+        replay
+            .publish(
+                &session.session_id(),
+                revision,
+                vec![lash_core::LiveReplayEventDraft::new(
+                    None::<TurnId>,
+                    lash_core::SessionObservationEventPayload::ResidentChanged,
+                )],
+            )
+            .await
+            .expect("publish after resnapshot");
+        let next = tokio::time::timeout(Duration::from_secs(10), feed.next())
+            .await
+            .expect("the feed resumes")
+            .expect("next event")?;
+        assert!(
+            matches!(next, crate::observe::SessionObservationStreamItem::Event(_)),
+            "one loss produces one gap"
+        );
+    }
+    core.shutdown().await?;
+    Ok(())
+}
+
 /// A live replay store that counts the commits published into it: a node
 /// publishes a turn's `Committed` after the turn's commit is acknowledged,
 /// so a law that reads the replay after a send waits for its publication.
@@ -107,6 +193,10 @@ impl lash_core::LiveReplayStore for PublishedCommits {
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session_id, revision)
+    }
+
+    async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_all().await
     }
 
     async fn invalidate_session(
@@ -1043,6 +1133,10 @@ impl lash_core::LiveReplayStore for FailingAppendReplayStore {
         self.inner.current_cursor(session_id, revision)
     }
 
+    async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_all().await
+    }
+
     async fn invalidate_session(
         &self,
         session_id: &SessionId,
@@ -1598,6 +1692,10 @@ impl lash_core::LiveReplayStore for PausedCommitReplayStore {
         revision: lash_core::SessionRevision,
     ) -> lash_core::SessionCursor {
         self.inner.current_cursor(session_id, revision)
+    }
+
+    async fn invalidate_all(&self) -> std::result::Result<(), lash_core::LiveReplayStoreError> {
+        self.inner.invalidate_all().await
     }
 
     async fn invalidate_session(
