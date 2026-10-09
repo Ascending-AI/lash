@@ -598,7 +598,6 @@ async fn postgres_obligation_checks_reject_incomplete_variants() {
 }
 
 #[tokio::test]
-#[ignore = "requires PostgreSQL"]
 async fn turn_cancellation_shape_is_guarded() {
     let url = lash_postgres_store::testing::required_database_url();
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
