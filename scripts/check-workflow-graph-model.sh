@@ -21,12 +21,6 @@ if [ "$definition_count" != "1" ]; then
   exit 1
 fi
 
-if ! grep -qE 'lash_vm_runtime::trace_lashlang_main_map\(&artifact\.graph\)' \
-  crates/lash-protocol-rlm/src/executor/mod.rs; then
-  echo "workflow graph model check failed: RLM no longer delegates its trace skeleton" >&2
-  exit 1
-fi
-
 if ! grep -qE 'graph:[[:space:]]*lash_vm::workflow_graph_from_artifact\(artifact\)' \
   crates/lash-vm-worker/src/service.rs; then
   echo "workflow graph model check failed: worker no longer projects the admitted artifact's WorkflowGraph" >&2

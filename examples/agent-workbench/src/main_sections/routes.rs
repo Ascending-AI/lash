@@ -954,7 +954,7 @@ pub(crate) async fn lash_vm_graph(
     AxumPath(graph_key): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
-) -> Result<Json<TraceLashlangGraph>, AppError> {
+) -> Result<Json<crate::execution_view::ExecutionGraph>, AppError> {
     let session_id = state.admit_session(&query, "api.lash_vm_graph").await?;
     state.execution_graphs.follow(&state, &session_id).await;
     let graph = execution_graphs::visible_graph_by_key(

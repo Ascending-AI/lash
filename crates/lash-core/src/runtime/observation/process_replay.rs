@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures_util::Stream;
-pub use lash_trace::LanguageExecutionObservation;
+pub use lash_trace::{LanguageExecutionObservation, StepBodyStartedObservation};
 
 use super::super::{
     ObservedProcess, ObservedProcessEvent, ProcessEffectReport, RetiredProcessStatus,
@@ -333,6 +333,11 @@ pub enum ProcessObservationEventPayload {
     /// settle the process: only a committed terminal fact or a terminal
     /// snapshot does.
     LanguageExecution(LanguageExecutionObservation),
+    /// Provisional evidence that the admitted body of one of the process's
+    /// steps started: it binds a site occurrence of the process's workflow
+    /// document to the call the admission pinned. A refused step never
+    /// produces one; a retried body produces one more, for its next attempt.
+    StepBodyStarted(StepBodyStartedObservation),
     /// One committed lifecycle fact. It extends the process at
     /// `event.sequence - 1`: a consumer holding that sequence applies the
     /// fact, one holding `event.sequence` or later already has it, and any
@@ -347,6 +352,9 @@ impl ProcessObservationEventPayload {
             Self::LanguageExecution(observation) => ProcessObservationIdentity::LanguageExecution {
                 event_key: observation.execution.event_key.clone(),
             },
+            Self::StepBodyStarted(observation) => ProcessObservationIdentity::StepBodyStarted {
+                event_key: observation.step.event_key(),
+            },
             Self::Committed { event } => ProcessObservationIdentity::Committed {
                 sequence: ProcessSequence(event.sequence),
             },
@@ -360,6 +368,7 @@ impl ProcessObservationEventPayload {
             (Self::LanguageExecution(left), Self::LanguageExecution(right)) => {
                 left.same_fact(right)
             }
+            (Self::StepBodyStarted(left), Self::StepBodyStarted(right)) => left.step == right.step,
             (Self::Committed { event: left }, Self::Committed { event: right }) => left == right,
             _ => false,
         }
@@ -374,6 +383,7 @@ impl ProcessObservationEventPayload {
 pub enum ProcessObservationIdentity {
     Committed { sequence: ProcessSequence },
     LanguageExecution { event_key: String },
+    StepBodyStarted { event_key: String },
 }
 
 impl fmt::Display for ProcessObservationIdentity {
@@ -383,6 +393,7 @@ impl fmt::Display for ProcessObservationIdentity {
             Self::LanguageExecution { event_key } => {
                 write!(f, "language execution `{event_key}`")
             }
+            Self::StepBodyStarted { event_key } => write!(f, "step body start `{event_key}`"),
         }
     }
 }
@@ -478,6 +489,18 @@ impl ProcessReplayEventDraft {
         Self {
             sequence,
             payload: ProcessObservationEventPayload::LanguageExecution(observation),
+        }
+    }
+
+    /// The start of an admitted step body, stamped as a provisional
+    /// observation is.
+    pub fn step_body_started(
+        sequence: ProcessSequence,
+        observation: StepBodyStartedObservation,
+    ) -> Self {
+        Self {
+            sequence,
+            payload: ProcessObservationEventPayload::StepBodyStarted(observation),
         }
     }
 

@@ -1557,7 +1557,6 @@ fn tool_engine_advance(
                 .unwrap_or_default();
             lash_core::EngineAction::Steps {
                 steps: vec![lash_core::StepRequest::Tool {
-                    language_execution: None,
                     step: lash_core::StepName("write".to_owned()),
                     tool: lash_core::ToolId::new(WRITE_TOOL),
                     input: serde_json::json!({ "x": x }),

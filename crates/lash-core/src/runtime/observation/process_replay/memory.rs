@@ -770,6 +770,9 @@ fn event_bytes(
         super::ProcessObservationEventPayload::LanguageExecution(observation) => {
             serde_json::to_writer(&mut counter, observation)
         }
+        super::ProcessObservationEventPayload::StepBodyStarted(observation) => {
+            serde_json::to_writer(&mut counter, observation)
+        }
         super::ProcessObservationEventPayload::Committed { event } => {
             serde_json::to_writer(&mut counter, event)
         }

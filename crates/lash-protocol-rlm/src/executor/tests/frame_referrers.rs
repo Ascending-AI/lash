@@ -225,10 +225,20 @@ fn a_bare_module_reference_does_not_acquire_a_definition() {
             .expect("bind bare module refs");
         let response = run_cell(&mut state, &store, "finish(1);").await;
         assert!(response.error().is_none(), "{:?}", response.error());
+        // The cell publishes its own module under its execution (FIG-5576)
+        // and writes nothing for the bare reference.
         assert!(
-            store.writes().is_empty(),
-            "bare module refs are not definition holders"
+            matches!(
+                store.writes().as_slice(),
+                [ArtifactWrite::Publish(
+                    lash_core::ArtifactReferrerKind::Execution,
+                    _
+                )]
+            ),
+            "bare module refs are not definition holders: {:?}",
+            store.writes()
         );
+        assert_eq!(state.frame_held_module_refs().count(), 0);
     });
 }
 
@@ -279,9 +289,17 @@ fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
         let before = store.writes().len();
         let response = run_cell(&mut restored, &store, "finish(2);").await;
         assert!(response.error().is_none(), "{:?}", response.error());
+        // The second cell publishes only its own module under its execution.
         assert!(
-            store.writes()[before..].is_empty(),
-            "SQL owns the descriptor and its module closure acquisition"
+            matches!(
+                &store.writes()[before..],
+                [ArtifactWrite::Publish(
+                    lash_core::ArtifactReferrerKind::Execution,
+                    published
+                )] if *published != module_ref
+            ),
+            "SQL owns the descriptor and its module closure acquisition: {:?}",
+            &store.writes()[before..]
         );
         let ids = restored.vm.state().referenced_definition_ids();
         assert_eq!(

@@ -43,10 +43,10 @@ mod event;
 mod jsonl_records;
 mod language_execution;
 mod language_execution_failure;
-mod lashlang_graph;
 #[cfg(feature = "otel")]
 pub mod otel;
 pub mod telemetry;
+mod workflow_overlay;
 
 pub use content::{CONTENT_POLICY_OMISSION, TelemetryContent};
 pub use content_block::{TraceContentBlock, TraceToolResultBlock};
@@ -60,24 +60,15 @@ pub use jsonl_records::{
     JsonlTraceReadError, TraceRead, parse_jsonl_records, parse_trace_jsonl_records,
 };
 pub use language_execution::{
-    LanguageExecutionObservation, TraceLanguageExecutionPayload, TraceNodeAwaited,
-    TraceNodeWaitKind, TraceNodeWaitResolution, WorkflowDocumentEntry, WorkflowDocumentRef,
+    LanguageExecutionObservation, StepBodyStarted, StepBodyStartedObservation,
+    TraceLanguageExecutionPayload, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,
+    WorkflowDocumentEntry, WorkflowDocumentRef,
 };
 pub use language_execution_failure::TraceLanguageExecutionFailure;
 pub use lash_sansio::llm::types::GenerationReceipt;
 use lash_sansio::llm::types::{LlmOutputPart, LlmProviderTraceDirection};
 pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
-};
-pub use lashlang_graph::{
-    DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT, TraceLashlangEdgeSelection, TraceLashlangEventIdentity,
-    TraceLashlangEventTransition, TraceLashlangGraph, TraceLashlangGraphAccumulator,
-    TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
-    TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
-    TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphSettlement,
-    TraceLashlangGraphTerminal, TraceLashlangNodeObservation, TraceLashlangNodeReport,
-    TraceLashlangNodeRetention, TraceLashlangNodeTerminalRecord, TraceLashlangNodeTerminalStatus,
-    fold_lashlang_graph,
 };
 pub use telemetry::{
     AttemptObservation, DurableTraceScope, EmissionPermit, EmissionSource, InvalidTraceCarrier,
@@ -87,6 +78,17 @@ pub use telemetry::{
     TraceScopeAdmission, TraceScopeFactory, TraceScopeId, TraceScopeKind, TraceScopeOffer,
     TraceScopeOwner, TraceToolOwner, TraceTransitionKind, UntracedScopes, W3cSpanId, W3cTraceFlags,
     W3cTraceId, W3cTraceState,
+};
+pub use workflow_overlay::{
+    DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT, WorkflowExecutionOverlay,
+    WorkflowExecutionOverlayAccumulator, WorkflowOverlayCall, WorkflowOverlayChildLink,
+    WorkflowOverlayConflict, WorkflowOverlayConflictKind, WorkflowOverlayCoverage,
+    WorkflowOverlayDocument, WorkflowOverlayEventIdentity, WorkflowOverlayEventTransition,
+    WorkflowOverlayFact, WorkflowOverlayFoldError, WorkflowOverlayHistoryEvent,
+    WorkflowOverlayMismatch, WorkflowOverlayOccurrence, WorkflowOverlaySettlement,
+    WorkflowOverlaySite, WorkflowOverlaySiteReport, WorkflowOverlaySiteRetention,
+    WorkflowOverlayTerminal, WorkflowOverlayTerminalRecord, WorkflowOverlayTerminalStatus,
+    fold_workflow_overlay,
 };
 
 /// Version of the durable trace JSONL schema, written to
@@ -190,6 +192,11 @@ pub use telemetry::{
 /// types `runtime_stream_event`: its payload is a closed enum whose block
 /// arm carries the stream-block lifecycle hosts see, with the block's full
 /// identity, in place of a free-text event name beside optional fields.
+/// FIG-5576 removes the execution map: `execution_started` names its
+/// workflow document by reference, node facts name a site and drop its
+/// static kind and label, `branch_selected` drops its edge id, the
+/// `step_body_started` event binds an admitted process step to its site, and
+/// the graph snapshot becomes the workflow execution overlay.
 ///
 /// version_guard(
 ///     shapes(
@@ -198,18 +205,16 @@ pub use telemetry::{
 ///             TraceRecord, TraceEvent, TraceTurnOutcome, TraceTurnCancellationEvidence,
 ///             TraceTurnCompletionReason, TraceTurnFailureReason, TraceJournaledEffectStatus,
 ///             TraceDurableWaitResolution, TraceDurableTimerStatus, TraceLanguageExecutionPayload,
-///             TraceLashlangGraph, TraceNodeWaitKind, TraceNodeAwaited, TraceNodeWaitResolution,
-///             TraceLashlangNodeObservation, TraceLashlangGraphNode,
-///             TraceLashlangNodeTerminalStatus, TraceLanguageExecutionMapNode,
-///             TraceLashlangEventIdentity, TraceBranchMembership,
+///             StepBodyStarted, TraceNodeWaitKind, TraceNodeAwaited, TraceNodeWaitResolution,
 ///         ),
 ///     ),
-///     items(path = "crates/lash-trace/src/lashlang_graph.rs", fold_lashlang_graph),
+///     items(path = "crates/lash-trace/src/workflow_overlay.rs", fold_workflow_overlay),
 ///     shapes(
-///         path = "crates/lash-trace/src/lashlang_graph/model.rs",
+///         path = "crates/lash-trace/src/workflow_overlay/model.rs",
 ///         cover(
-///             TraceLashlangNodeObservation, TraceLashlangNodeReport,
-///             TraceLashlangNodeTerminalRecord,
+///             WorkflowExecutionOverlay, WorkflowOverlayOccurrence, WorkflowOverlaySite,
+///             WorkflowOverlaySiteReport, WorkflowOverlayTerminalRecord,
+///             WorkflowOverlayTerminalStatus, WorkflowOverlayEventIdentity,
 ///         ),
 ///     ),
 ///     shapes(
@@ -1264,52 +1269,6 @@ impl TraceLanguageExecutionStatus {
 pub enum TraceBranchSelection {
     Then,
     Else,
-}
-
-/// The static graph of an execution, carried once on
-/// [`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity
-/// (`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the
-/// enclosing [`TraceLanguageExecutionIdentity`]; the map never repeats it.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceLanguageExecutionMap {
-    #[serde(default)]
-    pub nodes: Vec<TraceLanguageExecutionMapNode>,
-    #[serde(default)]
-    pub edges: Vec<TraceLanguageExecutionMapEdge>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceLanguageExecutionMapNode {
-    pub id: String,
-    pub site: lash_sansio::WorkflowExecutionSite,
-    pub kind: lash_sansio::ExecutionNodeKind,
-    pub label: String,
-    /// Observed branch selections that admit this node's arm.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub branch_memberships: Vec<TraceBranchMembership>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label_metadata: Option<TraceLabelMetadata>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceBranchMembership {
-    pub branch_node_id: String,
-    pub arm: TraceBranchSelection,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceLabelMetadata {
-    pub title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TraceLanguageExecutionMapEdge {
-    pub id: String,
-    pub from: String,
-    pub to: String,
-    pub label: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

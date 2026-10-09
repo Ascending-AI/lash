@@ -9,9 +9,8 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-RLM = "crates/lash-protocol-rlm/src/executor/mod.rs"
 WORKER = "crates/lash-vm-worker/src/service.rs"
-TRACE = "crates/lash-vm-runtime/src/process/trace_map.rs"
+RUNTIME = "crates/lash-vm-runtime/src/document.rs"
 
 
 class WorkflowGraphModelTests(unittest.TestCase):
@@ -37,22 +36,13 @@ class WorkflowGraphModelTests(unittest.TestCase):
         self.write("crates/lash-vm/src/lib.rs", "pub struct WorkflowGraph {}\n")
         self.write("crates/lash-typescript/src/lib.rs", "")
         self.write(
-            RLM,
-            "fn trace_main_map(artifact: &lash_vm_client::InspectedArtifact) {\n"
-            "    lash_vm_runtime::trace_lashlang_main_map(&artifact.graph)\n}\n",
-        )
-        self.write(
             WORKER,
             "fn inspect(artifact: &lash_vm::ModuleArtifact) {\n"
             "    lash_vm_client::InspectedArtifact {\n"
             "        graph: lash_vm::workflow_graph_from_artifact(artifact),\n"
             "    }\n}\n",
         )
-        self.write(
-            TRACE,
-            "pub fn trace_lashlang_main_map(graph: &lash_vm::WorkflowGraph) {\n"
-            "    trace_workflow_subgraph(&graph.main)\n}\n",
-        )
+        self.write(RUNTIME, "pub struct WorkflowExecutionDocument;\n")
         (self.root / "examples").mkdir()
 
     def write(self, relative, source):
@@ -68,22 +58,9 @@ class WorkflowGraphModelTests(unittest.TestCase):
             check=False,
         )
 
-    def test_worker_projection_and_graph_delegation_pass(self):
+    def test_worker_projection_passes(self):
         result = self.check()
         self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_pre_worker_artifact_argument_is_rejected(self):
-        path = self.root / RLM
-        path.write_text(path.read_text().replace("&artifact.graph", "artifact"))
-        self.write(
-            TRACE,
-            "#[cfg(test)]\nmod tests {\n"
-            "    fn fixture() { lash_vm::workflow_graph_from_artifact(artifact); }\n"
-            "}\n",
-        )
-        result = self.check()
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("RLM no longer delegates its trace skeleton", result.stderr)
 
     def test_missing_worker_projection_is_rejected(self):
         self.write(WORKER, "fn inspect() {}\n")
@@ -93,7 +70,7 @@ class WorkflowGraphModelTests(unittest.TestCase):
 
     def test_runtime_test_projection_cannot_replace_worker_projection(self):
         self.write(WORKER, "fn inspect() {}\n")
-        with (self.root / TRACE).open("a") as source:
+        with (self.root / RUNTIME).open("a") as source:
             source.write(
                 "#[cfg(test)]\nmod tests {\n"
                 "    fn fixture() { lash_vm::workflow_graph_from_artifact(artifact); }\n"

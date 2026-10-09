@@ -372,15 +372,64 @@ fn compiled_sites(
         .collect()
 }
 
-fn map_sites(map: &lash_trace::TraceLanguageExecutionMap) -> BTreeSet<SiteKey> {
-    map.nodes
-        .iter()
-        .map(|node| (node.id.clone(), node.kind, node.site.clone()))
-        .collect()
+/// The document an execution of `entry` in `artifact` names: the module's
+/// graph and the entry it runs it from.
+fn execution_document(
+    artifact: &lash_vm::ModuleArtifact,
+    entry: Option<&str>,
+) -> WorkflowExecutionDocument {
+    WorkflowExecutionDocument {
+        reference: lash_trace::WorkflowDocumentRef {
+            source_identity: artifact.source_identity().to_string(),
+            module_ref: "module".to_string(),
+            entry: match entry {
+                None => lash_trace::WorkflowDocumentEntry::Main,
+                Some(name) => lash_trace::WorkflowDocumentEntry::Process {
+                    process_ref: name.to_string(),
+                },
+            },
+            ir_version: 1,
+        },
+        graph: lash_vm::workflow_graph_from_artifact(artifact),
+        entry: entry.map(str::to_string),
+    }
+}
+
+/// The execution sites the document states for the body it enters, with
+/// their kinds.
+fn document_sites(document: &WorkflowExecutionDocument) -> BTreeSet<SiteKey> {
+    fn collect(body: &lash_vm::WorkflowSubgraph, sites: &mut BTreeSet<SiteKey>) {
+        for node in &body.nodes {
+            sites.extend(
+                node.execution_sites
+                    .iter()
+                    .map(|site| (node.id.to_string(), site.kind, site.clone())),
+            );
+            if let lash_vm::WorkflowNodeKind::Container(container) = &node.kind {
+                for (_, child) in container.child_subgraphs() {
+                    collect(child, sites);
+                }
+            }
+        }
+    }
+    let mut sites = BTreeSet::new();
+    collect(document.body().expect("the entry's body"), &mut sites);
+    sites
+}
+
+/// Every site of `sites` is a site of the reducer's index of `document`, so
+/// an observation at it is never a mismatch.
+fn assert_overlay_index_covers(document: &WorkflowExecutionDocument, sites: &BTreeSet<SiteKey>) {
+    let index = document.overlay_document();
+    assert_eq!(index.reference(), &document.reference);
+    for (node_id, _, site) in sites {
+        let site = lash_sansio::WorkflowSiteRef::new(node_id.clone(), site.site_path.clone());
+        assert!(index.contains(&site), "{site} is outside the overlay index");
+    }
 }
 
 #[test]
-fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
+fn a_second_front_end_gets_complete_documents_for_main_and_its_lifted_process() {
     let output = mini_module();
     let worker = lifted_worker(&output.artifact);
     let worker_ref = output
@@ -390,24 +439,19 @@ fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
         .clone();
 
     let main_sites = compiled_sites(&output.artifact, lash_vm::Entry::Main);
-    let main_map = map_sites(&trace_lashlang_main_map(
-        &lash_vm::workflow_graph_from_artifact(&output.artifact),
-    ));
+    let main_document = execution_document(&output.artifact, None);
     assert!(!main_sites.is_empty());
     assert_eq!(
-        main_sites.difference(&main_map).collect::<Vec<_>>(),
+        main_sites
+            .difference(&document_sites(&main_document))
+            .collect::<Vec<_>>(),
         Vec::<&SiteKey>::new(),
-        "every main site is in the main map with its kind and owner path"
+        "every main site is in the main document with its kind and owner path"
     );
+    assert_overlay_index_covers(&main_document, &main_sites);
 
     let worker_sites = compiled_sites(&output.artifact, lash_vm::Entry::Process(&worker_ref));
-    let worker_map = map_sites(
-        &trace_lashlang_process_map(
-            &lash_vm::workflow_graph_from_artifact(&output.artifact),
-            &worker,
-        )
-        .expect("worker map"),
-    );
+    let worker_document = execution_document(&output.artifact, Some(&worker));
     let kinds = worker_sites
         .iter()
         .map(|(_, kind, _)| *kind)
@@ -424,9 +468,23 @@ fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
         );
     }
     assert_eq!(
-        worker_sites.difference(&worker_map).collect::<Vec<_>>(),
+        worker_sites
+            .difference(&document_sites(&worker_document))
+            .collect::<Vec<_>>(),
         Vec::<&SiteKey>::new(),
-        "every lifted-process site is in the process map with its kind and owner path"
+        "every lifted-process site is in the process document with its kind and owner path"
+    );
+    assert_overlay_index_covers(&worker_document, &worker_sites);
+    assert!(
+        main_sites.iter().any(|(node_id, _, site)| {
+            !worker_document
+                .overlay_document()
+                .contains(&lash_sansio::WorkflowSiteRef::new(
+                    node_id.clone(),
+                    site.site_path.clone(),
+                ))
+        }),
+        "the index holds the entry's body, not the whole module"
     );
 
     // The runtime and the projection read the front end's structure off the
@@ -510,7 +568,7 @@ async fn a_second_front_end_keeps_its_sites_across_relink_and_stored_reload() {
         compiled_sites(&first.artifact, lash_vm::Entry::Process(&worker_ref))
     );
     assert_eq!(
-        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(reloaded)),
-        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(&first.artifact))
+        lash_vm::workflow_graph_from_artifact(reloaded),
+        lash_vm::workflow_graph_from_artifact(&first.artifact)
     );
 }

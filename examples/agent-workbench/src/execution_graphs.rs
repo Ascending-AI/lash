@@ -2,10 +2,11 @@ use lash::ProcessId;
 use lash::SessionId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use lash::tracing::{TraceLashlangGraph, TraceRuntimeScope, TraceRuntimeSubject};
+use lash::tracing::{TraceRuntimeScope, TraceRuntimeSubject};
 use serde::Serialize;
 use serde_json::Value;
 
+use crate::execution_view::{ExecutionGraph, ExecutionGraphChildLink};
 use crate::{AppError, compact_payload};
 
 #[derive(Debug, Serialize)]
@@ -64,7 +65,7 @@ pub(crate) struct LashVmGraphLineageEdge {
 pub(crate) async fn index_for_session(
     process_observer: &lash::process::ProcessWorkObserver,
     current_session_id: &SessionId,
-    graphs: Vec<TraceLashlangGraph>,
+    graphs: Vec<ExecutionGraph>,
 ) -> Result<LashVmGraphIndex, AppError> {
     let mut projection = GraphProjection::new(process_observer, current_session_id, graphs).await?;
     projection.compute_visibility().await;
@@ -74,9 +75,9 @@ pub(crate) async fn index_for_session(
 pub(crate) async fn visible_graph_by_key(
     process_observer: &lash::process::ProcessWorkObserver,
     current_session_id: &SessionId,
-    graphs: Vec<TraceLashlangGraph>,
+    graphs: Vec<ExecutionGraph>,
     graph_key: &str,
-) -> Result<TraceLashlangGraph, AppError> {
+) -> Result<ExecutionGraph, AppError> {
     let mut projection = GraphProjection::new(process_observer, current_session_id, graphs).await?;
     projection.compute_visibility().await;
     projection
@@ -87,7 +88,7 @@ pub(crate) async fn visible_graph_by_key(
 
 struct GraphProjection<'a> {
     process_observer: &'a lash::process::ProcessWorkObserver,
-    graphs: Vec<TraceLashlangGraph>,
+    graphs: Vec<ExecutionGraph>,
     graph_by_key: BTreeMap<String, usize>,
     process_graphs: BTreeMap<ProcessId, Vec<(usize, Option<u32>)>>,
     effect_graphs_by_session: BTreeMap<Option<SessionId>, Vec<usize>>,
@@ -101,7 +102,7 @@ impl<'a> GraphProjection<'a> {
     async fn new(
         process_observer: &'a lash::process::ProcessWorkObserver,
         current_session_id: &SessionId,
-        graphs: Vec<TraceLashlangGraph>,
+        graphs: Vec<ExecutionGraph>,
     ) -> Result<Self, AppError> {
         let snapshot = process_observer
             .snapshot_for_session(current_session_id)
@@ -130,13 +131,11 @@ impl<'a> GraphProjection<'a> {
                     .entry(graph.scope.session_id.clone())
                     .or_default()
                     .push(index);
-            } else if let TraceRuntimeSubject::Process { process_id } = &graph.subject
-                && let Some(event) = graph.history.first()
-            {
+            } else if let TraceRuntimeSubject::Process { process_id } = &graph.subject {
                 process_graphs
                     .entry(process_id.clone())
                     .or_default()
-                    .push((index, event.event.identity.attempt()));
+                    .push((index, graph.attempt));
             }
         }
         for indices in effect_graphs_by_session.values_mut() {
@@ -262,7 +261,7 @@ impl<'a> GraphProjection<'a> {
         })
     }
 
-    fn graph_if_visible(&self, graph_key: &str) -> Option<&TraceLashlangGraph> {
+    fn graph_if_visible(&self, graph_key: &str) -> Option<&ExecutionGraph> {
         if !self.visible_keys.contains(graph_key) {
             return None;
         }
@@ -271,7 +270,7 @@ impl<'a> GraphProjection<'a> {
             .and_then(|index| self.graphs.get(*index))
     }
 
-    fn visible_graphs_sorted(&self) -> Vec<TraceLashlangGraph> {
+    fn visible_graphs_sorted(&self) -> Vec<ExecutionGraph> {
         let mut graphs = self
             .visible_keys
             .iter()
@@ -288,7 +287,7 @@ impl<'a> GraphProjection<'a> {
 
     async fn graph_process_summary(
         &mut self,
-        graph: &TraceLashlangGraph,
+        graph: &ExecutionGraph,
     ) -> Option<LashVmGraphProcessSummary> {
         let TraceRuntimeSubject::Process { process_id } = &graph.subject else {
             return None;
@@ -300,7 +299,7 @@ impl<'a> GraphProjection<'a> {
 
     async fn append_lineage_edges(
         &mut self,
-        child: &lash::tracing::TraceLashlangGraphChildLink,
+        child: &ExecutionGraphChildLink,
         out: &mut Vec<LashVmGraphLineageEdge>,
     ) {
         let process_id = child.child_process_id.clone();
@@ -378,10 +377,7 @@ impl<'a> GraphProjection<'a> {
         }
     }
 
-    fn resolved_child_graph_keys(
-        &self,
-        child: &lash::tracing::TraceLashlangGraphChildLink,
-    ) -> Vec<String> {
+    fn resolved_child_graph_keys(&self, child: &ExecutionGraphChildLink) -> Vec<String> {
         if let Some(graph_key) = &child.child_graph_key
             && self.graph_by_key.contains_key(graph_key)
         {
@@ -400,7 +396,7 @@ impl<'a> GraphProjection<'a> {
             .collect()
     }
 
-    fn child_session_effect_graphs(&self, session_id: &SessionId) -> Vec<&TraceLashlangGraph> {
+    fn child_session_effect_graphs(&self, session_id: &SessionId) -> Vec<&ExecutionGraph> {
         self.effect_graphs_by_session
             .get(&Some(session_id.clone()))
             .into_iter()
@@ -487,7 +483,7 @@ fn graph_sort_key(scope: &TraceRuntimeScope, graph_key: &str) -> (usize, usize, 
     )
 }
 
-fn graph_kind(graph: &TraceLashlangGraph) -> String {
+fn graph_kind(graph: &ExecutionGraph) -> String {
     match &graph.subject {
         TraceRuntimeSubject::Effect { .. } if graph.entry_name == "main" => {
             "foreground".to_string()
@@ -497,7 +493,7 @@ fn graph_kind(graph: &TraceLashlangGraph) -> String {
     }
 }
 
-fn graph_title(graph: &TraceLashlangGraph) -> String {
+fn graph_title(graph: &ExecutionGraph) -> String {
     match &graph.subject {
         TraceRuntimeSubject::Effect { .. } if graph.entry_name == "main" => {
             "foreground execution".to_string()
@@ -514,7 +510,7 @@ fn graph_title(graph: &TraceLashlangGraph) -> String {
 }
 
 fn lineage_bridge_title(
-    child: &lash::tracing::TraceLashlangGraphChildLink,
+    child: &ExecutionGraphChildLink,
     process: Option<&lash::process::ObservedProcess>,
     process_id: &ProcessId,
 ) -> String {
@@ -529,7 +525,7 @@ mod tests {
     use super::*;
     use lash::TurnId;
     use lash::process::ProcessInput as RuntimeInput;
-    use lash::tracing::{TraceLanguageExecutionStatus, TraceLashlangGraphChildLink};
+    use lash::tracing::TraceLanguageExecutionStatus;
     use serde_json::json;
     use std::sync::Arc;
 
@@ -569,10 +565,9 @@ mod tests {
         graph_key: &str,
         session_id: &SessionId,
         subject: TraceRuntimeSubject,
-        children: Vec<TraceLashlangGraphChildLink>,
-    ) -> TraceLashlangGraph {
-        TraceLashlangGraph {
-            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
+        children: Vec<ExecutionGraphChildLink>,
+    ) -> ExecutionGraph {
+        ExecutionGraph {
             graph_key: graph_key.to_string(),
             scope: TraceRuntimeScope::new(session_id),
             subject,
@@ -583,15 +578,15 @@ mod tests {
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Running,
             settlement: None,
-            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
+            coverage: lash::workflow::WorkflowOverlayCoverage {
+                document_loaded: false,
+                start_observed: false,
+            },
             nodes: Vec::new(),
             edges: Vec::new(),
             children,
-            history_limit: lash::tracing::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
-            node_retention: Vec::new(),
-            conflicts: Vec::new(),
-            history: Vec::new(),
-            execution_map: None,
+            attempt: None,
+            mismatches: Vec::new(),
         }
     }
 
@@ -626,8 +621,7 @@ mod tests {
             .expect("register subagent process")
             .id;
 
-        let parent_graph = TraceLashlangGraph {
-            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
+        let parent_graph = ExecutionGraph {
             graph_key: "effect:root:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
                 session_id: Some(SessionId::from("root")),
@@ -650,10 +644,13 @@ mod tests {
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Running,
             settlement: None,
-            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
+            coverage: lash::workflow::WorkflowOverlayCoverage {
+                document_loaded: false,
+                start_observed: false,
+            },
             nodes: Vec::new(),
             edges: Vec::new(),
-            children: vec![TraceLashlangGraphChildLink {
+            children: vec![ExecutionGraphChildLink {
                 parent_graph_key: "effect:root:turn-1:exec-1".to_string(),
                 parent_node_id: "spawn".to_string(),
                 child_graph_key: None,
@@ -663,14 +660,10 @@ mod tests {
                 child_entry_ref: None,
                 child_entry_name: Some("subagent".to_string()),
             }],
-            history_limit: lash::tracing::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
-            node_retention: Vec::new(),
-            conflicts: Vec::new(),
-            history: Vec::new(),
-            execution_map: None,
+            attempt: None,
+            mismatches: Vec::new(),
         };
-        let child_graph = TraceLashlangGraph {
-            schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
+        let child_graph = ExecutionGraph {
             graph_key: "effect:child-session:turn-1:exec-1".to_string(),
             scope: TraceRuntimeScope {
                 session_id: Some(SessionId::fixture(child_session_id.to_string())),
@@ -693,15 +686,15 @@ mod tests {
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Completed,
             settlement: None,
-            completeness: lash::tracing::TraceLashlangGraphCompleteness::IncompleteMap,
+            coverage: lash::workflow::WorkflowOverlayCoverage {
+                document_loaded: false,
+                start_observed: false,
+            },
             nodes: Vec::new(),
             edges: Vec::new(),
             children: Vec::new(),
-            history_limit: lash::tracing::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
-            node_retention: Vec::new(),
-            conflicts: Vec::new(),
-            history: Vec::new(),
-            execution_map: None,
+            attempt: None,
+            mismatches: Vec::new(),
         };
         let mut projection = GraphProjection::new(
             &observer,
@@ -800,7 +793,7 @@ mod tests {
                 .expect("valid current-session effect address"),
                 effect_id: "exec-1".to_string(),
             },
-            vec![TraceLashlangGraphChildLink {
+            vec![ExecutionGraphChildLink {
                 parent_graph_key: "effect:current-session:turn-1:exec-1".to_string(),
                 parent_node_id: "spawn".to_string(),
                 child_graph_key: None,
@@ -856,7 +849,7 @@ mod tests {
         assert!(keys.contains("effect:child-session:turn-1:exec-1"));
         assert!(!keys.contains(&format!("process:{old_process_id}")));
     }
-    fn effect_graph(key: &str, session: &str) -> TraceLashlangGraph {
+    fn effect_graph(key: &str, session: &str) -> ExecutionGraph {
         test_graph(
             key,
             &SessionId::fixture(session),
@@ -880,8 +873,8 @@ mod tests {
         target: Option<&str>,
         process: &str,
         attempt: Option<u32>,
-    ) -> TraceLashlangGraphChildLink {
-        TraceLashlangGraphChildLink {
+    ) -> ExecutionGraphChildLink {
+        ExecutionGraphChildLink {
             parent_graph_key: parent.to_string(),
             parent_node_id: format!("spawn-{process}"),
             child_graph_key: target.map(str::to_string),
@@ -894,11 +887,7 @@ mod tests {
         }
     }
 
-    fn process_graph(
-        key: &str,
-        process: &str,
-        history_attempt: Option<Option<u32>>,
-    ) -> TraceLashlangGraph {
+    fn process_graph(key: &str, process: &str, attempt: Option<u32>) -> ExecutionGraph {
         let mut graph = test_graph(
             key,
             &SessionId::from("other"),
@@ -908,33 +897,11 @@ mod tests {
             },
             Vec::new(),
         );
-        if let Some(attempt) = history_attempt {
-            graph.history.push(
-                serde_json::from_value(json!({
-                    "identity": { "attempt": attempt, "transition": "execution_finished" },
-                    "timestamp": "2026-09-29T00:00:00Z",
-                    "event": {
-                        "event_key": key,
-                        "identity": {
-                            "scope": graph.scope,
-                            "subject": graph.subject,
-                            "source_identity": graph.source_identity,
-                            "module_ref": graph.module_ref,
-                            "entry_kind": "main",
-                            "entry_name": "main",
-                            "attempt": attempt,
-                        },
-                        "kind": "execution_finished",
-                        "status": "completed",
-                    },
-                }))
-                .expect("history event"),
-            );
-        }
+        graph.attempt = attempt;
         graph
     }
 
-    fn traversal_fixtures() -> Vec<Vec<TraceLashlangGraph>> {
+    fn traversal_fixtures() -> Vec<Vec<ExecutionGraph>> {
         let chain = (0..64)
             .map(|index| {
                 let key = format!("chain-{index:02}");
@@ -979,7 +946,7 @@ mod tests {
                     } else {
                         projection.graphs.iter().filter(|graph| {
                             matches!(&graph.subject, TraceRuntimeSubject::Process { process_id } if process_id == child.child_process_id)
-                                && graph.history.first().is_some_and(|event| child.child_attempt.is_none_or(|attempt| event.event.identity.attempt() == Some(attempt)))
+                                && child.child_attempt.is_none_or(|attempt| graph.attempt == Some(attempt))
                         }).map(|graph| graph.graph_key.clone()).collect()
                     };
                     for target in targets {
@@ -1008,7 +975,7 @@ mod tests {
 
     async fn assert_projection_matches_reference(
         observer: &lash::process::ProcessWorkObserver,
-        graphs: Vec<TraceLashlangGraph>,
+        graphs: Vec<ExecutionGraph>,
     ) {
         let session = SessionId::from("root");
         let mut reference = GraphProjection::new(observer, &session, graphs.clone())
@@ -1047,16 +1014,15 @@ mod tests {
             child_link("root", Some("missing"), "target", Some(1)),
             child_link("root", None, "target", None),
         ];
-        let mut first = process_graph("attempt-one", "target", Some(Some(1)));
+        let mut first = process_graph("attempt-one", "target", Some(1));
         first.scope.turn_index = Some(2);
-        let mut second = process_graph("attempt-two", "target", Some(Some(2)));
+        let mut second = process_graph("attempt-two", "target", Some(2));
         second.scope.protocol_iteration = Some(3);
         fixtures.push(vec![
             root,
             second,
-            process_graph("empty", "target", None),
             first,
-            process_graph("unset", "target", Some(None)),
+            process_graph("unset", "target", None),
             effect_graph("inaccessible", "old"),
         ]);
         for graphs in fixtures {

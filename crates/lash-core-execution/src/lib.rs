@@ -379,7 +379,6 @@ pub mod facade_support {
     pub use lash_sansio::visible_response_text_from_parts;
     pub use lash_trace::JsonlTraceSink;
     pub use lash_trace::TraceBranchSelection;
-    pub use lash_trace::TraceLabelMetadata;
     pub use lash_trace::TraceLevel;
     pub use lash_trace::TraceRecord;
     pub use lash_trace::TraceRuntimeScope;
@@ -712,16 +711,16 @@ pub use runtime::{
     ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventKind, ProcessEventLite,
     ProcessEventLog, ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore,
     ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventRelease, ProcessExecutionContext,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
-    ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLifecycle,
-    ProcessLifecycleFact, ProcessLineage, ProcessListFilter, ProcessListMode, ProcessListSelection,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope,
-    ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeObserver,
-    ProcessParkReason, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
-    ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome, ProcessRegistrationReceipt,
-    ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention,
-    ProcessRosterCursor, ProcessRosterRecords, ProcessRunOutcome, ProcessService,
+    ProcessExecutionDocumentRead, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput,
+    ProcessLifecycle, ProcessLifecycleFact, ProcessLineage, ProcessListFilter, ProcessListMode,
+    ProcessListSelection, ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry,
+    ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
+    ProcessOutcomeObserver, ProcessParkReason, ProcessProvenance, ProcessPruneReport, ProcessQuery,
+    ProcessRecord, ProcessRegistrar, ProcessRegistration, ProcessRegistrationOutcome,
+    ProcessRegistrationReceipt, ProcessRegistry, ProcessRegistryCursor, ProcessResumeRefusal,
+    ProcessRetention, ProcessRosterCursor, ProcessRosterRecords, ProcessRunOutcome, ProcessService,
     ProcessSessionDeleteReport, ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration,
     ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt, ProcessStartRequest,
     ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalWait, ProcessTombstone,

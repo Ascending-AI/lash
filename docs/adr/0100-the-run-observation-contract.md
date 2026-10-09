@@ -40,23 +40,26 @@ Evidence: `crates/lash-vm/src/workflow_graph.rs::workflow_node_id`,
 `crates/lash-vm/src/workflow_graph/projection.rs:203`, `:307`, and
 `crates/lash-vm-runtime/src/host_identity.rs:1`.
 
-### R1: the map carries the site
+### R1: the document carries the site
 
-Graph and runtime node ids come from the same structural mint.
-`TraceLanguageExecutionMapNode` carries `WorkflowExecutionSite`, including
-owner, AST path, and site kind. A host needs no pairing table or secondary id.
+Graph and runtime node ids come from the same structural mint. Each document
+node states its `WorkflowExecutionSite`s, including owner, AST path, and site
+kind. An execution's start names that document by reference
+(`WorkflowDocumentRef`) and carries no copy of it; events name exact sites
+and a host looks labels and kinds up in the document. A host needs no pairing
+table or secondary id.
 
 `ModuleArtifact::ir` is the linked, span-free executable program, with names
 verbatim. Private artifact fields admit it through linking, the validating
 builder, or the verifying store decoder. The compiler and projector read that
 program. Structural roles, binding visibility, loop bind expressions, and
 `ProcessOrigin::Lifted` describe generated structure without readers guessing
-front-end names. The process and RLM emitters use the same map contract.
+front-end names. The process and RLM emitters name the same document contract.
 
 Evidence: `crates/lash-vm/src/artifact.rs`,
 `crates/lash-vm/src/workflow_graph/projection.rs:51`,
 `crates/lash-vm/src/workflow_graph/execution_sites.rs:1`,
-`crates/lash-vm-runtime/src/process/trace_map.rs`, and
+`crates/lash-vm-runtime/src/document.rs`, and
 `crates/lash-protocol-rlm/src/executor`.
 
 ### R2: process-scoped subscription with epochs
@@ -86,17 +89,17 @@ Evidence: `crates/lash-sansio/src/process_cursor.rs:1`, `:55`,
 
 ### R3: logical identity is not publication position
 
-Node observations use node id, node kind, occurrence, and attempt within their
+Node observations use the exact site, its occurrence, and attempt within their
 execution identity. That identity is distinct from publisher epoch and position.
-The static map is independently available. The bounded pure fold keeps
+The static document is independently available by its reference. The bounded pure fold keeps
 canonical output across arrival permutations and incremental partitions,
 deduplicates equal observations, reports conflicting duplicates, preserves
 terminal state per occurrence, and admits later occurrences. It exposes
 incompleteness and truncation rather than implying absent work did not execute.
 
-Evidence: `crates/lash-trace/src/lashlang_graph/model.rs:24`,
-`crates/lash-trace/src/lashlang_graph.rs:55`, `:183`, `:1420`, and
-`crates/lash-trace/src/lashlang_graph/tests.rs`.
+Evidence: `crates/lash-trace/src/workflow_overlay/model.rs`,
+`crates/lash-trace/src/workflow_overlay.rs`, and
+`crates/lash-trace/src/workflow_overlay/tests.rs`.
 
 ### R4: durable per-effect summary
 
@@ -133,7 +136,7 @@ Attempt distinguishes telemetry observations and trace deduplication. It does
 not enter effect idempotency keys, group keys, or admitted operation identities. Process
 identity is the minted id, with no additional process-incarnation component.
 
-Evidence: `crates/lash-trace/src/lashlang_graph/model.rs:24`,
+Evidence: `crates/lash-trace/src/workflow_overlay/model.rs`,
 `crates/lash-vm-runtime/src/host_identity.rs:1`, and
 `crates/lash-sansio/src/process_cursor.rs:55`.
 
@@ -197,13 +200,13 @@ The pre-1.0 freeze governs changes in place.
 | Type facets | `WORKFLOW_TYPE_FACET_SCHEMA_VERSION = 4` | Noncurrent facets discarded before graph decode; consumers may discard derived facets | Additive known-facet fields tolerated; closed variants refused |
 | `TypeExpr` | Its graph or facet carrier | Decoded only in an admitted carrier | Unknown variant fields and variants refused |
 | Trace records and events | `TRACE_SCHEMA_VERSION = 36` | Exact trace record version before event decode | Additive known fields tolerated; closed variants refused |
-| `TraceLashlangGraph` | `TRACE_SCHEMA_VERSION = 36` | Exact snapshot version before shape | Additive fields tolerated; closed status, observation, wait, node, and completeness variants refused |
+| `WorkflowExecutionOverlay` | `TRACE_SCHEMA_VERSION = 36` | Exact snapshot version before shape | Additive fields tolerated; closed status, occurrence, wait, mismatch, and fact variants refused |
 | Durable effect-summary events | `PROCESS_EVENT_VOCABULARY_VERSION = 1` | Fleet read window and registered upcaster before strict payload decode | Unknown summary fields and lifecycle kinds refused; the vocabulary is closed under ADR 0137 |
 
 The owners and fences are in `crates/lash-vm/src/workflow_graph.rs:61`, `:129`,
 `crates/lash-vm/src/workflow_graph/facets.rs:12`,
 `crates/lash-trace/src/lib.rs:164`, `:187`,
-`crates/lash-trace/src/lashlang_graph/model.rs:140`, and
+`crates/lash-trace/src/workflow_overlay/model.rs`, and
 `crates/lash-core-execution/src/runtime/process/effect_summary.rs:17`, `:125`.
 
 Checked-in JSON Schemas live under `schemas/host/`. Their generator and drift

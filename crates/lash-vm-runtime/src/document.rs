@@ -36,6 +36,54 @@ pub struct WorkflowDocument {
     pub entry: String,
 }
 
+/// The workflow document an execution runs, with the entry it runs it from:
+/// what a [`lash_trace::WorkflowDocumentRef`] names
+/// ([`lash_core::ProcessDocumentProvider::execution_document`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkflowExecutionDocument {
+    pub reference: lash_trace::WorkflowDocumentRef,
+    pub graph: WorkflowGraph,
+    /// The exported name of the entry process; `None` for the main body.
+    pub entry: Option<String>,
+}
+
+impl WorkflowExecutionDocument {
+    /// The body the execution enters: the main body, or the entry process's.
+    pub fn body(&self) -> Option<&lash_vm::WorkflowSubgraph> {
+        match &self.entry {
+            None => Some(&self.graph.main),
+            Some(entry) => self.graph.process(entry).map(|process| &process.body),
+        }
+    }
+
+    /// What the execution overlay's reducer reads of this document: its
+    /// reference and the execution sites of the body the execution enters.
+    /// It is an index derived for one fold; the document stays the only copy
+    /// of the graph.
+    pub fn overlay_document(&self) -> lash_trace::WorkflowOverlayDocument {
+        fn collect(
+            body: &lash_vm::WorkflowSubgraph,
+            sites: &mut Vec<lash_sansio::WorkflowSiteRef>,
+        ) {
+            for node in &body.nodes {
+                sites.extend(node.execution_sites.iter().map(|site| {
+                    lash_sansio::WorkflowSiteRef::new(node.id.to_string(), site.site_path.clone())
+                }));
+                if let lash_vm::WorkflowNodeKind::Container(container) = &node.kind {
+                    for (_, child) in container.child_subgraphs() {
+                        collect(child, sites);
+                    }
+                }
+            }
+        }
+        let mut sites = Vec::new();
+        if let Some(body) = self.body() {
+            collect(body, &mut sites);
+        }
+        lash_trace::WorkflowOverlayDocument::new(self.reference.clone(), sites)
+    }
+}
+
 /// Which process of an admitted module a definition starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WorkflowEntry {
@@ -231,6 +279,58 @@ impl lash_core::ProcessDocumentProvider for LashVmDocumentProvider {
                 },
                 ir_version: inspected.graph.ir_version,
             },
+        ))
+    }
+
+    async fn execution_document(
+        &self,
+        reference: &lash_trace::WorkflowDocumentRef,
+    ) -> Result<lash_core::ProcessExecutionDocumentRead, lash_core::PluginError> {
+        let module_ref = serde_json::from_value::<lash_vm::ModuleRef>(serde_json::Value::String(
+            reference.module_ref.clone(),
+        ))
+        .map_err(|error| unresolvable(format!("invalid module reference: {error}")))?;
+        let Some(inspected) = self
+            .engine
+            .workers
+            .inspect_artifact(&self.engine.artifact_store, &module_ref)
+            .await?
+        else {
+            return Ok(lash_core::ProcessExecutionDocumentRead::ArtifactMissing {
+                artifact: lash_core::ArtifactName {
+                    store: lash_core::ArtifactStoreId::VmModule,
+                    artifact_ref: reference.module_ref.clone(),
+                },
+            });
+        };
+        if inspected.source_identity() != reference.source_identity
+            || inspected.graph.ir_version != reference.ir_version
+        {
+            return Err(unresolvable(
+                "the stored module is not the document the reference names".into(),
+            ));
+        }
+        let entry = match &reference.entry {
+            lash_trace::WorkflowDocumentEntry::Main => None,
+            lash_trace::WorkflowDocumentEntry::Process { process_ref } => Some(
+                inspected
+                    .exports()
+                    .processes
+                    .iter()
+                    .find_map(|(name, exported)| {
+                        (lash_vm::process_ref_key(exported) == *process_ref).then(|| name.clone())
+                    })
+                    .ok_or_else(|| {
+                        unresolvable("the document exports no such entry process".into())
+                    })?,
+            ),
+        };
+        Ok(lash_core::ProcessExecutionDocumentRead::Read(
+            lash_core::ProcessDocument::new(WorkflowExecutionDocument {
+                reference: reference.clone(),
+                graph: inspected.graph,
+                entry,
+            }),
         ))
     }
 

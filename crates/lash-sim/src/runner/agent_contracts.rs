@@ -358,7 +358,7 @@ await task.fail({ reason: "parent observed child failure" });
         .run_turn(
             &session,
             "sim-agent-failed-child-turn",
-            events.clone(),
+            contract_turn_events(&events, &graph_store, &core),
             contract_turn("Spawn a child that fails and preserve its execution graph."),
         )
         .await?
@@ -371,7 +371,8 @@ await task.fail({ reason: "parent observed child failure" });
     let recorded = events.snapshot().await;
     let process_observations = agent_contract_process_observations(&core).await?;
     let process_facts = agent_contract_process_facts(&process_observations);
-    let graph_facts = agent_contract_graph_facts(&graph_store.graphs(), &result.state.session_id);
+    let graph_facts =
+        agent_contract_graph_facts(&graph_store.graphs(&core).await, &result.state.session_id);
     let failure = agent_failed_child_activity_facts(&result, &recorded);
     let payload = json!({
         "execution_api": "lash::LashCore facade",
@@ -631,7 +632,7 @@ async fn facade_agent_process_execution_with_options(
         .run_turn(
             &session,
             lash_core::TurnId::fixture(format!("{session_id}-turn")),
-            events.clone(),
+            contract_turn_events(&events, &graph_store, &core),
             contract_turn(prompt),
         )
         .await?
@@ -708,7 +709,8 @@ finish({ recovered: true });
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let turn_engine = engine.clone();
     let turn_session = session.clone();
-    let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
+    let turn_events: Arc<dyn lash::TurnActivitySink> =
+        contract_turn_events(&events, &graph_store, &core);
     let turn = tokio::spawn(async move {
         turn_engine
             .run_turn(
@@ -785,44 +787,6 @@ finish({ recovered: true });
         true,
     )
     .await
-}
-
-/// The graphs of the executions a contract core observes: one bounded
-/// accumulator per graph key, fed by the core's product observer.
-#[derive(Default)]
-struct ContractGraphs(
-    std::sync::Mutex<BTreeMap<String, lash::tracing::TraceLashlangGraphAccumulator>>,
-);
-
-impl ContractGraphs {
-    /// Every observed graph, in graph-key order.
-    fn graphs(&self) -> Vec<lash::tracing::TraceLashlangGraph> {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .values()
-            .filter_map(lash::tracing::TraceLashlangGraphAccumulator::snapshot)
-            .collect()
-    }
-}
-
-impl lash::tracing::TraceSink for ContractGraphs {
-    fn append(
-        &self,
-        record: &lash::tracing::TraceRecord,
-    ) -> Result<(), lash::tracing::TraceSinkError> {
-        if let lash::tracing::TraceEvent::LanguageExecution { event, .. } = &record.event {
-            // One key per accumulator, so the fold cannot refuse the record.
-            let _ = self
-                .0
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .entry(event.identity.graph_key())
-                .or_default()
-                .fold(std::slice::from_ref(record));
-        }
-        Ok(())
-    }
 }
 
 /// A contract core, the graphs its executions trace into, and the engine it
@@ -1026,7 +990,8 @@ async fn agent_process_execution_result(
     } else {
         Vec::new()
     };
-    let graph_facts = agent_contract_graph_facts(&graph_store.graphs(), &result.state.session_id);
+    let graph_facts =
+        agent_contract_graph_facts(&graph_store.graphs(core).await, &result.state.session_id);
     let mut payload = json!({
         "execution_api": "lash::LashCore facade",
         "provider_kind": provider_kind,
@@ -1403,99 +1368,6 @@ fn normalize_contract_process_event_payload(event_type: &str, payload: Value) ->
     payload
 }
 
-fn agent_contract_graph_facts(
-    graphs: &[lash::tracing::TraceLashlangGraph],
-    root_session_id: &SessionId,
-) -> Value {
-    let mut completed_process_entries = BTreeSet::new();
-    let mut completed_labeled_resources = BTreeSet::new();
-    let mut failed_labeled_resources = BTreeSet::new();
-    let mut completed_labeled_nodes = BTreeSet::new();
-    let mut child_links = BTreeSet::new();
-    let mut graph_status_counts = BTreeMap::<String, usize>::new();
-    let mut child_session_exec_completed_count = 0usize;
-    let mut child_session_exec_failed_count = 0usize;
-    for graph in graphs {
-        *graph_status_counts
-            .entry(trace_lash_vm_status_label(graph.status).to_string())
-            .or_default() += 1;
-        if graph.scope.session_id.as_ref() != Some(root_session_id)
-            && matches!(
-                &graph.subject,
-                lash::tracing::TraceRuntimeSubject::Effect { .. }
-            )
-        {
-            match graph.status {
-                lash::tracing::TraceLanguageExecutionStatus::Completed => {
-                    child_session_exec_completed_count += 1;
-                }
-                lash::tracing::TraceLanguageExecutionStatus::Failed => {
-                    child_session_exec_failed_count += 1;
-                }
-                _ => {}
-            }
-        }
-        if graph.entry_kind == "process"
-            && matches!(
-                graph.subject,
-                lash::tracing::TraceRuntimeSubject::Process { .. }
-            )
-            && graph.status == lash::tracing::TraceLanguageExecutionStatus::Completed
-        {
-            completed_process_entries.insert(graph.entry_name.clone());
-        }
-        for node in &graph.nodes {
-            let title = node
-                .label_metadata
-                .as_ref()
-                .map(|label| label.title.as_str());
-            if node.kind == lash::tracing::ExecutionNodeKind::ResourceOperation
-                && matches!(
-                    &node.observation,
-                    lash::tracing::TraceLashlangNodeObservation::Completed { .. }
-                )
-                && let Some(title) = title
-            {
-                completed_labeled_resources.insert(title.to_string());
-            }
-            if node.kind == lash::tracing::ExecutionNodeKind::ResourceOperation
-                && matches!(
-                    &node.observation,
-                    lash::tracing::TraceLashlangNodeObservation::Failed { .. }
-                )
-                && let Some(title) = title
-            {
-                failed_labeled_resources.insert(title.to_string());
-            }
-            if matches!(
-                &node.observation,
-                lash::tracing::TraceLashlangNodeObservation::Completed { .. }
-            ) && let Some(title) = title
-            {
-                completed_labeled_nodes.insert(title.to_string());
-            }
-        }
-        for child in &graph.children {
-            child_links.insert(format!(
-                "{}->{}",
-                graph.entry_name,
-                child.child_entry_name.as_deref().unwrap_or("<unknown>")
-            ));
-        }
-    }
-    json!({
-        "graph_count": graphs.len(),
-        "status_counts": graph_status_counts,
-        "completed_process_entries": completed_process_entries.into_iter().collect::<Vec<_>>(),
-        "completed_labeled_resources": completed_labeled_resources.into_iter().collect::<Vec<_>>(),
-        "failed_labeled_resources": failed_labeled_resources.into_iter().collect::<Vec<_>>(),
-        "completed_labeled_nodes": completed_labeled_nodes.into_iter().collect::<Vec<_>>(),
-        "child_links": child_links.into_iter().collect::<Vec<_>>(),
-        "child_session_exec_completed_count": child_session_exec_completed_count,
-        "child_session_exec_failed_count": child_session_exec_failed_count,
-    })
-}
-
 fn agent_failed_child_activity_facts(
     result: &lash::TurnReport,
     events: &[lash::TurnActivity],
@@ -1528,15 +1400,6 @@ fn agent_failed_child_activity_facts(
         "child_task_fail_reason_observed": event_debug.contains("child boom"),
         "parent_task_fail_reason_observed": event_debug.contains("parent observed child failure"),
     })
-}
-
-fn trace_lash_vm_status_label(status: lash::tracing::TraceLanguageExecutionStatus) -> &'static str {
-    match status {
-        lash::tracing::TraceLanguageExecutionStatus::Running => "running",
-        lash::tracing::TraceLanguageExecutionStatus::Completed => "completed",
-        lash::tracing::TraceLanguageExecutionStatus::Failed => "failed",
-        lash::tracing::TraceLanguageExecutionStatus::Cancelled => "cancelled",
-    }
 }
 
 fn normalize_contract_tool_output(value: Value) -> Value {

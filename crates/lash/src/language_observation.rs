@@ -195,10 +195,38 @@ impl LanguageObservationPublisher {
     }
 }
 
+impl LanguageObservationPublisher {
+    /// A step's body start joins its process's FIFO behind the language
+    /// observations already accepted for it.
+    fn enqueue_step_body_started(&self, record: &TraceRecord, step: &lash_trace::StepBodyStarted) {
+        if self.closed.load(Ordering::Acquire) {
+            return;
+        }
+        let timestamp = u64::try_from(record.timestamp.timestamp_millis()).ok();
+        let charge = timestamp.and_then(|_| worker::charge(step));
+        self.process.enqueue(charge, || ProcessPublication {
+            id: step.process_id.clone(),
+            draft: ProcessReplayEventDraft::step_body_started(
+                ProcessSequence(0),
+                lash_trace::StepBodyStartedObservation {
+                    step: step.clone(),
+                    observed_at_ms: timestamp.unwrap_or(0),
+                },
+            ),
+            completion: None,
+        });
+        self.start();
+    }
+}
+
 impl TraceSink for LanguageObservationPublisher {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
-        if let TraceEvent::LanguageExecution { language, event } = &record.event {
-            self.enqueue_language(record, language, event);
+        match &record.event {
+            TraceEvent::LanguageExecution { language, event } => {
+                self.enqueue_language(record, language, event);
+            }
+            TraceEvent::StepBodyStarted { step } => self.enqueue_step_body_started(record, step),
+            _ => {}
         }
         Ok(())
     }

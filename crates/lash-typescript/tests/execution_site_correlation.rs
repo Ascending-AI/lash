@@ -692,15 +692,6 @@ finish(result);
         compiler, expected,
         "compiler must emit sites only for the authored process body the graph projects"
     );
-
-    let branch = compiled_execution_sites(&main)
-        .into_iter()
-        .find(|site| site.node_kind == lash_sansio::ExecutionNodeKind::Branch)
-        .expect("compiled branch site");
-    assert!(
-        branch.branch.is_some(),
-        "branch descriptor must use branch_site"
-    );
 }
 
 // ---- Exact sites, per-site occurrences and loop context (FIG-5575) ----

@@ -145,7 +145,7 @@ pub const WORKFLOW_IR_VERSION: u32 = 1;
 ///         is_statement_list, collect_body, collect_statement, statement_value, map_node_subtree,
 ///         check_shape, process_wrapper_run_path, execution_sites, collect_execution_sites,
 ///         push_execution_site_descriptor, collect_child_execution_sites, workflow_owner,
-///         node_site, branch_site, branch_edge_id,
+///         node_site, branch_site,
 ///     ),
 /// )
 #[cfg(not(feature = "synthetic-next"))]

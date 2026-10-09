@@ -21,6 +21,7 @@ mod deferred_tools;
 mod e2e_live_budget;
 mod execution_feeds;
 mod execution_graphs;
+mod execution_view;
 mod failure_provider;
 mod host_triggers;
 mod mail;
@@ -60,8 +61,8 @@ use lash::sync::MutexExt;
 use lash::{
     LashCore, SessionSpec, TurnActivity, TurnActivitySink, TurnEvent,
     tracing::{
-        JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent,
-        TraceLashlangGraph, TraceLevel, TraceRecord, TraceSink,
+        JsonlTraceSink, StderrTraceSink, TeeTraceSink, TraceContext, TraceEvent, TraceLevel,
+        TraceRecord, TraceSink,
     },
 };
 

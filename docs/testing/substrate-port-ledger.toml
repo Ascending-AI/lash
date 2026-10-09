@@ -2990,13 +2990,13 @@ needs = ["cell", "process"]
 class = "mechanical"
 lane = "L9e"
 laws = [
-  "production_rlm_map_is_the_compiled_inventory_for_every_loop_kind",
-  "production_process_map_is_the_compiled_inventory_after_a_store_round_trip",
+  "production_rlm_document_is_the_compiled_inventory_for_every_loop_kind",
+  "production_process_document_is_the_compiled_inventory_after_a_store_round_trip",
   "every_model_code_path_runs_in_a_worker",
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5378: covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::production_rlm_map_is_the_compiled_inventory_for_every_loop_kind; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::production_process_map_is_the_compiled_inventory_after_a_store_round_trip; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::durable_language_trace_continues_once_across_quiet_points; covered-by:crates/lash-durable-test/tests/rlm_execution_maps.rs::every_model_code_path_runs_in_a_worker. The stored process-map law is enabled. FIG-5406 verified its exact selectors on PostgreSQL, SQLite memory and SQLite file at 47167f2431 (3 executed, 3 passed). FIG-5378 commit e168fca836 fixed the known arrival-order-dependent fixture bug: the worker is identified by its limit parameter, rather than the lifted main path it shares with the nested process. The reported full-run red at ea51af0029 has no retained failure log and did not reproduce; its culprit remains unproven. assert_skipped retains its worker-never marker check. The continuation law also checks distinct admitted call bindings at repeated occurrences of one node."
+note = "FIG-5378: covered-by:crates/lash-durable-test/tests/rlm_execution_documents.rs::production_rlm_document_is_the_compiled_inventory_for_every_loop_kind; covered-by:crates/lash-durable-test/tests/rlm_execution_documents.rs::production_process_document_is_the_compiled_inventory_after_a_store_round_trip; covered-by:crates/lash-durable-test/tests/rlm_execution_documents.rs::durable_language_trace_continues_once_across_quiet_points; covered-by:crates/lash-durable-test/tests/rlm_execution_documents.rs::every_model_code_path_runs_in_a_worker. The stored process-map law is enabled. FIG-5406 verified its exact selectors on PostgreSQL, SQLite memory and SQLite file at 47167f2431 (3 executed, 3 passed). FIG-5378 commit e168fca836 fixed the known arrival-order-dependent fixture bug: the worker is identified by its limit parameter, rather than the lifted main path it shares with the nested process. The reported full-run red at ea51af0029 has no retained failure log and did not reproduce; its culprit remains unproven. assert_skipped retains its worker-never marker check. The continuation law also checks distinct admitted call bindings at repeated occurrences of one node."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/projections_and_snapshots.rs"

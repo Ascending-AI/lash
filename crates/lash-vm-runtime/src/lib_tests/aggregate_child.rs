@@ -83,7 +83,7 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
         ],
     );
     let store = Arc::new(std::sync::Mutex::new(
-        lash_trace::TraceLashlangGraphAccumulator::default(),
+        lash_trace::WorkflowExecutionOverlayAccumulator::default(),
     ));
     let identity = TraceLanguageExecutionIdentity {
         scope: lash_trace::TraceRuntimeScope::none(),
@@ -99,7 +99,7 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
         generation: None,
     };
     let observer_store = Arc::clone(&store);
-    let traced = LanguageTraceHost::new(ChildHost::default(), move |_: &ChildHost, payload| {
+    let traced = LanguageTraceHost::new(ChildHost::default(), move |_: &ChildHost, payload, _| {
         let event = TraceLanguageExecution {
             event_key: "real-aggregate".to_string(),
             identity: identity.clone(),
@@ -130,10 +130,12 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
         "one await occurrence must have one wait and resume"
     );
     assert!(graph.history.iter().any(|item| matches!(
-        &item.event.payload,
-        TraceLanguageExecutionPayload::NodeWaiting {
-            awaited: TraceNodeAwaited::ChildProcesses { process_ids },
-            ..
+        &item.fact,
+        lash_trace::WorkflowOverlayFact::Language {
+            payload: TraceLanguageExecutionPayload::NodeWaiting {
+                awaited: TraceNodeAwaited::ChildProcesses { process_ids },
+                ..
+            },
         } if process_ids == &vec![
             lash_core::ProcessId::fixture("child-1"),
             lash_core::ProcessId::fixture("child-2"),
@@ -211,7 +213,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
         ],
     );
     let store = Arc::new(std::sync::Mutex::new(
-        lash_trace::TraceLashlangGraphAccumulator::default(),
+        lash_trace::WorkflowExecutionOverlayAccumulator::default(),
     ));
     let identity = TraceLanguageExecutionIdentity {
         scope: lash_trace::TraceRuntimeScope::none(),
@@ -231,7 +233,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
     let observer_store = Arc::clone(&store);
     let traced = LanguageTraceHost::new(
         CancellingHost::default(),
-        move |_: &CancellingHost, payload: TraceLanguageExecutionPayload| {
+        move |_: &CancellingHost, payload: TraceLanguageExecutionPayload, _| {
             observed.lock().expect("payload log").push(payload.clone());
             observer_store
                 .lock()
@@ -283,34 +285,35 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
         .snapshot()
         .expect("cancelled graph");
     assert!(graph.conflicts.is_empty(), "{:?}", graph.conflicts);
-    let observation = |id: &str| {
+    let occurrence = |id: &str| {
         &graph
-            .nodes
+            .sites
             .iter()
-            .find(|node| node.id == id)
-            .expect("observed node")
-            .observation
+            .find(|site| site.site.node_id == id)
+            .expect("observed site")
+            .occurrence
     };
     assert!(matches!(
-        observation(&cancelled[0]),
-        TraceLashlangNodeObservation::Cancelled { .. }
+        occurrence(&cancelled[0]),
+        WorkflowOverlayOccurrence::Cancelled { .. }
     ));
     assert!(
-        graph.nodes.iter().any(|node| matches!(
-            node.observation,
-            TraceLashlangNodeObservation::Completed { .. }
-        )),
+        graph
+            .sites
+            .iter()
+            .any(|site| matches!(site.occurrence, WorkflowOverlayOccurrence::Completed { .. })),
         "the start before the await completed: {:#?}",
-        graph.nodes
+        graph.sites
     );
 }
 
 /// A branch inside a loop takes `then` in iteration 1 and `else` in
-/// iteration 2. The run is real VM execution; the static map is the module
-/// artifact's own. Each iteration's untaken arm folds to `Skipped` from the
-/// observed `BranchSelected` alone.
+/// iteration 2. The run is real VM execution, folded over the module
+/// artifact's own document: each selection names its typed arm, only the
+/// taken arm's site is observed, and no site is outside the document. Which
+/// nodes the untaken arm holds is the document's to say.
 #[tokio::test(flavor = "current_thread")]
-async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
+async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
     #[derive(Default)]
     struct PrintHost;
 
@@ -371,17 +374,26 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         environment: &environment,
     })
     .expect("loop branch compiles");
-    let execution_map =
-        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(&output.artifact));
-    let arm = |title: &str| {
-        execution_map
-            .nodes
-            .iter()
-            .find(|node| node.label == title)
-            .map(|node| node.id.clone())
-            .unwrap_or_else(|| panic!("`{title}` is mapped: {execution_map:#?}"))
+    let document = WorkflowExecutionDocument {
+        reference: lash_trace::WorkflowDocumentRef {
+            source_identity: output.artifact.source_identity().to_string(),
+            module_ref: output.module_ref.to_string(),
+            entry: lash_trace::WorkflowDocumentEntry::Main,
+            ir_version: 1,
+        },
+        graph: lash_vm::workflow_graph_from_artifact(&output.artifact),
+        entry: None,
     };
-    let (then_arm, else_arm) = (arm("Then print"), arm("Else print"));
+    let node = |title: &str| {
+        document
+            .graph
+            .nodes()
+            .find(|node| node.name == title)
+            .map(|node| node.id.to_string())
+            .unwrap_or_else(|| panic!("`{title}` is in the document"))
+    };
+    let (then_arm, else_arm) = (node("Then print"), node("Else print"));
+    let index = document.overlay_document();
 
     let identity = TraceLanguageExecutionIdentity {
         scope: lash_trace::TraceRuntimeScope::none(),
@@ -412,12 +424,12 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
     };
     let records = Arc::new(std::sync::Mutex::new(vec![record(
         TraceLanguageExecutionPayload::ExecutionStarted {
-            execution_map: execution_map.clone(),
+            document: document.reference.clone(),
         },
     )]));
     let observed = Arc::clone(&records);
     let observed_record = record;
-    let traced = LanguageTraceHost::new(PrintHost, move |_: &PrintHost, payload| {
+    let traced = LanguageTraceHost::new(PrintHost, move |_: &PrintHost, payload, _| {
         observed
             .lock()
             .expect("record log")
@@ -444,62 +456,59 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
         .nth(1)
         .expect("the branch is selected in both iterations");
     let fold = |records: &[lash_trace::TraceRecord]| {
-        lash_trace::fold_lashlang_graph(
+        lash_trace::fold_workflow_overlay(
             None,
+            Some(&index),
             records,
-            lash_trace::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
+            lash_trace::DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT,
         )
-        .expect("loop branch graph")
+        .expect("loop branch overlay")
     };
-    let observation = |graph: &lash_trace::TraceLashlangGraph, id: &str| {
-        graph
-            .nodes
+    let at = |overlay: &WorkflowExecutionOverlay, id: &str| {
+        overlay
+            .sites
             .iter()
-            .find(|node| node.id == id)
-            .map(|node| node.observation.clone())
-            .unwrap_or_else(|| panic!("`{id}` in graph: {:#?}", graph.nodes))
+            .find(|site| site.site.node_id == id)
+            .cloned()
+    };
+    let selected = |overlay: &WorkflowExecutionOverlay| {
+        overlay
+            .sites
+            .iter()
+            .find_map(|site| site.branch)
+            .expect("the branch site names its arm")
     };
 
     let first = fold(&records[..second_selection]);
+    assert_eq!(selected(&first), lash_trace::TraceBranchSelection::Then);
     assert!(
         matches!(
-            observation(&first, &then_arm),
-            TraceLashlangNodeObservation::Completed { .. }
+            at(&first, &then_arm).map(|site| site.occurrence),
+            Some(WorkflowOverlayOccurrence::Completed { occurrence: 1, .. })
         ),
         "{:#?}",
-        first.nodes
+        first.sites
     );
-    assert!(
-        matches!(
-            observation(&first, &else_arm),
-            TraceLashlangNodeObservation::Skipped {
-                branch_occurrence: 1,
-                ..
-            }
-        ),
-        "{:#?}",
-        first.nodes
+    assert_eq!(
+        at(&first, &else_arm),
+        None,
+        "the untaken arm is not observed"
     );
 
     let last = fold(&records);
     assert!(last.conflicts.is_empty(), "{:?}", last.conflicts);
-    assert!(
-        matches!(
-            observation(&last, &then_arm),
-            TraceLashlangNodeObservation::Skipped {
-                branch_occurrence: 2,
-                ..
-            }
-        ),
-        "{:#?}",
-        last.nodes
-    );
-    assert!(
-        matches!(
-            observation(&last, &else_arm),
-            TraceLashlangNodeObservation::Completed { .. }
-        ),
-        "{:#?}",
-        last.nodes
-    );
+    assert!(last.mismatches.is_empty(), "{:?}", last.mismatches);
+    assert!(last.coverage.is_complete());
+    assert_eq!(selected(&last), lash_trace::TraceBranchSelection::Else);
+    for arm in [&then_arm, &else_arm] {
+        let site = at(&last, arm).expect("each arm ran once");
+        assert!(
+            matches!(
+                site.occurrence,
+                WorkflowOverlayOccurrence::Completed { occurrence: 1, .. }
+            ),
+            "{site:#?}"
+        );
+        assert_eq!(site.summary.retained_occurrences, 1);
+    }
 }

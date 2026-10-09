@@ -126,12 +126,12 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
                 } = &event.payload
             {
                 let graph = reduce(&records[..=index]);
-                assert_eq!(graph.graph_key, event.identity.graph_key());
-                assert!(graph.nodes.iter().any(|node| {
-                    node.id == *node_id
+                assert_eq!(graph.execution_key, event.identity.graph_key());
+                assert!(graph.sites.iter().any(|site| {
+                    site.site.node_id == *node_id
                         && matches!(
-                            node.observation,
-                            lash_vm_runtime::TraceLashlangNodeObservation::Waiting { .. }
+                            site.occurrence,
+                            lash_vm_runtime::WorkflowOverlayOccurrence::Waiting { .. }
                         )
                 }));
                 awaited_node = Some((event.identity.graph_key(), node_id.clone()));
@@ -139,32 +139,41 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
         }
         let (graph_key, node_id) = awaited_node.expect("sleep emitted a wait");
         let graph = reduce(&records);
-        assert_eq!(graph.graph_key, graph_key);
-        assert!(graph.nodes.iter().any(|node| {
-            node.id == node_id
+        assert_eq!(graph.execution_key, graph_key);
+        assert!(graph.sites.iter().any(|site| {
+            site.site.node_id == node_id
                 && matches!(
-                    node.observation,
-                    lash_vm_runtime::TraceLashlangNodeObservation::Completed { .. }
+                    site.occurrence,
+                    lash_vm_runtime::WorkflowOverlayOccurrence::Completed { .. }
                 )
         }));
+        assert!(
+            matches!(
+                graph.document.as_ref().map(|document| &document.entry),
+                Some(lash_trace::WorkflowDocumentEntry::Main)
+            ),
+            "a cell's start names the main body of its module: {:?}",
+            graph.document
+        );
     });
 }
 
 fn reduce(
     records: &[lash_core::facade_support::TraceRecord],
-) -> lash_vm_runtime::TraceLashlangGraph {
+) -> lash_vm_runtime::WorkflowExecutionOverlay {
     graphs_of(records)
         .into_iter()
         .next()
-        .expect("execution graph")
+        .expect("execution overlay")
 }
 
-/// The graph of each execution `records` observe, in graph-key order.
+/// The overlay of each execution `records` observe, in execution-key order.
 fn graphs_of(
     records: &[lash_core::facade_support::TraceRecord],
-) -> Vec<lash_vm_runtime::TraceLashlangGraph> {
+) -> Vec<lash_vm_runtime::WorkflowExecutionOverlay> {
     let mut graphs =
-        std::collections::BTreeMap::<String, lash_trace::TraceLashlangGraphAccumulator>::new();
+        std::collections::BTreeMap::<String, lash_trace::WorkflowExecutionOverlayAccumulator>::new(
+        );
     for record in records {
         if let lash_trace::TraceEvent::LanguageExecution { event, .. } = &record.event {
             graphs
@@ -176,27 +185,36 @@ fn graphs_of(
     }
     graphs
         .values()
-        .filter_map(lash_trace::TraceLashlangGraphAccumulator::snapshot)
+        .filter_map(lash_trace::WorkflowExecutionOverlayAccumulator::snapshot)
         .collect()
 }
 
-fn observations_of_kind(
-    graph: &lash_vm_runtime::TraceLashlangGraph,
-    kind: lash_sansio::ExecutionNodeKind,
-) -> Vec<(String, lash_vm_runtime::TraceLashlangNodeObservation)> {
-    graph
-        .nodes
+/// The nodes `records` report parked on a sleep.
+fn sleep_nodes(
+    records: &[lash_core::facade_support::TraceRecord],
+) -> std::collections::BTreeSet<String> {
+    records
         .iter()
-        .filter(|node| node.kind == kind)
-        .map(|node| (node.id.clone(), node.observation.clone()))
+        .filter_map(|record| match &record.event {
+            lash_trace::TraceEvent::LanguageExecution { event, .. } => match &event.payload {
+                lash_vm_runtime::TraceLanguageExecutionPayload::NodeWaiting {
+                    node_id,
+                    awaited: lash_vm_runtime::TraceNodeAwaited::Sleep { .. },
+                    ..
+                } => Some(node_id.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
         .collect()
 }
 
 /// Cancellation after partial completion: the first sleep completed, the
-/// second is parked when the cell is cancelled, and the third never starts.
+/// second is parked when the cell is cancelled, and the third never starts,
+/// so the overlay holds no site for it.
 #[test]
 fn real_foreground_cancel_after_partial_completion_keeps_each_occurrence_honest() {
-    use lash_vm_runtime::TraceLashlangNodeObservation as Observation;
+    use lash_vm_runtime::WorkflowOverlayOccurrence as Observation;
     block_on(async {
         let cancellation = lash_core::CancellationToken::new();
         let sink = Arc::new(StepSink {
@@ -216,8 +234,22 @@ fn real_foreground_cancel_after_partial_completion_keeps_each_occurrence_honest(
         let records = sink.records.lock().unwrap().clone();
         let graph = reduce(&records);
         assert!(graph.conflicts.is_empty(), "{:?}", graph.conflicts);
-        let sleeps = observations_of_kind(&graph, lash_sansio::ExecutionNodeKind::Sleep);
-        assert_eq!(sleeps.len(), 3, "{sleeps:#?}");
+        let slept = sleep_nodes(&records);
+        let sleeps = graph
+            .sites
+            .iter()
+            .filter(|site| slept.contains(&site.site.node_id))
+            .map(|site| (site.site.node_id.clone(), site.occurrence.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(sleeps.len(), 2, "{sleeps:#?}");
+        assert!(
+            graph.sites.iter().all(|site| !matches!(
+                site.occurrence,
+                Observation::Running { .. } | Observation::Waiting { .. }
+            )),
+            "nothing is left in flight: {:#?}",
+            graph.sites
+        );
         let count = |matches: fn(&Observation) -> bool| {
             sleeps
                 .iter()
@@ -231,11 +263,6 @@ fn real_foreground_cancel_after_partial_completion_keeps_each_occurrence_honest(
         );
         assert_eq!(
             count(|o| matches!(o, Observation::Cancelled { .. })),
-            1,
-            "{sleeps:#?}"
-        );
-        assert_eq!(
-            count(|o| matches!(o, Observation::Unobserved)),
             1,
             "{sleeps:#?}"
         );

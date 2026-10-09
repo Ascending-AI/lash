@@ -1,18 +1,18 @@
 //! Emits the checked-in JSON Schema documents for the trace shapes a host
 //! decodes: the NDJSON [`TraceRecord`] (with its [`lash_trace::TraceEvent`]
-//! payload) and the trace-derived [`TraceLashlangGraph`] snapshot.
+//! payload) and the [`WorkflowExecutionOverlay`] folded from it.
 //!
 //! Both documents are owned by [`TRACE_SCHEMA_VERSION`]. The version property
 //! is pinned because a reader checks it exactly before decoding the shape.
 //! Neither root is closed: the trace policy tolerates additive fields on a
 //! known record, event or snapshot, while every enum stays closed.
 
-use lash_trace::{TRACE_SCHEMA_VERSION, TraceLashlangGraph, TraceRecord};
+use lash_trace::{TRACE_SCHEMA_VERSION, TraceRecord, WorkflowExecutionOverlay};
 use schemars::JsonSchema;
 use serde_json::{Value, json};
 
 const RECORD_NAME: &str = "trace-record";
-const GRAPH_NAME: &str = "trace-lashlang-graph";
+const OVERLAY_NAME: &str = "workflow-execution-overlay";
 const VERSION_CONSTANT: &str = "TRACE_SCHEMA_VERSION";
 
 /// One generated document. The registration the drift script reads is built
@@ -48,7 +48,7 @@ fn main() -> Result<(), String> {
 fn documents() -> Result<Vec<Document>, String> {
     Ok(vec![
         document::<TraceRecord>(RECORD_NAME)?,
-        document::<TraceLashlangGraph>(GRAPH_NAME)?,
+        document::<WorkflowExecutionOverlay>(OVERLAY_NAME)?,
     ])
 }
 

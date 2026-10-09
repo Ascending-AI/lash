@@ -229,6 +229,16 @@ pub enum ProcessDocumentRead {
     },
 }
 
+/// What a [`ProcessDocumentProvider`] reads for a document reference.
+#[derive(Debug)]
+pub enum ProcessExecutionDocumentRead {
+    Read(ProcessDocument),
+    /// Nothing retains the module the reference names.
+    ArtifactMissing {
+        artifact: crate::ArtifactName,
+    },
+}
+
 /// What a [`ProcessDocumentProvider`] names a definition's document by.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ProcessDocumentRefRead {
@@ -259,6 +269,15 @@ pub trait ProcessDocumentProvider: Send + Sync {
         &self,
         payload: &serde_json::Value,
     ) -> Result<ProcessDocumentRefRead, crate::PluginError>;
+
+    /// The document `reference` names, with the entry it selects: what an
+    /// execution that named it runs, whether that is a definition's process
+    /// or a module's main body. The answer is the provider's own type, or
+    /// `ArtifactMissing` when nothing retains the module any more.
+    async fn execution_document(
+        &self,
+        reference: &lash_trace::WorkflowDocumentRef,
+    ) -> Result<ProcessExecutionDocumentRead, crate::PluginError>;
 
     /// Admit a language document as a definition. The engine validates the
     /// document itself, derives everything a definition states from it, and

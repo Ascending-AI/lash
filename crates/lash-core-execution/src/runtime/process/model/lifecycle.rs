@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// One thing a process is blocked on: what it is, since when, and the node
-/// of the engine's execution map that blocked on it, when the engine named
+/// of the engine's workflow document that blocked on it, when the engine named
 /// one. It names no completion key or wait id: holding one of those resolves
 /// the wait, and a reader of process state is not handed that.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

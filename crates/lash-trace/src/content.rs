@@ -256,6 +256,7 @@ impl TraceEvent {
             | Self::DomainCompleted { .. }
             | Self::ProviderReplayDropped { .. }
             | Self::ToolReceipt { .. }
+            | Self::StepBodyStarted { .. }
             | Self::ToolCheckConflict { .. }
             | Self::ObservationProjection { .. }
             | Self::JournaledEffectStarted { .. }

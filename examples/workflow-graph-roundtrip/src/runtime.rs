@@ -89,20 +89,33 @@ impl RunView {
             .source_identity
             .clone()
             .ok_or_else(|| RunError::Invalid("the run's graph names no artifact".into()))?;
-        let map = trace_lashlang_process_map(&document.graph, &document.entry)
-            .ok_or_else(|| RunError::Invalid("the run's process has no execution map".into()))?;
-        let root_node = document
+        let process = document
             .graph
             .process(&document.entry)
-            .ok_or_else(|| RunError::Invalid("the run's process has no graph".into()))?
-            .id
-            .to_string();
+            .ok_or_else(|| RunError::Invalid("the run's process has no graph".into()))?;
+        let mut nodes = BTreeSet::new();
+        executing_nodes(&process.body, &mut nodes);
         Ok(Self {
             workflow_version,
             definition,
-            root_node,
-            nodes: map.nodes.into_iter().map(|node| node.id).collect(),
+            root_node: process.id.to_string(),
+            nodes,
         })
+    }
+}
+
+/// The nodes of `body`, nested ones included, that have an execution site:
+/// the nodes a run can report on.
+fn executing_nodes(body: &lash::vm::ir::WorkflowSubgraph, nodes: &mut BTreeSet<String>) {
+    for node in &body.nodes {
+        if !node.execution_sites.is_empty() {
+            nodes.insert(node.id.to_string());
+        }
+        if let lash::vm::ir::WorkflowNodeKind::Container(container) = &node.kind {
+            for (_, child) in container.child_subgraphs() {
+                executing_nodes(child, nodes);
+            }
+        }
     }
 }
 
@@ -232,6 +245,10 @@ impl PreparedRun {
                     ProcessObservationEventPayload::LanguageExecution(observation) => {
                         (overlay.language_observation(&observation.execution)?, false)
                     }
+                    // The admitted body of a tool step started: its node runs.
+                    ProcessObservationEventPayload::StepBodyStarted(observation) => {
+                        (overlay.step_body_started(&observation.step), false)
+                    }
                     ProcessObservationEventPayload::Committed { event } => (
                         overlay.durable(event)?,
                         matches!(event.fact, ProcessLifecycleFact::Terminal { .. }),
@@ -319,7 +336,7 @@ impl Overlay {
     fn effect(&mut self, occurrence: &ProcessEffectOccurrence) -> Result<Vec<RunEvent>, RunError> {
         if !self.view.nodes.contains(&occurrence.node_id) {
             return Err(RunError::Invalid(format!(
-                "process event names a node outside the saved execution map: {}",
+                "process event names a node outside the saved workflow document: {}",
                 occurrence.node_id
             )));
         }
@@ -431,6 +448,18 @@ impl Overlay {
             .collect::<Vec<_>>();
         events.extend(self.deliver_display()?);
         Ok(events)
+    }
+
+    fn step_body_started(&mut self, step: &lash::tracing::StepBodyStarted) -> Vec<RunEvent> {
+        if !self.view.nodes.contains(&step.node_id) {
+            return Vec::new();
+        }
+        vec![self.event(
+            step.node_id.clone(),
+            RunStatus::Started,
+            DisplayDelta::default(),
+            None,
+        )]
     }
 
     fn language(&mut self, payload: TraceLanguageExecutionPayload) -> Option<RunEvent> {

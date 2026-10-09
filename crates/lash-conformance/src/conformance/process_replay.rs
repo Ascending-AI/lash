@@ -12,6 +12,7 @@ use super::replay_laws::{
 use super::*;
 use crate::testing::{
     process_committed_event, process_language_observation, process_observation_label,
+    process_step_body_started,
 };
 use crate::{
     ProcessId, ProcessObservationCursor, ProcessObservationCursorError, ProcessObservationEvent,
@@ -316,6 +317,50 @@ async fn a_redelivery_is_published_once(store: Arc<dyn ProcessReplayStore>) {
     assert_eq!(
         labels_after(&store, &start).await,
         ["node a", "committed:1", "committed:2"]
+    );
+
+    // FIG-5576: a step's body start is one fact per attempt. Its redelivery
+    // is published once; the retried body's start is another fact, with the
+    // same site and call.
+    let body = |attempt, observed_at_ms| {
+        ProcessReplayEventDraft::step_body_started(
+            ProcessSequence::new(2),
+            process_step_body_started(&process, "node a", attempt, observed_at_ms),
+        )
+    };
+    let stepped = store
+        .publish(
+            &process,
+            vec![body(1, 5), body(1, 6), body(2, 7), body(1, 8)],
+        )
+        .await
+        .expect("publish a body start, its redeliveries and its retry");
+    assert_eq!(
+        stepped
+            .iter()
+            .map(|event| process_observation_label(event))
+            .collect::<Vec<_>>(),
+        ["step body node a attempt 1", "step body node a attempt 2"]
+    );
+    assert!(matches!(
+        stepped[0].payload.identity(),
+        ProcessObservationIdentity::StepBodyStarted { .. }
+    ));
+    assert_ne!(
+        stepped[0].payload.identity(),
+        stepped[1].payload.identity(),
+        "each attempt is its own fact"
+    );
+    assert_eq!(
+        labels_after(&store, &start).await,
+        [
+            "node a",
+            "committed:1",
+            "committed:2",
+            "step body node a attempt 1",
+            "step body node a attempt 2"
+        ],
+        "a reader of the window decodes the body starts it retained"
     );
 }
 

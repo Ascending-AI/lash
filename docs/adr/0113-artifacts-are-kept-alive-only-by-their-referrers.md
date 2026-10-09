@@ -427,7 +427,11 @@ another referrer holds them
 #### 3.7 `execution`: execution settlement
 
 RLM publication and realized tool intents hold artifacts under the enclosing
-execution's `Execution` referrer. The first acquisition arms `AwaitJournal`;
+execution's `Execution` referrer. Every cell publishes its module there,
+whether or not it declares a process: the cell's `ExecutionStarted` names
+its workflow document by that module's reference, and a host reads it while
+the execution is unsettled. Only a module that declares a process also takes
+the frame's edge (§3.1). The first acquisition arms `AwaitJournal`;
 its end requires the execution to be `Settled` (§2.5). A terminal durable
 fact alone cannot authorize cleanup while that execution may still resume
 (`crates/lash-protocol-rlm/src/executor/mod.rs:955-979`,

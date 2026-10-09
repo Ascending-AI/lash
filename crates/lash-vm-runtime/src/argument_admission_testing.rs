@@ -117,7 +117,6 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
                     node_id: "nested-union".into(),
                     node_kind: lash_sansio::ExecutionNodeKind::Call,
                     label: "nested start".into(),
-                    branch: None,
                     workflow_site: lash_vm::WorkflowExecutionSite::new(
                         "process:install",
                         [],

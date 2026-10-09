@@ -1278,7 +1278,6 @@ impl crate::ProcessEngine for LawEngine {
                 state,
                 crate::EngineAction::Steps {
                     steps: vec![crate::StepRequest::Tool {
-                        language_execution: None,
                         step: crate::StepName("forever".into()),
                         tool: lash_sansio::ToolId::new(HANGING_TOOL),
                         input: serde_json::Value::Null,

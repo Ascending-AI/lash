@@ -61,9 +61,8 @@ pub use lash_vm::{
     format_link_diagnostic, format_runtime_diagnostic, format_source_diagnostic,
 };
 pub use lash_vm::{
-    LashVmBranchSite, LashVmEffectFailure, LashVmExecutionCallSite, LashVmExecutionChild,
-    LashVmExecutionFailure, LashVmExecutionObservation, LashVmExecutionSite,
-    ProcessBranchSelection, process_ref_key,
+    LashVmEffectFailure, LashVmExecutionCallSite, LashVmExecutionChild, LashVmExecutionFailure,
+    LashVmExecutionObservation, LashVmExecutionSite, ProcessBranchSelection, process_ref_key,
 };
 pub use lash_vm::{
     LashVmHostCatalog, LashVmHostCatalogError, LashVmHostEnvironment, LashVmLanguageFeatures,

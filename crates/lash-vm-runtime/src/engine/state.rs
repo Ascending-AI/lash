@@ -245,7 +245,6 @@ pub(crate) enum IssuedLeaf {
         /// The call's node and occurrence, when the VM tracks it.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         site: Option<lash_core::StepEffectSite>,
-        language_execution: Option<Box<lash_trace::TraceLanguageExecution>>,
     },
 
     /// A timer that settles at `until_ms`.

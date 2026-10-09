@@ -18,6 +18,9 @@ enum StoredPayload {
     LanguageExecution {
         observation: Box<LanguageExecutionObservation>,
     },
+    StepBodyStarted {
+        observation: Box<lash_core::StepBodyStartedObservation>,
+    },
     Committed {
         event: Box<ObservedProcessEvent>,
     },
@@ -50,6 +53,7 @@ fn identity_key(identity: &ProcessObservationIdentity) -> String {
     match identity {
         ProcessObservationIdentity::Committed { sequence } => format!("c:{}", sequence.as_u64()),
         ProcessObservationIdentity::LanguageExecution { event_key } => format!("l:{event_key}"),
+        ProcessObservationIdentity::StepBodyStarted { event_key } => format!("s:{event_key}"),
     }
 }
 
@@ -62,6 +66,11 @@ pub(super) fn encode(
     let stored = match &payload {
         ProcessObservationEventPayload::LanguageExecution(observation) => {
             StoredPayload::LanguageExecution {
+                observation: Box::new(observation.clone()),
+            }
+        }
+        ProcessObservationEventPayload::StepBodyStarted(observation) => {
+            StoredPayload::StepBodyStarted {
                 observation: Box::new(observation.clone()),
             }
         }
@@ -93,6 +102,9 @@ pub(super) fn decode_payload(
     Ok(match stored {
         StoredPayload::LanguageExecution { observation } => {
             ProcessObservationEventPayload::LanguageExecution(*observation)
+        }
+        StoredPayload::StepBodyStarted { observation } => {
+            ProcessObservationEventPayload::StepBodyStarted(*observation)
         }
         StoredPayload::Committed { event } => {
             ProcessObservationEventPayload::Committed { event: *event }

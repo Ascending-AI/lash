@@ -169,6 +169,7 @@ impl From<WorkloadProfileError> for FixedScriptRunnerError {
 
 mod agent_contracts;
 mod attempt_probe;
+mod contract_graphs;
 #[cfg(test)]
 mod contract_registry_tests;
 mod contract_support;
@@ -203,6 +204,7 @@ pub(crate) use runtime_proofs::prove_pending_tool_completion_on as prove_pending
 
 use agent_contracts::*;
 use attempt_probe::*;
+use contract_graphs::*;
 use contract_support::*;
 use fixed_script::*;
 use generated_driver::*;

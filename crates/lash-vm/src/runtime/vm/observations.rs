@@ -285,18 +285,14 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         else {
             return;
         };
-        let Some(branch) = site.branch.as_ref() else {
+        if site.node_kind != lash_sansio::ExecutionNodeKind::Branch {
             return;
-        };
+        }
         let occurrence = next_occurrence(&mut self.lash_vm_execution_occurrences, site);
         self.observe(|| LashVmExecutionObservation::BranchSelected {
             site: site.clone(),
             occurrence,
             loops: self.loop_context(),
-            edge_id: match selected {
-                ProcessBranchSelection::Then => branch.then_edge_id.clone(),
-                ProcessBranchSelection::Else => branch.else_edge_id.clone(),
-            },
             selected,
         });
     }

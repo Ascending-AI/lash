@@ -255,6 +255,36 @@ impl HostArtifacts {
         Ok(read)
     }
 
+    /// Read the workflow document `reference` names, with the entry it
+    /// selects: what an execution that named it runs, a session cell's main
+    /// body as much as a process's definition. An execution's start and a
+    /// process's observation snapshot carry the reference. This acquires no
+    /// lasting pin.
+    #[cfg(feature = "rlm")]
+    pub async fn execution_document(
+        &self,
+        reference: &crate::workflow::WorkflowDocumentRef,
+    ) -> Result<crate::workflow::WorkflowDocumentRead> {
+        use crate::workflow::{WorkflowDocumentRead, WorkflowUnavailable};
+        let Some(provider) = self
+            .engines
+            .document_provider(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+        else {
+            return Ok(WorkflowDocumentRead::Unsupported);
+        };
+        Ok(match provider.execution_document(reference).await? {
+            lash_core::ProcessExecutionDocumentRead::Read(document) => {
+                match document.downcast::<crate::workflow::WorkflowExecutionDocument>() {
+                    Ok(document) => WorkflowDocumentRead::Read(Box::new(document)),
+                    Err(_) => WorkflowDocumentRead::Unsupported,
+                }
+            }
+            lash_core::ProcessExecutionDocumentRead::ArtifactMissing { artifact } => {
+                WorkflowDocumentRead::Unavailable(WorkflowUnavailable::Artifact { artifact })
+            }
+        })
+    }
+
     /// Ends the pin: its `Ended` record, and on the store set's own
     /// database its fence, in one core transaction. The artifact-cleanup
     /// relay then severs every edge the pin holds in every store. The pin can

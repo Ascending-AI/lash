@@ -1,0 +1,1938 @@
+{
+  "$defs": {
+    "EffectAddress": {
+      "description": "Canonical address of one admitted runtime effect.",
+      "properties": {
+        "execution_scope": {
+          "$ref": "#/$defs/ExecutionScope"
+        },
+        "replay_key": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "execution_scope",
+        "replay_key"
+      ],
+      "type": "object"
+    },
+    "ExecutionScope": {
+      "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic\nwork begins. Its journal encoding is an existing durable contract; effect\naddresses compose it with a replay key without changing those bytes.",
+      "oneOf": [
+        {
+          "properties": {
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "turn_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "turn",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "turn_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "process",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_id"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One operation on a session that runs no turn: a host command, named\nby its batch, or the admissions of one shift request. It has no\nlogical root, and no logical turn runs under it.",
+          "properties": {
+            "operation_id": {
+              "type": "string"
+            },
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "session_operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id",
+            "operation_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "session_id": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "session_delete",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "session_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "runtime_operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "operation_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ExprSlot": {
+      "description": "The role one child expression plays in its parent expression of the\nshared workflow IR.",
+      "oneOf": [
+        {
+          "enum": [
+            "condition",
+            "then",
+            "else",
+            "iterable",
+            "receiver",
+            "callee",
+            "this",
+            "catch",
+            "finally",
+            "target",
+            "index",
+            "left",
+            "right"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A statement of a block or an element of a list.",
+          "properties": {
+            "item": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "item"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The value of a record entry, by entry position.",
+          "properties": {
+            "entry": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "entry"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "inner",
+          "description": "The expression a label or a structural role wraps.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A dynamic index of an assignment target's path, by position.",
+          "properties": {
+            "assign_index": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "assign_index"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "value",
+          "description": "The value an assignment stores.",
+          "type": "string"
+        },
+        {
+          "const": "bind",
+          "description": "The generated statements that bind a loop element to authored names.",
+          "type": "string"
+        },
+        {
+          "const": "body",
+          "description": "The body of a loop, a function, a process literal or a `try`.",
+          "type": "string"
+        },
+        {
+          "const": "input",
+          "description": "The input of a host descriptor constructor.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A call argument, by position.",
+          "properties": {
+            "arg": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "arg"
+          ],
+          "type": "object"
+        },
+        {
+          "const": "operand",
+          "description": "The single operand of a unary form.",
+          "type": "string"
+        },
+        {
+          "const": "method_key",
+          "description": "The computed member a method call reads its callee from.",
+          "type": "string"
+        },
+        {
+          "const": "items",
+          "description": "The collection a map intrinsic reads.",
+          "type": "string"
+        },
+        {
+          "const": "function",
+          "description": "The callback a map intrinsic applies.",
+          "type": "string"
+        }
+      ]
+    },
+    "RunAggregateWakePolicy": {
+      "description": "Aggregate wake rule. Run-owned aggregates preserve these semantics;\nthe rule does not require a durable group dispatcher.\n\n`Promise.all` and `Promise.allSettled` both use [`All`](Self::All): the\ncaller's early exit on rejection is not a host wake rule. The wire shape\nhas no default, so a missing rule cannot be replayed under a guess.",
+      "oneOf": [
+        {
+          "const": "first",
+          "description": "Wake on the first settlement of any kind.",
+          "type": "string"
+        },
+        {
+          "const": "first_success",
+          "description": "Wake on the first success, or after every child fails.",
+          "type": "string"
+        },
+        {
+          "const": "all",
+          "description": "Deliver every settlement in durable rank order.",
+          "type": "string"
+        }
+      ]
+    },
+    "StepBodyStarted": {
+      "additionalProperties": false,
+      "description": "The admitted body of a process step started: the step's actor committed\nits admission, bound it to a call, and is about to run it. A step that is\nrefused never produces one, and a retried body produces one more with the\nsame site, occurrence and call and the next attempt.\n\nIt names no language and no document: the process's own definition scopes\nthe site.",
+      "properties": {
+        "attempt": {
+          "description": "The one-based attempt of the admitted body.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "call_id": {
+          "description": "The call the admission bound the step to.",
+          "type": "string"
+        },
+        "context": {
+          "$ref": "#/$defs/WorkflowOccurrenceContext",
+          "description": "The exact site inside the node and the loop activations around this\noccurrence."
+        },
+        "node_id": {
+          "description": "The node of the process's workflow document the step runs for.",
+          "type": "string"
+        },
+        "occurrence": {
+          "description": "Which occurrence of the site this is, from 1, counted per site.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "process_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "process_id",
+        "node_id",
+        "occurrence",
+        "call_id",
+        "attempt"
+      ],
+      "type": "object"
+    },
+    "ToolFailureClass": {
+      "enum": [
+        "invalid_request",
+        "io",
+        "unavailable",
+        "permission_denied",
+        "timeout",
+        "execution",
+        "external",
+        "resource_limit",
+        "internal"
+      ],
+      "type": "string"
+    },
+    "ToolFailureSource": {
+      "enum": [
+        "runtime",
+        "tool",
+        "plugin",
+        "policy",
+        "cancellation"
+      ],
+      "type": "string"
+    },
+    "TraceBranchSelection": {
+      "enum": [
+        "then",
+        "else"
+      ],
+      "type": "string"
+    },
+    "TraceLanguageChildExecution": {
+      "properties": {
+        "attempt": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "entry_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entry_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "module_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "process_id": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/TraceRuntimeScope"
+        }
+      },
+      "required": [
+        "scope",
+        "process_id"
+      ],
+      "type": "object"
+    },
+    "TraceLanguageExecutionFailure": {
+      "description": "The observed cause of a failed language node.",
+      "oneOf": [
+        {
+          "description": "A dispatched tool effect failed with its recorded classification and\nrecorded source and delay hint. `replay_key` is the causing effect's identity.",
+          "properties": {
+            "class": {
+              "$ref": "#/$defs/ToolFailureClass"
+            },
+            "code": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "effect",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "replay_key": {
+              "type": "string"
+            },
+            "source": {
+              "$ref": "#/$defs/ToolFailureSource"
+            },
+            "suggested_delay_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "class",
+            "code",
+            "message",
+            "replay_key",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "A VM or host-boundary failure with a stable runtime error code.",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "runtime",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "code",
+            "message"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceLanguageExecutionStatus": {
+      "enum": [
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "TraceNodeAwaited": {
+      "oneOf": [
+        {
+          "properties": {
+            "deadline_ms": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "sleep",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "signal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "key"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "const": "child_processes",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_ids"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "batch_id": {
+              "type": "string"
+            },
+            "position": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "tool_batch",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "batch_id",
+            "position"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "group_key": {
+              "type": "string"
+            },
+            "position": {
+              "format": "uint",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "type": {
+              "const": "run_aggregate",
+              "type": "string"
+            },
+            "wake": {
+              "$ref": "#/$defs/RunAggregateWakePolicy"
+            }
+          },
+          "required": [
+            "type",
+            "group_key",
+            "position",
+            "wake"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TraceNodeWaitResolution": {
+      "enum": [
+        "resumed",
+        "timed_out",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "TraceRuntimeScope": {
+      "properties": {
+        "protocol_iteration": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
+          "minLength": 1,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_index": {
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TraceRuntimeSubject": {
+      "oneOf": [
+        {
+          "properties": {
+            "address": {
+              "$ref": "#/$defs/EffectAddress"
+            },
+            "effect_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "effect",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "address",
+            "effect_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "process_id": {
+              "type": "string"
+            },
+            "type": {
+              "const": "process",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "process_id"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowDocumentEntry": {
+      "description": "The entry of a [`WorkflowDocumentRef`].",
+      "oneOf": [
+        {
+          "description": "The module's main body.",
+          "properties": {
+            "kind": {
+              "const": "main",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "One exported process, by the persisted reference the module's\nexports name it with.",
+          "properties": {
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "process_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "process_ref"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowDocumentRef": {
+      "description": "Which workflow document an execution runs, and where it enters it. It\nnames the document; it is never the document. A host reads the graph the\nreference names through the facade's workflow inspection and may cache\nit under this value, which is immutable for a process.",
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/WorkflowDocumentEntry",
+          "description": "Where the execution enters the document."
+        },
+        "ir_version": {
+          "description": "The interpretation of the IR the document is written under.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "module_ref": {
+          "description": "The stored module the document is read from.",
+          "type": "string"
+        },
+        "source_identity": {
+          "description": "The definition identity of the admitted module the document\nprojects; the document's own `source_identity`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_identity",
+        "module_ref",
+        "entry",
+        "ir_version"
+      ],
+      "type": "object"
+    },
+    "WorkflowLoopFrame": {
+      "additionalProperties": false,
+      "description": "One enclosing loop of an occurrence, outermost first in a context.",
+      "properties": {
+        "activation": {
+          "description": "Which entry of that loop this is, unique within the execution: a loop\nreentered by an outer iteration gets a new activation.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "position": {
+          "$ref": "#/$defs/WorkflowLoopPosition"
+        },
+        "site": {
+          "$ref": "#/$defs/WorkflowSiteRef",
+          "description": "The loop's own site."
+        }
+      },
+      "required": [
+        "site",
+        "activation",
+        "position"
+      ],
+      "type": "object"
+    },
+    "WorkflowLoopPosition": {
+      "description": "Where inside one loop activation something ran. Numbers are one-based.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The `n`-th evaluation of a `while` condition. The check after the last\nbody iteration, which reads false, is a check with no body of its\nnumber.",
+          "properties": {
+            "check": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "check"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The `n`-th run of the loop body.",
+          "properties": {
+            "body": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowOccurrenceContext": {
+      "additionalProperties": false,
+      "description": "Where one occurrence of a site ran, beyond its node: the exact site\ninside the node's statement and the loop activations that enclosed the\noccurrence when it began, outermost first. The default is a node's own\nstatement site outside every loop.",
+      "properties": {
+        "loops": {
+          "items": {
+            "$ref": "#/$defs/WorkflowLoopFrame"
+          },
+          "type": "array"
+        },
+        "site_path": {
+          "$ref": "#/$defs/WorkflowSitePath"
+        }
+      },
+      "type": "object"
+    },
+    "WorkflowOverlayCall": {
+      "description": "The admitted call an occurrence is bound to.",
+      "properties": {
+        "attempt": {
+          "description": "The latest attempt of the call's admitted body that was observed to\nstart; absent when the binding came from a language fact alone.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "call_id": {
+          "type": "string"
+        },
+        "occurrence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "occurrence",
+        "call_id"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlayChildLink": {
+      "description": "Link from an observed parent site to a child execution's overlay.",
+      "properties": {
+        "child_attempt": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "child_entry_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_entry_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_execution_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_module_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "child_process_id": {
+          "type": "string"
+        },
+        "parent_execution_key": {
+          "type": "string"
+        },
+        "parent_site": {
+          "$ref": "#/$defs/WorkflowSiteRef"
+        }
+      },
+      "required": [
+        "parent_execution_key",
+        "parent_site",
+        "child_process_id"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlayConflict": {
+      "description": "A bounded, typed record of divergent values under one logical identity.",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/WorkflowOverlayEventIdentity"
+        },
+        "kind": {
+          "$ref": "#/$defs/WorkflowOverlayConflictKind"
+        },
+        "variants": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "identity",
+        "kind",
+        "variants"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlayConflictKind": {
+      "description": "Why two records under one logical identity did not deduplicate.",
+      "enum": [
+        "conflicting_duplicate"
+      ],
+      "type": "string"
+    },
+    "WorkflowOverlayCoverage": {
+      "description": "How much of the execution the overlay can speak for.",
+      "properties": {
+        "document_loaded": {
+          "description": "The reducer was given the document: every listed site is one of its\nsites, and a site it lacks is a mismatch.",
+          "type": "boolean"
+        },
+        "start_observed": {
+          "description": "The retained observations include the execution's start. Without it\nthe observer attached late or lost continuity, and occurrences that\nran before are not here.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "document_loaded",
+        "start_observed"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlayEventIdentity": {
+      "description": "Canonical identity of one fold input within its execution.\n\nSite transitions use `(site, occurrence)` plus the transition kind:\noccurrences count per site. The transition kind lets a start and its\nterminal fact merge monotonically while still making a second, different\nstart or terminal a typed conflict. A step body start is one fact per\nattempt of its body.",
+      "properties": {
+        "occurrence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "site": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowSiteRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "step_attempt": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "transition": {
+          "$ref": "#/$defs/WorkflowOverlayEventTransition"
+        }
+      },
+      "required": [
+        "transition"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlayEventTransition": {
+      "enum": [
+        "execution_started",
+        "execution_finished",
+        "node_started",
+        "step_body_started",
+        "node_waiting",
+        "node_resumed",
+        "node_terminal",
+        "branch_selected",
+        "child_started"
+      ],
+      "type": "string"
+    },
+    "WorkflowOverlayHistoryEvent": {
+      "description": "One canonical observation retained so a persisted overlay can be folded\nagain.",
+      "oneOf": [
+        {
+          "description": "What the language execution reported.",
+          "oneOf": [
+            {
+              "description": "The execution began. It names the workflow document it runs and the\nentry it runs it from; the document itself is read through the\nfacade's workflow inspection, never carried here.",
+              "properties": {
+                "document": {
+                  "$ref": "#/$defs/WorkflowDocumentRef"
+                },
+                "kind": {
+                  "const": "execution_started",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "document"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "error": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "kind": {
+                  "const": "execution_finished",
+                  "type": "string"
+                },
+                "status": {
+                  "$ref": "#/$defs/TraceLanguageExecutionStatus"
+                }
+              },
+              "required": [
+                "kind",
+                "status"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "call_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "context": {
+                  "$ref": "#/$defs/WorkflowOccurrenceContext",
+                  "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+                },
+                "kind": {
+                  "const": "node_started",
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "occurrence": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "node_id",
+                "occurrence"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "The named occurrence has parked on an observed wait. Its `since` is\nthe enclosing trace record timestamp, not a separately sampled clock.",
+              "properties": {
+                "awaited": {
+                  "$ref": "#/$defs/TraceNodeAwaited"
+                },
+                "context": {
+                  "$ref": "#/$defs/WorkflowOccurrenceContext",
+                  "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+                },
+                "kind": {
+                  "const": "node_waiting",
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "occurrence": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "node_id",
+                "occurrence",
+                "awaited"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "A parked occurrence resolved, including cancellation. Its node terminal\nremains a separate fact.",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/WorkflowOccurrenceContext",
+                  "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+                },
+                "kind": {
+                  "const": "node_resumed",
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "occurrence": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "resolution": {
+                  "$ref": "#/$defs/TraceNodeWaitResolution"
+                }
+              },
+              "required": [
+                "kind",
+                "node_id",
+                "occurrence",
+                "resolution"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Only an occurrence observed in flight may be cancelled.",
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/WorkflowOccurrenceContext",
+                  "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+                },
+                "kind": {
+                  "const": "node_cancelled",
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "occurrence": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "node_id",
+                "occurrence"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "call_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "context": {
+                  "$ref": "#/$defs/WorkflowOccurrenceContext",
+                  "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+                },
+                "kind": {
+                  "const": "node_completed",
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "occurrence": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "node_id",
+                "occurrence"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "call_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "context": {
+                  "$ref": "#/$defs/WorkflowOccurrenceContext",
+                  "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+                },
+                "failure": {
+                  "$ref": "#/$defs/TraceLanguageExecutionFailure"
+                },
+                "kind": {
+                  "const": "node_failed",
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "occurrence": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "node_id",
+                "occurrence",
+                "failure"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "context": {
+                  "$ref": "#/$defs/WorkflowOccurrenceContext",
+                  "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+                },
+                "kind": {
+                  "const": "branch_selected",
+                  "type": "string"
+                },
+                "node_id": {
+                  "type": "string"
+                },
+                "occurrence": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "selected": {
+                  "$ref": "#/$defs/TraceBranchSelection",
+                  "description": "The arm of the branch this occurrence took."
+                }
+              },
+              "required": [
+                "kind",
+                "node_id",
+                "occurrence",
+                "selected"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "child": {
+                  "$ref": "#/$defs/TraceLanguageChildExecution"
+                },
+                "context": {
+                  "$ref": "#/$defs/WorkflowOccurrenceContext",
+                  "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
+                },
+                "kind": {
+                  "const": "child_started",
+                  "type": "string"
+                },
+                "occurrence": {
+                  "format": "uint64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "parent_node_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "parent_node_id",
+                "occurrence",
+                "child"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "fact": {
+              "const": "language",
+              "type": "string"
+            }
+          },
+          "required": [
+            "fact"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The admitted body of a process step started.",
+          "properties": {
+            "fact": {
+              "const": "step_body_started",
+              "type": "string"
+            },
+            "step": {
+              "$ref": "#/$defs/StepBodyStarted"
+            }
+          },
+          "required": [
+            "fact",
+            "step"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/WorkflowOverlayEventIdentity"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "timestamp"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlayMismatch": {
+      "description": "An observation that does not belong to the claimed document. It is\nreported and never folded into the overlay.",
+      "oneOf": [
+        {
+          "description": "The execution's start names another document than the one loaded.",
+          "properties": {
+            "claimed": {
+              "$ref": "#/$defs/WorkflowDocumentRef"
+            },
+            "kind": {
+              "const": "document",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "claimed"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An observation names a site the loaded document does not have.",
+          "properties": {
+            "kind": {
+              "const": "site_outside_document",
+              "type": "string"
+            },
+            "site": {
+              "$ref": "#/$defs/WorkflowSiteRef"
+            }
+          },
+          "required": [
+            "kind",
+            "site"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowOverlaySettlement": {
+      "description": "Terminal evidence supplied by a committed process fact or durable snapshot.\nThis does not manufacture a language execution or site observation.",
+      "properties": {
+        "occurred_at": {
+          "description": "None when the snapshot has no canonical terminal occurrence time.",
+          "format": "date-time",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminal": {
+          "$ref": "#/$defs/WorkflowOverlayTerminal"
+        }
+      },
+      "required": [
+        "terminal"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlaySite": {
+      "description": "What was observed at one execution site of the document.",
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "const": "unobserved",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "status": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "start"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "awaited": {
+              "$ref": "#/$defs/TraceNodeAwaited"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "since": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "waiting",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "since",
+            "awaited"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_ms": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "duration_ms": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "failure": {
+              "$ref": "#/$defs/TraceLanguageExecutionFailure"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "end",
+            "failure"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The process settled without complete terminal evidence for this\nobserved occurrence. The category is authoritative; success, failure\nand timing are not inferred from it.",
+          "properties": {
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "settled_at": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "incomplete",
+              "type": "string"
+            },
+            "terminal": {
+              "$ref": "#/$defs/WorkflowOverlayTerminal"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "terminal"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "branch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceBranchSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which arm a branch site last took. Absent on every other site, and on\na branch whose selection has not been observed. The arms themselves\nare the document's: a host reads which nodes an unselected arm holds\nfrom the branch's typed children."
+        },
+        "call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowOverlayCall"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The admitted call of the site's latest bound occurrence."
+        },
+        "site": {
+          "$ref": "#/$defs/WorkflowSiteRef"
+        },
+        "summary": {
+          "$ref": "#/$defs/WorkflowOverlaySiteReport"
+        }
+      },
+      "required": [
+        "site",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlaySiteReport": {
+      "properties": {
+        "first_terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowOverlayTerminalRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_terminal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowOverlayTerminalRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retained_occurrences": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "started_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "retained_occurrences",
+        "started_count",
+        "terminal_count"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlaySiteRetention": {
+      "description": "Aggregate facts for occurrences evicted from one site's bounded history.",
+      "properties": {
+        "archived": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowOverlaySite"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "children": {
+          "items": {
+            "$ref": "#/$defs/WorkflowOverlayChildLink"
+          },
+          "type": "array"
+        },
+        "site": {
+          "$ref": "#/$defs/WorkflowSiteRef"
+        },
+        "state": {
+          "$ref": "#/$defs/WorkflowOverlaySite"
+        },
+        "truncation_watermark": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "watermark_history": {
+          "items": {
+            "$ref": "#/$defs/WorkflowOverlayHistoryEvent"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "site",
+        "truncation_watermark",
+        "watermark_history",
+        "state",
+        "children"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlayTerminal": {
+      "description": "The actual durable terminal category; abandonment is not a VM failure.",
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled",
+        "abandoned"
+      ],
+      "type": "string"
+    },
+    "WorkflowOverlayTerminalRecord": {
+      "properties": {
+        "end": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "occurrence": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/WorkflowOverlayTerminalStatus"
+        }
+      },
+      "required": [
+        "occurrence",
+        "status",
+        "end"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlayTerminalStatus": {
+      "enum": [
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "WorkflowSitePath": {
+      "description": "The typed path from a workflow node's statement to one executable\nsubexpression. The empty path is the statement itself.\n\nSlot segments walk the statement's typed child slots; a trailing role\nsegment names a synthetic site of the expression they reach.",
+      "items": {
+        "$ref": "#/$defs/WorkflowSiteSegment"
+      },
+      "type": "array"
+    },
+    "WorkflowSiteRef": {
+      "additionalProperties": false,
+      "description": "The static address of one execution site in a workflow document: the node\nthat owns it and the path to the executable subexpression inside it.",
+      "properties": {
+        "node_id": {
+          "type": "string"
+        },
+        "site_path": {
+          "$ref": "#/$defs/WorkflowSitePath"
+        }
+      },
+      "required": [
+        "node_id"
+      ],
+      "type": "object"
+    },
+    "WorkflowSiteRole": {
+      "description": "What a site that is not an expression of its own stands for.",
+      "oneOf": [
+        {
+          "const": "labeled_step",
+          "description": "The step a label declares over the expression it wraps, when that\nexpression is not itself the labeled operation.",
+          "type": "string"
+        }
+      ]
+    },
+    "WorkflowSiteSegment": {
+      "description": "One step of a [`WorkflowSitePath`].",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A typed child slot of the expression reached so far.",
+          "properties": {
+            "slot": {
+              "$ref": "#/$defs/ExprSlot"
+            }
+          },
+          "required": [
+            "slot"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A site the expression reached so far owns beside its own.",
+          "properties": {
+            "role": {
+              "$ref": "#/$defs/WorkflowSiteRole"
+            }
+          },
+          "required": [
+            "role"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$id": "https://lash.dev/schemas/workflow-execution-overlay/v36",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What one execution did, keyed into the workflow document it ran.\n\nThe overlay holds only what was observed: per-site occurrence states,\nbranch choices, child links and the bounded history they fold from. The\nstatic structure (nodes, labels, kinds, edges, the arms of a branch) is\nthe document's; a site with no observation is not listed here.",
+  "properties": {
+    "attempt": {
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "children": {
+      "items": {
+        "$ref": "#/$defs/WorkflowOverlayChildLink"
+      },
+      "type": "array"
+    },
+    "conflicts": {
+      "items": {
+        "$ref": "#/$defs/WorkflowOverlayConflict"
+      },
+      "type": "array"
+    },
+    "coverage": {
+      "$ref": "#/$defs/WorkflowOverlayCoverage"
+    },
+    "document": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkflowDocumentRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The document the execution runs: the loaded document's reference, or\nthe one the execution's start named when none was loaded."
+    },
+    "execution_key": {
+      "description": "The execution's key: its subject and, for an attempted execution, its\nattempt. Two runs of one document never share it.",
+      "type": "string"
+    },
+    "history": {
+      "items": {
+        "$ref": "#/$defs/WorkflowOverlayHistoryEvent"
+      },
+      "type": "array"
+    },
+    "history_limit": {
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "mismatches": {
+      "description": "Observations that did not belong to the document, smallest first, at\nmost 64.",
+      "items": {
+        "$ref": "#/$defs/WorkflowOverlayMismatch"
+      },
+      "type": "array"
+    },
+    "mismatches_truncated": {
+      "description": "More mismatches were observed than `mismatches` lists.",
+      "type": "boolean"
+    },
+    "retention": {
+      "items": {
+        "$ref": "#/$defs/WorkflowOverlaySiteRetention"
+      },
+      "type": "array"
+    },
+    "schema_version": {
+      "enum": [
+        36
+      ],
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scope": {
+      "$ref": "#/$defs/TraceRuntimeScope"
+    },
+    "settlement": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkflowOverlaySettlement"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Authoritative process settlement, independent of provisional VM outcomes."
+    },
+    "sites": {
+      "items": {
+        "$ref": "#/$defs/WorkflowOverlaySite"
+      },
+      "type": "array"
+    },
+    "status": {
+      "$ref": "#/$defs/TraceLanguageExecutionStatus"
+    },
+    "subject": {
+      "$ref": "#/$defs/TraceRuntimeSubject"
+    }
+  },
+  "required": [
+    "schema_version",
+    "execution_key",
+    "scope",
+    "subject",
+    "coverage",
+    "status",
+    "sites",
+    "children",
+    "mismatches",
+    "history_limit",
+    "retention",
+    "conflicts",
+    "history"
+  ],
+  "title": "WorkflowExecutionOverlay",
+  "type": "object",
+  "x-lash-schema-version": 36,
+  "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
+}

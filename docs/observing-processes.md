@@ -249,8 +249,10 @@ evidence the window holds. Completion does not shorten the window.
 
 ### The feed
 
-A feed yields two kinds of event.
+A feed yields three kinds of event.
 
+- `StepBodyStarted` is provisional: the admitted body of one step started,
+  at its site, under its call and attempt.
 - `LanguageExecution` is provisional: what a language execution reported
   (node starts, waits, branches, completion), with the producer's `event_key`
   as its identity. It never proves a durable advance. An `ExecutionFinished`
@@ -264,29 +266,63 @@ Node history is not durable. Starts, branches, loop occurrences, waits and
 timings live only in the replay window; a committed effect occurrence proves
 that effect's outcome and nothing else about the timeline.
 
-### Folding a graph
+### Folding an execution overlay
 
-Lash keeps no graph of a running process. A host that shows one folds the
-feed's `LanguageExecution` observations itself, with the pure reducer:
+Lash keeps no graph of a running process. The workflow document is the
+static truth: its nodes, their labels and kinds, the arms of a branch. What
+an execution did is an overlay a host folds over that document, with the pure
+reducer:
 
 ```rust,ignore
-let mut graph = TraceLashlangGraphAccumulator::default();
-graph.observe(&observation)?;          // a LanguageExecution event
-graph.settle(settlement);              // a committed Terminal, or a terminal read view
-graph.reset_live();                    // a gap
-let view = graph.snapshot();
+let mut overlay = WorkflowExecutionOverlayAccumulator::default();
+overlay.set_document(document.overlay_document()); // the document the execution names
+overlay.observe(&observation)?;          // a LanguageExecution event
+overlay.step_body_started(&started)?;    // a StepBodyStarted event
+overlay.settle(settlement);              // a committed Terminal, or a terminal read view
+overlay.reset_live();                    // a gap
+let view = overlay.snapshot();
 ```
 
+An execution's `ExecutionStarted` names its document
+(`WorkflowDocumentRef`), and so does a process's snapshot. Read it with
+`host_artifacts().execution_document(&reference)`: it answers a session
+cell's main body as well as a process's definition. Lash holds a process's
+document as long as it holds the process's definition. It holds a cell's
+only while the cell's execution is unsettled, unless a global of the frame
+names a process the cell declared: read a cell's document when its start
+arrives, and keep your own copy if you archive its observations. A document
+Lash no longer holds reads as `WorkflowDocumentRead::Unavailable`, and the
+overlay's `coverage.document_loaded` stays `false`. Events carry no labels,
+kinds or edges; look those up in the document by the event's site
+(`node_id` and `context.site_path`). A `BranchSelected` names the typed arm
+it took (`then` or `else`); which nodes the other arm holds is the document's
+to say.
+
+The overlay holds one state per observed execution site: its latest
+occurrence, the arm a branch site chose, the call an admitted step ran
+under, and a bounded history. It never lists a site that was not observed,
+and never grafts one the document lacks: a site outside the document is a
+typed `WorkflowOverlayMismatch`. `coverage` says what the overlay rests on.
+An observer that attached after the execution started still loads the right
+document from the snapshot's reference, and `coverage.start_observed` is
+`false` until the start is replayed.
+
+`StepBodyStarted` reports that the admitted body of a step is starting: the
+process, the exact site and occurrence, the admitted call and the attempt. A
+step that was refused reports none, and a retried body reports again with the
+same occurrence and call and the next attempt.
+
 `settle` takes the process's durable end
-(`TraceLashlangGraphSettlement { terminal, occurred_at }`): from a committed
+(`WorkflowOverlaySettlement { terminal, occurred_at }`): from a committed
 `Terminal` fact its `occurred_at_ms`, from a terminal read view the
-lifecycle's `occurred_at_ms`. A settled graph cancels only the occurrences it
-observed in flight, never starts an unobserved node, and is not reopened by
-node evidence replayed after it. `reset_live` discards the provisional
-history at a gap and keeps the document and the durable end.
+lifecycle's `occurred_at_ms`. A committed terminal settles the overlay with
+no `ExecutionFinished` at all. A settled overlay cancels only the
+occurrences it observed in flight, never starts an unobserved site, and is
+not reopened by evidence replayed after it. `reset_live` discards the
+provisional history at a gap and keeps the document and the durable end.
 
 Keep one accumulator per `identity.graph_key()` and bound the cache: the
-reducer bounds the occurrences of one node, not the number of processes. The
+reducer bounds the occurrences of one site, not the number of processes. The
 cache is a projection; it is never what a feed recovers from.
 
 A session's cells run the same language. Their observations arrive on the
@@ -295,7 +331,9 @@ session's feed as `SessionObservationEventPayload::LanguageExecution`
 payload, and fold the same way. Lash publishes each observation once: a
 cell's on its session's feed, a process's on the process feed.
 [`examples/agent-workbench/src/execution_feeds.rs`](../examples/agent-workbench/src/execution_feeds.rs)
-follows both into one bounded cache.
+follows both into one bounded cache, and
+[`execution_view.rs`](../examples/agent-workbench/src/execution_view.rs)
+draws each overlay over its document.
 
 ### Gaps
 

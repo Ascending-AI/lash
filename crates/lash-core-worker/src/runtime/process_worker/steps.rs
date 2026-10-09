@@ -100,36 +100,43 @@ impl DurableProcessWorker {
         tool_step_output(&process.id, &call, result)
     }
 
-    /// Bind only an admitted body to the node that issued its call. The
-    /// stored step keeps the node and occurrence stable across a retry.
-    fn observe_language_call(&self, step: &StepRequest, execution: &AdmittedExecution) {
-        let language_execution = match step {
-            StepRequest::Tool {
-                language_execution, ..
-            } => language_execution,
-            StepRequest::Engine { .. } => return,
-        };
-        let Some(mut event) = language_execution.clone() else {
-            return;
-        };
-        let lash_trace::TraceLanguageExecutionPayload::NodeStarted {
-            node_id, call_id, ..
-        } = &mut event.payload
+    /// Report that the admitted body of `step` is starting, at the site the
+    /// engine issued it from, bound to the call its admission pinned. Only an
+    /// admitted execution reaches here: a refused step reports nothing, and
+    /// a retried body reports again with the same site and call.
+    fn observe_step_body_started(
+        &self,
+        process: &ProcessRecord,
+        step: &StepRequest,
+        execution: &AdmittedExecution,
+    ) {
+        let StepRequest::Tool {
+            site: Some(site), ..
+        } = step
         else {
             return;
         };
-        *call_id = Some(execution.call().clone());
         let tracing = crate::plugin::PluginExecutionTrace::new(
             self.config.runtime_host.tracing.unreplayed(None),
         );
+        if !tracing.observes_language() {
+            return;
+        }
+        let started = lash_trace::StepBodyStarted {
+            process_id: process.id.clone(),
+            node_id: site.node_id.clone(),
+            occurrence: site.occurrence,
+            context: site.context.clone(),
+            call_id: execution.call().clone(),
+            attempt: execution.attempt(),
+        };
         let mut context = tracing.trace_runtime().base_context().clone();
-        context.graph_node_id = Some(node_id.clone());
-        tracing.observe_language(&event.event_key, || {
+        context.graph_node_id = Some(site.node_id.clone());
+        tracing.observe_language(&started.event_key(), || {
             (
                 context.clone(),
-                crate::TraceEvent::LanguageExecution {
-                    language: "typescript".to_owned(),
-                    event: (*event).clone(),
+                crate::TraceEvent::StepBodyStarted {
+                    step: started.clone(),
                 },
             )
         });
@@ -274,7 +281,7 @@ impl ProcessSteps for WorkerSteps {
         let execution = execution.clone();
         Box::new(move |token| {
             Box::pin(async move {
-                worker.observe_language_call(&step, &execution);
+                worker.observe_step_body_started(&process, &step, &execution);
                 match step {
                     StepRequest::Tool { .. } => {
                         worker

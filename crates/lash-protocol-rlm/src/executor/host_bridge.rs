@@ -430,8 +430,6 @@ impl LashVmExecutionTrace {
             identity: self.identity.clone(),
             payload: TraceLanguageExecutionPayload::NodeWaiting {
                 node_id: site.node_id.clone(),
-                node_kind: site.node_kind,
-                label: site.label.clone(),
                 occurrence: call_site.occurrence,
                 context: call_site.context(),
                 awaited,
@@ -451,8 +449,6 @@ impl LashVmExecutionTrace {
             identity: self.identity.clone(),
             payload: TraceLanguageExecutionPayload::NodeResumed {
                 node_id: site.node_id.clone(),
-                node_kind: site.node_kind,
-                label: site.label.clone(),
                 occurrence: call_site.occurrence,
                 context: call_site.context(),
                 resolution,
@@ -470,8 +466,6 @@ impl LashVmExecutionTrace {
                 identity: self.identity.clone(),
                 payload: TraceLanguageExecutionPayload::NodeResumed {
                     node_id: call_site.site.node_id.clone(),
-                    node_kind: call_site.site.node_kind,
-                    label: call_site.site.label.clone(),
                     occurrence: call_site.occurrence,
                     context: call_site.context(),
                     resolution: lash_vm_runtime::TraceNodeWaitResolution::Cancelled,
@@ -496,8 +490,6 @@ impl LashVmExecutionTrace {
             payload: TraceLanguageExecutionPayload::NodeCancelled {
                 context: call_site.context(),
                 node_id: call_site.site.node_id,
-                node_kind: call_site.site.node_kind,
-                label: call_site.site.label,
                 occurrence: call_site.occurrence,
             },
         });
@@ -545,8 +537,6 @@ impl LashVmExecutionTrace {
             payload: TraceLanguageExecutionPayload::NodeStarted {
                 context: started.context(),
                 node_id: started.site.node_id,
-                node_kind: started.site.node_kind,
-                label: started.site.label,
                 occurrence: started.occurrence,
                 call_id,
             },
@@ -828,8 +818,6 @@ impl ExecutionHost for HostBridge<'_> {
                 format!("node:{label}:waiting"),
                 TraceLanguageExecutionPayload::NodeWaiting {
                     node_id: site.node_id,
-                    node_kind: site.node_kind,
-                    label: site.label,
                     occurrence,
                     context,
                     awaited: lash_vm_runtime::TraceNodeAwaited::ChildProcesses { process_ids },
@@ -839,8 +827,6 @@ impl ExecutionHost for HostBridge<'_> {
                 format!("node:{label}:resumed"),
                 TraceLanguageExecutionPayload::NodeResumed {
                     node_id: site.node_id,
-                    node_kind: site.node_kind,
-                    label: site.label,
                     occurrence,
                     context,
                     resolution: lash_vm_runtime::TraceNodeWaitResolution::Resumed,
@@ -859,8 +845,6 @@ impl ExecutionHost for HostBridge<'_> {
                 format!("node:{label}:started"),
                 TraceLanguageExecutionPayload::NodeStarted {
                     node_id: site.node_id,
-                    node_kind: site.node_kind,
-                    label: site.label,
                     occurrence,
                     context,
                     call_id: None,
@@ -872,8 +856,6 @@ impl ExecutionHost for HostBridge<'_> {
                     format!("node:{label}:completed"),
                     TraceLanguageExecutionPayload::NodeCompleted {
                         node_id: site.node_id,
-                        node_kind: site.node_kind,
-                        label: site.label,
                         occurrence,
                         context,
                         call_id,
@@ -886,8 +868,6 @@ impl ExecutionHost for HostBridge<'_> {
                     format!("node:{label}:failed"),
                     TraceLanguageExecutionPayload::NodeFailed {
                         node_id: site.node_id,
-                        node_kind: site.node_kind,
-                        label: site.label,
                         occurrence,
                         context,
                         call_id,
@@ -895,18 +875,12 @@ impl ExecutionHost for HostBridge<'_> {
                     },
                 )
             }
-            Observation::BranchSelected {
-                site,
-                edge_id,
-                selected,
-                ..
-            } => (
-                format!("branch:{label}:{edge_id}"),
+            Observation::BranchSelected { site, selected, .. } => (
+                format!("branch:{label}"),
                 TraceLanguageExecutionPayload::BranchSelected {
                     node_id: site.node_id,
                     occurrence,
                     context,
-                    edge_id,
                     selected: match selected {
                         lash_vm::ProcessBranchSelection::Then => TraceBranchSelection::Then,
                         lash_vm::ProcessBranchSelection::Else => TraceBranchSelection::Else,

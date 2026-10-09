@@ -351,7 +351,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-durable-test:recorded_behaviour_laws__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:render_cache_laws__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:resource_capacity__test": {"cpu_count": 2, "memory_kb": 524288},
-    "//crates/lash-durable-test:rlm_execution_maps__test": {"cpu_count": 2, "memory_kb": 524288},
+    "//crates/lash-durable-test:rlm_execution_documents__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:rlm_session_globals__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:round_crash_matrix__test": {"cpu_count": 4, "memory_kb": 524288},
     "//crates/lash-durable-test:session_send__test": {"cpu_count": 2, "memory_kb": 524288},

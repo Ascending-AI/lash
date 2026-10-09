@@ -166,8 +166,6 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             "language node failed",
             language_execution(TraceLanguageExecutionPayload::NodeFailed {
                 node_id: "n1".to_string(),
-                node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
-                label: "node".to_string(),
                 occurrence: 1,
                 call_id: None,
                 failure: TraceLanguageExecutionFailure::Runtime {
@@ -241,8 +239,6 @@ fn event_is_failed_identifies_all_failure_outcomes() {
             "started language node",
             language_execution(TraceLanguageExecutionPayload::NodeStarted {
                 node_id: "n1".to_string(),
-                node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
-                label: "node".to_string(),
                 occurrence: 1,
                 call_id: None,
                 context: Default::default(),

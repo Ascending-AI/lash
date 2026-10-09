@@ -6,7 +6,6 @@ use lash_trace::{
     TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent, TraceEffectEnvelopeDiffValue,
     TraceError, TraceEvent, TraceEventKind, TraceExecToolCall, TraceJournaledEffectStatus,
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionIdentity,
-    TraceLanguageExecutionMap, TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
     TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceLlmRequest, TraceLlmResponse,
     TraceProviderEvent, TraceProviderReplayDropEvent, TraceProviderReplayDropReason,
     TraceProviderReplayKind, TraceProviderRouteIdentity, TraceRecord, TraceRuntimeScope,
@@ -42,26 +41,10 @@ fn trace_retry_attempt_refuses_the_shared_llm_tool_shape() {
 }
 
 #[test]
-fn node_kind_refuses_unrecognized_wire_value() {
-    let payload = serde_json::json!({
-        "kind": "node_started",
-        "node_id": "node-1",
-        "node_kind": "future_kind",
-        "label": "step",
-        "occurrence": 1
-    });
-    let error = serde_json::from_value::<lash_trace::TraceLanguageExecutionPayload>(payload)
-        .expect_err("node kinds are a closed wire vocabulary");
-    assert!(error.to_string().contains("future_kind"));
-}
-
-#[test]
 fn node_failure_requires_typed_provenance() {
     let legacy = json!({
         "kind": "node_failed",
         "node_id": "node-1",
-        "node_kind": "resource_operation",
-        "label": "read",
         "occurrence": 1,
         "error": "permission denied"
     });
@@ -71,8 +54,6 @@ fn node_failure_requires_typed_provenance() {
 
     let payload = TraceLanguageExecutionPayload::NodeFailed {
         node_id: "node-1".to_owned(),
-        node_kind: lash_sansio::ExecutionNodeKind::ResourceOperation,
-        label: "read".to_owned(),
         occurrence: 1,
         call_id: Some(lash_sansio::ToolCallId::fixture("effect-1")),
         failure: lash_trace::TraceLanguageExecutionFailure::Effect {
@@ -312,6 +293,9 @@ fn event_samples() -> Vec<TraceEvent> {
                 raw_json: None,
                 raw_json_omitted_reason: Some(lash_trace::TraceProviderBodyOmission::InvalidJson),
             },
+        },
+        TraceEvent::StepBodyStarted {
+            step: step_body_started(),
         },
         TraceEvent::ToolCheckConflict {
             plugin_id: "alpha".to_string(),
@@ -584,51 +568,22 @@ fn assert_schema_accepts(validator: &jsonschema::Validator, value: &serde_json::
     }
 }
 
-/// One language-execution payload of every kind, in an order the graph fold
-/// accepts: the execution map first, then the observed nodes, then the finish.
+/// One language-execution payload of every kind, in the order an execution
+/// reports them: its start, then the observed sites, then its finish.
 fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
-    let site = |path: &[u32], kind, label: &str| {
-        lash_sansio::WorkflowExecutionSite::new("main", path, kind, label)
-    };
     vec![
         TraceLanguageExecutionPayload::ExecutionStarted {
-            execution_map: TraceLanguageExecutionMap {
-                nodes: vec![
-                    TraceLanguageExecutionMapNode {
-                        id: "branch".to_string(),
-                        site: site(&[0], lash_sansio::ExecutionNodeKind::Branch, "if ready"),
-                        kind: lash_sansio::ExecutionNodeKind::Branch,
-                        label: "if ready".to_string(),
-                        branch_memberships: Vec::new(),
-                        label_metadata: Some(lash_trace::TraceLabelMetadata {
-                            title: "Ready?".to_string(),
-                            description: Some("gate".to_string()),
-                        }),
-                    },
-                    TraceLanguageExecutionMapNode {
-                        id: "then".to_string(),
-                        site: site(&[0, 1, 0], lash_sansio::ExecutionNodeKind::Call, "notify()"),
-                        kind: lash_sansio::ExecutionNodeKind::Call,
-                        label: "notify()".to_string(),
-                        branch_memberships: vec![lash_trace::TraceBranchMembership {
-                            branch_node_id: "branch".to_string(),
-                            arm: TraceBranchSelection::Then,
-                        }],
-                        label_metadata: None,
-                    },
-                ],
-                edges: vec![TraceLanguageExecutionMapEdge {
-                    id: "then-edge".to_string(),
-                    from: "branch".to_string(),
-                    to: "then".to_string(),
-                    label: "sequence".to_string(),
-                }],
+            document: lash_trace::WorkflowDocumentRef {
+                source_identity: "source-1".to_string(),
+                module_ref: "module-1".to_string(),
+                entry: lash_trace::WorkflowDocumentEntry::Process {
+                    process_ref: "0:0".to_string(),
+                },
+                ir_version: 1,
             },
         },
         TraceLanguageExecutionPayload::NodeStarted {
             node_id: "branch".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Branch,
-            label: "if ready".to_string(),
             occurrence: 1,
             call_id: None,
             context: Default::default(),
@@ -636,30 +591,23 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
         TraceLanguageExecutionPayload::BranchSelected {
             node_id: "branch".to_string(),
             occurrence: 1,
-            edge_id: "then-edge".to_string(),
             selected: TraceBranchSelection::Then,
             context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeCompleted {
             node_id: "branch".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Branch,
-            label: "if ready".to_string(),
             occurrence: 1,
             call_id: None,
             context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeStarted {
             node_id: "then".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Call,
-            label: "notify()".to_string(),
             occurrence: 1,
             call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
             context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeWaiting {
             node_id: "then".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Call,
-            label: "notify()".to_string(),
             occurrence: 1,
             awaited: lash_trace::TraceNodeAwaited::Signal {
                 name: "approved".to_string(),
@@ -669,8 +617,6 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
         },
         TraceLanguageExecutionPayload::NodeResumed {
             node_id: "then".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Call,
-            label: "notify()".to_string(),
             occurrence: 1,
             resolution: lash_trace::TraceNodeWaitResolution::Resumed,
             context: Default::default(),
@@ -690,8 +636,6 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
         },
         TraceLanguageExecutionPayload::NodeFailed {
             node_id: "then".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Call,
-            label: "notify()".to_string(),
             occurrence: 1,
             call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
             failure: lash_trace::TraceLanguageExecutionFailure::Runtime {
@@ -702,16 +646,12 @@ fn language_execution_payload_samples() -> Vec<TraceLanguageExecutionPayload> {
         },
         TraceLanguageExecutionPayload::NodeStarted {
             node_id: "then".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Call,
-            label: "notify()".to_string(),
             occurrence: 2,
             call_id: None,
             context: Default::default(),
         },
         TraceLanguageExecutionPayload::NodeCancelled {
             node_id: "then".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Call,
-            label: "notify()".to_string(),
             occurrence: 2,
             context: Default::default(),
         },
@@ -829,27 +769,45 @@ fn published_trace_record_schema_tolerates_additive_fields_and_refuses_unknown_v
 }
 
 #[test]
-fn published_graph_schema_accepts_a_folded_snapshot_and_enforces_its_row() {
+fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
     let validator = published_schema(include_str!(
-        "../../../schemas/host/trace-lashlang-graph/v36.schema.json"
+        "../../../schemas/host/workflow-execution-overlay/v36.schema.json"
     ))
-    .expect("published trace schema");
-    let graph = lash_trace::fold_lashlang_graph(
-        None,
-        &language_execution_records(),
-        lash_trace::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
-    )
-    .expect("fold every payload kind");
-    assert!(!graph.nodes.is_empty() && !graph.history.is_empty());
-    let mut value = serde_json::to_value(&graph).expect("encode graph");
-    assert_schema_accepts(&validator, &value, "a folded graph snapshot");
+    .expect("published overlay schema");
+    let mut records = language_execution_records();
+    records.push(fixture_record(
+        TraceContext::default().for_session("s1"),
+        TraceEvent::StepBodyStarted {
+            step: step_body_started(),
+        },
+    ));
+    // One site of the two the execution touched is the document's; the
+    // other is reported as a mismatch.
+    let document = lash_trace::WorkflowOverlayDocument::new(
+        lash_trace::WorkflowDocumentRef {
+            source_identity: "source-2".to_string(),
+            module_ref: "module-1".to_string(),
+            entry: lash_trace::WorkflowDocumentEntry::Main,
+            ir_version: 1,
+        },
+        [lash_sansio::WorkflowSiteRef::node("then")],
+    );
+    let overlay = lash_trace::fold_workflow_overlay(None, Some(&document), &records, 1)
+        .expect("fold every payload kind");
+    assert!(!overlay.sites.is_empty() && !overlay.history.is_empty());
+    assert!(!overlay.retention.is_empty() && !overlay.children.is_empty());
+    assert_eq!(overlay.mismatches.len(), 2);
+    assert!(overlay.sites[0].call.is_some());
+    let mut value = serde_json::to_value(&overlay).expect("encode overlay");
+    assert_schema_accepts(&validator, &value, "a folded overlay");
 
     value["future_field"] = json!(true);
-    assert_schema_accepts(&validator, &value, "an additive snapshot field");
+    assert_schema_accepts(&validator, &value, "an additive overlay field");
     for (field, pointer) in [
-        ("graph status", "/status"),
-        ("completeness", "/completeness"),
-        ("node kind", "/nodes/0/kind"),
+        ("execution status", "/status"),
+        ("site status", "/sites/0/status"),
+        ("mismatch kind", "/mismatches/0/kind"),
+        ("history fact", "/history/0/fact"),
     ] {
         let mut changed = value.clone();
         *changed.pointer_mut(pointer).expect(field) = json!("future_variant");
@@ -857,6 +815,17 @@ fn published_graph_schema_accepts_a_folded_snapshot_and_enforces_its_row() {
             !validator.is_valid(&changed),
             "unknown {field} variant must be refused"
         );
+    }
+}
+
+fn step_body_started() -> lash_trace::StepBodyStarted {
+    lash_trace::StepBodyStarted {
+        process_id: lash_sansio::ProcessId::fixture("p1"),
+        node_id: "then".to_string(),
+        occurrence: 2,
+        context: Default::default(),
+        call_id: lash_sansio::ToolCallId::fixture("call-2"),
+        attempt: 1,
     }
 }
 
@@ -1117,8 +1086,6 @@ fn content_bearing_events() -> Vec<TraceEvent> {
         }),
         language(TraceLanguageExecutionPayload::NodeFailed {
             node_id: "n1".to_string(),
-            node_kind: lash_sansio::ExecutionNodeKind::Call,
-            label: "search".to_string(),
             occurrence: 0,
             call_id: Some(lash_sansio::ToolCallId::fixture("call-1")),
             failure: lash_trace::TraceLanguageExecutionFailure::Runtime {

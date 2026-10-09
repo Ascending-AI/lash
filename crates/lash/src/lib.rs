@@ -970,8 +970,8 @@ pub mod plugins {
         AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
         InspectedProcessDefinition, ProcessDocument, ProcessDocumentProvider, ProcessDocumentRead,
         ProcessDocumentRefRead, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
-        ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput, ProtocolDriverState,
-        ProtocolTurnOptionsError, TurnDriverPreamble,
+        ProcessExecutionDocumentRead, ProcessInfraError, ProcessRunOutcome, ProtocolBuildInput,
+        ProtocolDriverState, ProtocolTurnOptionsError, TurnDriverPreamble,
     };
     /// The session services a hook context hands a plugin: read-through state
     /// access ([`SessionStateService`]) and durable graph appends
@@ -1179,12 +1179,10 @@ pub mod process {
         ProcessReadView, ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason,
         ProcessReplayOutcome, ProcessReplayStore, ProcessReplayStoreError,
         ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
-        RetainedProcessView,
+        RetainedProcessView, StepBodyStartedObservation,
     };
     #[cfg(feature = "rlm")]
-    pub use lash_vm_runtime::{
-        LASH_VM_ENGINE_KIND, LashVmProcessInput, trace_lashlang_process_map,
-    };
+    pub use lash_vm_runtime::{LASH_VM_ENGINE_KIND, LashVmProcessInput};
 }
 
 /// Durability configuration and backend contracts.

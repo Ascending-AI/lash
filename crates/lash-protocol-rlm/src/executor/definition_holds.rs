@@ -50,10 +50,14 @@ async fn hold_definitions(
     Ok(())
 }
 
-/// Publish a cell's module under the cell's execution, then hold it in the
-/// frame (ADR 0113 §3.1). The execution edge protects the bytes while the
-/// cell's journal may replay; the frame edge keeps them for the globals that
-/// name them. A module the frame already holds is not published again.
+/// Publish a cell's module under the cell's execution, and hold it in the
+/// frame when it declares a process (ADR 0113 §3.1). The execution edge
+/// protects the bytes while the cell's journal may replay, and keeps the
+/// document the cell's start names readable while the execution is unsettled
+/// (FIG-5576); the frame edge keeps them for the globals that name them. A
+/// module that declares no process has no global to name it, so the frame
+/// takes no edge and the bytes end with the execution. A module the frame
+/// already holds is not published again.
 pub(super) async fn publish_cell_module(
     state: &mut RlmExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
@@ -109,6 +113,9 @@ pub(super) async fn publish_cell_module(
     let Some(frame) = frame else {
         return Ok(());
     };
+    if artifact.exports().processes.is_empty() {
+        return Ok(());
+    }
     match acquire_frame_edge(&frame, artifact_store, module_ref).await {
         Ok(()) => {
             state.record_frame_hold(&frame, module_ref.clone());

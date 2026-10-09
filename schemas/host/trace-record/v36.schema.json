@@ -346,21 +346,6 @@
       ],
       "type": "string"
     },
-    "ExecutionNodeKind": {
-      "description": "Closed vocabulary of executable workflow sites.\n\nThis describes the site, not its current observation. A workflow node may\nexpose more than one site kind. Declaration order is the canonical order:\na node's execution sites sort by it, so reordering the variants changes\nthe serialized workflow graph and needs a graph schema bump.",
-      "enum": [
-        "resource_operation",
-        "sleep",
-        "wait",
-        "terminal",
-        "process_event",
-        "branch",
-        "loop",
-        "call",
-        "step"
-      ],
-      "type": "string"
-    },
     "ExecutionScope": {
       "description": "Stable semantic identity for one effectful runtime operation.\n\nThis is the scope admitted by the host boundary before nondeterministic\nwork begins. Its journal encoding is an existing durable contract; effect\naddresses compose it with a replay key without changing those bytes.",
       "oneOf": [
@@ -1427,6 +1412,47 @@
         }
       ]
     },
+    "StepBodyStarted": {
+      "additionalProperties": false,
+      "description": "The admitted body of a process step started: the step's actor committed\nits admission, bound it to a call, and is about to run it. A step that is\nrefused never produces one, and a retried body produces one more with the\nsame site, occurrence and call and the next attempt.\n\nIt names no language and no document: the process's own definition scopes\nthe site.",
+      "properties": {
+        "attempt": {
+          "description": "The one-based attempt of the admitted body.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "call_id": {
+          "description": "The call the admission bound the step to.",
+          "type": "string"
+        },
+        "context": {
+          "$ref": "#/$defs/WorkflowOccurrenceContext",
+          "description": "The exact site inside the node and the loop activations around this\noccurrence."
+        },
+        "node_id": {
+          "description": "The node of the process's workflow document the step runs for.",
+          "type": "string"
+        },
+        "occurrence": {
+          "description": "Which occurrence of the site this is, from 1, counted per site.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "process_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "process_id",
+        "node_id",
+        "occurrence",
+        "call_id",
+        "attempt"
+      ],
+      "type": "object"
+    },
     "StreamBlockEvent": {
       "description": "One step of a streamed output block's lifecycle: the single payload every\nlane carries for it \u2014 the provider stream, the session stream, turn\nactivity and the trace. A lane adds its own envelope (observation\nidentity, correlation, sequence, elapsed time) around this payload and\nnever redefines it.",
       "oneOf": [
@@ -1801,21 +1827,6 @@
       },
       "required": [
         "request_model"
-      ],
-      "type": "object"
-    },
-    "TraceBranchMembership": {
-      "properties": {
-        "arm": {
-          "$ref": "#/$defs/TraceBranchSelection"
-        },
-        "branch_node_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "branch_node_id",
-        "arm"
       ],
       "type": "object"
     },
@@ -2382,23 +2393,6 @@
       ],
       "type": "string"
     },
-    "TraceLabelMetadata": {
-      "properties": {
-        "description": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "title": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "title"
-      ],
-      "type": "object"
-    },
     "TraceLanguageChildExecution": {
       "properties": {
         "attempt": {
@@ -2443,9 +2437,10 @@
     "TraceLanguageExecution": {
       "oneOf": [
         {
+          "description": "The execution began. It names the workflow document it runs and the\nentry it runs it from; the document itself is read through the\nfacade's workflow inspection, never carried here.",
           "properties": {
-            "execution_map": {
-              "$ref": "#/$defs/TraceLanguageExecutionMap"
+            "document": {
+              "$ref": "#/$defs/WorkflowDocumentRef"
             },
             "kind": {
               "const": "execution_started",
@@ -2454,7 +2449,7 @@
           },
           "required": [
             "kind",
-            "execution_map"
+            "document"
           ],
           "type": "object"
         },
@@ -2496,14 +2491,8 @@
               "const": "node_started",
               "type": "string"
             },
-            "label": {
-              "type": "string"
-            },
             "node_id": {
               "type": "string"
-            },
-            "node_kind": {
-              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
@@ -2514,8 +2503,6 @@
           "required": [
             "kind",
             "node_id",
-            "node_kind",
-            "label",
             "occurrence"
           ],
           "type": "object"
@@ -2534,14 +2521,8 @@
               "const": "node_waiting",
               "type": "string"
             },
-            "label": {
-              "type": "string"
-            },
             "node_id": {
               "type": "string"
-            },
-            "node_kind": {
-              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
@@ -2552,8 +2533,6 @@
           "required": [
             "kind",
             "node_id",
-            "node_kind",
-            "label",
             "occurrence",
             "awaited"
           ],
@@ -2570,14 +2549,8 @@
               "const": "node_resumed",
               "type": "string"
             },
-            "label": {
-              "type": "string"
-            },
             "node_id": {
               "type": "string"
-            },
-            "node_kind": {
-              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
@@ -2591,8 +2564,6 @@
           "required": [
             "kind",
             "node_id",
-            "node_kind",
-            "label",
             "occurrence",
             "resolution"
           ],
@@ -2609,14 +2580,8 @@
               "const": "node_cancelled",
               "type": "string"
             },
-            "label": {
-              "type": "string"
-            },
             "node_id": {
               "type": "string"
-            },
-            "node_kind": {
-              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
@@ -2627,8 +2592,6 @@
           "required": [
             "kind",
             "node_id",
-            "node_kind",
-            "label",
             "occurrence"
           ],
           "type": "object"
@@ -2649,14 +2612,8 @@
               "const": "node_completed",
               "type": "string"
             },
-            "label": {
-              "type": "string"
-            },
             "node_id": {
               "type": "string"
-            },
-            "node_kind": {
-              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
@@ -2667,8 +2624,6 @@
           "required": [
             "kind",
             "node_id",
-            "node_kind",
-            "label",
             "occurrence"
           ],
           "type": "object"
@@ -2692,14 +2647,8 @@
               "const": "node_failed",
               "type": "string"
             },
-            "label": {
-              "type": "string"
-            },
             "node_id": {
               "type": "string"
-            },
-            "node_kind": {
-              "$ref": "#/$defs/ExecutionNodeKind"
             },
             "occurrence": {
               "format": "uint64",
@@ -2710,8 +2659,6 @@
           "required": [
             "kind",
             "node_id",
-            "node_kind",
-            "label",
             "occurrence",
             "failure"
           ],
@@ -2722,9 +2669,6 @@
             "context": {
               "$ref": "#/$defs/WorkflowOccurrenceContext",
               "description": "The exact site inside the node and the loop activations around\nthis occurrence. `occurrence` counts per site."
-            },
-            "edge_id": {
-              "type": "string"
             },
             "kind": {
               "const": "branch_selected",
@@ -2739,14 +2683,14 @@
               "type": "integer"
             },
             "selected": {
-              "$ref": "#/$defs/TraceBranchSelection"
+              "$ref": "#/$defs/TraceBranchSelection",
+              "description": "The arm of the branch this occurrence took."
             }
           },
           "required": [
             "kind",
             "node_id",
             "occurrence",
-            "edge_id",
             "selected"
           ],
           "type": "object"
@@ -2908,89 +2852,6 @@
         "module_ref",
         "entry_kind",
         "entry_name"
-      ],
-      "type": "object"
-    },
-    "TraceLanguageExecutionMap": {
-      "description": "The static graph of an execution, carried once on\n[`TraceLanguageExecutionPayload::ExecutionStarted`]. Identity\n(`module_ref`, `entry_kind`, `entry_ref`, `entry_name`) lives solely on the\nenclosing [`TraceLanguageExecutionIdentity`]; the map never repeats it.",
-      "properties": {
-        "edges": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/TraceLanguageExecutionMapEdge"
-          },
-          "type": "array"
-        },
-        "nodes": {
-          "default": [],
-          "items": {
-            "$ref": "#/$defs/TraceLanguageExecutionMapNode"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
-    },
-    "TraceLanguageExecutionMapEdge": {
-      "properties": {
-        "from": {
-          "type": "string"
-        },
-        "id": {
-          "type": "string"
-        },
-        "label": {
-          "type": "string"
-        },
-        "to": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "from",
-        "to",
-        "label"
-      ],
-      "type": "object"
-    },
-    "TraceLanguageExecutionMapNode": {
-      "properties": {
-        "branch_memberships": {
-          "description": "Observed branch selections that admit this node's arm.",
-          "items": {
-            "$ref": "#/$defs/TraceBranchMembership"
-          },
-          "type": "array"
-        },
-        "id": {
-          "type": "string"
-        },
-        "kind": {
-          "$ref": "#/$defs/ExecutionNodeKind"
-        },
-        "label": {
-          "type": "string"
-        },
-        "label_metadata": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/TraceLabelMetadata"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "site": {
-          "$ref": "#/$defs/WorkflowExecutionSite"
-        }
-      },
-      "required": [
-        "id",
-        "site",
-        "kind",
-        "label"
       ],
       "type": "object"
     },
@@ -4161,35 +4022,68 @@
         }
       ]
     },
-    "WorkflowExecutionSite": {
-      "description": "One execution site of a workflow node: the node (`owner` and `path`), the\nexact executable subexpression inside its statement (`site_path`), and a\ndescription of what runs there. `kind` and `label` describe the site; they\nare not its identity.",
-      "properties": {
-        "kind": {
-          "$ref": "#/$defs/ExecutionNodeKind"
-        },
-        "label": {
-          "type": "string"
-        },
-        "owner": {
-          "type": "string"
-        },
-        "path": {
-          "default": [],
-          "items": {
-            "format": "uint32",
-            "minimum": 0,
-            "type": "integer"
+    "WorkflowDocumentEntry": {
+      "description": "The entry of a [`WorkflowDocumentRef`].",
+      "oneOf": [
+        {
+          "description": "The module's main body.",
+          "properties": {
+            "kind": {
+              "const": "main",
+              "type": "string"
+            }
           },
-          "type": "array"
+          "required": [
+            "kind"
+          ],
+          "type": "object"
         },
-        "site_path": {
-          "$ref": "#/$defs/WorkflowSitePath"
+        {
+          "description": "One exported process, by the persisted reference the module's\nexports name it with.",
+          "properties": {
+            "kind": {
+              "const": "process",
+              "type": "string"
+            },
+            "process_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "process_ref"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowDocumentRef": {
+      "description": "Which workflow document an execution runs, and where it enters it. It\nnames the document; it is never the document. A host reads the graph the\nreference names through the facade's workflow inspection and may cache\nit under this value, which is immutable for a process.",
+      "properties": {
+        "entry": {
+          "$ref": "#/$defs/WorkflowDocumentEntry",
+          "description": "Where the execution enters the document."
+        },
+        "ir_version": {
+          "description": "The interpretation of the IR the document is written under.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "module_ref": {
+          "description": "The stored module the document is read from.",
+          "type": "string"
+        },
+        "source_identity": {
+          "description": "The definition identity of the admitted module the document\nprojects; the document's own `source_identity`.",
+          "type": "string"
         }
       },
       "required": [
-        "owner",
-        "kind",
-        "label"
+        "source_identity",
+        "module_ref",
+        "entry",
+        "ir_version"
       ],
       "type": "object"
     },
@@ -5251,6 +5145,23 @@
         "type",
         "language",
         "event"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The admitted body of a process step started.",
+      "properties": {
+        "step": {
+          "$ref": "#/$defs/StepBodyStarted"
+        },
+        "type": {
+          "const": "step_body_started",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "step"
       ],
       "type": "object"
     },

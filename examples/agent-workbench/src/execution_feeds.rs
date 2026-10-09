@@ -1,10 +1,14 @@
-//! The workbench's execution graphs: a bounded cache of pure graph folds, fed
-//! from lash's session and process feeds.
+//! The workbench's execution graphs: a bounded cache of execution overlays,
+//! fed from lash's session and process feeds and drawn over the workflow
+//! document each execution names.
 //!
 //! A session's cells publish their language observations on the session's
-//! feed; a process publishes its own on the process feed, with the committed
-//! facts that settle it. The workbench follows both and folds what they
-//! deliver into one [`TraceLashlangGraphAccumulator`] per graph key. The
+//! feed; a process publishes its own on the process feed, with the body
+//! starts of its admitted steps and the committed facts that settle it. The
+//! workbench follows both and folds what they deliver into one
+//! [`WorkflowExecutionOverlayAccumulator`] per execution key. An execution's
+//! start, or its process's snapshot, names its document; the workbench reads
+//! that document from lash once and draws the overlay over it. The
 //! cache is a projection the host may lose at any time: it is never a
 //! recovery authority. A feed gap discards the provisional history of the
 //! graphs it covers, and what the feed replays next rebuilds what is still
@@ -22,17 +26,20 @@ use std::time::Duration;
 use futures_util::StreamExt as _;
 use lash::observe::{SessionObservationEventPayload, SessionObservationStreamItem};
 use lash::process::{
-    LanguageExecutionObservation, ProcessLifecycleFact, ProcessObservationEventPayload,
-    ProcessObservationStreamItem, ProcessReadView, ProcessStatus,
+    LanguageExecutionObservation, ProcessDocumentIdentity, ProcessLifecycleFact,
+    ProcessObservationEventPayload, ProcessObservationStreamItem, ProcessReadView, ProcessStatus,
+    StepBodyStartedObservation,
 };
 use lash::sync::MutexExt;
-use lash::tracing::{
-    TraceLanguageExecutionPayload, TraceLashlangGraph, TraceLashlangGraphAccumulator,
-    TraceLashlangGraphSettlement, TraceLashlangGraphTerminal,
+use lash::tracing::{TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload};
+use lash::workflow::{
+    WorkflowDocumentRead, WorkflowDocumentRef, WorkflowExecutionDocument,
+    WorkflowExecutionOverlayAccumulator, WorkflowOverlaySettlement, WorkflowOverlayTerminal,
 };
 use lash::{ProcessId, SessionId};
 
 use crate::AppState;
+use crate::execution_view::ExecutionGraph;
 
 /// Graphs the cache keeps.
 const MAX_GRAPHS: usize = 256;
@@ -53,7 +60,14 @@ enum Source {
 
 struct CachedGraph {
     source: Source,
-    accumulator: TraceLashlangGraphAccumulator,
+    accumulator: WorkflowExecutionOverlayAccumulator,
+    /// The execution's identity as its language observations state it;
+    /// `None` while only step facts of its process have arrived.
+    identity: Option<TraceLanguageExecutionIdentity>,
+    /// The document the execution names, and the document once lash
+    /// answered it.
+    wants: Option<WorkflowDocumentRef>,
+    document: Option<Arc<WorkflowExecutionDocument>>,
     /// The cache's feed count when this graph was last fed.
     fed: u64,
 }
@@ -64,33 +78,45 @@ struct Cache {
     graphs: BTreeMap<String, CachedGraph>,
     /// The committed end of each followed process, applied to its graphs
     /// whenever they appear.
-    settlements: BTreeMap<ProcessId, TraceLashlangGraphSettlement>,
+    settlements: BTreeMap<ProcessId, WorkflowOverlaySettlement>,
+    /// The document each followed process's snapshot names.
+    process_documents: BTreeMap<ProcessId, WorkflowDocumentRef>,
+    /// The documents lash answered, by the reference that names each.
+    documents: BTreeMap<WorkflowDocumentRef, Arc<WorkflowExecutionDocument>>,
 }
 
 impl Cache {
-    fn observe(&mut self, source: Source, observation: &LanguageExecutionObservation) {
+    /// The graph `key` names, fed now; a new one starts from what the cache
+    /// already knows of `source`.
+    fn fed_graph(&mut self, source: Source, key: String) -> &mut CachedGraph {
         self.fed += 1;
         let fed = self.fed;
-        let graph_key = observation.execution.identity.graph_key();
-        let settlement = match &source {
-            Source::Process(process_id) => self.settlements.get(process_id).copied(),
-            Source::Session(_) => None,
+        let (settlement, wants) = match &source {
+            Source::Process(process_id) => (
+                self.settlements.get(process_id).copied(),
+                self.process_documents.get(process_id).cloned(),
+            ),
+            Source::Session(_) => (None, None),
         };
-        let graph = self.graphs.entry(graph_key).or_insert_with(|| {
-            let mut accumulator = TraceLashlangGraphAccumulator::default();
+        let graph = self.graphs.entry(key).or_insert_with(|| {
+            let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
             if let Some(settlement) = settlement {
                 accumulator.settle(settlement);
             }
             CachedGraph {
                 source,
                 accumulator,
+                identity: None,
+                wants,
+                document: None,
                 fed,
             }
         });
         graph.fed = fed;
-        if let Err(error) = graph.accumulator.observe(observation) {
-            eprintln!("warning: workbench execution graph refused an observation: {error}");
-        }
+        graph
+    }
+
+    fn evict(&mut self) {
         while self.graphs.len() > MAX_GRAPHS {
             let Some(oldest) = self
                 .graphs
@@ -102,9 +128,115 @@ impl Cache {
             };
             self.graphs.remove(&oldest);
         }
+        let wanted = self
+            .graphs
+            .values()
+            .filter_map(|graph| graph.wants.as_ref())
+            .chain(self.process_documents.values())
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        self.documents
+            .retain(|reference, _| wanted.contains(reference));
     }
 
-    fn settle(&mut self, process_id: &ProcessId, settlement: TraceLashlangGraphSettlement) {
+    /// Fold `observation`. Answers the document its graph names when the
+    /// cache does not hold that document yet.
+    fn observe(
+        &mut self,
+        source: Source,
+        observation: &LanguageExecutionObservation,
+    ) -> Option<WorkflowDocumentRef> {
+        let key = observation.execution.identity.graph_key();
+        // Steps that arrived before any language observation opened the
+        // graph under the process's own key: it is this execution's.
+        if !self.graphs.contains_key(&key)
+            && let Some(opened) = self
+                .graphs
+                .iter()
+                .find(|(_, graph)| graph.source == source && graph.identity.is_none())
+                .map(|(opened, _)| opened.clone())
+            && let Some(graph) = self.graphs.remove(&opened)
+        {
+            self.graphs.insert(key.clone(), graph);
+        }
+        let graph = self.fed_graph(source, key);
+        graph.identity = Some(observation.execution.identity.clone());
+        if let TraceLanguageExecutionPayload::ExecutionStarted { document } =
+            &observation.execution.payload
+        {
+            graph.wants = Some(document.clone());
+        }
+        if let Err(error) = graph.accumulator.observe(observation) {
+            eprintln!("warning: workbench execution graph refused an observation: {error}");
+        }
+        self.evict();
+        self.attach_documents()
+    }
+
+    /// Fold the start of an admitted step body into its process's graph.
+    fn step_body_started(
+        &mut self,
+        observation: &StepBodyStartedObservation,
+    ) -> Option<WorkflowDocumentRef> {
+        let process_id = observation.step.process_id.clone();
+        let source = Source::Process(process_id.clone());
+        // A process runs one execution: its steps belong to the graph its
+        // language observations opened, or open it under the process's key.
+        let key = self
+            .graphs
+            .iter()
+            .find(|(_, graph)| graph.source == source)
+            .map(|(key, _)| key.clone())
+            .unwrap_or_else(|| format!("process:{process_id}"));
+        let graph = self.fed_graph(source, key);
+        if let Err(error) = graph.accumulator.step_body_started(observation) {
+            eprintln!("warning: workbench execution graph refused a step body start: {error}");
+        }
+        self.evict();
+        self.attach_documents()
+    }
+
+    /// Give every graph the document it names, when the cache holds it.
+    /// Answers one document some graph names that the cache does not hold.
+    fn attach_documents(&mut self) -> Option<WorkflowDocumentRef> {
+        let mut missing = None;
+        for graph in self.graphs.values_mut() {
+            if graph.document.is_some() {
+                continue;
+            }
+            let Some(wants) = &graph.wants else {
+                continue;
+            };
+            match self.documents.get(wants) {
+                Some(document) => {
+                    graph.accumulator.set_document(document.overlay_document());
+                    graph.document = Some(Arc::clone(document));
+                }
+                None => missing = Some(wants.clone()),
+            }
+        }
+        missing
+    }
+
+    /// Lash answered the document `reference` names.
+    fn loaded(&mut self, document: WorkflowExecutionDocument) {
+        self.documents
+            .insert(document.reference.clone(), Arc::new(document));
+        self.attach_documents();
+    }
+
+    /// The snapshot of `process_id` names the document it runs.
+    fn names_document(&mut self, process_id: &ProcessId, reference: WorkflowDocumentRef) {
+        let source = Source::Process(process_id.clone());
+        for graph in self.graphs.values_mut() {
+            if graph.source == source && graph.wants.is_none() {
+                graph.wants = Some(reference.clone());
+            }
+        }
+        self.process_documents.insert(process_id.clone(), reference);
+    }
+
+    fn settle(&mut self, process_id: &ProcessId, settlement: WorkflowOverlaySettlement) {
         self.settlements.insert(process_id.clone(), settlement);
         let source = Source::Process(process_id.clone());
         for graph in self.graphs.values_mut() {
@@ -122,6 +254,20 @@ impl Cache {
                 graph.accumulator.reset_live();
             }
         }
+    }
+
+    /// Every graph a language observation has identified, drawn.
+    fn drawn(&self) -> Vec<ExecutionGraph> {
+        self.graphs
+            .values()
+            .filter_map(|graph| {
+                Some(crate::execution_view::draw(
+                    graph.identity.as_ref()?,
+                    &graph.accumulator.snapshot()?,
+                    graph.document.as_deref(),
+                ))
+            })
+            .collect()
     }
 }
 
@@ -144,15 +290,9 @@ pub(crate) struct ExecutionGraphs {
 }
 
 impl ExecutionGraphs {
-    /// Every cached graph, in graph-key order.
-    pub(crate) fn graphs(&self) -> Vec<TraceLashlangGraph> {
-        self.inner
-            .cache
-            .lock_recover()
-            .graphs
-            .values()
-            .filter_map(|graph| graph.accumulator.snapshot())
-            .collect()
+    /// Every cached graph, drawn, in graph-key order.
+    pub(crate) fn graphs(&self) -> Vec<ExecutionGraph> {
+        self.inner.cache.lock_recover().drawn()
     }
 
     /// Drop every graph and stop every follower.
@@ -226,11 +366,9 @@ impl ExecutionGraphs {
         while followers.processes.len() > MAX_PROCESSES {
             if let Some((released, oldest)) = followers.processes.pop_front() {
                 oldest.abort();
-                self.inner
-                    .cache
-                    .lock_recover()
-                    .settlements
-                    .remove(&released);
+                let mut cache = self.inner.cache.lock_recover();
+                cache.settlements.remove(&released);
+                cache.process_documents.remove(&released);
             }
         }
     }
@@ -251,8 +389,39 @@ impl ExecutionGraphs {
             .retain(|(id, _)| id != process_id);
     }
 
-    fn observe(&self, source: Source, observation: &LanguageExecutionObservation) {
-        self.inner.cache.lock_recover().observe(source, observation);
+    async fn observe(
+        &self,
+        state: &AppState,
+        source: Source,
+        observation: &LanguageExecutionObservation,
+    ) {
+        let missing = self.inner.cache.lock_recover().observe(source, observation);
+        self.load(state, missing).await;
+    }
+
+    /// Read the document `reference` names from lash and hand it to the
+    /// graphs that name it. A document lash cannot answer leaves those
+    /// graphs drawn from their observations alone.
+    async fn load(&self, state: &AppState, reference: Option<WorkflowDocumentRef>) {
+        let Some(reference) = reference else {
+            return;
+        };
+        match state
+            .core
+            .host_artifacts()
+            .execution_document(&reference)
+            .await
+        {
+            Ok(WorkflowDocumentRead::Read(document)) => {
+                self.inner.cache.lock_recover().loaded(*document);
+            }
+            Ok(unreadable) => {
+                eprintln!("warning: workbench cannot read a workflow document: {unreadable:?}");
+            }
+            Err(error) => {
+                eprintln!("warning: workbench could not read a workflow document: {error}");
+            }
+        }
     }
 }
 
@@ -268,7 +437,7 @@ async fn follow_session(graphs: ExecutionGraphs, state: AppState, session_id: Se
             match item? {
                 SessionObservationStreamItem::Event(event) => match &event.payload {
                     SessionObservationEventPayload::LanguageExecution(observation) => {
-                        graphs.observe(source.clone(), observation);
+                        graphs.observe(&state, source.clone(), observation).await;
                     }
                     SessionObservationEventPayload::ProcessChanged { process_ids, .. } => {
                         for process_id in process_ids {
@@ -292,15 +461,15 @@ async fn follow_session(graphs: ExecutionGraphs, state: AppState, session_id: Se
 
 /// The settlement a process's durable end states, from its terminal status
 /// and the time of the committed fact that ended it.
-fn settlement(status: ProcessStatus, occurred_at_ms: u64) -> Option<TraceLashlangGraphSettlement> {
+fn settlement(status: ProcessStatus, occurred_at_ms: u64) -> Option<WorkflowOverlaySettlement> {
     let terminal = match status {
-        ProcessStatus::Completed => TraceLashlangGraphTerminal::Completed,
-        ProcessStatus::Failed => TraceLashlangGraphTerminal::Failed,
-        ProcessStatus::Cancelled => TraceLashlangGraphTerminal::Cancelled,
-        ProcessStatus::Abandoned => TraceLashlangGraphTerminal::Abandoned,
+        ProcessStatus::Completed => WorkflowOverlayTerminal::Completed,
+        ProcessStatus::Failed => WorkflowOverlayTerminal::Failed,
+        ProcessStatus::Cancelled => WorkflowOverlayTerminal::Cancelled,
+        ProcessStatus::Abandoned => WorkflowOverlayTerminal::Abandoned,
         _ => return None,
     };
-    Some(TraceLashlangGraphSettlement {
+    Some(WorkflowOverlaySettlement {
         terminal,
         occurred_at: i64::try_from(occurred_at_ms)
             .ok()
@@ -320,6 +489,13 @@ async fn follow_process(graphs: ExecutionGraphs, state: AppState, process_id: Pr
         };
         if let Some(child_session_id) = &view.process.child_session_id {
             graphs.follow_session(&state, child_session_id);
+        }
+        if let ProcessDocumentIdentity::Available(reference) = &view.document {
+            graphs
+                .inner
+                .cache
+                .lock_recover()
+                .names_document(&process_id, reference.clone());
         }
         let ended = view
             .process
@@ -363,7 +539,15 @@ async fn follow_process(graphs: ExecutionGraphs, state: AppState, process_id: Pr
                         {
                             graphs.follow_process(&state, &child.process_id);
                         }
-                        graphs.observe(source.clone(), observation);
+                        graphs.observe(&state, source.clone(), observation).await;
+                    }
+                    ProcessObservationEventPayload::StepBodyStarted(observation) => {
+                        let missing = graphs
+                            .inner
+                            .cache
+                            .lock_recover()
+                            .step_body_started(observation);
+                        graphs.load(&state, missing).await;
                     }
                     ProcessObservationEventPayload::Committed { event } => {
                         if let ProcessLifecycleFact::Terminal { outcome, .. } = &event.fact
@@ -399,11 +583,8 @@ async fn follow_process(graphs: ExecutionGraphs, state: AppState, process_id: Pr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash::tracing::{
-        TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
-        TraceLanguageExecutionMapNode, TraceLashlangNodeObservation, TraceRuntimeScope,
-        TraceRuntimeSubject,
-    };
+    use lash::tracing::{TraceLanguageExecution, TraceRuntimeScope, TraceRuntimeSubject};
+    use lash::workflow::{WorkflowDocumentEntry, WorkflowOverlayOccurrence};
 
     fn observation(
         process_id: &ProcessId,
@@ -440,21 +621,13 @@ mod tests {
             "started",
             1_000,
             TraceLanguageExecutionPayload::ExecutionStarted {
-                execution_map: TraceLanguageExecutionMap {
-                    nodes: vec![TraceLanguageExecutionMapNode {
-                        id: "sleep".to_string(),
-                        site: lash::vm::WorkflowExecutionSite::new(
-                            "worker",
-                            [0],
-                            lash::tracing::ExecutionNodeKind::Call,
-                            "sleep",
-                        ),
-                        kind: lash::tracing::ExecutionNodeKind::Call,
-                        label: "sleep".to_string(),
-                        branch_memberships: Vec::new(),
-                        label_metadata: None,
-                    }],
-                    edges: Vec::new(),
+                document: WorkflowDocumentRef {
+                    source_identity: "source".to_string(),
+                    module_ref: "module".to_string(),
+                    entry: WorkflowDocumentEntry::Process {
+                        process_ref: "0:0".to_string(),
+                    },
+                    ir_version: 1,
                 },
             },
         )
@@ -467,8 +640,6 @@ mod tests {
             1_100,
             TraceLanguageExecutionPayload::NodeStarted {
                 node_id: "sleep".to_string(),
-                node_kind: lash::tracing::ExecutionNodeKind::Call,
-                label: "sleep".to_string(),
                 occurrence: 1,
                 call_id: None,
                 context: Default::default(),
@@ -476,7 +647,7 @@ mod tests {
         )
     }
 
-    fn cancelled_at(ms: u64) -> TraceLashlangGraphSettlement {
+    fn cancelled_at(ms: u64) -> WorkflowOverlaySettlement {
         settlement(ProcessStatus::Cancelled, ms).expect("a terminal status settles")
     }
 
@@ -504,16 +675,16 @@ mod tests {
                 .expect("the process graph");
             assert_eq!(
                 graph.settlement.map(|settlement| settlement.terminal),
-                Some(TraceLashlangGraphTerminal::Cancelled),
+                Some(WorkflowOverlayTerminal::Cancelled),
                 "settle_first={settle_first}"
             );
             assert!(
                 matches!(
-                    graph.nodes[0].observation,
-                    TraceLashlangNodeObservation::Cancelled { .. }
+                    graph.sites[0].occurrence,
+                    WorkflowOverlayOccurrence::Cancelled { .. }
                 ),
                 "settle_first={settle_first}: {:?}",
-                graph.nodes[0].observation
+                graph.sites[0].occurrence
             );
         }
     }

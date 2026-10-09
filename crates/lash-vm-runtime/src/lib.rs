@@ -47,11 +47,10 @@ pub use language_runtime::{
 
 pub use lash_trace::{
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,
-    TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
-    TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus, TraceLashlangEdgeSelection, TraceLashlangGraph,
-    TraceLashlangGraphChildLink, TraceLashlangGraphEdge, TraceLashlangGraphNode,
-    TraceLashlangNodeObservation, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,
+    TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity,
+    TraceLanguageExecutionPayload, TraceLanguageExecutionStatus, TraceNodeAwaited,
+    TraceNodeWaitKind, TraceNodeWaitResolution, WorkflowExecutionOverlay, WorkflowOverlayChildLink,
+    WorkflowOverlayDocument, WorkflowOverlayOccurrence, WorkflowOverlaySite,
 };
 pub use lash_vm::{
     LASH_TYPE_KEY, LashVmArtifacts, LashVmHostCatalog, LashVmHostEnvironment,
@@ -1147,13 +1146,10 @@ pub use deferred::{
 };
 pub use document::{
     AdmittedWorkflow, WorkflowAdmissionOutcome, WorkflowAdmissionRequest, WorkflowDocument,
-    WorkflowEntry,
+    WorkflowEntry, WorkflowExecutionDocument,
 };
 pub use engine::LASH_VM_SEGMENT_STATE_VERSION;
-pub use process::{
-    lash_vm_program_hash, lash_vm_type_expr_schema, trace_lashlang_main_map,
-    trace_lashlang_process_map,
-};
+pub use process::{lash_vm_program_hash, lash_vm_type_expr_schema};
 
 #[cfg(test)]
 mod lib_tests;

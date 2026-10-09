@@ -68,18 +68,25 @@ async fn a_saved_workflow_runs_as_a_durable_process() {
             .iter()
             .all(|event| Some(&event.definition) == graph.source_identity.as_ref())
     );
-    let map = lash::process::trace_lashlang_process_map(graph, process_name)
-        .expect("saved execution map");
-    let mut node_ids = map
-        .nodes
-        .iter()
-        .map(|node| node.id.as_str())
-        .collect::<std::collections::BTreeSet<_>>();
-    let root_id = graph
-        .process(process_name)
-        .expect("saved root")
-        .id
-        .to_string();
+    let saved_root = graph.process(process_name).expect("saved root");
+    fn executing<'g>(
+        body: &'g lash::vm::ir::WorkflowSubgraph,
+        ids: &mut std::collections::BTreeSet<&'g str>,
+    ) {
+        for node in &body.nodes {
+            if !node.execution_sites.is_empty() {
+                ids.insert(node.id.as_str());
+            }
+            if let lash::vm::ir::WorkflowNodeKind::Container(container) = &node.kind {
+                for (_, child) in container.child_subgraphs() {
+                    executing(child, ids);
+                }
+            }
+        }
+    }
+    let mut node_ids = std::collections::BTreeSet::new();
+    executing(&saved_root.body, &mut node_ids);
+    let root_id = saved_root.id.to_string();
     assert!(document.roots.processes.contains(&root_id));
     node_ids.insert(root_id.as_str());
     assert!(

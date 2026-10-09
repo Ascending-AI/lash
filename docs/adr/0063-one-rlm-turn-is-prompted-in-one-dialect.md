@@ -72,6 +72,6 @@ rule to their own contributions.
 - [Prompt walker](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs)
   checks source wording with explicit IR and VM exceptions.
 - [Cell trace](../../crates/lash-protocol-rlm/src/protocol/driver.rs),
-  [process trace](../../crates/lash-vm-runtime/src/process/trace_map.rs)
+  [process trace](../../crates/lash-vm-runtime/src/engine/trace.rs)
   and [IR identity](../../crates/lash-vm/src/artifact_identity.rs)
   keep source labels separate from machine identities.

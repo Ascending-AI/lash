@@ -33,8 +33,7 @@ use lash_core::SessionError;
 use lash_vm::ExecutionOutcome;
 use lash_vm_runtime::{
     LashVmSurface, TraceLanguageExecution, TraceLanguageExecutionGeneration,
-    TraceLanguageExecutionIdentity, TraceLanguageExecutionMap, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
 };
 
 use self::host_bridge::{
@@ -668,7 +667,11 @@ async fn execute_code_in_worker_scope(
     // through its definitions. Publishing again would journal a step its
     // first execution may have skipped on a frame hold only that worker
     // knew of, and a replay rebuilt from the committed state would not.
-    if resumed.is_none() && !linked_module.artifact.exports().processes.is_empty() {
+    //
+    // Every cell's module is published, whether or not it declares a process:
+    // the cell's start names its document by this module's reference, and a
+    // host reads it while the execution is unsettled (FIG-5576).
+    if resumed.is_none() {
         let stored = {
             let _phase = ctx.named_phase("rlm_lash_vm.store_module_artifact");
             publish_cell_module(state, &ctx, &artifact_store, &linked_module.artifact).await
@@ -1492,7 +1495,12 @@ fn emit_foreground_execution_started(
         event_key: trace.event_key("started"),
         identity: trace.identity().clone(),
         payload: TraceLanguageExecutionPayload::ExecutionStarted {
-            execution_map: trace_main_map(artifact),
+            document: lash_trace::WorkflowDocumentRef {
+                source_identity: trace.identity().source_identity.clone(),
+                module_ref: trace.identity().module_ref.clone(),
+                entry: lash_trace::WorkflowDocumentEntry::Main,
+                ir_version: artifact.graph.ir_version,
+            },
         },
     });
 }
@@ -1524,10 +1532,6 @@ fn emit_foreground_execution_finished(
         identity: trace.identity().clone(),
         payload: TraceLanguageExecutionPayload::ExecutionFinished { status, error },
     });
-}
-
-fn trace_main_map(artifact: &lash_vm_client::InspectedArtifact) -> TraceLanguageExecutionMap {
-    lash_vm_runtime::trace_lashlang_main_map(&artifact.graph)
 }
 
 /// Applies a `set_default` patch as one transaction.

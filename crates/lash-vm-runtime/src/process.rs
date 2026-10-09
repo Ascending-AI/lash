@@ -123,10 +123,6 @@ pub(crate) fn segment_continuation_expectation<'a>(
 mod schema;
 pub use schema::lash_vm_type_expr_schema;
 
-#[path = "process/trace_map.rs"]
-mod trace_map;
-pub use trace_map::{trace_lashlang_main_map, trace_lashlang_process_map};
-
 #[cfg(test)]
 #[path = "process/opaque_state_tests.rs"]
 mod opaque_state_tests;

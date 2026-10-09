@@ -48,7 +48,6 @@ fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
 
 fn step(name: &str) -> StepRequest {
     StepRequest::Tool {
-        language_execution: None,
         step: StepName(name.to_owned()),
         tool: ToolId::new(name),
         input: json!({ "step": name }),

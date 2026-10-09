@@ -171,7 +171,6 @@ impl ProcessEngine for LawEngine {
             }
             ("refused_step", EngineEvent::Started { .. }) => EngineAction::Steps {
                 steps: vec![StepRequest::Tool {
-                    language_execution: None,
                     step: StepName("refused".to_owned()),
                     tool: ToolId::new(REFUSED_TOOL),
                     input: json!({}),

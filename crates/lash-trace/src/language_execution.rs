@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     TraceBranchSelection, TraceLanguageChildExecution, TraceLanguageExecutionFailure,
-    TraceLanguageExecutionMap, TraceLanguageExecutionStatus,
+    TraceLanguageExecutionStatus,
 };
 
 /// One language execution fact as an observer receives it: the execution
@@ -32,7 +32,9 @@ impl LanguageExecutionObservation {
 /// names the document; it is never the document. A host reads the graph the
 /// reference names through the facade's workflow inspection and may cache
 /// it under this value, which is immutable for a process.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 pub struct WorkflowDocumentRef {
     /// The definition identity of the admitted module the document
     /// projects; the document's own `source_identity`.
@@ -46,7 +48,9 @@ pub struct WorkflowDocumentRef {
 }
 
 /// The entry of a [`WorkflowDocumentRef`].
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkflowDocumentEntry {
     /// The module's main body.
@@ -56,12 +60,65 @@ pub enum WorkflowDocumentEntry {
     Process { process_ref: String },
 }
 
+/// The admitted body of a process step started: the step's actor committed
+/// its admission, bound it to a call, and is about to run it. A step that is
+/// refused never produces one, and a retried body produces one more with the
+/// same site, occurrence and call and the next attempt.
+///
+/// It names no language and no document: the process's own definition scopes
+/// the site.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StepBodyStarted {
+    pub process_id: lash_sansio::ProcessId,
+    /// The node of the process's workflow document the step runs for.
+    pub node_id: String,
+    /// Which occurrence of the site this is, from 1, counted per site.
+    pub occurrence: u64,
+    /// The exact site inside the node and the loop activations around this
+    /// occurrence.
+    #[serde(
+        default,
+        skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
+    )]
+    pub context: lash_sansio::WorkflowOccurrenceContext,
+    /// The call the admission bound the step to.
+    pub call_id: lash_sansio::ToolCallId,
+    /// The one-based attempt of the admitted body.
+    pub attempt: u32,
+}
+
+impl StepBodyStarted {
+    /// The static site the step runs for.
+    pub fn site(&self) -> lash_sansio::WorkflowSiteRef {
+        lash_sansio::WorkflowSiteRef::new(self.node_id.clone(), self.context.site_path.clone())
+    }
+
+    /// The identity a redelivery of this fact repeats: one per attempt of
+    /// one call.
+    pub fn event_key(&self) -> String {
+        format!(
+            "step_body:process:{}:{}:attempt:{}",
+            self.process_id, self.call_id, self.attempt
+        )
+    }
+}
+
+/// One [`StepBodyStarted`] as an observer receives it, with when it was
+/// observed. `observed_at_ms` is not part of the fact.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StepBodyStartedObservation {
+    pub step: StepBodyStarted,
+    pub observed_at_ms: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum TraceLanguageExecutionPayload {
-    ExecutionStarted {
-        execution_map: TraceLanguageExecutionMap,
-    },
+    /// The execution began. It names the workflow document it runs and the
+    /// entry it runs it from; the document itself is read through the
+    /// facade's workflow inspection, never carried here.
+    ExecutionStarted { document: WorkflowDocumentRef },
     ExecutionFinished {
         status: TraceLanguageExecutionStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -69,8 +126,6 @@ pub enum TraceLanguageExecutionPayload {
     },
     NodeStarted {
         node_id: String,
-        node_kind: lash_sansio::ExecutionNodeKind,
-        label: String,
         occurrence: u64,
         /// The exact site inside the node and the loop activations around
         /// this occurrence. `occurrence` counts per site.
@@ -86,8 +141,6 @@ pub enum TraceLanguageExecutionPayload {
     /// the enclosing trace record timestamp, not a separately sampled clock.
     NodeWaiting {
         node_id: String,
-        node_kind: lash_sansio::ExecutionNodeKind,
-        label: String,
         occurrence: u64,
         /// The exact site inside the node and the loop activations around
         /// this occurrence. `occurrence` counts per site.
@@ -102,8 +155,6 @@ pub enum TraceLanguageExecutionPayload {
     /// remains a separate fact.
     NodeResumed {
         node_id: String,
-        node_kind: lash_sansio::ExecutionNodeKind,
-        label: String,
         occurrence: u64,
         /// The exact site inside the node and the loop activations around
         /// this occurrence. `occurrence` counts per site.
@@ -117,8 +168,6 @@ pub enum TraceLanguageExecutionPayload {
     /// Only an occurrence observed in flight may be cancelled.
     NodeCancelled {
         node_id: String,
-        node_kind: lash_sansio::ExecutionNodeKind,
-        label: String,
         occurrence: u64,
         /// The exact site inside the node and the loop activations around
         /// this occurrence. `occurrence` counts per site.
@@ -130,8 +179,6 @@ pub enum TraceLanguageExecutionPayload {
     },
     NodeCompleted {
         node_id: String,
-        node_kind: lash_sansio::ExecutionNodeKind,
-        label: String,
         occurrence: u64,
         /// The exact site inside the node and the loop activations around
         /// this occurrence. `occurrence` counts per site.
@@ -145,8 +192,6 @@ pub enum TraceLanguageExecutionPayload {
     },
     NodeFailed {
         node_id: String,
-        node_kind: lash_sansio::ExecutionNodeKind,
-        label: String,
         occurrence: u64,
         /// The exact site inside the node and the loop activations around
         /// this occurrence. `occurrence` counts per site.
@@ -169,7 +214,7 @@ pub enum TraceLanguageExecutionPayload {
             skip_serializing_if = "lash_sansio::WorkflowOccurrenceContext::is_default"
         )]
         context: lash_sansio::WorkflowOccurrenceContext,
-        edge_id: String,
+        /// The arm of the branch this occurrence took.
         selected: TraceBranchSelection,
     },
     ChildStarted {

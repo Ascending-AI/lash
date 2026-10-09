@@ -95,9 +95,31 @@
 //! The IR the document carries (`Expr`, its slots, declarations and types)
 //! is `lash::vm::ir`; this module is the document itself.
 
-/// Which document a process runs, as its observation snapshot names it
-/// ([`ProcessDocumentIdentity`](crate::process::ProcessDocumentIdentity)).
+/// The execution overlay: what one execution was observed to do, keyed by
+/// the execution sites of the document it runs. A host folds it from the
+/// observations of a session or process feed with
+/// [`WorkflowExecutionOverlayAccumulator`] (or the pure
+/// [`fold_workflow_overlay`]), reads the document the execution names with
+/// [`HostArtifacts::execution_document`](crate::persistence::HostArtifacts::execution_document),
+/// gives the reducer its [`WorkflowExecutionDocument::overlay_document`],
+/// and settles the overlay with the process's committed end. Labels, kinds, edges and the arms of a branch are read
+/// from the document, never from the overlay.
+pub use lash_trace::{
+    DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT, WorkflowExecutionOverlay,
+    WorkflowExecutionOverlayAccumulator, WorkflowOverlayCall, WorkflowOverlayChildLink,
+    WorkflowOverlayConflict, WorkflowOverlayConflictKind, WorkflowOverlayCoverage,
+    WorkflowOverlayDocument, WorkflowOverlayEventIdentity, WorkflowOverlayEventTransition,
+    WorkflowOverlayFact, WorkflowOverlayFoldError, WorkflowOverlayHistoryEvent,
+    WorkflowOverlayMismatch, WorkflowOverlayOccurrence, WorkflowOverlaySettlement,
+    WorkflowOverlaySite, WorkflowOverlaySiteReport, WorkflowOverlaySiteRetention,
+    WorkflowOverlayTerminal, WorkflowOverlayTerminalRecord, WorkflowOverlayTerminalStatus,
+    fold_workflow_overlay,
+};
+/// Which document an execution runs, as a process's observation snapshot
+/// ([`ProcessDocumentIdentity`](crate::process::ProcessDocumentIdentity))
+/// and an execution's start name it.
 pub use lash_trace::{WorkflowDocumentEntry, WorkflowDocumentRef};
+
 pub use lash_vm::{
     WORKFLOW_IR_VERSION, WorkflowBodyForm, WorkflowCatch, WorkflowCompletionGroup, WorkflowGraph,
     WorkflowGraphError, WorkflowIrVersionRefusal, WorkflowPinnedSlots, WorkflowProcessWrapper,
@@ -113,7 +135,7 @@ pub use lash_vm::{
     WorkflowEdgeDrag, WorkflowEdit, WorkflowEditDiagnostic, WorkflowEditDiagnosticKind,
     WorkflowEditLocation, WorkflowEditRefusal, WorkflowEditTransaction, WorkflowNodeSource,
 };
-pub use lash_vm_runtime::{WorkflowDocument, WorkflowEntry};
+pub use lash_vm_runtime::{WorkflowDocument, WorkflowEntry, WorkflowExecutionDocument};
 
 use crate::persistence::ArtifactName;
 use crate::process::{ProcessDefinition, ProcessDefinitionId, ProcessEngineKind};
@@ -181,6 +203,16 @@ pub enum WorkflowRead {
     Unsupported {
         engine_kind: ProcessEngineKind,
     },
+}
+
+/// The document an execution names, or why there is none.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WorkflowDocumentRead {
+    Read(Box<WorkflowExecutionDocument>),
+    /// Nothing retains the module the reference names any more.
+    Unavailable(WorkflowUnavailable),
+    /// This core has no engine that reads workflow documents.
+    Unsupported,
 }
 
 /// What a workflow read found no longer retained.

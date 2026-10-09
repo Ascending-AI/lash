@@ -245,7 +245,6 @@ const LAW_PARK: &str = "law_park";
 fn law_step(step: &str, tool: &str) -> EngineAction {
     EngineAction::Steps {
         steps: vec![StepRequest::Tool {
-            language_execution: None,
             step: StepName(step.to_owned()),
             tool: lash_sansio::ToolId::new(tool),
             input: json!({}),
@@ -261,7 +260,7 @@ const PARK_TWO: [&str; 2] = ["park-a", "park-b"];
 /// The node [`LawEngine`]'s `sleep` act sleeps at.
 const SLEEP_NODE: &str = "sleep-node";
 
-/// The first occurrence of `node`, as the law engine's execution map
+/// The first occurrence of `node`, as the law engine's document
 /// would name it.
 fn law_site(node: &str) -> crate::StepEffectSite {
     crate::StepEffectSite {
@@ -342,7 +341,6 @@ impl ProcessEngine for LawEngine {
             EngineEvent::Started { .. } => match act.as_str() {
                 "stuck" => EngineAction::Steps {
                     steps: vec![StepRequest::Tool {
-                        language_execution: None,
                         step: StepName("stuck".to_owned()),
                         tool: lash_sansio::ToolId::new("law_stuck"),
                         input: json!({}),
@@ -362,7 +360,6 @@ impl ProcessEngine for LawEngine {
                     steps: PARK_TWO
                         .iter()
                         .map(|step| StepRequest::Tool {
-                            language_execution: None,
                             step: StepName((*step).to_owned()),
                             tool: lash_sansio::ToolId::new(LAW_PARK),
                             input: json!({}),

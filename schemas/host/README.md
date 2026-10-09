@@ -23,7 +23,7 @@ target runs all of them:
 | `workflow-graph` | `WorkflowGraph` | `WORKFLOW_GRAPH_SCHEMA_VERSION` | `crates/lash-vm/src/bin/workflow_schema_generator.rs` |
 | `workflow-type-facets` | `WorkflowNodeTypeFacets` | `WORKFLOW_TYPE_FACET_SCHEMA_VERSION` | `crates/lash-vm/src/bin/workflow_schema_generator.rs` |
 | `trace-record` | `TraceRecord` with its `TraceEvent` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
-| `trace-lashlang-graph` | `TraceLashlangGraph` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
+| `workflow-execution-overlay` | `WorkflowExecutionOverlay` | `TRACE_SCHEMA_VERSION` | `crates/lash-trace/src/bin/trace_schema_generator.rs` |
 | `process-effect-outcome` | `process.effect_outcome` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
 | `process-effect-omissions` | `process.effect_omissions` payload | `PROCESS_EVENT_VOCABULARY_VERSION` | `crates/lash-core-execution/src/bin/process_event_schema_generator.rs` |
 

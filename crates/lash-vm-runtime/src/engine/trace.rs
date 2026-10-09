@@ -61,12 +61,20 @@ impl ProcessTrace {
         })
     }
 
+    /// The execution began: it names the document it runs and the process
+    /// it enters it by.
     pub(super) fn started(&self, artifact: &lash_vm_client::InspectedArtifact) {
-        if let Some(execution_map) =
-            crate::trace_lashlang_process_map(&artifact.graph, &self.identity.entry_name)
-        {
-            self.emit(TraceLanguageExecutionPayload::ExecutionStarted { execution_map });
-        }
+        let Some(process_ref) = self.identity.entry_ref.clone() else {
+            return;
+        };
+        self.emit_payload(TraceLanguageExecutionPayload::ExecutionStarted {
+            document: lash_trace::WorkflowDocumentRef {
+                source_identity: self.identity.source_identity.clone(),
+                module_ref: self.identity.module_ref.clone(),
+                entry: lash_trace::WorkflowDocumentEntry::Process { process_ref },
+                ir_version: artifact.graph.ir_version,
+            },
+        });
     }
 
     pub(super) fn finished(&self, outcome: &lash_core::ProcessOutcome) {
@@ -79,13 +87,18 @@ impl ProcessTrace {
             }
             _ => TraceLanguageExecutionStatus::Failed,
         };
-        self.emit(TraceLanguageExecutionPayload::ExecutionFinished {
+        self.emit_payload(TraceLanguageExecutionPayload::ExecutionFinished {
             status,
             error: None,
         });
     }
 
-    pub(super) fn emit(&self, mut payload: TraceLanguageExecutionPayload) {
+    /// Emit a fact about an occurrence of a site of static kind `kind`.
+    pub(super) fn emit(
+        &self,
+        mut payload: TraceLanguageExecutionPayload,
+        kind: lash_sansio::ExecutionNodeKind,
+    ) {
         use TraceLanguageExecutionPayload as Payload;
         let Some(key) = payload.occurrence_key() else {
             self.emit_payload(payload);
@@ -97,8 +110,8 @@ impl ProcessTrace {
             *call_id = self.settled_calls.lock_recover().remove(&key);
         }
         match &payload {
-            Payload::NodeStarted { node_kind, .. }
-                if *node_kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND =>
+            Payload::NodeStarted { .. }
+                if kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND =>
             {
                 self.pending_resource_starts
                     .lock_recover()
@@ -153,32 +166,13 @@ impl ProcessTrace {
         }
     }
 
-    /// Hand the observed start to the tool step. Its actor owns the call id;
-    /// emitting here would publish an unbound start before admission.
-    pub(super) fn resource_started(
-        &self,
-        call_site: &lash_vm::LashVmExecutionCallSite,
-    ) -> TraceLanguageExecution {
+    /// The operation at `call_site` became a tool step. Its actor reports
+    /// the body's start once it admits the step, bound to its call; a start
+    /// published here would claim a call that admission can still refuse.
+    pub(super) fn resource_issued(&self, call_site: &lash_vm::LashVmExecutionCallSite) {
         self.pending_resource_starts
             .lock_recover()
             .remove(&occurrence_key(call_site));
-        TraceLanguageExecution {
-            event_key: format!(
-                "lash_vm_execution:{}:node:{}:{}:started",
-                self.identity.graph_key(),
-                call_site.site.site_ref(),
-                call_site.occurrence
-            ),
-            identity: self.identity.clone(),
-            payload: TraceLanguageExecutionPayload::NodeStarted {
-                node_id: call_site.site.node_id.clone(),
-                node_kind: call_site.site.node_kind,
-                label: call_site.site.label.clone(),
-                occurrence: call_site.occurrence,
-                call_id: None,
-                context: call_site.context(),
-            },
-        }
     }
 
     fn emit_payload(&self, payload: TraceLanguageExecutionPayload) {
@@ -192,9 +186,7 @@ impl ProcessTrace {
         let (suffix, node) = match &payload {
             Payload::ExecutionStarted { .. } => ("started".to_owned(), None),
             Payload::ExecutionFinished { .. } => ("finished".to_owned(), None),
-            Payload::BranchSelected {
-                node_id, edge_id, ..
-            } => (format!("branch:{at}:{edge_id}"), Some(node_id)),
+            Payload::BranchSelected { node_id, .. } => (format!("branch:{at}"), Some(node_id)),
             Payload::ChildStarted {
                 parent_node_id,
                 child,
@@ -255,8 +247,6 @@ impl ProcessTrace {
         let payload = if resumed {
             TraceLanguageExecutionPayload::NodeResumed {
                 node_id: site.site.node_id.clone(),
-                node_kind: site.site.node_kind,
-                label: site.site.label.clone(),
                 occurrence: site.occurrence,
                 resolution: crate::TraceNodeWaitResolution::Resumed,
                 context: site.context(),
@@ -264,13 +254,11 @@ impl ProcessTrace {
         } else {
             TraceLanguageExecutionPayload::NodeWaiting {
                 node_id: site.site.node_id.clone(),
-                node_kind: site.site.node_kind,
-                label: site.site.label.clone(),
                 occurrence: site.occurrence,
                 awaited,
                 context: site.context(),
             }
         };
-        self.emit(payload);
+        self.emit(payload, site.site.node_kind);
     }
 }

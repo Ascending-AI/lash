@@ -267,9 +267,9 @@ async fn vm_run(
     let identities = lash_vm_broker::CodeCallIdentities::process_body(run.process.clone());
     let boundary = || false;
     let quiet_points = HeldQuietPoints::default();
-    let observed_host = crate::LanguageTraceHost::new(host, |_: &QuietPointHost, payload| {
+    let observed_host = crate::LanguageTraceHost::new(host, |_: &QuietPointHost, payload, kind| {
         if let Some(trace) = &trace {
-            trace.emit(payload);
+            trace.emit(payload, kind);
         }
     });
     let end = crate::WorkerRun {
@@ -612,20 +612,14 @@ impl QuietPointHost {
             }
             .into());
         }
+        if let (Some(trace), Some(call_site)) = (&self.trace, call_site.as_deref()) {
+            trace.resource_issued(call_site);
+        }
         Ok(IssuedLeaf::Tool {
             tool,
             input: resource_payload(&args)?,
             site,
-            language_execution: self.language_execution(call_site.as_deref()),
         })
-    }
-
-    fn language_execution(
-        &self,
-        call_site: Option<&lash_vm::LashVmExecutionCallSite>,
-    ) -> Option<Box<lash_trace::TraceLanguageExecution>> {
-        let trace = self.trace.as_ref()?;
-        Some(Box::new(trace.resource_started(call_site?)))
     }
 
     /// A language runtime value, sampled in place: it reaches nothing outside

@@ -29,7 +29,8 @@ pub fn trace_failure(
 
 /// Adapts the VM's internal execution observations to the public language
 /// trace payload consumed by hosts. The wrapped host never receives an
-/// internal execution-site descriptor.
+/// internal execution-site descriptor. The observer is also told the static
+/// kind of the site the fact is about, which the payload does not repeat.
 ///
 /// Cancellation follows the engine hosts' rule: an in-flight occurrence that
 /// ends while the wrapped host reports cancellation is reported as
@@ -60,7 +61,7 @@ impl<H, O> LanguageTraceHost<H, O> {
 impl<H, O> lash_vm::ExecutionHost for LanguageTraceHost<H, O>
 where
     H: lash_vm::ExecutionHost,
-    O: Fn(&H, TraceLanguageExecutionPayload) + Sync,
+    O: Fn(&H, TraceLanguageExecutionPayload, ExecutionNodeKind) + Sync,
 {
     async fn perform(
         &self,
@@ -182,13 +183,14 @@ where
             }
             Observation::BranchSelected { .. } | Observation::ChildStarted { .. } => {}
         }
-        (self.observer)(&self.host, public_payload(observation));
+        let kind = observation.call_site().site.node_kind;
+        (self.observer)(&self.host, public_payload(observation), kind);
     }
 }
 
 impl<H, O> LanguageTraceHost<H, O>
 where
-    O: Fn(&H, TraceLanguageExecutionPayload),
+    O: Fn(&H, TraceLanguageExecutionPayload, ExecutionNodeKind),
 {
     fn emit_cancelled(
         &self,
@@ -201,23 +203,21 @@ where
                 &self.host,
                 TraceLanguageExecutionPayload::NodeResumed {
                     node_id: site.node_id.clone(),
-                    node_kind: site.node_kind,
-                    label: site.label.clone(),
                     occurrence,
                     context: site.occurrence_context(loops),
                     resolution: lash_trace::TraceNodeWaitResolution::Cancelled,
                 },
+                site.node_kind,
             );
         }
         (self.observer)(
             &self.host,
             TraceLanguageExecutionPayload::NodeCancelled {
                 node_id: site.node_id.clone(),
-                node_kind: site.node_kind,
-                label: site.label.clone(),
                 occurrence,
                 context: site.occurrence_context(loops),
             },
+            site.node_kind,
         );
     }
 }
@@ -234,8 +234,6 @@ fn public_payload(
         } => TraceLanguageExecutionPayload::NodeWaiting {
             context: site.occurrence_context(&loops),
             node_id: site.node_id,
-            node_kind: site.node_kind,
-            label: site.label,
             occurrence,
             awaited: lash_trace::TraceNodeAwaited::ChildProcesses { process_ids },
         },
@@ -246,8 +244,6 @@ fn public_payload(
         } => TraceLanguageExecutionPayload::NodeResumed {
             context: site.occurrence_context(&loops),
             node_id: site.node_id,
-            node_kind: site.node_kind,
-            label: site.label,
             occurrence,
             resolution: lash_trace::TraceNodeWaitResolution::Resumed,
         },
@@ -258,8 +254,6 @@ fn public_payload(
         } => TraceLanguageExecutionPayload::NodeStarted {
             context: site.occurrence_context(&loops),
             node_id: site.node_id,
-            node_kind: site.node_kind,
-            label: site.label,
             occurrence,
             call_id: None,
         },
@@ -270,8 +264,6 @@ fn public_payload(
         } => TraceLanguageExecutionPayload::NodeCompleted {
             context: site.occurrence_context(&loops),
             node_id: site.node_id,
-            node_kind: site.node_kind,
-            label: site.label,
             occurrence,
             call_id: None,
         },
@@ -283,8 +275,6 @@ fn public_payload(
         } => TraceLanguageExecutionPayload::NodeFailed {
             context: site.occurrence_context(&loops),
             node_id: site.node_id,
-            node_kind: site.node_kind,
-            label: site.label,
             occurrence,
             call_id: None,
             failure: trace_failure(failure),
@@ -292,14 +282,12 @@ fn public_payload(
         lash_vm::LashVmExecutionObservation::BranchSelected {
             site,
             occurrence,
-            edge_id,
             selected,
             loops,
         } => TraceLanguageExecutionPayload::BranchSelected {
             context: site.occurrence_context(&loops),
             node_id: site.node_id,
             occurrence,
-            edge_id,
             selected: match selected {
                 lash_vm::ProcessBranchSelection::Then => TraceBranchSelection::Then,
                 lash_vm::ProcessBranchSelection::Else => TraceBranchSelection::Else,

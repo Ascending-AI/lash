@@ -3,37 +3,24 @@ use super::*;
 use futures_util::StreamExt as _;
 use lash_core::SessionRevision;
 use lash_trace::{
-    TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
-    TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload, TraceRuntimeScope,
-    TraceRuntimeSubject,
+    TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload,
+    TraceRuntimeScope, TraceRuntimeSubject,
 };
 use std::time::Duration;
 
 fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
         TraceLanguageExecutionPayload::ExecutionStarted {
-            execution_map: TraceLanguageExecutionMap {
-                nodes: vec![TraceLanguageExecutionMapNode {
-                    id: "node".into(),
-                    site: lash_sansio::WorkflowExecutionSite::new(
-                        "main",
-                        [0],
-                        lash_sansio::ExecutionNodeKind::Call,
-                        "call()",
-                    ),
-                    kind: lash_sansio::ExecutionNodeKind::Call,
-                    label: "call()".into(),
-                    branch_memberships: Vec::new(),
-                    label_metadata: None,
-                }],
-                edges: Vec::new(),
+            document: lash_trace::WorkflowDocumentRef {
+                source_identity: "source".into(),
+                module_ref: "module".into(),
+                entry: lash_trace::WorkflowDocumentEntry::Main,
+                ir_version: 1,
             },
         }
     } else {
         TraceLanguageExecutionPayload::NodeStarted {
             node_id: "node".into(),
-            node_kind: lash_sansio::ExecutionNodeKind::Call,
-            label: "call()".into(),
             occurrence,
             call_id: None,
             context: Default::default(),
@@ -84,10 +71,12 @@ async fn next(
 }
 
 /// FIG-5548: a committed cancellation settles a blocked process's observed
-/// language occurrences without inventing observations of the untouched tail.
+/// occurrences without inventing observations of the untouched tail.
+/// FIG-5576: the body start of an admitted step reaches the process's feed
+/// as its own observation, behind the language observations before it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
-    use lash_trace::{TraceLanguageExecutionStatus, TraceLashlangNodeObservation};
+    use lash_trace::{TraceLanguageExecutionStatus, WorkflowOverlayOccurrence};
 
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::memory()
@@ -119,7 +108,7 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     let observed = core.processes().observe(process);
     let snapshot = observed.snapshot().await.expect("initial durable snapshot");
     let mut subscription = observed.subscribe_and_recover(snapshot.cursor);
-    let mut graph = lash_trace::TraceLashlangGraphAccumulator::default();
+    let mut graph = lash_trace::WorkflowExecutionOverlayAccumulator::default();
     // The observation boundary receives these records from the language VM.
     // The held engine isolates its terminal writer from VM segment execution.
     for occurrence in 0..=4 {
@@ -135,18 +124,9 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         event.identity.generation = None;
         event.identity.engine_execution_id = Some(process.to_string());
         match &mut event.payload {
-            TraceLanguageExecutionPayload::ExecutionStarted { execution_map } => {
-                for id in ["untouched", "running", "done"] {
-                    let mut node = execution_map.nodes[0].clone();
-                    node.id = id.into();
-                    execution_map.nodes.push(node);
-                }
-            }
             _ if occurrence == 2 => {
                 event.payload = TraceLanguageExecutionPayload::NodeWaiting {
                     node_id: "node".into(),
-                    node_kind: lash_sansio::ExecutionNodeKind::Call,
-                    label: "call()".into(),
                     occurrence: 1,
                     awaited: lash_trace::TraceNodeAwaited::Sleep { deadline_ms: None },
                     context: Default::default(),
@@ -163,8 +143,6 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
             _ if occurrence == 4 => {
                 event.payload = TraceLanguageExecutionPayload::NodeCompleted {
                     node_id: "done".into(),
-                    node_kind: lash_sansio::ExecutionNodeKind::Call,
-                    label: "call()".into(),
                     occurrence: 1,
                     call_id: None,
                     context: Default::default(),
@@ -174,37 +152,80 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         }
         core.env.core.tracing.emitter().observe_product(|| traced);
     }
+    let step = lash_trace::StepBodyStarted {
+        process_id: process.clone(),
+        node_id: "stepped".into(),
+        occurrence: 1,
+        context: Default::default(),
+        call_id: lash_sansio::ToolCallId::fixture("stepped"),
+        attempt: 1,
+    };
+    let stepped = step.clone();
+    core.env.core.tracing.emitter().observe_product(|| {
+        fixture_record(
+            lash_trace::TraceContext::default(),
+            TraceEvent::StepBodyStarted { step: stepped },
+        )
+    });
     let mut received = 0;
-    while received < 5 {
+    let mut step_position = None;
+    while received < 6 {
         let item = next(&mut subscription).await;
         match item {
-            crate::process::ProcessObservationStreamItem::Event(event) => {
-                if let crate::process::ProcessObservationEventPayload::LanguageExecution(
-                    observation,
-                ) = &event.payload
-                {
+            crate::process::ProcessObservationStreamItem::Event(event) => match &event.payload {
+                crate::process::ProcessObservationEventPayload::LanguageExecution(observation) => {
                     graph
                         .observe(observation)
                         .expect("fold retained language observation");
                     received += 1;
                 }
-            }
+                crate::process::ProcessObservationEventPayload::StepBodyStarted(observation) => {
+                    assert_eq!(observation.step, step);
+                    graph
+                        .step_body_started(observation)
+                        .expect("fold the step body start");
+                    received += 1;
+                    step_position = Some(received);
+                }
+                _ => {}
+            },
             crate::process::ProcessObservationStreamItem::Gap { .. } => {
                 graph.reset_live();
                 received = 0;
+                step_position = None;
             }
         }
     }
+    assert_eq!(
+        step_position,
+        Some(6),
+        "the step's body start keeps its place in the process's order"
+    );
     let before = graph.snapshot().expect("observed graph");
-    assert!(before.nodes.iter().any(|node| matches!(
-        node.observation,
-        TraceLashlangNodeObservation::Waiting { .. }
-    )));
     assert!(
         before
-            .nodes
+            .sites
             .iter()
-            .any(|node| matches!(node.observation, TraceLashlangNodeObservation::Unobserved))
+            .any(|site| matches!(site.occurrence, WorkflowOverlayOccurrence::Waiting { .. }))
+    );
+    let stepped = before
+        .sites
+        .iter()
+        .find(|site| site.site == step.site())
+        .expect("the step's site");
+    assert!(matches!(
+        stepped.occurrence,
+        WorkflowOverlayOccurrence::Running { occurrence: 1, .. }
+    ));
+    assert_eq!(
+        stepped.call.as_ref().map(|call| &call.call_id),
+        Some(&step.call_id)
+    );
+    assert_eq!(
+        before.sites.len(),
+        4,
+        "only observed sites are in the overlay: {:#?}",
+        before.sites
     );
     core.processes()
         .cancel(process, core.effect_host())
@@ -232,8 +253,8 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
                 terminal.status(),
                 lash_core::TerminalProcessStatus::Cancelled
             );
-            graph.settle(lash_trace::TraceLashlangGraphSettlement {
-                terminal: lash_trace::TraceLashlangGraphTerminal::Cancelled,
+            graph.settle(lash_trace::WorkflowOverlaySettlement {
+                terminal: lash_trace::WorkflowOverlayTerminal::Cancelled,
                 occurred_at: Some(
                     (std::time::UNIX_EPOCH + Duration::from_millis(event.occurred_at_ms)).into(),
                 ),
@@ -243,25 +264,26 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
     }
     let after = graph.snapshot().expect("terminal graph");
     assert_eq!(after.status, TraceLanguageExecutionStatus::Cancelled);
-    for node in &before.nodes {
+    for site in &before.sites {
         let settled = after
-            .nodes
+            .sites
             .iter()
-            .find(|current| current.id == node.id)
-            .expect("same node");
-        match node.observation {
-            TraceLashlangNodeObservation::Running { occurrence, .. }
-            | TraceLashlangNodeObservation::Waiting { occurrence, .. } => {
+            .find(|current| current.site == site.site)
+            .expect("same site");
+        match site.occurrence {
+            WorkflowOverlayOccurrence::Running { occurrence, .. }
+            | WorkflowOverlayOccurrence::Waiting { occurrence, .. } => {
                 assert!(
-                    matches!(settled.observation, TraceLashlangNodeObservation::Cancelled { occurrence: ended, .. } if ended == occurrence)
+                    matches!(settled.occurrence, WorkflowOverlayOccurrence::Cancelled { occurrence: ended, .. } if ended == occurrence)
                 );
             }
             _ => assert_eq!(
-                settled.observation, node.observation,
+                settled.occurrence, site.occurrence,
                 "only in-flight occurrences settle"
             ),
         }
     }
+    assert_eq!(after.sites.len(), before.sites.len());
     core.shutdown().await.expect("stop core");
 }
 

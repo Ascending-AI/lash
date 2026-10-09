@@ -334,7 +334,6 @@ fn write_tool(world: &Arc<World>) -> Arc<dyn lash_core::ToolProvider> {
 fn write(step: &str, x: u64, site: Option<(&str, u64)>) -> lash_core::EngineAction {
     lash_core::EngineAction::Steps {
         steps: vec![lash_core::StepRequest::Tool {
-            language_execution: None,
             step: lash_core::StepName(step.to_owned()),
             tool: lash_core::ToolId::new(WRITE_TOOL),
             input: serde_json::json!({ "x": x }),

@@ -20,9 +20,7 @@ pub use lash_trace::{
     TraceToolOwner, TraceToolTerminal, TraceTransitionKind, UntracedScopes, W3cSpanId,
     W3cTraceFlags, W3cTraceId, W3cTraceState,
 };
-pub use lash_trace::{
-    TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT, TraceLashlangNodeRetention,
-};
+pub use lash_trace::{TRACE_LINK_LIMIT, TRACESTATE_CHAR_LIMIT, TRACESTATE_MEMBER_LIMIT};
 
 pub use lash_core::{
     TraceAttachment, TraceContentBlock, TraceEffectEnvelopeDiffEntry, TraceEffectEnvelopeDiffEvent,
@@ -32,9 +30,9 @@ pub use lash_core::{
     TraceProviderRouteIdentity, TraceRuntimeStreamEvent, TraceRuntimeStreamPayload,
     TraceToolResultBlock, TraceToolSpec, facade_support::JsonlTraceReadError,
     facade_support::JsonlTraceSink, facade_support::TraceBranchSelection,
-    facade_support::TraceLabelMetadata, facade_support::TraceRecord,
-    facade_support::TraceRuntimeScope, facade_support::TraceRuntimeSubject,
-    facade_support::TraceSinkError, facade_support::parse_jsonl_records,
+    facade_support::TraceRecord, facade_support::TraceRuntimeScope,
+    facade_support::TraceRuntimeSubject, facade_support::TraceSinkError,
+    facade_support::parse_jsonl_records,
 };
 pub use lash_sansio::ExecutionNodeKind;
 #[cfg(feature = "otel-trace")]
@@ -57,22 +55,15 @@ pub use lash_trace::{
 /// variant exists in every build, so its payload types are unconditional
 /// `lash-trace` re-exports rather than `rlm`-gated.
 pub use lash_trace::{
-    DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT, ExecCodeFailureReason, TRACE_SCHEMA_VERSION,
-    TextProjectionMetadata, TraceAgentFrameSwitch, TraceBranchMembership, TraceDurableTimerStatus,
-    TraceDurableWaitResolution, TraceExecToolCall, TraceFailureCode, TraceJournaledEffectStatus,
-    TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,
-    TraceLanguageExecutionGeneration, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
-    TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode, TraceLanguageExecutionPayload,
-    TraceLanguageExecutionStatus, TraceLashlangEdgeSelection, TraceLashlangEventIdentity,
-    TraceLashlangEventTransition, TraceLashlangGraph, TraceLashlangGraphAccumulator,
-    TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
-    TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
-    TraceLashlangGraphHistoryEvent, TraceLashlangGraphNode, TraceLashlangGraphSettlement,
-    TraceLashlangGraphTerminal, TraceLashlangNodeObservation, TraceLashlangNodeReport,
-    TraceLashlangNodeTerminalRecord, TraceLashlangNodeTerminalStatus, TraceLlmTerminalReason,
-    TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution, TraceNormalizedError,
-    TraceProgramStepOutcome, TraceProviderFailureKind, TraceRetryAttempt, TraceRetryAttemptDetail,
-    TraceRetryClass, TraceRetryDeclineCause, TraceRetryWait, TraceStoreErrorClass,
-    TraceToolAttemptOutcome, TraceToolCallStatus, TraceTurnCancellationEvidence,
-    TraceTurnCompletionReason, TraceTurnFailureReason, TraceTurnOutcome, fold_lashlang_graph,
+    ExecCodeFailureReason, StepBodyStarted, TRACE_SCHEMA_VERSION, TextProjectionMetadata,
+    TraceAgentFrameSwitch, TraceDurableTimerStatus, TraceDurableWaitResolution, TraceExecToolCall,
+    TraceFailureCode, TraceJournaledEffectStatus, TraceLanguageChildExecution,
+    TraceLanguageExecution, TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, TraceLanguageExecutionStatus,
+    TraceLlmTerminalReason, TraceNodeAwaited, TraceNodeWaitKind, TraceNodeWaitResolution,
+    TraceNormalizedError, TraceProgramStepOutcome, TraceProviderFailureKind, TraceRetryAttempt,
+    TraceRetryAttemptDetail, TraceRetryClass, TraceRetryDeclineCause, TraceRetryWait,
+    TraceStoreErrorClass, TraceToolAttemptOutcome, TraceToolCallStatus,
+    TraceTurnCancellationEvidence, TraceTurnCompletionReason, TraceTurnFailureReason,
+    TraceTurnOutcome,
 };

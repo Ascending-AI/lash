@@ -32,7 +32,7 @@ impl crate::InMemoryProcessReplayStore {
 
 /// A provisional language observation of `process_id` for replay tests: one
 /// started node. `event_key` is its redelivery identity and `label` the
-/// fact it states.
+/// fact it states, as the node it names.
 pub fn process_language_observation(
     process_id: &crate::ProcessId,
     event_key: &str,
@@ -56,9 +56,7 @@ pub fn process_language_observation(
                 generation: None,
             },
             payload: lash_trace::TraceLanguageExecutionPayload::NodeStarted {
-                node_id: "fixture-node".to_string(),
-                node_kind: lash_sansio::ExecutionNodeKind::Call,
-                label: label.to_string(),
+                node_id: label.to_string(),
                 occurrence: 0,
                 call_id: None,
                 context: Default::default(),
@@ -72,16 +70,44 @@ pub fn process_language_observation(
 /// event, or a description of any other payload.
 pub fn process_observation_label(event: &crate::ProcessObservationEvent) -> String {
     match &event.payload {
-        crate::ProcessObservationEventPayload::LanguageExecution(observation) => match &observation
-            .execution
-            .payload
-        {
-            lash_trace::TraceLanguageExecutionPayload::NodeStarted { label, .. } => label.clone(),
-            other => format!("language:{other:?}"),
-        },
+        crate::ProcessObservationEventPayload::LanguageExecution(observation) => {
+            match &observation.execution.payload {
+                lash_trace::TraceLanguageExecutionPayload::NodeStarted { node_id, .. } => {
+                    node_id.clone()
+                }
+                other => format!("language:{other:?}"),
+            }
+        }
+        crate::ProcessObservationEventPayload::StepBodyStarted(observation) => {
+            format!(
+                "step body {} attempt {}",
+                observation.step.node_id, observation.step.attempt
+            )
+        }
         crate::ProcessObservationEventPayload::Committed { event } => {
             format!("committed:{}", event.sequence)
         }
+    }
+}
+
+/// The start of attempt `attempt` of an admitted step body of `process`, at
+/// the first occurrence of the node `label`, for replay tests.
+pub fn process_step_body_started(
+    process: &crate::ProcessId,
+    label: &str,
+    attempt: u32,
+    observed_at_ms: u64,
+) -> lash_trace::StepBodyStartedObservation {
+    lash_trace::StepBodyStartedObservation {
+        step: lash_trace::StepBodyStarted {
+            process_id: process.clone(),
+            node_id: label.to_owned(),
+            occurrence: 1,
+            context: Default::default(),
+            call_id: crate::ToolCallId::fixture(label),
+            attempt,
+        },
+        observed_at_ms,
     }
 }
 

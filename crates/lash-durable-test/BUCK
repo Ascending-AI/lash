@@ -829,12 +829,12 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
-    name = "rlm_execution_maps__test",
+    name = "rlm_execution_documents__test",
     crate_features = [],
-    crate_name = "rlm_execution_maps",
-    crate_root = "tests/rlm_execution_maps.rs",
+    crate_name = "rlm_execution_documents",
+    crate_root = "tests/rlm_execution_documents.rs",
     declared_features = [],
-    exec_properties = sized_exec_properties("lash-internal-durable-test", "rlm_execution_maps", "//crates/lash-durable-test:rlm_execution_maps__test"),
+    exec_properties = sized_exec_properties("lash-internal-durable-test", "rlm_execution_documents", "//crates/lash-durable-test:rlm_execution_documents__test"),
     extra_compile_data = [],
     extra_data = [
         "//crates/lash-vm-worker:lash-vm-worker__bin",

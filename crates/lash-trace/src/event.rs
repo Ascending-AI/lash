@@ -257,6 +257,10 @@ pub enum TraceEvent {
         language: String,
         event: TraceLanguageExecution,
     },
+    /// The admitted body of a process step started.
+    StepBodyStarted {
+        step: crate::StepBodyStarted,
+    },
     TurnCompleted {
         outcome: TraceTurnOutcome,
     },
@@ -366,6 +370,7 @@ impl TraceEvent {
             | Self::DurableWaitParked { .. }
             | Self::DurableTimerStarted { .. }
             | Self::ProtocolStep { .. }
+            | Self::StepBodyStarted { .. }
             | Self::ToolCheckConflict { .. }
             | Self::Custom { .. } => false,
         }

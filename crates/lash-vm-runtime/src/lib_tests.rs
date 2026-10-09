@@ -64,61 +64,6 @@ pub(crate) fn process_module(
     )
 }
 
-/// The labelled workflow witness, whose Lash VM source is spelled out at the
-/// call site: labelled statements, an if/else, a `for`, a map and a
-/// `while`.
-fn labeled_workflow_program() -> lash_vm::Program {
-    b::program(vec![
-        b::labelled(
-            b::label("Seed value", None),
-            b::assign("value", b::num(1.0)),
-        ),
-        b::if_else(
-            b::bool_lit(true),
-            b::block(vec![b::labelled(
-                b::label("Selected print", None),
-                b::print(b::var("value")),
-            )]),
-            b::block(vec![b::labelled(
-                b::label("Skipped print", None),
-                b::print(b::num(0.0)),
-            )]),
-        ),
-        b::for_in(
-            "item",
-            b::list(vec![b::num(1.0), b::num(2.0)]),
-            b::block(vec![b::labelled(
-                b::label("For print", None),
-                b::print(b::var("item")),
-            )]),
-        ),
-        b::assign(
-            "measured",
-            b::map(
-                b::list(vec![b::num(1.0), b::num(2.0)]),
-                "item",
-                b::builtin("len", vec![b::list(vec![b::var("item")])]),
-            ),
-        ),
-        b::assign("count", b::num(0.0)),
-        b::while_loop(
-            b::binary(
-                b::var("count"),
-                lash_vm::CoercingBinaryOp::Less,
-                b::num(1.0),
-            ),
-            b::block(vec![
-                b::labelled(b::label("Loop print", None), b::print(b::var("count"))),
-                b::assign(
-                    "count",
-                    b::binary(b::var("count"), lash_vm::CoercingBinaryOp::Add, b::num(1.0)),
-                ),
-            ]),
-        ),
-        b::labelled(b::label("Finish value", None), b::finish(b::var("value"))),
-    ])
-}
-
 /// `process scan(root: str) -> str { finish root }`
 fn scan_module() -> lash_vm::Program {
     process_module(
@@ -140,104 +85,6 @@ fn handler_module(first: &str, first_ty: lash_vm::TypeExpr, second: &str) -> las
         lash_vm::TypeExpr::Bool,
         b::bool_lit(true),
     )
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
-    let source = r#"
-        @label(title: "Seed value")
-        value = 1
-        if true {
-          @label(title: "Selected print")
-          print value
-        } else {
-          @label(title: "Skipped print")
-          print 0
-        }
-        for item in [1, 2] {
-          @label(title: "For print")
-          print item
-        }
-        measured = [len([item]) for item in [1, 2]]
-        count = 0
-        while count < 1 {
-          @label(title: "Loop print")
-          print count
-          count = count + 1
-        }
-        @label(title: "Finish value")
-        finish value
-    "#;
-    let environment = LashVmHostEnvironment::new(lash_vm::LashVmHostCatalog::new())
-        .with_language_features(
-            lash_vm::LashVmLanguageFeatures::default().with_label_annotations(),
-        );
-    let program = labeled_workflow_program();
-    let output = lash_vm::compile_module(lash_vm::ModuleCompileRequest {
-        source,
-        program: program.clone(),
-        environment: &environment,
-    })
-    .expect("labeled workflow compiles");
-    // The projection is language-neutral and lives beside the IR (ADR 0100
-    // R8): this witness is direct IR — `@label` and a list comprehension have
-    // no TypeScript form — and projects with no dialect in the graph.
-    let graph = lash_vm::workflow_graph_from_program(&program);
-    let trace_graph = lash_vm::workflow_graph_from_artifact(&output.artifact);
-    let trace_map =
-        trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(&output.artifact));
-    assert_eq!(
-        Some(output.artifact.source_identity()),
-        trace_graph.source_identity,
-        "the trace integration must retain the projector's source identity"
-    );
-
-    let container_kinds = graph
-        .nodes()
-        .filter_map(|node| match &node.kind {
-            lash_vm::WorkflowNodeKind::Container(lash_vm::WorkflowContainer::If { .. }) => {
-                Some("if")
-            }
-            lash_vm::WorkflowNodeKind::Container(lash_vm::WorkflowContainer::For { .. }) => {
-                Some("for")
-            }
-            lash_vm::WorkflowNodeKind::Container(lash_vm::WorkflowContainer::While { .. }) => {
-                Some("while")
-            }
-            _ => None,
-        })
-        .collect::<std::collections::BTreeSet<_>>();
-    assert_eq!(
-        container_kinds,
-        std::collections::BTreeSet::from(["for", "if", "while"]),
-        "the equality probe must cover every workflow container kind"
-    );
-
-    let expected_nodes = graph
-        .nodes()
-        .filter(|node| !node.execution_sites.is_empty())
-        .map(|node| node.id.to_string())
-        .collect::<std::collections::BTreeSet<_>>();
-    let actual_nodes = trace_map
-        .nodes
-        .iter()
-        .map(|node| node.id.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-
-    assert!(!expected_nodes.is_empty());
-    assert_eq!(actual_nodes, expected_nodes);
-    assert!(
-        trace_map
-            .nodes
-            .iter()
-            .any(|node| node.label == "Selected print")
-    );
-    assert!(
-        trace_map
-            .nodes
-            .iter()
-            .any(|node| node.label == "Loop print")
-    );
 }
 
 #[test]
@@ -880,7 +727,6 @@ pub(crate) fn test_start_site(node_id: &str, occurrence: u64) -> lash_vm::LashVm
             node_id: node_id.to_string(),
             node_kind: lash_sansio::ExecutionNodeKind::Call,
             label: "start scan".to_string(),
-            branch: None,
             workflow_site: lash_vm::WorkflowExecutionSite::new(
                 "process:scan",
                 [],

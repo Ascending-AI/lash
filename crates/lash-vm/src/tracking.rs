@@ -89,12 +89,7 @@ impl LashVmExecutionSiteBuilder<'_> {
         node_path: &WorkflowNodePath,
         slots: &[ExprSlot],
     ) -> LashVmExecutionSite {
-        let mut site = self.node_site(node_path, slots, ExecutionNodeKind::Branch, "if");
-        site.branch = Some(LashVmBranchSite {
-            then_edge_id: self.branch_edge_id(node_path, ProcessBranchSelection::Then),
-            else_edge_id: self.branch_edge_id(node_path, ProcessBranchSelection::Else),
-        });
-        site
+        self.node_site(node_path, slots, ExecutionNodeKind::Branch, "if")
     }
 
     fn site(
@@ -110,25 +105,9 @@ impl LashVmExecutionSiteBuilder<'_> {
             node_id: workflow_node_id(&owner, node_path.indices()).to_string(),
             node_kind: kind,
             label: label.clone(),
-            branch: None,
             workflow_site: WorkflowExecutionSite::new(owner, node_path.indices(), kind, label)
                 .at(site_path),
         }
-    }
-
-    pub(crate) fn branch_edge_id(
-        &self,
-        path: &WorkflowNodePath,
-        selection: ProcessBranchSelection,
-    ) -> String {
-        let label = match selection {
-            ProcessBranchSelection::Then => "then",
-            ProcessBranchSelection::Else => "else",
-        };
-        format!(
-            "{}:{label}",
-            workflow_node_id(&self.context.entry.workflow_owner(), path.indices())
-        )
     }
 }
 
@@ -141,8 +120,6 @@ pub struct LashVmExecutionSite {
     pub node_id: String,
     pub node_kind: ExecutionNodeKind,
     pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub branch: Option<LashVmBranchSite>,
     pub workflow_site: WorkflowExecutionSite,
 }
 
@@ -223,12 +200,6 @@ pub enum LashVmExecutionFailure {
         code: String,
         message: String,
     },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct LashVmBranchSite {
-    pub then_edge_id: String,
-    pub else_edge_id: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -338,7 +309,6 @@ pub enum LashVmExecutionObservation {
         occurrence: u64,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         loops: Vec<WorkflowLoopFrame>,
-        edge_id: String,
         selected: ProcessBranchSelection,
     },
     ChildStarted {

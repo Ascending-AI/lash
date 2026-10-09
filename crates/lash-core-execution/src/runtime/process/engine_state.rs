@@ -82,15 +82,12 @@ pub enum StepRequest {
         tool: lash_sansio::ToolId,
         /// The tool's input.
         input: serde_json::Value,
-        /// The effect node it runs for, when the engine's execution map
-        /// names one: its committed outcome is recorded as that node's
-        /// `process.effect_outcome`.
+        /// The site of the engine's workflow document it runs for, when the
+        /// engine names one: its committed outcome is recorded as that
+        /// site's `process.effect_outcome`, and the start of its admitted
+        /// body is observed there ([`lash_trace::StepBodyStarted`]).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         site: Option<StepEffectSite>,
-        /// The language node that issued this call. The admitted execution
-        /// supplies its call id when the body starts, after admission commits.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        language_execution: Option<Box<lash_trace::TraceLanguageExecution>>,
     },
     /// A body of the process's own engine, run through the [`EngineSteps`]
     /// its registration declares, under the retry policy its kind declares
@@ -115,7 +112,7 @@ pub enum StepRequest {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StepEffectSite {
-    /// The node's id in the engine's execution map.
+    /// The node's id in the engine's workflow document.
     pub node_id: String,
     /// Which occurrence of the site this is, from 1, counted per site.
     pub occurrence: u64,
@@ -291,7 +288,7 @@ pub enum EngineAction {
     AwaitExternal {
         /// The wait's name.
         name: KeyName,
-        /// The node that waits, when the engine's execution map names one.
+        /// The node that waits, when the engine's workflow document names one.
         site: Option<StepEffectSite>,
     },
     /// Wait for another process's terminal.
@@ -301,14 +298,14 @@ pub enum EngineAction {
         /// How long the wait may stay open: the engine's own bound, with no
         /// lash default or ceiling.
         bound: crate::ParkBound,
-        /// The node that waits, when the engine's execution map names one.
+        /// The node that waits, when the engine's workflow document names one.
         site: Option<StepEffectSite>,
     },
     /// Sleep until a durable instant.
     Sleep {
         /// When the process wakes.
         until: DurableInstant,
-        /// The node that sleeps, when the engine's execution map names one.
+        /// The node that sleeps, when the engine's workflow document names one.
         site: Option<StepEffectSite>,
     },
     /// Nothing to do and no deadline: the process waits until the next
