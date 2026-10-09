@@ -428,7 +428,9 @@ function compareOrder(left, right) {
   return left.t - right.t || left.group - right.group || left.lane - right.lane || left.seq - right.seq;
 }
 
-const TURN_LANES = { input: 0, thinking: 1, code: 2, tool: 2, retry: 2, event: 2, reply: 3 };
+// Reasoning and execution retain their round order; both precede the reply.
+// Every source uses these lanes, including reasoning embedded in a reply.
+const TURN_LANES = { input: 0, thinking: 1, code: 1, tool: 1, retry: 1, event: 1, reply: 2 };
 
 // BEGIN WORKBENCH_SETTLED_TRANSCRIPT
 /* The keys committed rows take, from typed provenance alone. A turn's first
@@ -471,10 +473,8 @@ function committedRowEntries(rows, seen, counters) {
       : row.kind === "code_block" ? "code"
       : row.kind === "reasoning" ? "thinking"
       : "event";
-    /* Reasoning carried by a call or reply belongs beside that row, in
-       commit order, rather than ahead of every tool round in the turn. */
     assigned.thinking.forEach((key, index) => entries.push({
-      key, kind: "thinking", laneKind: kind, turnId, rowId: row.row_id, row, text: content.reasoning[index]
+      key, kind: "thinking", turnId, rowId: row.row_id, row, text: content.reasoning[index]
     }));
     if (assigned.key) {
       entries.push({ key: assigned.key, kind, turnId, rowId: row.row_id, row });
@@ -537,7 +537,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
   }
 
   /* Time orders independent occurrences and turns. Within a turn, input,
-     thinking, execution and reply are causal lanes: prose can stream before
+     reasoning/execution and reply are causal lanes: prose can stream before
      the cell it describes runs, and its node can be recorded before that
      cell's result. Clamp each lane after the lanes preceding it, retaining
      execution order within a lane. Only a new row extends these bounds;
@@ -577,7 +577,7 @@ function createWorkbenchTimeline({ list, footer, empty, hooks = {} }) {
   function upsert(key, kind, source, payload, order) {
     let row = rows.get(key);
     if (!row) {
-      row = { key, kind, order: placeInTurn(order(), payload?.laneKind || kind, payload?.turnId), sources: {}, stamps: {}, turnId: null, view: null, dirty: true };
+      row = { key, kind, order: placeInTurn(order(), kind, payload?.turnId), sources: {}, stamps: {}, turnId: null, view: null, dirty: true };
       rows.set(key, row);
       insertOrdered(row);
     }
