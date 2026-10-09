@@ -2669,6 +2669,8 @@ dependencies = [
  "lash-internal-vm",
  "lash-internal-vm-broker",
  "lash-internal-vm-protocol",
+ "lash-kernel-doc",
+ "lash-kernel-vm",
  "rmp-serde",
  "serde",
  "serde_json",

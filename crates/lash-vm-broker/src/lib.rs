@@ -14,6 +14,8 @@
 //! - [`members`]: the admitted members of an execution's operations, run
 //!   through the admitted-execution lifecycle.
 //! - [`identity`]: the one derivation of a code command's `ToolCallId`.
+//! - [`kernel`]: the broker for kernel runs: the set of pending effects, the
+//!   park transaction, delivery in any order, and number-exact effect values.
 //! - [`effects`]: the parent's admission and body behind every operation.
 //! - [`broker`]: the run loop, quiet points, restore by identity, terminal
 //!   precedence, cancellation, frame fencing and slot release.
@@ -28,6 +30,7 @@ pub mod authority;
 pub mod broker;
 pub mod effects;
 pub mod identity;
+pub mod kernel;
 pub mod ledger;
 pub mod members;
 pub mod session;

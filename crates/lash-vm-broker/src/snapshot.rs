@@ -240,11 +240,11 @@ fn decode_checkpoint(stored: &str) -> Result<Checkpoint, QuietPointRefusal> {
 /// actor's epoch. It holds the execution's admitted members on this
 /// activation and runs their bodies from the host's [`MemberBodies`].
 pub struct DurableSnapshotStore {
-    cx: ActorContext,
-    exec: ExecKey,
+    pub(crate) cx: ActorContext,
+    pub(crate) exec: ExecKey,
     /// The revision it last read or wrote.
     rev: Mutex<Option<Option<SnapshotRev>>>,
-    members: tokio::sync::Mutex<Members>,
+    pub(crate) members: tokio::sync::Mutex<Members>,
 }
 
 impl std::fmt::Debug for DurableSnapshotStore {
@@ -286,7 +286,7 @@ impl DurableSnapshotStore {
         &self.exec
     }
 
-    fn held_rev(&self) -> std::sync::MutexGuard<'_, Option<Option<SnapshotRev>>> {
+    pub(crate) fn held_rev(&self) -> std::sync::MutexGuard<'_, Option<Option<SnapshotRev>>> {
         self.rev
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -294,7 +294,7 @@ impl DurableSnapshotStore {
 
     /// The revision a write replaces: the one last read or written, or the
     /// stored one.
-    async fn revision(&self) -> Result<Option<SnapshotRev>, QuietPointRefusal> {
+    pub(crate) async fn revision(&self) -> Result<Option<SnapshotRev>, QuietPointRefusal> {
         if let Some(rev) = *self.held_rev() {
             return Ok(rev);
         }
@@ -303,7 +303,9 @@ impl DurableSnapshotStore {
         Ok(rev)
     }
 
-    async fn read(&self) -> Result<Option<lash_durable::domain::SnapshotRow>, QuietPointRefusal> {
+    pub(crate) async fn read(
+        &self,
+    ) -> Result<Option<lash_durable::domain::SnapshotRow>, QuietPointRefusal> {
         self.cx
             .durable_reads()
             .map_err(refused)?
@@ -315,7 +317,7 @@ impl DurableSnapshotStore {
     /// Commit `tx` under `label`. A refused or unacknowledged commit forgets
     /// the revision and the records the members read: the next write reads
     /// them back.
-    async fn commit(
+    pub(crate) async fn commit(
         &self,
         tx: lash_durable::ActorTx,
         label: CommitLabel,
@@ -368,7 +370,7 @@ fn reachable_from(ledger: &BrokerLedger) -> u64 {
         .unwrap_or(ledger.next_admission)
 }
 
-fn refused(error: impl std::fmt::Display) -> QuietPointRefusal {
+pub(crate) fn refused(error: impl std::fmt::Display) -> QuietPointRefusal {
     QuietPointRefusal(error.to_string())
 }
 

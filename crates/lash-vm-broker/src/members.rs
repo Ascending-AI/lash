@@ -76,6 +76,10 @@ pub enum Driven<T> {
     Suspended,
 }
 
+/// A decision over the owner's records, their fold and the store's time.
+pub(crate) type DecideFolded<'a, T> =
+    dyn FnMut(&[RunRecordRow], &RunFold, DurableInstant) -> Decide<T> + Send + 'a;
+
 /// The members of one execution's owner on one activation: the lifecycle
 /// that runs their bodies and the records it reads. Never a grant: a new
 /// activation builds it again from the rows.
@@ -265,6 +269,25 @@ impl Members {
         cancel: &CancellationToken,
         decide: &mut (dyn FnMut(&[MemberEnd], DurableInstant) -> Decide<T> + Send),
     ) -> Result<Driven<T>, RoundError> {
+        self.drive_by(cancel, &mut |rows, folded, now| {
+            decide(&member_ends(rows, folded, run), now)
+        })
+        .await
+    }
+
+    /// Run the members of every admission until `decide` answers from the
+    /// owner's folded records, or until nothing runs and the execution
+    /// stayed hot for `idle_evict`. Once `cancel` fires, every open member
+    /// is cancelled.
+    ///
+    /// # Errors
+    ///
+    /// As [`drive`](Self::drive).
+    pub(crate) async fn drive_by<T>(
+        &mut self,
+        cancel: &CancellationToken,
+        decide: &mut DecideFolded<'_, T>,
+    ) -> Result<Driven<T>, RoundError> {
         let clock = Arc::clone(self.cx.clock());
         let idle_evict = self.cx.backend().config().settings().idle_evict;
         // Since when the operation has run nothing and waited only on rows.
@@ -281,14 +304,14 @@ impl Members {
             };
             let rows = self.rows().await?;
             let now = self.cx.durable_now().await?;
-            let until = match decide(&member_ends(&rows, &folded, run), now) {
+            let until = match decide(&rows, &folded, now) {
                 Decide::Answer(answer) => return Ok(Driven::Answered(answer)),
                 Decide::Wait { until } => until,
             };
             if idle.quiet() && until.is_none() {
-                return Err(refused(format!(
-                    "operation {run:?} can never be answered: none of its members is open"
-                )));
+                return Err(refused(
+                    "the operation can never be answered: none of its members is open",
+                ));
             }
             // Only rows are left to wait on: stay hot for `idle_evict`,
             // then suspend until the earliest due.

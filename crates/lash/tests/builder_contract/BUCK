@@ -3,7 +3,7 @@ load("//tools/buck2:ui_fixtures.bzl", "ui_fixtures_test")
 
 ui_fixtures_test(
     name = "builder_plugin_host_is_removed_without_testing",
-    harness = "//crates/lash:ui__test__fv_ad82d22a",
+    harness = "//crates/lash:ui__test__fv_fc61460b",
     package = "crates/lash",
     fixtures = ["//crates/lash:tests/ui/core_builder_plugin_host_is_removed.rs"],
     expected = ["//crates/lash:tests/ui/core_builder_plugin_host_is_removed.stderr"],
