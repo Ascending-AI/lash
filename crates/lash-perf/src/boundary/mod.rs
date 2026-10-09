@@ -2,6 +2,7 @@
 //! is diagnostic until collected on a qualified quiet host.
 mod attachments;
 mod facade;
+mod ledger;
 mod observation;
 mod pg_statements;
 mod seeded;
@@ -12,11 +13,14 @@ mod workers;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{Result, ensure};
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
+
+pub(crate) use ledger::Ledger;
+use ledger::Observation;
 
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum Case {
@@ -62,6 +66,9 @@ pub struct Args {
     pub store_dir: PathBuf,
     #[arg(long, default_value_t = 8)]
     pub operations: usize,
+    /// Maximum retained intervals, including aggregate rows. Later operations are counted as dropped.
+    #[arg(long, default_value_t = 100_000)]
+    pub ledger_cap: usize,
     #[arg(long, default_value_t = 4)]
     pub callers: usize,
     /// Private, baseline-initialized PG18 database; never the sketch schema.
@@ -125,21 +132,81 @@ pub struct Allocations {
     pub bytes_deallocated: usize,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 struct Meter {
     phases: Arc<Mutex<Vec<Phase>>>,
-    /// High-rate intervals in nanoseconds, summarized in the receipt and
-    /// never listed.
-    samples: Arc<Mutex<BTreeMap<String, Vec<u64>>>>,
+    ledger: Arc<Mutex<Ledger>>,
+    epoch: Instant,
     windows: Arc<Mutex<Vec<Throughput>>>,
 }
 impl Meter {
-    fn record(&self, boundary: &str, operations: usize, start: Instant) {
-        self.phases.lock_recover().push(Phase {
-            boundary: boundary.into(),
+    fn new(cap: usize) -> Self {
+        Self {
+            phases: Default::default(),
+            ledger: Arc::new(Mutex::new(Ledger::new(cap))),
+            epoch: Instant::now(),
+            windows: Default::default(),
+        }
+    }
+    fn offset(&self, at: Instant) -> i128 {
+        if at >= self.epoch {
+            at.duration_since(self.epoch).as_nanos() as i128
+        } else {
+            -(self.epoch.duration_since(at).as_nanos() as i128)
+        }
+    }
+    fn interval(
+        &self,
+        boundary: &str,
+        id: impl ToString,
+        result: &str,
+        start: Instant,
+        end: Instant,
+    ) {
+        self.ledger.lock_recover().push(Observation::operation(
+            boundary,
+            id.to_string(),
+            result,
+            self.offset(start),
+            self.offset(end),
+        ));
+    }
+    fn operation(&self, boundary: &str, id: impl ToString, result: &str, start: Instant) {
+        let end = Instant::now();
+        self.phase(boundary, 1, end.duration_since(start).as_micros());
+        self.interval(boundary, id, result, start, end);
+    }
+    fn aggregate(
+        &self,
+        boundary: &str,
+        operations: usize,
+        id: impl ToString,
+        result: &str,
+        start: Instant,
+    ) {
+        let end = Instant::now();
+        self.phase(boundary, operations, end.duration_since(start).as_micros());
+        self.ledger.lock_recover().push(Observation::aggregate(
+            boundary,
             operations,
-            elapsed_us: start.elapsed().as_micros(),
-        });
+            id.to_string(),
+            result,
+            self.offset(start),
+            self.offset(end),
+        ));
+    }
+    fn phase(&self, boundary: &str, operations: usize, elapsed_us: u128) {
+        let mut phases = self.phases.lock_recover();
+        if let Some(phase) = phases.iter_mut().find(|phase| phase.boundary == boundary) {
+            phase.operations += operations;
+            phase.elapsed_us += elapsed_us;
+        } else {
+            phases.push(Phase {
+                boundary: boundary.into(),
+                operations,
+                elapsed_us,
+            });
+        }
     }
     fn count(&self, boundary: &str) -> usize {
         self.phases
@@ -148,13 +215,6 @@ impl Meter {
             .filter(|p| p.boundary == boundary)
             .map(|p| p.operations)
             .sum()
-    }
-    fn sample(&self, boundary: &str, elapsed: Duration) {
-        self.samples
-            .lock_recover()
-            .entry(boundary.into())
-            .or_default()
-            .push(u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX));
     }
     fn window(&self, window: &str, operations: usize, start: Instant) {
         let elapsed = start.elapsed();
@@ -168,37 +228,36 @@ impl Meter {
         });
     }
     fn latency(&self) -> Vec<Latency> {
-        let mut by_boundary = self.samples.lock_recover().clone();
-        for phase in self.phases.lock_recover().iter() {
-            if phase.operations > 0 {
-                let each = phase.elapsed_us * 1000 / phase.operations as u128;
+        let mut by_boundary = BTreeMap::<String, Vec<f64>>::new();
+        for observation in &self.ledger.lock_recover().observations {
+            if observation.is_operation() {
                 by_boundary
-                    .entry(phase.boundary.clone())
+                    .entry(observation.boundary.clone())
                     .or_default()
-                    .push(u64::try_from(each).unwrap_or(u64::MAX));
+                    .push((observation.end_ns - observation.start_ns) as f64 / 1000.0);
             }
         }
         by_boundary
             .into_iter()
-            .map(|(boundary, values)| {
-                let samples = values.len();
-                let stats = crate::perf_support::metrics::percentile_summary(
-                    values
-                        .into_iter()
-                        .map(|nanos| nanos as f64 / 1000.0)
-                        .collect(),
-                );
+            .map(|(boundary, mut values)| {
+                values.sort_by(f64::total_cmp);
                 Latency {
                     boundary,
-                    samples,
-                    p50_us: stats.p50,
-                    p95_us: stats.p95,
-                    p99_us: stats.p99,
-                    max_us: stats.max,
-                    mean_us: stats.mean,
+                    samples: values.len(),
+                    p50_us: crate::perf_support::metrics::nearest_rank(&values, 0.5),
+                    p95_us: crate::perf_support::metrics::nearest_rank(&values, 0.95),
+                    p99_us: crate::perf_support::metrics::nearest_rank(&values, 0.99),
+                    max_us: *values.last().unwrap_or(&0.0),
+                    mean_us: values.iter().sum::<f64>() / values.len() as f64,
                 }
             })
             .collect()
+    }
+}
+#[cfg(test)]
+impl Default for Meter {
+    fn default() -> Self {
+        Self::new(100_000)
     }
 }
 
@@ -221,6 +280,9 @@ pub struct Receipt {
     pub stack_profile: Option<crate::perf_support::stack::StackProfile>,
     pub counters: serde_json::Value,
     pub evidence: serde_json::Value,
+    pub ledger_file: &'static str,
+    #[serde(skip)]
+    ledger: Ledger,
 }
 impl Receipt {
     fn new(
@@ -267,6 +329,8 @@ impl Receipt {
             stack_profile: None,
             counters,
             evidence,
+            ledger_file: "boundary-observations.ledger.json",
+            ledger: meter.ledger.lock_recover().with_backend(store),
         }
     }
 }
@@ -301,9 +365,9 @@ async fn run_observed(
     std::fs::create_dir(&args.store_dir)?;
     let before = allocator_stats();
     let mut receipt = match args.case {
-        Case::WireSlots => attachments::run(args.operations).await?,
+        Case::WireSlots => attachments::run(args.operations, args.ledger_cap).await?,
         Case::TokenHealthy | Case::TokenExpiring | Case::TokenRejected => {
-            tokens::run(args.case, args.operations, args.callers).await?
+            tokens::run(args.case, args.operations, args.callers, args.ledger_cap).await?
         }
         Case::SqliteProcesses => workers::run(args).await?,
         Case::SeededPlan => seeded::run(args).await?,
@@ -332,6 +396,10 @@ async fn run_observed(
 }
 
 fn write_receipt(path: &Path, receipt: &Receipt) -> Result<()> {
+    std::fs::write(
+        path.with_file_name(receipt.ledger_file),
+        format!("{}\n", serde_json::to_string_pretty(&receipt.ledger)?),
+    )?;
     std::fs::write(
         path,
         format!("{}\n", serde_json::to_string_pretty(receipt)?),

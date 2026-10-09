@@ -29,7 +29,7 @@ fn sample(start: Instant, wave: usize, completed: usize, node_alive: bool) -> se
 }
 
 pub(super) async fn run(args: &Args) -> Result<Receipt> {
-    let meter = Meter::default();
+    let meter = Meter::new(args.ledger_cap);
     let start = Instant::now();
     let stores = lash_sqlite_store::SqliteStoreSet::open(
         args.store_dir.join("lash.db"),
@@ -86,7 +86,13 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     drop(core);
     result?;
     write_sample(args.operations, args.operations * args.callers, false)?;
-    meter.record("waves.settled", args.operations * args.callers, start);
+    meter.aggregate(
+        "waves.settled",
+        args.operations * args.callers,
+        "persistent-wave-session",
+        "ok",
+        start,
+    );
     Ok(Receipt::new(
         Case::PersistentNodeWaves,
         "facade-send",

@@ -47,7 +47,7 @@ pub(super) fn provider(meter: &Meter, pending: bool) -> ProviderHandle {
                 let start = Instant::now();
                 if request.messages.iter().any(|m| m.blocks.iter().any(|b|
                     matches!(b, LlmContentBlock::Text { text, .. } if text.contains("boundary-process-hold")))) {
-                    meter.record("process.provider.held", 1, start);
+                    meter.operation("process.provider.held", &request.scope.request_id, "pending", start);
                     std::future::pending::<()>().await;
                 }
                 let result = if pending && !request.messages.iter().any(|m|
@@ -56,7 +56,7 @@ pub(super) fn provider(meter: &Meter, pending: bool) -> ProviderHandle {
                         call_id: "boundary-deferred".into(), tool_name: "boundary_wait".into(),
                         input_json: "{}".into(), replay: None }], ..Default::default() }
                 } else { response("boundary answered".into()) };
-                meter.record("provider.complete", 1, start);
+                meter.operation("provider.complete", &request.scope.request_id, "ok", start);
                 Ok(result)
             }
         }).build().into_handle()
@@ -134,7 +134,12 @@ pub(super) async fn send(session: &lash::DurableSession, name: &str, meter: &Met
             .await
     })
     .await?;
-    meter.record("send.accept", 1, start);
+    meter.operation(
+        "send.accept",
+        format!("session:{}/turn:{name}", session.session_id()),
+        "ok",
+        start,
+    );
     let start = Instant::now();
     let output = crate::perf_support::async_operations::observe(
         "boundary.send.settle",
@@ -146,7 +151,12 @@ pub(super) async fn send(session: &lash::DurableSession, name: &str, meter: &Met
         "send stopped: {:?}",
         output.result.outcome
     );
-    meter.record("send.settle", 1, start);
+    meter.operation(
+        "send.settle",
+        format!("session:{}/turn:{name}", session.session_id()),
+        "ok",
+        start,
+    );
     Ok(())
 }
 
@@ -154,7 +164,7 @@ pub(super) async fn run(
     args: &Args,
     instrument: Option<(&super::pg_statements::Instrument, usize)>,
 ) -> Result<Receipt> {
-    let meter = Meter::default();
+    let meter = Meter::new(args.ledger_cap);
     let mut storage = Vec::new();
     let mut cores = Vec::new();
     let store = if matches!(args.case, Case::PgFacade) {
@@ -294,14 +304,25 @@ async fn history(
     loop {
         let at = Instant::now();
         let page = session.history(anchor, budget).await?;
-        meter.record("history.snapshot.page", 1, at);
+        meter.operation(
+            "history.snapshot.page",
+            format!("session:{}/page:{nodes}", session.session_id()),
+            "ok",
+            at,
+        );
         nodes += page.nodes.len();
         match page.next {
             Some(cursor) => anchor = lash_core::store::HistoryAnchor::Cursor(cursor),
             None => break,
         }
     }
-    meter.record("history.snapshot.nodes", nodes, start);
+    meter.aggregate(
+        "history.snapshot.nodes",
+        nodes,
+        format!("session:{}/page:{nodes}", session.session_id()),
+        "ok",
+        start,
+    );
     let mut cursor = None;
     let mut seen = std::collections::BTreeSet::new();
     let mut entries = 0;
@@ -310,7 +331,13 @@ async fn history(
         let page = session
             .committed_turns(cursor.as_ref(), NonZeroU32::MIN)
             .await?;
-        meter.record("history.typed.decode", page.turns.len(), at);
+        meter.aggregate(
+            "history.typed.decode",
+            page.turns.len(),
+            format!("session:{}/page:{nodes}", session.session_id()),
+            "ok",
+            at,
+        );
         let at = Instant::now();
         for turn in &page.turns {
             ensure!(
@@ -319,7 +346,13 @@ async fn history(
             );
             entries += turn.entries.len();
         }
-        meter.record("history.typed.fold", page.turns.len(), at);
+        meter.aggregate(
+            "history.typed.fold",
+            page.turns.len(),
+            format!("session:{}/page:{nodes}", session.session_id()),
+            "ok",
+            at,
+        );
         if page.turns.is_empty() {
             break;
         }
@@ -366,7 +399,7 @@ async fn root_redrive(
                 .is_some_and(|reason| reason.contains("llm_profile_unavailable")),
             "root parked for an unexpected cause: {park:?}"
         );
-        meter.record("root.park", 1, start);
+        meter.operation("root.park", session.session_id(), "ok", start);
         broken.shutdown().await?;
         let start = Instant::now();
         let serving = build(
@@ -393,7 +426,7 @@ async fn root_redrive(
                 .any(|a| matches!(a, MailAnswer::Redrive(domain::RedriveAnswer::Redriven))),
             "root was not redriven"
         );
-        meter.record("root.redrive.mail", 1, start);
+        meter.operation("root.redrive.mail", session.session_id(), "ok", start);
         let start = Instant::now();
         let output = crate::perf_support::async_operations::observe(
             "boundary.send.settle",
@@ -404,7 +437,7 @@ async fn root_redrive(
             matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
             "redrive did not finish"
         );
-        meter.record("root.redrive.settle", 1, start);
+        meter.operation("root.redrive.settle", session.session_id(), "ok", start);
         serving.shutdown().await?;
     }
     Ok(
@@ -443,10 +476,10 @@ async fn takeover(
         let handle = session.send(lash::TurnInput::text("pending call")).await?;
         let start = Instant::now();
         let before = parked(&current, &session).await?;
-        meter.record("call.park", 1, start);
+        meter.operation("call.park", session.session_id(), "ok", start);
         let start = Instant::now();
         current.shutdown().await?;
-        meter.record("owner.release", 1, start);
+        meter.operation("owner.release", session.session_id(), "ok", start);
         let actor = lash::durable::ActorKey::session(session.session_id().as_str())?;
         let released = first
             .backend()
@@ -468,7 +501,7 @@ async fn takeover(
             before == after,
             "takeover changed pinned call identity or deadline"
         );
-        meter.record("call.restore.pinned", 1, start);
+        meter.operation("call.restore.pinned", session.session_id(), "ok", start);
         let start = Instant::now();
         ensure!(
             matches!(
@@ -483,7 +516,7 @@ async fn takeover(
             ),
             "completion refused"
         );
-        meter.record("call.resolve", 1, start);
+        meter.operation("call.resolve", session.session_id(), "ok", start);
         tokio::time::timeout(Duration::from_secs(60), async {
             loop {
                 if let Some(claimed) = current.backend().durable().actor(&actor).await?
@@ -495,7 +528,7 @@ async fn takeover(
             }
         })
         .await??;
-        meter.record("call.takeover", 1, takeover_start);
+        meter.operation("call.takeover", session.session_id(), "ok", takeover_start);
         let start = Instant::now();
         let output = crate::perf_support::async_operations::observe(
             "boundary.send.settle",
@@ -506,7 +539,7 @@ async fn takeover(
             matches!(output.result.outcome, lash::TurnOutcome::Finished(_)),
             "takeover failed"
         );
-        meter.record("call.settle", 1, start);
+        meter.operation("call.settle", session.session_id(), "ok", start);
     }
     current.shutdown().await?;
     Ok(
@@ -554,7 +587,7 @@ async fn lifecycle(
             lash_core::LifetimeDecision::Detached,
         );
         let started = core.processes().start(request, core.effect_host()).await?;
-        meter.record("process.start", 1, start);
+        meter.operation("process.start", &started.process_id, "ok", start);
         ensure!(
             ids.insert(started.process_id.clone()),
             "process identity reused"
@@ -570,7 +603,7 @@ async fn lifecycle(
             core.processes()
                 .cancel(&started.process_id, core.effect_host())
                 .await?;
-            meter.record("process.cancel", 1, start);
+            meter.operation("process.cancel", &started.process_id, "ok", start);
         }
         let start = Instant::now();
         let output = tokio::time::timeout(
@@ -587,11 +620,16 @@ async fn lifecycle(
             matches!(&output, lash_core::ProcessAwaitOutput::Settled { output } if output.status() == status),
             "process failed: {output:?}"
         );
-        meter.record("process.await_terminal", 1, start);
+        meter.operation(
+            "process.await_terminal",
+            &started.process_id,
+            if n % 2 == 1 { "cancelled" } else { "success" },
+            start,
+        );
         let start = Instant::now();
         let record = core.processes().get(&started.process_id).await?;
         ensure!(record.is_some(), "process terminal not retained");
-        meter.record("process.observe", 1, start);
+        meter.operation("process.observe", &started.process_id, "ok", start);
     }
     Ok(
         serde_json::json!({"started": ids.len(), "terminal": operations, "waves": operations,

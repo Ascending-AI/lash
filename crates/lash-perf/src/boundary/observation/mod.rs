@@ -125,7 +125,8 @@ impl lash_core::ToolProvider for Tools {
         let start = Instant::now();
         let output =
             lash_core::ToolCallOutput::success(serde_json::json!({"key": call.args["key"]}));
-        self.meter.sample("tool.mark", start.elapsed());
+        self.meter
+            .operation("tool.mark", call.context.call_id(), "ok", start);
         lash_core::ToolOutcome::from_output(output).into()
     }
 }

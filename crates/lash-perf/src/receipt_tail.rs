@@ -5,12 +5,13 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-use crate::perf_support::metrics::percentile_sorted;
+use crate::perf_support::metrics::{nearest_rank, percentile_sorted};
 
 #[derive(Default)]
 struct Population {
     values: Vec<(String, f64)>,
     missing: usize,
+    nearest_rank: bool,
 }
 
 type Populations = BTreeMap<(String, String), Population>;
@@ -195,20 +196,34 @@ fn latency_rows(samples: &[Value]) -> Result<Populations> {
 }
 
 fn render(rows: Populations, slowest: usize) -> String {
+    let boundary = rows.values().any(|row| row.nearest_rank);
     let mut out = String::from(
         "operation duration tails; unit=ms; statistic=linear interpolation at p*(n-1); n=contributing operations; missing=absent marks; signed differences retained\nsmall functional populations do not certify rare tails; run_total and phase_total rows describe their named envelope, simulated rows are labelled\npopulation\toperation\tunit\tn\tmissing\tp50\tp99\tp99.9\tmax\tslowest_ids (value_ms)\n",
     );
+    if boundary {
+        out = out.replace(
+            "linear interpolation at p*(n-1)",
+            "nearest-rank over exact operation intervals",
+        );
+    }
     for ((population, operation), mut row) in rows {
         row.values.sort_by(|(left_id, left), (right_id, right)| {
             left.total_cmp(right).then_with(|| left_id.cmp(right_id))
         });
         let values: Vec<_> = row.values.iter().map(|(_, value)| *value).collect();
+        let percentile = |fraction| {
+            if row.nearest_rank {
+                nearest_rank(&values, fraction)
+            } else {
+                percentile_sorted(&values, fraction)
+            }
+        };
         let stats = if let Some(max) = values.last() {
             format!(
                 "{:.6}\t{:.6}\t{:.6}\t{max:.6}",
-                percentile_sorted(&values, 0.5),
-                percentile_sorted(&values, 0.99),
-                percentile_sorted(&values, 0.999)
+                percentile(0.5),
+                percentile(0.99),
+                percentile(0.999)
             )
         } else {
             "-\t-\t-\t-".to_string()
@@ -230,7 +245,60 @@ fn render(rows: Populations, slowest: usize) -> String {
     out
 }
 
-/// Read a runtime receipt, latency receipt or raw latency ledger without running a workload.
+pub(crate) fn boundary_table(value: &Value, slowest: usize) -> Result<String> {
+    let ledger: crate::boundary::Ledger = serde_json::from_value(value.clone())?;
+    let mut rows = Populations::new();
+    let mut aggregates = String::from(
+        "aggregate intervals; excluded from operation percentiles\nbackend\tboundary\tmeasurement\tN\ttotal_ms\tidentity\tresult\n",
+    );
+    for observation in &ledger.observations {
+        let elapsed_ns = observation
+            .end_ns
+            .checked_sub(observation.start_ns)
+            .filter(|elapsed| *elapsed >= 0)
+            .context("boundary interval must have monotonic start <= end")?;
+        let elapsed_ms = elapsed_ns as f64 / 1_000_000.0;
+        if observation.is_operation() {
+            let population = format!("boundary/{}", observation.backend);
+            add(
+                &mut rows,
+                &population,
+                &observation.boundary,
+                format!(
+                    "pid:{}/record:{}/{} [{}]",
+                    observation.process_id,
+                    observation.record_id,
+                    observation.operation_id,
+                    observation.result
+                ),
+                Some(elapsed_ms),
+            )?;
+            rows.get_mut(&(population, observation.boundary.clone()))
+                .context("added boundary row")?
+                .nearest_rank = true;
+        } else {
+            aggregates.push_str(&format!(
+                "{}\t{}\taggregate\t{}\t{elapsed_ms:.6}\t{}\t{}\n",
+                observation.backend,
+                observation.boundary,
+                observation.operations(),
+                observation.operation_id,
+                observation.result
+            ));
+        }
+    }
+    Ok(format!(
+        "boundary ledger cap={} retained_records={} dropped_records={} dropped_operations={}\n{}{}",
+        ledger.cap,
+        ledger.observations.len(),
+        ledger.dropped_records,
+        ledger.dropped_operations,
+        render(rows, slowest),
+        aggregates
+    ))
+}
+
+/// Read an operation receipt or its retained ledger without running a workload.
 pub fn run(receipt: &Path, samples: Option<&Path>, slowest: usize) -> Result<()> {
     let value: Value = serde_json::from_slice(&std::fs::read(receipt)?)?;
     let rows = if value.is_array() {
@@ -241,6 +309,26 @@ pub fn run(receipt: &Path, samples: Option<&Path>, slowest: usize) -> Result<()>
         )?
     } else {
         match value["kind"].as_str() {
+            Some("lash.boundary-workload") => {
+                let path = if let Some(samples) = samples {
+                    samples.to_path_buf()
+                } else {
+                    receipt
+                        .parent()
+                        .unwrap_or(Path::new("."))
+                        .join(label(&value, "ledger_file")?)
+                };
+                let ledger: Value = serde_json::from_slice(
+                    &std::fs::read(&path)
+                        .with_context(|| format!("reading boundary ledger {}", path.display()))?,
+                )?;
+                print!("{}", boundary_table(&ledger, slowest)?);
+                return Ok(());
+            }
+            Some("lash.boundary-observations") => {
+                print!("{}", boundary_table(&value, slowest)?);
+                return Ok(());
+            }
             Some("runtime-perf") => runtime_rows(&value)?,
             Some("lash.send-latency") => {
                 let path = if let Some(samples) = samples {
@@ -260,7 +348,7 @@ pub fn run(receipt: &Path, samples: Option<&Path>, slowest: usize) -> Result<()>
                 latency_rows(&ledger)?
             }
             _ => anyhow::bail!(
-                "expected a runtime-perf or lash.send-latency receipt, or a raw latency sample array"
+                "expected a runtime, latency or boundary receipt, boundary ledger, or raw latency sample array"
             ),
         }
     };
@@ -272,6 +360,32 @@ pub fn run(receipt: &Path, samples: Option<&Path>, slowest: usize) -> Result<()>
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn boundary_percentiles_are_nearest_rank_on_exact_samples() {
+        let observations: Vec<_> = (1..=1001).rev().map(|index| json!({
+            "boundary": "send.settle", "start_ns": 700, "end_ns": 700 + index * 1_000_000_u64,
+            "operation_id": format!("turn:{index}"), "result": "ok", "backend": "sqlite",
+            "process_id": 42, "record_id": index, "measurement": "operation",
+        })).collect();
+        let table = boundary_table(
+            &json!({
+                "kind": "lash.boundary-observations", "cap": 1001, "dropped_operations": 0,
+                "dropped_records": 0, "observations": observations,
+            }),
+            10,
+        )
+        .expect("exact boundary samples");
+        assert!(table.contains("boundary/sqlite\tsend.settle\tms\t1001\t0\t501.000000\t991.000000\t1000.000000\t1001.000000"), "{table}");
+        let row = table
+            .lines()
+            .find(|line| line.starts_with("boundary/sqlite\t"))
+            .expect("boundary row");
+        let slowest = row.split('\t').next_back().expect("slowest IDs");
+        assert_eq!(slowest.split(", ").count(), 10);
+        assert!(slowest.starts_with("pid:42/record:1001/turn:1001 [ok] (1001.000000)"));
+        assert!(slowest.ends_with("pid:42/record:992/turn:992 [ok] (992.000000)"));
+    }
 
     #[test]
     fn raw_operation_tails_preserve_p999_max_ids_and_populations() {

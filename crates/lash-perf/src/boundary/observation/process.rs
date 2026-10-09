@@ -20,7 +20,7 @@ use super::{
 const SURFACE: &str = "facade-workflow-process+process-feed";
 
 pub(super) async fn run(args: &Args) -> Result<Receipt> {
-    let meter = Meter::default();
+    let meter = Meter::new(args.ledger_cap);
     let nodes = match args.case {
         Case::ProcessConvergence | Case::ProcessReconcile => 2,
         // The quiet observer sits on a second replica where replicas share
@@ -107,7 +107,15 @@ async fn follow(
                 break;
             }
         };
-        meter.sample(boundary, start.elapsed());
+        meter.operation(
+            boundary,
+            match &item {
+                ProcessObservationStreamItem::Event(event) => event.cursor.as_str().to_owned(),
+                ProcessObservationStreamItem::Gap { .. } => "feed-gap".into(),
+            },
+            "ok",
+            start,
+        );
         match item {
             ProcessObservationStreamItem::Event(event) => match &event.payload {
                 ProcessObservationEventPayload::LanguageExecution(_) => delivered.language += 1,
@@ -152,7 +160,7 @@ async fn observe(
     let observed = node.core.processes().observe(process);
     let start = Instant::now();
     let snapshot = within("process snapshot", observed.snapshot()).await??;
-    meter.sample("process.feed.snapshot", start.elapsed());
+    meter.operation("process.feed.snapshot", process, "ok", start);
     let meter = meter.clone();
     Ok(tokio::spawn(async move {
         let mut feed = observed.subscribe_and_recover(snapshot.cursor.clone());
@@ -269,7 +277,7 @@ async fn feeds(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let observed = node.core.processes().observe(&process);
     let mut feed = observed.subscribe_and_recover(stale.context("one feed")?);
     let recovered = follow(&mut feed, meter, "process.feed.recover.next").await?;
-    meter.record("process.feed.recover", 1, start);
+    meter.operation("process.feed.recover", process, "ok", start);
 
     let gaps: usize = delivered.iter().map(Delivered::gap_count).sum();
     let errored = delivered
@@ -397,13 +405,12 @@ async fn convergence(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
         if let Some(other) = second.arrivals.get(sequence) {
             both += 1;
             second_trailed += usize::from(other > at);
-            meter.sample(
+            meter.interval(
                 "process.convergence.lag",
-                if other > at {
-                    *other - *at
-                } else {
-                    *at - *other
-                },
+                format!("process:{process}/sequence:{sequence}"),
+                "delivered",
+                *at.min(other),
+                *at.max(other),
             );
         }
     }
@@ -529,7 +536,7 @@ async fn reconcile(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     let start = Instant::now();
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     let recovered = follow(&mut feed, meter, "process.feed.recover.next").await?;
-    meter.record("process.feed.recover", 1, start);
+    meter.operation("process.feed.recover", process, "ok", start);
     meter.window("process.reconcile.recover", recovered.committed, start);
     let after = stalled.process_replay.counts();
 
@@ -603,7 +610,7 @@ async fn roster(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
         loop {
             let at = Instant::now();
             let page = within("roster page", processes.list(filter, limit, continuation)).await??;
-            meter.sample(boundary, at.elapsed());
+            meter.operation(boundary, format!("{name}/page:{pages}"), "ok", at);
             pages += 1;
             rows += page.processes.len();
             empty_pages += usize::from(page.processes.is_empty());
@@ -630,7 +637,7 @@ async fn roster(args: &Args, fleet: &Fleet, meter: &Meter) -> Outcome {
     loop {
         let at = Instant::now();
         let page = within("change page", processes.changed_since(cursor, limit)).await??;
-        meter.sample("process.changes.page", at.elapsed());
+        meter.operation("process.changes.page", format!("page:{pages}"), "ok", at);
         pages += 1;
         changes += page.changes.len();
         if page.changes.is_empty() {

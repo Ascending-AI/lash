@@ -2,6 +2,7 @@
 //! releases a stdin barrier only after every child opened its own core.
 use super::{Args, Case, Meter, Receipt, facade};
 use anyhow::{Context, Result, ensure};
+use lash_sansio::sync::MutexExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,6 +18,8 @@ pub struct WorkerArgs {
     pub lane: usize,
     #[arg(long)]
     pub operations: usize,
+    #[arg(long, default_value_t = 100_000)]
+    pub ledger_cap: usize,
 }
 
 /// One writer: its own core over the shared database, serving as its own
@@ -29,8 +32,8 @@ pub(super) struct Writer {
 }
 
 impl Writer {
-    pub(super) async fn open(store_dir: &Path, lane: usize) -> Result<Self> {
-        let meter = Meter::default();
+    pub(super) async fn open(store_dir: &Path, lane: usize, ledger_cap: usize) -> Result<Self> {
+        let meter = Meter::new(ledger_cap);
         let stores = lash_sqlite_store::SqliteStoreSet::open(
             store_dir.join("lash.db"),
             lash_sqlite_store::SqliteSynchronous::Normal,
@@ -74,7 +77,7 @@ impl Writer {
 
 pub async fn run_worker(args: &WorkerArgs) -> Result<()> {
     use std::io::Write;
-    let writer = Writer::open(&args.store_dir, args.lane).await?;
+    let writer = Writer::open(&args.store_dir, args.lane, args.ledger_cap).await?;
     println!("boundary writer ready");
     std::io::stdout().flush()?;
     let mut line = String::new();
@@ -110,10 +113,12 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
     drop(initialized);
     let mut children = Vec::new();
     let mut paths = Vec::new();
-    let meter = Meter::default();
+    let meter = Meter::new(args.ledger_cap);
     let start = Instant::now();
     for lane in 0..args.callers {
-        let path = args.store_dir.join(format!("writer-{lane}.json"));
+        let artifact_dir = args.store_dir.join(format!("writer-{lane}"));
+        std::fs::create_dir(&artifact_dir)?;
+        let path = artifact_dir.join("receipt.json");
         let mut child = tokio::process::Command::new(std::env::current_exe()?)
             .arg("boundary-worker")
             .arg("--store-dir")
@@ -122,6 +127,8 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
             .arg(&path)
             .arg("--lane")
             .arg(lane.to_string())
+            .arg("--ledger-cap")
+            .arg(args.ledger_cap.to_string())
             .arg("--operations")
             .arg(args.operations.to_string())
             .stdin(std::process::Stdio::piped())
@@ -139,13 +146,25 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         paths.push(path);
         children.push(child);
     }
-    meter.record("sqlite.process.boot", args.callers, start);
+    meter.aggregate(
+        "sqlite.process.boot",
+        args.callers,
+        "writer-population",
+        "ok",
+        start,
+    );
     let start = Instant::now();
     for child in &mut children {
         let mut stdin = child.stdin.take().context("writer stdin")?;
         stdin.write_all(b"go\n").await?;
     }
-    meter.record("sqlite.process.barrier_release", args.callers, start);
+    meter.aggregate(
+        "sqlite.process.barrier_release",
+        args.callers,
+        "writer-population",
+        "ok",
+        start,
+    );
     let start = Instant::now();
     let statuses = futures_util::future::try_join_all(children.iter_mut().map(|child| async {
         Ok::<_, anyhow::Error>(tokio::time::timeout(Duration::from_secs(120), child.wait()).await??)
@@ -155,15 +174,25 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         statuses.iter().all(|status| status.success()),
         "SQLite writer failed: {statuses:?}"
     );
-    meter.record("sqlite.process.join", args.callers, start);
+    meter.aggregate(
+        "sqlite.process.join",
+        args.callers,
+        "writer-population",
+        "ok",
+        start,
+    );
     let mut pids = std::collections::BTreeSet::new();
     let mut settled = 0;
     for path in paths {
-        let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+        let receipt: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
         pids.insert(receipt["evidence"]["pid"].as_u64().context("writer pid")?);
         settled += receipt["evidence"]["settled"]
             .as_u64()
             .context("writer settles")? as usize;
+        let ledger: super::ledger::Ledger = serde_json::from_slice(&std::fs::read(
+            path.with_file_name(receipt["ledger_file"].as_str().context("writer ledger")?),
+        )?)?;
+        meter.ledger.lock_recover().merge(ledger);
         for phase in receipt["phases"].as_array().context("writer phases")? {
             // Preserve the child-measured intervals rather than timing a parent
             // read and calling it a send.

@@ -94,6 +94,12 @@ pub fn percentile_sorted(values: &[f64], percentile: f64) -> f64 {
     }
 }
 
+/// Nearest rank over nonempty exact sorted samples; the answer is always an observed value.
+pub(crate) fn nearest_rank<T: Copy>(sorted: &[T], fraction: f64) -> T {
+    let rank = (fraction * sorted.len() as f64).ceil() as usize;
+    sorted[rank.clamp(1, sorted.len()) - 1]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

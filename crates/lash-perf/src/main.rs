@@ -128,14 +128,14 @@ struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
-    /// Read raw operation tails from a runtime or latency receipt.
+    /// Read raw operation tails from a runtime, latency or boundary receipt or ledger.
     ReceiptTail {
         #[arg(long)]
         receipt: std::path::PathBuf,
-        /// Explicit raw latency ledger, when stored separately from its receipt.
+        /// Explicit operation ledger, when stored separately from its receipt.
         #[arg(long)]
         samples: Option<std::path::PathBuf>,
-        #[arg(long, default_value_t = 5)]
+        #[arg(long, default_value_t = 10)]
         slowest: usize,
     },
     /// Run one synthetic 1.0 boundary population and write its functional receipt.

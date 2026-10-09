@@ -22,7 +22,7 @@ use super::super::{Args, Case, Meter, Receipt};
 use super::{Flavor, Fleet, loop_source, publish, start, within, within_population};
 
 pub(super) async fn run(args: &Args) -> Result<Receipt> {
-    let meter = Meter::default();
+    let meter = Meter::new(args.ledger_cap);
     match args.case {
         Case::OverlayFold => Box::pin(fold(args, &meter)).await,
         Case::OverlayAttribution => attribution(args, &meter).await,
@@ -101,11 +101,11 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
             match &event.payload {
                 ProcessObservationEventPayload::LanguageExecution(observation) => {
                     overlay.observe(observation)?;
-                    meter.sample("overlay.fold.language", start.elapsed());
+                    meter.operation("overlay.fold.language", format!("process:{process}/event:{}", event.cursor.as_str()), "ok", start);
                 }
                 ProcessObservationEventPayload::StepBodyStarted(observation) => {
                     overlay.step_body_started(observation)?;
-                    meter.sample("overlay.fold.step_body", start.elapsed());
+                    meter.operation("overlay.fold.step_body", format!("process:{process}/event:{}", event.cursor.as_str()), "ok", start);
                 }
                 ProcessObservationEventPayload::Committed { .. } => continue,
             }
@@ -113,7 +113,7 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
             // A host reads the overlay after each observation it folds.
             let start = Instant::now();
             snapshots += usize::from(overlay.snapshot().is_some());
-            meter.sample("overlay.snapshot", start.elapsed());
+            meter.operation("overlay.snapshot", format!("process:{process}/event:{}", event.cursor.as_str()), "ok", start);
         }
         meter.window("overlay.fold.observations", folded, window);
         let start = Instant::now();
@@ -122,7 +122,7 @@ async fn fold(args: &Args, meter: &Meter) -> Result<Receipt> {
             occurred_at: Some(chrono::Utc::now()),
         });
         let settled = overlay.snapshot().context("the settled overlay")?;
-        meter.record("overlay.settlement", 1, start);
+        meter.operation("overlay.settlement", &process, "ok", start);
         ensure!(folded > 0 && snapshots == folded, "the overlay folded nothing");
         anyhow::Ok((
             serde_json::json!({
@@ -217,7 +217,7 @@ async fn attribution(args: &Args, meter: &Meter) -> Result<Receipt> {
             let start = Instant::now();
             let outcome = lash_vm::execute(&compiled, &mut State::new(), &host).await?;
             elapsed.push(start.elapsed());
-            meter.sample(boundary, start.elapsed());
+            meter.operation(boundary, format!("round:{}", elapsed.len()), "ok", start);
             ensure!(
                 matches!(outcome, ExecutionOutcome::Finished(_)),
                 "the attribution program did not finish: {outcome:?}"

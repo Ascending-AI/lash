@@ -165,7 +165,12 @@ impl ProcessReplayStore for ProcessReplayProbe {
         }
         let start = Instant::now();
         let result = self.inner.publish(process_id, events).await;
-        self.meter.sample("process.replay.publish", start.elapsed());
+        self.meter.operation(
+            "process.replay.publish",
+            process_id,
+            if result.is_ok() { "ok" } else { "error" },
+            start,
+        );
         match &result {
             Ok(published) => cells.published.add(published.len()),
             Err(_) => cells.publish_errors.add(1),
@@ -173,10 +178,6 @@ impl ProcessReplayStore for ProcessReplayProbe {
         let answered = now_ms();
         let mut dwell = cells.dwell.lock_recover();
         for at in observed {
-            self.meter.sample(
-                "process.ingress.dwell",
-                std::time::Duration::from_millis(answered.saturating_sub(at)),
-            );
             dwell.push((at, answered));
         }
         result
@@ -197,8 +198,12 @@ impl ProcessReplayStore for ProcessReplayProbe {
         self.cells.subscribe_calls.add(1);
         let start = Instant::now();
         let outcome = self.inner.subscribe_after_cursor(cursor).await;
-        self.meter
-            .sample("process.replay.subscribe", start.elapsed());
+        self.meter.operation(
+            "process.replay.subscribe",
+            cursor.as_str(),
+            if outcome.is_ok() { "ok" } else { "error" },
+            start,
+        );
         if matches!(outcome, Ok(ProcessReplaySubscribeOutcome::Gap(_))) {
             self.cells.subscribe_gaps.add(1);
         }
@@ -230,8 +235,12 @@ impl ProcessReplayStore for ProcessReplayProbe {
         self.cells.invalidate_all.add(1);
         let start = Instant::now();
         let result = self.inner.invalidate_all().await;
-        self.meter
-            .sample("process.replay.invalidate_all", start.elapsed());
+        self.meter.operation(
+            "process.replay.invalidate_all",
+            "all-processes",
+            if result.is_ok() { "ok" } else { "error" },
+            start,
+        );
         result
     }
 }
@@ -319,7 +328,12 @@ impl LiveReplayStore for LiveReplayProbe {
             .fetch_max(events.len() as u64, Ordering::Relaxed);
         let start = Instant::now();
         let result = self.inner.publish(session_id, revision, events).await;
-        self.meter.sample("session.replay.publish", start.elapsed());
+        self.meter.operation(
+            "session.replay.publish",
+            format!("{session_id}/revision:{revision:?}"),
+            if result.is_ok() { "ok" } else { "error" },
+            start,
+        );
         match &result {
             Ok(published) => cells.published.add(published.len()),
             Err(_) => cells.publish_errors.add(1),
@@ -334,7 +348,12 @@ impl LiveReplayStore for LiveReplayProbe {
         self.cells.replay_calls.add(1);
         let start = Instant::now();
         let outcome = self.inner.replay_after_cursor(cursor).await;
-        self.meter.sample("session.replay.replay", start.elapsed());
+        self.meter.operation(
+            "session.replay.replay",
+            cursor.as_str(),
+            if outcome.is_ok() { "ok" } else { "error" },
+            start,
+        );
         match &outcome {
             Ok(LiveReplayOutcome::Replayed(events)) => self.cells.replayed_events.add(events.len()),
             Ok(LiveReplayOutcome::Gap(_)) => self.cells.replay_gaps.add(1),
@@ -350,8 +369,12 @@ impl LiveReplayStore for LiveReplayProbe {
         self.cells.subscribe_calls.add(1);
         let start = Instant::now();
         let outcome = self.inner.subscribe_after_cursor(cursor).await;
-        self.meter
-            .sample("session.replay.subscribe", start.elapsed());
+        self.meter.operation(
+            "session.replay.subscribe",
+            cursor.as_str(),
+            if outcome.is_ok() { "ok" } else { "error" },
+            start,
+        );
         if matches!(outcome, Ok(LiveReplaySubscribeOutcome::Gap(_))) {
             self.cells.subscribe_gaps.add(1);
         }
@@ -375,8 +398,12 @@ impl LiveReplayStore for LiveReplayProbe {
         self.cells.invalidate_all.add(1);
         let start = Instant::now();
         let result = self.inner.invalidate_all().await;
-        self.meter
-            .sample("session.replay.invalidate_all", start.elapsed());
+        self.meter.operation(
+            "session.replay.invalidate_all",
+            "all-sessions",
+            if result.is_ok() { "ok" } else { "error" },
+            start,
+        );
         result
     }
 

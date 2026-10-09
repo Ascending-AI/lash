@@ -3,27 +3,85 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 
+#[test]
+fn aggregate_intervals_are_excluded_from_operation_percentiles() {
+    let meter = Meter::default();
+    meter.aggregate(
+        "session.invalidate.recovered",
+        2,
+        "sessions",
+        "ok",
+        Instant::now(),
+    );
+    assert!(
+        meter.latency().is_empty(),
+        "a total over two sessions is not an operation sample"
+    );
+    let ledger = meter.ledger.lock_recover().with_backend("sqlite");
+    let table =
+        crate::receipt_tail::boundary_table(&serde_json::to_value(ledger).unwrap(), 10).unwrap();
+    assert!(
+        table.contains("sqlite\tsession.invalidate.recovered\taggregate\t2\t"),
+        "{table}"
+    );
+    assert!(
+        !table.contains("boundary/sqlite\tsession.invalidate.recovered"),
+        "{table}"
+    );
+    meter.aggregate(
+        "session.invalidate.recovered",
+        1,
+        "one-session-total",
+        "ok",
+        Instant::now(),
+    );
+    meter.operation(
+        "session.invalidate.recovered",
+        "session:one",
+        "ok",
+        Instant::now(),
+    );
+    assert_eq!(
+        meter.latency()[0].samples,
+        1,
+        "explicit aggregates remain excluded when N is one"
+    );
+    let ledger = meter.ledger.lock_recover().with_backend("sqlite");
+    let table =
+        crate::receipt_tail::boundary_table(&serde_json::to_value(ledger).unwrap(), 10).unwrap();
+    assert!(
+        table.contains("boundary/sqlite\tsession.invalidate.recovered\tms\t1\t0\t"),
+        "{table}"
+    );
+}
+
 #[tokio::test]
 async fn wire_slots_receipt_counts_every_retry_and_derivative_boundary() {
-    let receipt = attachments::run(1).await.unwrap();
+    let receipt = attachments::run(1, 100_000).await.unwrap();
     assert_eq!(receipt.evidence["attempts"], 3);
     eprintln!("{}", serde_json::to_string(&receipt).unwrap());
 }
 #[tokio::test]
 async fn token_healthy_receipt_counts_concurrent_source_calls_without_refresh() {
-    let receipt = tokens::run(Case::TokenHealthy, 1, 4).await.unwrap();
+    let receipt = tokens::run(Case::TokenHealthy, 1, 4, 100_000)
+        .await
+        .unwrap();
     assert_eq!(receipt.evidence["replacements"], 0);
     eprintln!("{}", serde_json::to_string(&receipt).unwrap());
 }
 #[tokio::test]
 async fn token_expiring_receipt_counts_one_refresh_for_concurrent_callers() {
-    let receipt = tokens::run(Case::TokenExpiring, 1, 4).await.unwrap();
+    let receipt = tokens::run(Case::TokenExpiring, 1, 4, 100_000)
+        .await
+        .unwrap();
     assert_eq!(receipt.evidence["replacements"], 1);
     eprintln!("{}", serde_json::to_string(&receipt).unwrap());
 }
 #[tokio::test]
 async fn token_rejected_receipt_counts_one_refresh_for_concurrent_rejections() {
-    let receipt = tokens::run(Case::TokenRejected, 1, 4).await.unwrap();
+    let receipt = tokens::run(Case::TokenRejected, 1, 4, 100_000)
+        .await
+        .unwrap();
     assert_eq!(receipt.evidence["replacements"], 1);
     eprintln!("{}", serde_json::to_string(&receipt).unwrap());
 }
@@ -41,6 +99,7 @@ fn args(case: Case, dir: &std::path::Path) -> Args {
         future_out: None,
         future_top: 20,
         worker_stack_bytes: None,
+        ledger_cap: 100_000,
     }
 }
 #[tokio::test]
@@ -116,10 +175,45 @@ async fn sqlite_writer_settles_its_send_after_a_later_booted_writer_has_left() {
     )
     .await
     .unwrap();
-    let first = workers::Writer::open(dir.path(), 0).await.unwrap();
-    let second = workers::Writer::open(dir.path(), 1).await.unwrap();
+    let first = workers::Writer::open(dir.path(), 0, 100_000).await.unwrap();
+    let second = workers::Writer::open(dir.path(), 1, 100_000).await.unwrap();
     let left = second.finish(1).await.unwrap();
     assert_eq!(left.count("send.settle"), 1);
     let stayed = first.finish(1).await.unwrap();
     assert_eq!(stayed.count("send.settle"), 1);
+}
+
+#[test]
+fn ledger_cap_counts_every_dropped_operation() {
+    let meter = Meter::new(2);
+    meter.operation("send.settle", "turn:1", "ok", Instant::now());
+    meter.aggregate(
+        "session.invalidate.recovered",
+        4,
+        "sessions",
+        "ok",
+        Instant::now(),
+    );
+    meter.operation("send.settle", "turn:2", "error", Instant::now());
+    meter.aggregate(
+        "session.invalidate.recovered",
+        3,
+        "sessions",
+        "ok",
+        Instant::now(),
+    );
+    let ledger = meter.ledger.lock_recover();
+    assert_eq!(ledger.observations.len(), 2);
+    assert_eq!(ledger.dropped_records, 2);
+    assert_eq!(ledger.dropped_operations, 4);
+    assert_eq!(
+        meter.count("send.settle"),
+        2,
+        "functional counts survive truncation"
+    );
+    drop(ledger);
+    let empty = Meter::new(0);
+    empty.operation("send.settle", "turn:3", "ok", Instant::now());
+    assert_eq!(empty.ledger.lock_recover().dropped_operations, 1);
+    assert!(empty.latency().is_empty());
 }

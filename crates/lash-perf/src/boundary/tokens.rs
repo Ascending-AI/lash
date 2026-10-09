@@ -32,22 +32,28 @@ impl TokenSource for Source {
             tokio::task::yield_now().await;
             ProviderToken::new("synthetic-new")
         };
-        self.meter.record(
+        self.meter.operation(
             match request.reason {
                 TokenRequestReason::Current => "token.source.current",
                 TokenRequestReason::Expiring => "token.source.expiring",
                 TokenRequestReason::Rejected => "token.source.rejected",
                 _ => "token.source.other",
             },
-            1,
+            format!("reason:{:?}", request.reason),
+            "ok",
             start,
         );
         Ok(token)
     }
 }
 
-pub(super) async fn run(case: Case, waves: usize, callers: usize) -> Result<Receipt> {
-    let meter = Meter::default();
+pub(super) async fn run(
+    case: Case,
+    waves: usize,
+    callers: usize,
+    ledger_cap: usize,
+) -> Result<Receipt> {
+    let meter = Meter::new(ledger_cap);
     for _ in 0..waves {
         let source = Arc::new(Source {
             expired: matches!(case, Case::TokenExpiring),
@@ -63,7 +69,12 @@ pub(super) async fn run(case: Case, waves: usize, callers: usize) -> Result<Rece
         let acquired = futures_util::future::try_join_all((0..callers).map(|_| async {
             let start = Instant::now();
             let lease = gate.current(&route).await?;
-            meter.record("token.gate.current", 1, start);
+            meter.operation(
+                "token.gate.current",
+                format!("epoch:{}", lease.epoch),
+                "ok",
+                start,
+            );
             Ok::<_, anyhow::Error>(lease)
         }))
         .await?;
@@ -74,7 +85,12 @@ pub(super) async fn run(case: Case, waves: usize, callers: usize) -> Result<Rece
                     .replace(&route, old, TokenRequestReason::Rejected)
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("replacement absent"))?;
-                meter.record("token.gate.rejected", 1, start);
+                meter.operation(
+                    "token.gate.rejected",
+                    format!("epoch:{}", lease.epoch),
+                    "ok",
+                    start,
+                );
                 ensure!(lease.epoch > old.epoch, "rejection did not renew the epoch");
                 Ok::<_, anyhow::Error>(lease)
             }))

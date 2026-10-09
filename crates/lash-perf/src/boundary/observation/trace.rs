@@ -72,7 +72,12 @@ impl TraceSink for TimedSink {
         } else {
             self.inner.append(record)
         };
-        self.meter.sample(self.boundary, start.elapsed());
+        self.meter.operation(
+            self.boundary,
+            &record.id,
+            if result.is_ok() { "ok" } else { "error" },
+            start,
+        );
         *self
             .kinds
             .lock_recover()
@@ -110,7 +115,12 @@ impl opentelemetry_sdk::trace::SpanExporter for TimedExporter {
     ) -> opentelemetry_sdk::error::OTelSdkResult {
         let start = Instant::now();
         let result = self.inner.export(batch).await;
-        self.meter.sample("trace.otel.export", start.elapsed());
+        self.meter.operation(
+            "trace.otel.export",
+            format!("export:{}", self.exports.load(Ordering::Relaxed)),
+            if result.is_ok() { "ok" } else { "error" },
+            start,
+        );
         self.exports.fetch_add(1, Ordering::Relaxed);
         result
     }
@@ -120,7 +130,7 @@ impl opentelemetry_sdk::trace::SpanExporter for TimedExporter {
 /// installed. `--callers` sizes what the variant varies: the custom payload
 /// in KiB, or the slow sink's delay in milliseconds.
 pub(super) async fn run(args: &Args) -> Result<Receipt> {
-    let meter = Meter::default();
+    let meter = Meter::new(args.ledger_cap);
     let path = args.store_dir.join("trace.jsonl");
     let inner: Arc<dyn TraceSink> = match args.case {
         Case::TraceSinkOtel | Case::TraceSinkSlow => Arc::new(Discard),

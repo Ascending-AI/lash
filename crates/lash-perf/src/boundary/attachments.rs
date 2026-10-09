@@ -51,7 +51,12 @@ impl ProviderFileUploader for Upload {
             return Err(AttachmentStoreError::Contract("upload length".into()));
         }
         let index = self.meter.count("attachment.derivative.upload");
-        self.meter.record("attachment.derivative.upload", 1, start);
+        self.meter.operation(
+            "attachment.derivative.upload",
+            format!("attachment:{:?}/upload:{index}", reference.id),
+            "ok",
+            start,
+        );
         Ok(UploadedProviderFile {
             id: DeliverySecret::new(format!("synthetic-file-{index}")),
             valid_until_ms: None,
@@ -82,7 +87,12 @@ impl AttachmentStore for MeasuredStore {
     ) -> Result<StoredAttachment, AttachmentStoreError> {
         let start = Instant::now();
         let result = self.inner.get(id, limit).await;
-        self.meter.record("attachment.resolution", 1, start);
+        self.meter.operation(
+            "attachment.resolution",
+            id,
+            if result.is_ok() { "ok" } else { "error" },
+            start,
+        );
         result
     }
     async fn head(&self, id: &AttachmentId) -> Result<Option<StoredBlobRef>, AttachmentStoreError> {
@@ -110,10 +120,19 @@ impl AttachmentStore for MeasuredStore {
                     ..
                 })
             ) {
-                self.meter
-                    .record("attachment.derivative.cache_hit", 1, start);
+                self.meter.operation(
+                    "attachment.derivative.cache_hit",
+                    format!("attachment:{:?}", reference.id),
+                    if result.is_ok() { "ok" } else { "error" },
+                    start,
+                );
             }
-            self.meter.record("attachment.delivery", 1, start);
+            self.meter.operation(
+                "attachment.delivery",
+                format!("attachment:{:?}", reference.id),
+                if result.is_ok() { "ok" } else { "error" },
+                start,
+            );
         }
         result
     }
@@ -125,8 +144,12 @@ impl AttachmentStore for MeasuredStore {
         let start = Instant::now();
         let result = self.inner.invalidate_delivery(reference, rejected).await;
         if self.delivery {
-            self.meter
-                .record("attachment.derivative.invalidate", 1, start);
+            self.meter.operation(
+                "attachment.derivative.invalidate",
+                format!("attachment:{:?}", reference.id),
+                if result.is_ok() { "ok" } else { "error" },
+                start,
+            );
         }
         result
     }
@@ -189,7 +212,12 @@ impl Provider for WireProvider {
             segments,
         )
         .map_err(lash_core::provider::attachment_wire::template_error);
-        self.meter.record("attachment.template.lower", 1, start);
+        self.meter.operation(
+            "attachment.template.lower",
+            &request.scope.request_id,
+            if result.is_ok() { "ok" } else { "error" },
+            start,
+        );
         result
     }
     async fn send(
@@ -200,7 +228,16 @@ impl Provider for WireProvider {
         let start = Instant::now();
         self.templates.lock_recover().push(body.template().clone());
         let attempt = self.meter.count("attachment.provider.send") % 3;
-        self.meter.record("attachment.provider.send", 1, start);
+        self.meter.operation(
+            "attachment.provider.send",
+            format!("attempt:{}", self.meter.count("attachment.provider.send")),
+            match attempt {
+                0 => "rejected",
+                1 => "retryable_error",
+                _ => "success",
+            },
+            start,
+        );
         if attempt == 0 {
             let mut error = LlmTransportError::new("synthetic file rejected")
                 .with_kind(ProviderFailureKind::Validation)
@@ -220,8 +257,8 @@ impl Provider for WireProvider {
     }
 }
 
-pub(super) async fn run(operations: usize) -> Result<Receipt> {
-    let meter = Meter::default();
+pub(super) async fn run(operations: usize, ledger_cap: usize) -> Result<Receipt> {
+    let meter = Meter::new(ledger_cap);
     let stores = Arc::new(lash_sqlite_store::SqliteStoreSet::memory().await?);
     let raw = facade::backend(stores)?;
     let observed = meter.clone();

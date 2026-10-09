@@ -17,6 +17,7 @@ fn args(case: Case, dir: &std::path::Path, operations: usize, callers: usize) ->
         future_out: None,
         future_top: 20,
         worker_stack_bytes: None,
+        ledger_cap: 100_000,
     }
 }
 

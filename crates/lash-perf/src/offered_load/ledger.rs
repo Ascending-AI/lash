@@ -15,6 +15,7 @@
 //! scheduled arrival; operations still open then are counted `unfinished`,
 //! never dropped.
 
+use crate::perf_support::metrics::nearest_rank;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -275,11 +276,6 @@ pub struct IntervalReport {
 
 fn ms(us: u64) -> f64 {
     us as f64 / 1_000.0
-}
-
-fn nearest_rank(sorted: &[u64], fraction: f64) -> u64 {
-    let rank = (fraction * sorted.len() as f64).ceil() as usize;
-    sorted[rank.clamp(1, sorted.len()) - 1]
 }
 
 impl IntervalReport {

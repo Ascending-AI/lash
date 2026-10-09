@@ -118,8 +118,12 @@ impl lash_core::ToolProvider for Tools {
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let start = Instant::now();
         let result = self.invoke(&call).await;
-        self.meter
-            .record(&format!("seeded.tool.{}", call.name()), 1, start);
+        self.meter.operation(
+            &format!("seeded.tool.{}", call.name()),
+            call.context.call_id(),
+            if result.is_ok() { "ok" } else { "error" },
+            start,
+        );
         match result {
             Ok(output) => lash_core::ToolOutcome::from_output(output).into(),
             Err(error) => lash_core::ToolOutcome::err_fmt(error).into(),
@@ -133,7 +137,7 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
         args.callers <= workload.spec().sessions as usize,
         "actor population exceeds seeded workload"
     );
-    let meter = Meter::default();
+    let meter = Meter::new(args.ledger_cap);
     let stores = Arc::new(
         lash_sqlite_store::SqliteStoreSet::open(
             args.store_dir.join("lash.db"),
@@ -182,7 +186,16 @@ pub(super) async fn run(args: &Args) -> Result<Receipt> {
                 let response = generator
                     .admitted_response(&[key.to_owned()], request.scope.attempt.unwrap_or(1))
                     .map_err(transport)?;
-                calls.record("seeded.provider.attempt", 1, start);
+                calls.operation(
+                    "seeded.provider.attempt",
+                    format!("{key}/attempt:{}", request.scope.attempt.unwrap_or(1)),
+                    if response.retryable {
+                        "retryable_error"
+                    } else {
+                        "success"
+                    },
+                    start,
+                );
                 if response.retryable {
                     return Err(transport("seeded first-attempt retry before response")
                         .with_kind(lash_core::llm::transport::ProviderFailureKind::Transport)
@@ -265,16 +278,16 @@ async fn execute(
                 let start = Instant::now();
                 let plan = generator.plan(actor as u64, ordinal as u64)?;
                 let payload = generator.materialize(&plan)?;
-                meter.record("seeded.plan.materialize", 1, start);
+                meter.operation("seeded.plan.materialize", plan.operation.key(), "ok", start);
                 let start = Instant::now();
                 let handle = session.send(lash::TurnInput::text(format!("seeded-operation:{}\n{}\n{}", plan.operation.key(), payload.input, payload.prompt)))
                     .id(lash::TurnId::try_from(plan.operation.key())?).await?;
-                meter.record("seeded.send.accept", 1, start);
+                meter.operation("seeded.send.accept", plan.operation.key(), "ok", start);
                 let start = Instant::now();
                 let output = tokio::time::timeout(Duration::from_secs(120), handle.output()).await??;
                 ensure!(matches!(&output.result.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::FinalValue { value })
                     if value["operation"] == plan.operation.key()), "seeded cell failed: {:?}; errors={:?}; calls={:?}", output.result.outcome, output.result.errors, output.result.llm_calls);
-                meter.record("seeded.send.settle", 1, start);
+                meter.operation("seeded.send.settle", plan.operation.key(), "ok", start);
                 // Queued plans are separate keyed sends; the sequential recipe
                 // does not claim to model their active-turn scheduling share.
                 for queued in &plan.queued_inputs {
@@ -283,7 +296,7 @@ async fn execute(
                         .id(lash::TurnId::try_from(queued.idempotency_key.clone())?).output().await?;
                     ensure!(matches!(&output.result.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::FinalValue { value })
                         if value["operation"] == queued.idempotency_key), "queued seeded input did not finish");
-                    meter.record("seeded.queued.settle", 1, start);
+                    meter.operation("seeded.queued.settle", &queued.idempotency_key, "ok", start);
                 }
             }
             anyhow::Ok(())

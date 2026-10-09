@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
+import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -686,6 +689,10 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="runtime-perf JSON, perf guard JSON, ui-perf JSON, lash-vm-perf JSON, or *.dhat.json",
     )
+    parser.add_argument(
+        "--receipt-tail-bin", type=Path,
+        help="lash-perf executable for boundary tails (defaults to LASH_PERF_BIN or lash-perf on PATH)",
+    )
     parser.add_argument("--diff", type=Path, help="baseline JSON of the same report kind to diff against")
     parser.add_argument("--top", type=int, default=20, help="top-N call stacks for dhat output (default 20)")
     return parser.parse_args()
@@ -694,6 +701,22 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     payload = json.loads(args.report.read_text())
+    if payload.get("kind") in ("lash.boundary-workload", "lash.boundary-observations"):
+        if args.diff:
+            print("error: boundary tails do not support --diff", file=sys.stderr)
+            return 2
+        binary = args.receipt_tail_bin or os.environ.get("LASH_PERF_BIN") or shutil.which("lash-perf")
+        if not binary:
+            print("error: boundary tails require lash-perf; set --receipt-tail-bin or LASH_PERF_BIN", file=sys.stderr)
+            return 2
+        try:
+            return subprocess.run(
+                [str(binary), "receipt-tail", "--receipt", str(args.report), "--slowest", "10"],
+                check=False,
+            ).returncode
+        except OSError as error:
+            print(f"error: cannot run receipt-tail: {error}", file=sys.stderr)
+            return 2
     try:
         kind, summarize, diff = dispatch_entry(payload, args.report)
     except ValueError as error:

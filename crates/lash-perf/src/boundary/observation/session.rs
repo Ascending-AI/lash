@@ -14,7 +14,7 @@ use super::super::{Args, Case, Meter, Receipt, facade};
 use super::{Flavor, Fleet, Node, within};
 
 pub(super) async fn run(args: &Args) -> Result<Receipt> {
-    let meter = Meter::default();
+    let meter = Meter::new(args.ledger_cap);
     let fleet = Fleet::open(args, &meter, 1, Flavor::Chat, |builder, _| Ok(builder)).await?;
     let result = match args.case {
         Case::SessionReplay => replay(args, &fleet.nodes[0], &meter).await,
@@ -75,7 +75,15 @@ async fn follow(
         let item = within("session feed item", feed.next())
             .await?
             .context("the session feed ended")??;
-        meter.sample("session.feed.next", start.elapsed());
+        meter.operation(
+            "session.feed.next",
+            match &item {
+                SessionObservationStreamItem::Event(event) => event.cursor.as_str().to_owned(),
+                SessionObservationStreamItem::Gap { .. } => "feed-gap".into(),
+            },
+            "ok",
+            start,
+        );
         match item {
             SessionObservationStreamItem::Event(event) => {
                 *delivered.events.entry(kind(&event.payload)).or_default() += 1;
@@ -114,7 +122,7 @@ async fn replay(args: &Args, node: &Node, meter: &Meter) -> Outcome {
         let observed = session.observe();
         let start = Instant::now();
         let snapshot = within("session snapshot", observed.snapshot()).await??;
-        meter.sample("session.feed.snapshot", start.elapsed());
+        meter.operation("session.feed.snapshot", session.session_id(), "ok", start);
         let mut feed = observed.subscribe_and_recover(snapshot.cursor);
         let (meter, operations) = (meter.clone(), args.operations);
         observers.push(tokio::spawn(async move {
@@ -134,12 +142,21 @@ async fn replay(args: &Args, node: &Node, meter: &Meter) -> Outcome {
         delivered.push(observer.await??);
     }
     let (mut events, mut published_first) = (0, 0);
-    for observer in &delivered {
+    for (observer_index, observer) in delivered.iter().enumerate() {
         events += observer.events.values().sum::<usize>();
         ensure!(observer.gaps == 0, "an attached observer gapped");
-        for (commit, settle) in observer.commits.iter().zip(&settled) {
+        for (index, (commit, settle)) in observer.commits.iter().zip(&settled).enumerate() {
             match commit.checked_duration_since(*settle) {
-                Some(lag) => meter.sample("session.commit_to_publication", lag),
+                Some(_) => meter.interval(
+                    "session.commit_to_publication",
+                    format!(
+                        "session:{}/turn:replay-{index}/observer:{observer_index}",
+                        session.session_id()
+                    ),
+                    "delivered_after_settle",
+                    *settle,
+                    *commit,
+                ),
                 None => published_first += 1,
             }
         }
@@ -193,11 +210,29 @@ async fn resume(args: &Args, node: &Node, meter: &Meter) -> Outcome {
             SessionResume::Replayed { events } => {
                 replayed += 1;
                 replayed_events += events.len();
-                meter.sample("session.resume.replayed", start.elapsed());
+                meter.operation(
+                    "session.resume.replayed",
+                    format!(
+                        "session:{}/cursor:{}",
+                        session.session_id(),
+                        cursor.as_str()
+                    ),
+                    "replayed",
+                    start,
+                );
             }
             SessionResume::Gap { .. } => {
                 gapped += 1;
-                meter.sample("session.resume.gap", start.elapsed());
+                meter.operation(
+                    "session.resume.gap",
+                    format!(
+                        "session:{}/cursor:{}",
+                        session.session_id(),
+                        cursor.as_str()
+                    ),
+                    "gap",
+                    start,
+                );
             }
         }
     }
@@ -220,12 +255,17 @@ async fn resume(args: &Args, node: &Node, meter: &Meter) -> Outcome {
     let store: Arc<dyn lash_core::LiveReplayStore> = node.live_replay.clone();
     let start = Instant::now();
     store.invalidate_all().await?;
-    meter.record("session.invalidate_all", 1, start);
+    meter.operation("session.invalidate_all", "session-population", "ok", start);
     let mut delivered = Vec::new();
     for mut feed in feeds {
         let mut observer = Delivered::default();
         follow(&mut feed, meter, &mut observer, 0, 1).await?;
-        meter.sample("session.invalidate.gap_delivery", start.elapsed());
+        meter.operation(
+            "session.invalidate.gap_delivery",
+            format!("observer:{}", delivered.len()),
+            "gap",
+            start,
+        );
         delivered.push((feed, observer));
     }
     let gaps: usize = delivered.iter().map(|(_, observer)| observer.gaps).sum();
@@ -234,7 +274,13 @@ async fn resume(args: &Args, node: &Node, meter: &Meter) -> Outcome {
         facade::send(durable, &format!("resume-{n}-after-gap"), meter).await?;
         follow(feed, meter, observer, 1, 0).await?;
     }
-    meter.record("session.invalidate.recovered", sessions.len(), start);
+    meter.aggregate(
+        "session.invalidate.recovered",
+        sessions.len(),
+        "session-population",
+        "ok",
+        start,
+    );
     Ok((
         serde_json::json!({
             "cursors_resumed": cursors.len(),
