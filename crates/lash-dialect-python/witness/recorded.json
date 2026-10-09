@@ -1,0 +1,431 @@
+{
+ "python": "3.12.3",
+ "cases": [
+  {
+   "name": "cancel_cleanup",
+   "source": "import asyncio\nlog = []\nasync def job(tag):\n    try:\n        log.append(await echo(tag + \":work\"))\n        await echo(tag + \":more\")\n        return \"finished\"\n    finally:\n        log.append(await echo(tag + \":cleanup\"))\n        print(tag, \"cleaned up\")\ntask = asyncio.create_task(job(\"a\"))\nawait echo(\"main:first\")\ntask.cancel()\ntry:\n    print(await task)\nexcept asyncio.CancelledError:\n    print(\"the task was cancelled\")\nprint(log)\ndone = asyncio.create_task(job(\"b\"))\nprint(await done, log)\nleftover = asyncio.create_task(job(\"c\"))\nawait echo(\"main:last\")\nprint(\"main ends\")\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [
+      "echo:main:first",
+      "echo:a:work"
+     ],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "echo:main:first"
+     ],
+     "asked": [
+      "echo:a:cleanup"
+     ],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "echo:a:cleanup"
+     ],
+     "asked": [
+      "echo:b:work"
+     ],
+     "logged": [
+      "a cleaned up",
+      "the task was cancelled",
+      "['a:cleanup']"
+     ]
+    },
+    {
+     "delivered": [
+      "echo:b:work"
+     ],
+     "asked": [
+      "echo:b:more"
+     ],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "echo:b:more"
+     ],
+     "asked": [
+      "echo:b:cleanup"
+     ],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "echo:b:cleanup"
+     ],
+     "asked": [
+      "echo:main:last",
+      "echo:c:work"
+     ],
+     "logged": [
+      "b cleaned up",
+      "finished ['a:cleanup', 'b:work', 'b:cleanup']"
+     ]
+    },
+    {
+     "delivered": [
+      "echo:main:last"
+     ],
+     "asked": [
+      "echo:c:cleanup"
+     ],
+     "logged": [
+      "main ends"
+     ]
+    },
+    {
+     "delivered": [
+      "echo:c:cleanup"
+     ],
+     "asked": [],
+     "logged": [
+      "c cleaned up"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "collections",
+   "source": "xs = [5, 3, 8, 1]\nprint(xs[0], xs[-1], xs[1:3], xs[:2], xs[2:], xs[::-1], xs[::2], xs[-3:-1], xs[10:], xs[1:100], xs[3:0:-1])\ntext = \"hello world\"\nprint(text[0], text[-1], text[1:4], text[::-1], text[::3], len(text), \"lo\" in text, \"z\" not in text)\npair = (1, \"two\", 3.0)\nprint(pair[1], pair[-1], pair[:2], pair + (4,), len(pair), pair * 2, 3.0 in pair)\nxs.append(9)\nxs.extend([2, 2])\nxs.insert(1, 7)\nxs.insert(-100, 0)\nxs.insert(100, 6)\nprint(xs, xs.pop(), xs.pop(0), xs.index(8), xs.count(2), 2 in xs)\nxs.remove(2)\nxs.sort()\nys = xs\nys.reverse()\nprint(xs, ys is xs, sorted(xs), xs.copy() == xs, sum(xs), min(xs), max(xs))\nxs += [1]\nys = ys + [0]\nprint(xs, ys, [0] * 3, [1, 2] * 2, \"ab\" * 3, 2 * \"x\", [[0] * 2] * 2)\ntry:\n    xs[99]\nexcept IndexError as error:\n    print(error)\ntry:\n    xs.remove(1000)\nexcept ValueError as error:\n    print(error)\ntry:\n    (1, 2)[0] = 5\nexcept TypeError as error:\n    print(\"tuples are immutable\")\nd = {\"b\": 2, \"a\": 1}\nd[\"c\"] = 3\nd[\"b\"] = 20\nprint(d, list(d), list(d.keys()), list(d.values()), list(d.items()), len(d), \"a\" in d, 1 in d)\nprint(d.get(\"z\"), d.get(\"z\", 0), d.setdefault(\"z\", []), d.pop(\"a\"), d)\nd.update({\"b\": 0, \"y\": 1})\ndel d[\"z\"]\ne = dict(d)\ne[\"new\"] = True\nprint(d, e, d == {\"y\": 1, \"c\": 3, \"b\": 0}, {1: \"int\"}[1.0], {} == dict(), dict([(\"k\", \"v\")]))\ns = {3, 1, 2, 3}\ns.add(4)\ns.discard(1)\ns.discard(100)\nprint(sorted(s), len(s), 2 in s, sorted(s | {9}), sorted(s & {2, 3, 7}), sorted(s - {2}), sorted(s ^ {2, 5}), sorted(set(\"aab\")), set() == set([]), {1, 2} == {2, 1}, sorted(s.union([7])), sorted(s.intersection([2, 3])), sorted(s.difference([2])))\nprint([x * 2 for x in range(5) if x % 2], {x: x * x for x in range(3)}, sorted({x % 2 for x in range(5)}), [(x, y) for x in range(2) for y in \"ab\"])\nprint(list(zip([1, 2, 3], \"ab\")), list(enumerate([\"a\", \"b\"], 1)), list(reversed([1, 2, 3])), tuple([1, 2]), list((1, 2)), list(\"ab\"), sum(x for x in range(4)))\nmatrix = [[1, 2], [3, 4]]\nmatrix[0][1] = 20\nmatrix[1][0] += 5\nprint(matrix, [row[0] for row in matrix], [n for row in matrix for n in row], matrix[1][-1])\nprint(\"a,b,,c\".split(\",\"), \"  two  words \".split(), \" pad \".strip() + \"|\", \"Hello\".upper(), \"Hello\".lower(), \"hello\".replace(\"l\", \"L\"), \"hello\".find(\"l\"), \"hello\".find(\"z\"), \"hello\".startswith(\"he\"), \"hello\".endswith(\"lo\"), \"hello\".count(\"l\"), \", \".join(str(n) for n in range(3)))\nprint(str(1.0), str(None), str(True), repr(\"it's\"), repr('say \"hi\"'), repr(\"tab\\there\"), int(\"7\") + 1, float(3), str([1.5, \"x\"]), isinstance(1, int), isinstance(True, int), isinstance(1.0, (int, str)), isinstance(\"s\", str), type(1).__name__, type([]).__name__, type(None).__name__)\nprint(ord(\"a\"), chr(98), abs(-3.5), abs(4), len(\"\"), len([[], []]), bool(\"False\"), 10 in range(11), [1, 2] < [1, 3], (1, 2) < (1, 2, 0), \"abc\" < \"abd\", min(\"b\", \"a\"), max([1, 5, 3]))\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "5 1 [3, 8] [5, 3] [8, 1] [1, 8, 3, 5] [5, 8] [3, 8] [] [3, 8, 1] [1, 8, 3]",
+      "h d ell dlrow olleh hlwl 11 True True",
+      "two 3.0 (1, 'two') (1, 'two', 3.0, 4) 3 (1, 'two', 3.0, 1, 'two', 3.0) True",
+      "[5, 7, 3, 8, 1, 9, 2, 2] 6 0 3 2 True",
+      "[9, 8, 7, 5, 3, 2, 1] True [1, 2, 3, 5, 7, 8, 9] True 35 1 9",
+      "[9, 8, 7, 5, 3, 2, 1, 1] [9, 8, 7, 5, 3, 2, 1, 1, 0] [0, 0, 0] [1, 2, 1, 2] ababab xx [[0, 0], [0, 0]]",
+      "list index out of range",
+      "list.remove(x): x not in list",
+      "tuples are immutable",
+      "{'b': 20, 'a': 1, 'c': 3} ['b', 'a', 'c'] ['b', 'a', 'c'] [20, 1, 3] [('b', 20), ('a', 1), ('c', 3)] 3 True False",
+      "None 0 [] 1 {'b': 20, 'c': 3, 'z': []}",
+      "{'b': 0, 'c': 3, 'y': 1} {'b': 0, 'c': 3, 'y': 1, 'new': True} True int True {'k': 'v'}",
+      "[2, 3, 4] 3 True [2, 3, 4, 9] [2, 3] [3, 4] [3, 4, 5] ['a', 'b'] True True [2, 3, 4, 7] [2, 3] [3, 4]",
+      "[2, 6] {0: 0, 1: 1, 2: 4} [0, 1] [(0, 'a'), (0, 'b'), (1, 'a'), (1, 'b')]",
+      "[(1, 'a'), (2, 'b')] [(1, 'a'), (2, 'b')] [3, 2, 1] (1, 2) [1, 2] ['a', 'b'] 6",
+      "[[1, 20], [8, 4]] [1, 8] [1, 20, 8, 4] 4",
+      "['a', 'b', '', 'c'] ['two', 'words'] pad| HELLO hello heLLo 2 -1 True True 2 0, 1, 2",
+      "1.0 None True \"it's\" 'say \"hi\"' 'tab\\there' 8 3.0 [1.5, 'x'] True True False True int list NoneType",
+      "97 b 3.5 4 0 2 True True True True True a 5"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "control",
+   "source": "def classify(n):\n    if n < 0:\n        return \"negative\"\n    elif n == 0:\n        return \"zero\"\n    elif n < 10:\n        return \"small\"\n    else:\n        return \"large\"\nprint([classify(n) for n in [-5, 0, 3, 42]])\nfor n in range(5):\n    if n == 1:\n        continue\n    if n == 3:\n        break\n    print(\"for\", n)\nelse:\n    print(\"no break\")\nfor n in range(2):\n    print(\"loop\", n)\nelse:\n    print(\"ran to the end\")\nn = 0\nwhile n < 10:\n    n += 3\n    if n % 2 == 0:\n        continue\n    print(\"while\", n)\nelse:\n    print(\"while ended at\", n)\nwhile True:\n    n -= 1\n    if n < 8:\n        break\nelse:\n    print(\"never\")\nprint(n)\ntotal = 0\nfor i in range(1, 4):\n    for j in range(i):\n        if j == 2:\n            break\n        total += i * j\n    else:\n        total += 100\nprint(total)\ni = 10\nfor i in range(3):\n    pass\nprint(i, [i for i in range(2)], i)\ndef find(xs, wanted):\n    for index, x in enumerate(xs):\n        if x == wanted:\n            return index\n    return -1\nprint(find([\"a\", \"b\"], \"b\"), find([], 1), 1 < 2 < 3, 1 < 2 > 5, 3 > 2 >= 2 != 1)\ncount = 0\ndef tick():\n    global count\n    count += 1\n    return count\nprint(1 < tick() < 3, tick() > 5 > tick(), count)\nx = 5\nx -= 2\nx *= 4\nx //= 5\nx **= 3\nx %= 5\nx /= 2\nprint(x, 3 if x else 4, None is None, [] is [], [] == [], (1, 2) == (1, 2), \"a\" != \"b\", x is not None)\nfor word in \"ab\":\n    for pair in [(1, 2), (3, 4)]:\n        first, second = pair\n        print(word, first + second)\na, (b, c), d = 1, (2, 3), [4]\na, b = b, a\nprint(a, b, c, d, list(range(3)), list(range(5, 0, -2)), len(range(10)), list(range(0)), list(range(3, 1)))\nassert a == 2, \"a is two\"\ntry:\n    assert b == 2, \"b is not two\"\nexcept AssertionError as error:\n    print(\"assert\", error)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "['negative', 'zero', 'small', 'large']",
+      "for 0",
+      "for 2",
+      "loop 0",
+      "loop 1",
+      "ran to the end",
+      "while 3",
+      "while 9",
+      "while ended at 12",
+      "7",
+      "205",
+      "2 [0, 1] 2",
+      "1 -1 True False True",
+      "False False 2",
+      "1.5 3 True False True True True True",
+      "a 3",
+      "a 7",
+      "b 3",
+      "b 7",
+      "2 1 3 [4] [0, 1, 2] [5, 3, 1] 10 [] []",
+      "assert b is not two"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "exceptions",
+   "source": "class AppError(Exception):\n    pass\nclass NotFound(AppError):\n    pass\ndef risky(kind):\n    if kind == \"value\":\n        raise ValueError(\"bad value\")\n    if kind == \"found\":\n        raise NotFound(\"no such thing\", 404)\n    if kind == \"bare\":\n        raise RuntimeError\n    return \"fine\"\nfor kind in [\"ok\", \"value\", \"found\", \"bare\"]:\n    try:\n        print(risky(kind))\n    except AppError as error:\n        print(\"app\", type(error).__name__, error, error.args, repr(error))\n    except (ValueError, TypeError) as error:\n        print(\"value\", error, error.args)\n    except Exception as error:\n        print(\"other\", repr(error), str(error) == \"\")\n    else:\n        print(\"no error\")\n    finally:\n        print(\"finally\", kind)\ndef chained():\n    try:\n        {}[\"k\"]\n    except KeyError as error:\n        raise AppError(\"lookup failed\") from error\ntry:\n    chained()\nexcept AppError as error:\n    print(error, repr(error.__cause__), type(error.__cause__).__name__)\ndef reraise():\n    try:\n        raise ValueError(\"again\")\n    except ValueError:\n        print(\"seen\")\n        raise\ntry:\n    reraise()\nexcept ValueError as error:\n    print(\"outer\", error)\ndef order():\n    try:\n        return \"try\"\n    finally:\n        print(\"finally runs before the return\")\nprint(order())\ndef override():\n    for attempt in range(3):\n        try:\n            if attempt < 2:\n                continue\n            return attempt\n        finally:\n            print(\"leaving\", attempt)\nprint(override())\ndef swallow():\n    try:\n        raise ValueError(\"lost\")\n    finally:\n        return \"the return in finally wins\"\nprint(swallow())\ntry:\n    try:\n        raise NotFound(\"inner\")\n    except ValueError:\n        print(\"not here\")\nexcept Exception as error:\n    print(\"propagated\", error)\ntry:\n    int(\"x\")\nexcept ValueError as error:\n    print(error)\ntry:\n    None + 1\nexcept TypeError as error:\n    print(error)\ntry:\n    print(defined_later)\nexcept NameError as error:\n    print(error)\ndefined_later = 1\ndef unbound():\n    print(later)\n    later = 1\ntry:\n    unbound()\nexcept UnboundLocalError as error:\n    print(error)\nerror = ValueError(\"made\", \"not raised\")\nprint(repr(error), error.args, isinstance(error, int))\ntry:\n    await boom(\"tool failed\")\nexcept Exception as error:\n    print(\"tool\", type(error).__name__, error)\ntry:\n    raise AppError(\"first\")\nexcept AppError:\n    try:\n        raise ValueError(\"second\")\n    except ValueError as inner:\n        print(\"nested\", inner)\nraise NotFound(\"at the end\")\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [
+      "boom:tool failed"
+     ],
+     "logged": [
+      "fine",
+      "no error",
+      "finally ok",
+      "value bad value ('bad value',)",
+      "finally value",
+      "app NotFound ('no such thing', 404) ('no such thing', 404) NotFound('no such thing', 404)",
+      "finally found",
+      "other RuntimeError() True",
+      "finally bare",
+      "lookup failed KeyError('k') KeyError",
+      "seen",
+      "outer again",
+      "finally runs before the return",
+      "try",
+      "leaving 0",
+      "leaving 1",
+      "leaving 2",
+      "2",
+      "the return in finally wins",
+      "propagated inner",
+      "invalid literal for int() with base 10: 'x'",
+      "unsupported operand type(s) for +: 'NoneType' and 'int'",
+      "name 'defined_later' is not defined",
+      "cannot access local variable 'later' where it is not associated with a value",
+      "ValueError('made', 'not raised') ('made', 'not raised') False"
+     ]
+    },
+    {
+     "delivered": [
+      "boom:tool failed"
+     ],
+     "asked": [],
+     "logged": [
+      "tool boom tool failed",
+      "nested second"
+     ]
+    }
+   ],
+   "end": "error NotFound: at the end"
+  },
+  {
+   "name": "methods",
+   "source": "xs = [3, 1, 2]\nys = xs.copy()\nys.clear()\nprint(xs, ys, xs.index(1), xs.count(3), xs.pop(1), xs)\nd = {\"a\": 1, \"b\": 2}\ne = d.copy()\ne.clear()\nprint(d, e, d.pop(\"a\"), d.setdefault(\"b\", 9), d.setdefault(\"c\"), d, list(d.items()))\ns = {1, 2}\nt = s.copy()\nt.remove(1)\nt.clear()\nprint(sorted(s), len(t), sorted(s.union({3})), sorted(s.intersection({2, 3})), sorted(s.difference({2})))\ntry:\n    s.remove(99)\nexcept KeyError as error:\n    print(\"KeyError\", error)\nword = \"banana\"\nprint(word.count(\"an\"), word.index(\"n\"), word.find(\"x\"), word.replace(\"a\", \"o\"), word.upper().lower(), word.startswith(\"ba\"), word.endswith(\"x\"))\ntry:\n    word.index(\"x\")\nexcept ValueError as error:\n    print(error)\nprint(\"  a b  \".strip() + \"|\" + \"  a\".lstrip() + \"|\" + \"a  \".rstrip() + \"|\", \"a-b-c\".split(\"-\"), \"+\".join([\"1\", \"2\"]), \"x y  z\".split())\ntry:\n    xs.pop(10)\nexcept IndexError as error:\n    print(error)\ntry:\n    [].pop()\nexcept IndexError as error:\n    print(error)\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "[3, 2] [] 1 1 1 [3, 2]",
+      "{'b': 2, 'c': None} {} 1 2 None {'b': 2, 'c': None} [('b', 2), ('c', None)]",
+      "[1, 2] 0 [1, 2, 3] [2] [1]",
+      "KeyError 99",
+      "2 2 -1 bonono banana True False",
+      "substring not found",
+      "a b|a|a| ['a', 'b', 'c'] 1+2 ['x', 'y', 'z']",
+      "pop index out of range",
+      "pop from empty list"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "number_text",
+   "source": "big = 2 ** 63\nprint(big, big + 1, big * big, -big - 1)\nprint(2 ** 64 - 1, (2 ** 64) // 3, (2 ** 64) % 1000, 10 ** 30 // 7)\nprint(7 // 2, -7 // 2, 7 // -2, -7 // -2)\nprint(7 % 3, -7 % 3, 7 % -3, -7 % -3)\nprint(7 / 2, -7 / 2, 1 / 3, 10 / 5, 2 ** 53 + 1, (2 ** 53 + 1) / 1)\nprint(7.5 // 2, -7.5 // 2, 7.5 % 2, -7.5 % 2, 2 ** 0.5, 2 ** -1, 10 ** -2)\nprint(divmod(-7, 2), divmod(7.5, 2), abs(-big), int(7.9), int(-7.9), round(2.5), round(3.5), round(-0.5), round(2.675, 2))\nprint(1 == 1.0, 2 ** 53 == 2.0 ** 53, 2 ** 53 + 1 == 2.0 ** 53, 0.1 + 0.2, 1e16, 1.5e-5, 123456789012345678.0, 0.0001, -0.0)\nattempts = [lambda: 1 // 0, lambda: 1 % 0, lambda: 1 / 0, lambda: 1.0 // 0, lambda: 1.0 % 0, lambda: 1.5 / 0, lambda: 0 ** -1, lambda: 2.0 ** 10000]\nfor attempt in attempts:\n    try:\n        attempt()\n    except (ZeroDivisionError, OverflowError) as error:\n        print(type(error).__name__, error)\nprint(int(\"12345678901234567890123\") + 1, float(\"1.5\") * 2, int(\"-42\"), str(2 ** 70), int(\" 7 \"))\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "9223372036854775808 9223372036854775809 85070591730234615865843651857942052864 -9223372036854775809",
+      "18446744073709551615 6148914691236517205 616 142857142857142857142857142857",
+      "3 -4 -4 3",
+      "1 2 -2 -1",
+      "3.5 -3.5 0.3333333333333333 2.0 9007199254740993 9007199254740992.0",
+      "3.0 -4.0 1.5 0.5 1.4142135623730951 0.5 0.01",
+      "(-4, 1) (3.0, 1.5) 9223372036854775808 7 -7 2 4 0 2.67",
+      "True True False 0.30000000000000004 1e+16 1.5e-05 1.2345678901234568e+17 0.0001 -0.0",
+      "ZeroDivisionError integer division or modulo by zero",
+      "ZeroDivisionError integer modulo by zero",
+      "ZeroDivisionError division by zero",
+      "ZeroDivisionError float floor division by zero",
+      "ZeroDivisionError float modulo",
+      "ZeroDivisionError float division by zero",
+      "ZeroDivisionError 0.0 cannot be raised to a negative power",
+      "OverflowError (34, 'Numerical result out of range')",
+      "12345678901234567890124 3.0 -42 1180591620717411303424 7"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "order",
+   "source": "log = []\ndef note(tag, value):\n    log.append(tag)\n    return value\nx = 1\ndef bump():\n    global x\n    x += 10\n    return x\nprint(x + bump(), bump() + x, x, [x, bump(), x], (x, bump()), {note(\"k\", \"key\"): note(\"v\", x)})\nprint(note(\"a\", 1) + note(\"b\", 2) * note(\"c\", 3), log)\nlog.clear()\nitems = [0, 0, 0]\nitems[note(\"index\", 1)] = note(\"value\", 5)\nprint(items, log)\nlog.clear()\ndef pick(a, b, c):\n    return (a, b, c)\nprint(pick(note(\"1\", x), bump(), note(\"3\", x)), log)\nlog.clear()\nprint(note(\"left\", 0) and note(\"skipped\", 1), note(\"left2\", 0) or note(\"right\", 2), note(\"t\", 1) if note(\"cond\", True) else note(\"e\", 2), log)\nlog.clear()\nd = {}\nd[note(\"key\", \"k\")] = [note(\"first\", 1), note(\"second\", 2)]\nd[\"k\"][note(\"i\", 0)] += note(\"add\", 10)\nprint(d, log)\nlog.clear()\nf = note\nf = [note, bump][note(\"choose\", 0)]\nprint(f(\"called\", \"result\"), log, f\"{note('f1', 1)}{bump()}{note('f2', x)}\", note(\"m\", \"a\").upper() + note(\"n\", \"b\"))\nvalue = [1, 2, 3]\nalias = value\nvalue = value + [note(\"rebind\", 4)]\nalias += [5]\nprint(value, alias, log[-1])\n",
+   "deliveries": [],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [],
+     "logged": [
+      "12 42 21 [21, 31, 31] (31, 41) {'key': 41}",
+      "7 ['k', 'v', 'a', 'b', 'c']",
+      "[0, 5, 0] ['value', 'index']",
+      "(41, 51, 51) ['1', '3']",
+      "0 2 1 ['left', 'left2', 'right', 'cond', 't']",
+      "{'k': [11, 2]} ['first', 'second', 'key', 'i', 'add']",
+      "result ['choose', 'called', 'f1', 'f2', 'm', 'n'] 16161 Ab",
+      "[1, 2, 3, 4] [1, 2, 3, 5] rebind"
+     ]
+    }
+   ],
+   "end": "ok"
+  },
+  {
+   "name": "tasks",
+   "source": "# deliver: echo:a1; echo:b1; echo:late; sleep:30; sleep:10; sleep:20\nimport asyncio\ntrace = []\nasync def step(tag, pauses):\n    trace.append(tag + \" starts\")\n    for n in range(pauses):\n        await asyncio.sleep(0)\n        trace.append(f\"{tag} resumes {n}\")\n    return tag\nfirst = asyncio.create_task(step(\"first\", 2))\nsecond = asyncio.create_task(step(\"second\", 1))\ntrace.append(\"main goes on\")\nprint(await second, trace)\nprint(await first, await first, trace)\nasync def fetch(tag):\n    return await echo(tag)\na = asyncio.create_task(fetch(\"a1\"))\nb = asyncio.create_task(fetch(\"b1\"))\nprint(await b, await a)\nasync def fail(tag):\n    await asyncio.sleep(0)\n    raise ValueError(tag)\nasync def slow(tag):\n    trace.append(await echo(tag))\n    return tag\ndoomed = asyncio.create_task(fail(\"task failed\"))\ntry:\n    await doomed\nexcept ValueError as error:\n    print(\"caught\", error)\ntry:\n    await asyncio.gather(slow(\"late\"), fail(\"gather failed\"))\nexcept ValueError as error:\n    print(\"gather raised\", error, trace[-1])\nawait asyncio.sleep(0)\nnever_awaited = asyncio.create_task(fail(\"nobody looks\"))\nasync def nap(tag, seconds):\n    await asyncio.sleep(seconds)\n    trace.append(tag)\n    return seconds\nprint(await asyncio.gather(nap(\"x\", 0.03), nap(\"y\", 0.01), nap(\"z\", 0.02)), trace[-4:])\nasync def inner():\n    return await echo(\"inner\")\nasync def outer():\n    return [await inner(), await inner()]\nprint(await outer())\ntasks = [asyncio.create_task(fetch(f\"t{n}\")) for n in range(3)]\nprint(await asyncio.gather(*tasks))\nasync def waiter(task):\n    try:\n        return await task\n    except asyncio.CancelledError:\n        print(\"waiter cancelled\")\n        raise\nsleeper = asyncio.create_task(nap(\"unreached\", 5))\nwatch = asyncio.create_task(waiter(sleeper))\nawait asyncio.sleep(0)\nawait asyncio.sleep(0)\nwatch.cancel()\ntry:\n    await watch\nexcept asyncio.CancelledError:\n    print(\"watch is cancelled\")\ntry:\n    await sleeper\nexcept asyncio.CancelledError:\n    print(\"and so is what it awaited\")\nprint(\"end of main\")\n",
+   "deliveries": [
+    [
+     "echo:a1"
+    ],
+    [
+     "echo:b1"
+    ],
+    [
+     "echo:late"
+    ],
+    [
+     "sleep:30"
+    ],
+    [
+     "sleep:10"
+    ],
+    [
+     "sleep:20"
+    ]
+   ],
+   "epochs": [
+    {
+     "delivered": [],
+     "asked": [
+      "echo:a1",
+      "echo:b1"
+     ],
+     "logged": [
+      "second ['main goes on', 'first starts', 'second starts', 'first resumes 0', 'second resumes 0', 'first resumes 1']",
+      "first first ['main goes on', 'first starts', 'second starts', 'first resumes 0', 'second resumes 0', 'first resumes 1']"
+     ]
+    },
+    {
+     "delivered": [
+      "echo:a1"
+     ],
+     "asked": [],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "echo:b1"
+     ],
+     "asked": [
+      "echo:late",
+      "sleep:30",
+      "sleep:10",
+      "sleep:20"
+     ],
+     "logged": [
+      "b1 a1",
+      "caught task failed",
+      "gather raised gather failed first resumes 1"
+     ]
+    },
+    {
+     "delivered": [
+      "echo:late"
+     ],
+     "asked": [],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "sleep:30"
+     ],
+     "asked": [],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "sleep:10"
+     ],
+     "asked": [],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "sleep:20"
+     ],
+     "asked": [
+      "echo:inner"
+     ],
+     "logged": [
+      "[0.03, 0.01, 0.02] ['late', 'x', 'y', 'z']"
+     ]
+    },
+    {
+     "delivered": [
+      "echo:inner"
+     ],
+     "asked": [
+      "echo:inner"
+     ],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "echo:inner"
+     ],
+     "asked": [
+      "echo:t0",
+      "echo:t1",
+      "echo:t2"
+     ],
+     "logged": [
+      "['inner', 'inner']"
+     ]
+    },
+    {
+     "delivered": [
+      "echo:t0"
+     ],
+     "asked": [],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "echo:t1"
+     ],
+     "asked": [],
+     "logged": []
+    },
+    {
+     "delivered": [
+      "echo:t2"
+     ],
+     "asked": [],
+     "logged": [
+      "['t0', 't1', 't2']",
+      "waiter cancelled",
+      "watch is cancelled",
+      "and so is what it awaited",
+      "end of main"
+     ]
+    }
+   ],
+   "end": "ok"
+  }
+ ]
+}

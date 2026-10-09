@@ -1,0 +1,281 @@
+# Python's format specification, as far as the dialect has it. The lowerer
+# reads a replacement field's specification when it lowers the f-string and
+# passes its parts; what it does not have it refuses there.
+
+use kind
+use same
+use lt
+use le
+use bool.not
+use add
+use sub
+use mul
+use div_floor
+use is_finite
+use num.to_float
+use num.to_text
+use format.fixed
+use format.scientific
+use format.radix
+use text.concat
+use text.len
+use text.slice
+use text.find
+use text.join
+use text.repeat
+use text.starts_with
+use text.upper_u17_0_0
+use py.str
+use py.repr
+use py.type
+use py.fail
+use py.float_text
+use py.format.group
+use py.format.exponent
+
+# Separators between each three digits of `digits`, from the right.
+function py.format.group(digits: Text, separator: Text) -> Text
+kernel 1
+charge sum(4, size(digits))
+body {
+  let grouped = ""
+  let rest = digits
+  while lt(3, text.len(rest)) {
+    let cut = sub(text.len(rest), 3)
+    set grouped = text.join([separator, text.slice(rest, cut, text.len(rest)), grouped], "")
+    set rest = text.slice(rest, 0, cut)
+  }
+  return text.concat(rest, grouped)
+}
+
+# The kernel's `d.ddde<n>` as Python writes it: a signed exponent of at
+# least two digits.
+function py.format.exponent(digits: Text) -> Text
+kernel 1
+charge sum(4, size(digits))
+body {
+  let mark = text.find(digits, "e", 0)
+  if lt(mark, 0) {
+    return digits
+  }
+  let exponent = text.slice(digits, add(mark, 1), text.len(digits))
+  let sign = "+"
+  if text.starts_with(exponent, "-") {
+    set sign = "-"
+    set exponent = text.slice(exponent, 1, text.len(exponent))
+  }
+  if lt(text.len(exponent), 2) {
+    set exponent = text.concat("0", exponent)
+  }
+  return text.join([text.slice(digits, 0, mark), "e", sign, exponent], "")
+}
+
+# One replacement field: `value` under `!conversion` and the specification
+# `[[fill]align][sign][#][0][width][grouping][.precision][code]`. `align`
+# and `code` are "" and `precision` is null where the field leaves them
+# out; `width` is 0 for none.
+function py.format(value: Any, conversion: Text, fill: Text, align: Text, sign: Text, alternate: Bool, zero: Bool, width: Int, grouping: Text, precision: Any, code: Text) -> Text
+kernel 1
+charge sum(16, deep(value), size(result), magnitude(width))
+body {
+  if same(conversion, "r") {
+    set value = invoke py.repr(value)
+  }
+  if same(conversion, "s") {
+    set value = invoke py.str(value)
+  }
+  let k = kind(value)
+  if same(k, "bool") {
+    # Under a specification a bool is the integer it is in Python.
+    if value {
+      set value = 1
+    } else {
+      set value = 0
+    }
+    set k = "integer"
+  }
+  let numeric = same(k, "integer")
+  if bool.not(numeric) {
+    set numeric = same(k, "float")
+  }
+  let digits = ""
+  let prefix = ""
+  if numeric {
+    let form = code
+    if same(form, "") {
+      if same(k, "integer") {
+        set form = "d"
+      } else {
+        if same(precision, null) {
+          set form = "r"
+        } else {
+          do invoke py.fail("ValueError", "a float precision without a format code is the general format, which this dialect does not have")
+        }
+      }
+    }
+    let known = false
+    for whole in ["d", "x", "X", "o", "b"] {
+      if same(form, whole) {
+        set known = true
+        if same(k, "float") {
+          let hoisted1 = text.join(["Unknown format code '", form, "' for object of type 'float'"], "")
+          do invoke py.fail("ValueError", hoisted1)
+        }
+        if bool.not(same(precision, null)) {
+          do invoke py.fail("ValueError", "Precision not allowed in integer format specifier")
+        }
+      }
+    }
+    if same(form, "d") {
+      set digits = num.to_text(value)
+    }
+    if same(form, "x") {
+      set digits = format.radix(value, 16)
+      if alternate {
+        set prefix = "0x"
+      }
+    }
+    if same(form, "X") {
+      set digits = text.upper_u17_0_0(format.radix(value, 16))
+      if alternate {
+        set prefix = "0X"
+      }
+    }
+    if same(form, "o") {
+      set digits = format.radix(value, 8)
+      if alternate {
+        set prefix = "0o"
+      }
+    }
+    if same(form, "b") {
+      set digits = format.radix(value, 2)
+      if alternate {
+        set prefix = "0b"
+      }
+    }
+    if same(form, "r") {
+      set known = true
+      set digits = invoke py.float_text(value)
+    }
+    for fractional in ["f", "F", "e", "E", "%"] {
+      if same(form, fractional) {
+        set known = true
+        let places = 6
+        if bool.not(same(precision, null)) {
+          set places = precision
+        }
+        let number = num.to_float(value)
+        if is_finite(number) {
+          if same(form, "%") {
+            set digits = text.concat(format.fixed(mul(number, 100), places), "%")
+          } else {
+            if same(text.upper_u17_0_0(form), "F") {
+              set digits = format.fixed(number, places)
+            } else {
+              let hoisted2 = format.scientific(number, places)
+              set digits = invoke py.format.exponent(hoisted2)
+            }
+          }
+        } else {
+          set digits = num.to_text(number)
+          if same(form, "%") {
+            set digits = text.concat(digits, "%")
+          }
+        }
+        if same(form, "E") {
+          set digits = text.upper_u17_0_0(digits)
+        }
+        if same(form, "F") {
+          set digits = text.upper_u17_0_0(digits)
+        }
+      }
+    }
+    if bool.not(known) {
+      let name = invoke py.type(value)
+      let hoisted3 = text.join(["Unknown format code '", form, "' for object of type '", name, "'"], "")
+      do invoke py.fail("ValueError", hoisted3)
+    }
+    if text.starts_with(digits, "-") {
+      set digits = text.slice(digits, 1, text.len(digits))
+      set prefix = text.concat("-", prefix)
+    } else {
+      if same(sign, "+") {
+        set prefix = text.concat("+", prefix)
+      }
+      if same(sign, " ") {
+        set prefix = text.concat(" ", prefix)
+      }
+    }
+    if bool.not(same(grouping, "")) {
+      let cut = text.find(digits, ".", 0)
+      if lt(cut, 0) {
+        set cut = text.find(digits, "e", 0)
+      }
+      if lt(cut, 0) {
+        set cut = text.find(digits, "%", 0)
+      }
+      if lt(cut, 0) {
+        set cut = text.len(digits)
+      }
+      let hoisted4 = text.slice(digits, 0, cut)
+      let whole = invoke py.format.group(hoisted4, grouping)
+      set digits = text.concat(whole, text.slice(digits, cut, text.len(digits)))
+    }
+  } else {
+    if same(k, "text") {
+      let textual = same(code, "")
+      if bool.not(textual) {
+        set textual = same(code, "s")
+      }
+      if bool.not(textual) {
+        let hoisted5 = text.join(["Unknown format code '", code, "' for object of type 'str'"], "")
+        do invoke py.fail("ValueError", hoisted5)
+      }
+      set digits = value
+      if bool.not(same(precision, null)) {
+        set digits = text.slice(value, 0, precision)
+      }
+    } else {
+      let plain = same(code, "")
+      if plain {
+        set plain = same(precision, null)
+      }
+      if bool.not(plain) {
+        let name = invoke py.type(value)
+        let hoisted6 = text.join(["unsupported format string passed to ", name, ".__format__"], "")
+        do invoke py.fail("TypeError", hoisted6)
+      }
+      set digits = invoke py.str(value)
+    }
+  }
+  let side = align
+  let filler = fill
+  if same(side, "") {
+    if numeric {
+      set side = ">"
+    } else {
+      set side = "<"
+    }
+    if zero {
+      set filler = "0"
+      if numeric {
+        set side = "="
+      }
+    }
+  }
+  let missing = sub(width, add(text.len(prefix), text.len(digits)))
+  if le(missing, 0) {
+    return text.concat(prefix, digits)
+  }
+  if same(side, "<") {
+    return text.join([prefix, digits, text.repeat(filler, missing)], "")
+  }
+  if same(side, ">") {
+    return text.join([text.repeat(filler, missing), prefix, digits], "")
+  }
+  if same(side, "=") {
+    return text.join([prefix, text.repeat(filler, missing), digits], "")
+  }
+  let before = div_floor(missing, 2)
+  return text.join([text.repeat(filler, before), prefix, digits, text.repeat(filler, sub(missing, before))], "")
+}

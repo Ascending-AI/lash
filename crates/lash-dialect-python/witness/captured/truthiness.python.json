@@ -1,0 +1,168 @@
+{
+  "end": {
+    "returned": {
+      "list": [
+        {
+          "int": "2"
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "int": "0"
+        }
+      ]
+    }
+  },
+  "prints": [
+    {
+      "list": [
+        {
+          "bool": false
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "text": "no"
+        },
+        {
+          "text": "no"
+        },
+        {
+          "text": "yes"
+        },
+        {
+          "text": "no"
+        },
+        {
+          "text": "yes"
+        },
+        {
+          "text": "yes"
+        },
+        {
+          "text": "no"
+        },
+        {
+          "text": "yes"
+        },
+        {
+          "text": "no"
+        },
+        {
+          "text": "yes"
+        },
+        {
+          "text": "no"
+        },
+        {
+          "text": "yes"
+        },
+        {
+          "text": "no"
+        },
+        {
+          "text": "yes"
+        },
+        {
+          "text": "no"
+        },
+        {
+          "text": "yes"
+        },
+        {
+          "text": "no"
+        },
+        {
+          "text": "yes"
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "text": "fallback"
+        },
+        {
+          "text": "both"
+        },
+        {
+          "text": "last"
+        },
+        "null",
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        }
+      ]
+    },
+    {
+      "text": "an empty list is false"
+    }
+  ],
+  "trace": []
+}

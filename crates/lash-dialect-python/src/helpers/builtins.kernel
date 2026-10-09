@@ -1,0 +1,488 @@
+# Python's built-in functions, as far as the dialect has them. The lowerer
+# calls one of these where the source calls the built-in by its name.
+
+use kind
+use same
+use eq
+use lt
+use le
+use bool.not
+use add
+use sub
+use neg
+use trunc
+use round_even
+use is_finite
+use num.to_int
+use num.to_float
+use num.to_text
+use int.parse
+use float.parse
+use format.fixed
+use text.concat
+use text.len
+use text.join
+use text.replace
+use text.lower_u17_0_0
+use text.trim_u17_0_0
+use text.to_code_points
+use text.from_code_points
+use list.len
+use list.sort
+use tuple.len
+use collection.range
+use py.str
+use py.repr
+use py.type
+use py.fail
+use py.truth
+use py.is_number
+use py.add
+use py.to_list
+use py.floordiv
+use py.mod
+use tuple.concat
+use tuple.contains
+
+# The line `print` writes: its arguments as `str` gives them, `sep` between.
+function py.show(args: Any, sep: Text) -> Text
+kernel 1
+charge sum(4, deep(args), size(result))
+body {
+  let parts = []
+  for item in args {
+    let part = invoke py.str(item)
+    set parts[list.len(parts)] = part
+  }
+  return text.join(parts, sep)
+}
+
+function py.int(value: Any, base?: Any) -> Int
+kernel 1
+charge sum(6, size(value))
+body {
+  let k = kind(value)
+  if same(k, "text") {
+    if same(base, absent) {
+      set base = 10
+    }
+    let digits = text.replace(text.trim_u17_0_0(value), "_", "")
+    try {
+      return int.parse(digits, base)
+    } catch problem {
+      let shown = invoke py.repr(value)
+      let hoisted1 = text.join(["invalid literal for int() with base ", num.to_text(base), ": ", shown], "")
+      do invoke py.fail("ValueError", hoisted1)
+    }
+  }
+  if bool.not(same(base, absent)) {
+    do invoke py.fail("TypeError", "int() can't convert non-string with explicit base")
+  }
+  if same(k, "integer") {
+    return value
+  }
+  if same(k, "bool") {
+    if value {
+      return 1
+    }
+    return 0
+  }
+  if same(k, "float") {
+    if bool.not(eq(value, value)) {
+      do invoke py.fail("ValueError", "cannot convert float NaN to integer")
+    }
+    if bool.not(is_finite(value)) {
+      do invoke py.fail("OverflowError", "cannot convert float infinity to integer")
+    }
+    return num.to_int(trunc(value))
+  }
+  let name = invoke py.type(value)
+  let hoisted2 = text.join(["int() argument must be a string, a bytes-like object or a real number, not '", name, "'"], "")
+  do invoke py.fail("TypeError", hoisted2)
+  return 0
+}
+
+function py.float(value: Any) -> Float
+kernel 1
+charge sum(6, size(value))
+body {
+  let k = kind(value)
+  if same(k, "float") {
+    return value
+  }
+  if same(k, "integer") {
+    return num.to_float(value)
+  }
+  if same(k, "bool") {
+    if value {
+      return 1.0
+    }
+    return 0.0
+  }
+  if same(k, "text") {
+    let digits = text.lower_u17_0_0(text.replace(text.trim_u17_0_0(value), "_", ""))
+    if same(digits, "infinity") {
+      set digits = "inf"
+    }
+    if same(digits, "+infinity") {
+      set digits = "inf"
+    }
+    if same(digits, "-infinity") {
+      set digits = "-inf"
+    }
+    if same(digits, "+nan") {
+      set digits = "nan"
+    }
+    if same(digits, "-nan") {
+      set digits = "nan"
+    }
+    try {
+      return float.parse(digits)
+    } catch problem {
+      let shown = invoke py.repr(value)
+      let hoisted3 = text.concat("could not convert string to float: ", shown)
+      do invoke py.fail("ValueError", hoisted3)
+    }
+  }
+  let name = invoke py.type(value)
+  let hoisted4 = text.join(["float() argument must be a string or a real number, not '", name, "'"], "")
+  do invoke py.fail("TypeError", hoisted4)
+  return 0.0
+}
+
+function py.abs(value: Any) -> Any
+kernel 1
+charge sum(4, size(value))
+body {
+  let ok = invoke py.is_number(value)
+  if bool.not(ok) {
+    let name = invoke py.type(value)
+    let hoisted5 = text.join(["bad operand type for abs(): '", name, "'"], "")
+    do invoke py.fail("TypeError", hoisted5)
+  }
+  if lt(value, 0) {
+    return neg(value)
+  }
+  if same(kind(value), "float") {
+    if eq(value, 0) {
+      return 0.0
+    }
+  }
+  return value
+}
+
+# `min(...)` when `largest` is false and `max(...)` when it is true, of the
+# arguments, or of the one iterable given.
+function py.extreme(args: Any, largest: Bool) -> Any
+kernel 1
+charge sum(4, deep(args))
+body {
+  let items = args
+  let name = "min"
+  if largest {
+    set name = "max"
+  }
+  if eq(tuple.len(args), 1) {
+    let hoisted6 = args[0]
+    set items = invoke py.to_list(hoisted6)
+    if eq(list.len(items), 0) {
+      let hoisted7 = text.concat(name, "() iterable argument is empty")
+      do invoke py.fail("ValueError", hoisted7)
+    }
+  }
+  let best = absent
+  for item in items {
+    if same(best, absent) {
+      set best = item
+    } else {
+      if largest {
+        if lt(best, item) {
+          set best = item
+        }
+      } else {
+        if lt(item, best) {
+          set best = item
+        }
+      }
+    }
+  }
+  return best
+}
+
+function py.sum(values: Any, start?: Any) -> Any
+kernel 1
+charge sum(4, deep(values))
+body {
+  let total = 0
+  if bool.not(same(start, absent)) {
+    set total = start
+  }
+  let items = invoke py.to_list(values)
+  for item in items {
+    set total = invoke py.add(total, item)
+  }
+  return total
+}
+
+# `sorted(values, key=key, reverse=reverse)`: stable, by `<`.
+function py.sorted(values: Any, key?: Any, reverse?: Any) -> List(Any)
+kernel 1
+charge sum(8, product(size(values), size(values)))
+body {
+  let items = invoke py.to_list(values)
+  let pairs = []
+  let keyed = bool.not(same(key, absent))
+  if keyed {
+    set keyed = bool.not(same(key, null))
+  }
+  for item in items {
+    let rank = item
+    if keyed {
+      set rank = apply key(item)
+    }
+    set pairs[list.len(pairs)] = (rank, item)
+  }
+  let descending = false
+  if bool.not(same(reverse, absent)) {
+    set descending = invoke py.truth(reverse)
+  }
+  let order = fn(first, second) {
+    if descending {
+      if lt(first[0], second[0]) {
+        return 1
+      }
+      return 0
+    }
+    if lt(second[0], first[0]) {
+      return 1
+    }
+    return 0
+  }
+  do invoke list.sort(pairs, order)
+  let out = []
+  for pair in pairs {
+    set out[list.len(out)] = pair[1]
+  }
+  return out
+}
+
+# `range(...)` as the list of its integers.
+function py.range(first: Any, second?: Any, step?: Any) -> List(Int)
+kernel 1
+charge sum(4, size(result))
+body {
+  let start = 0
+  let stop = first
+  if bool.not(same(second, absent)) {
+    set start = first
+    set stop = second
+  }
+  if same(step, absent) {
+    set step = 1
+  }
+  for bound in [start, stop, step] {
+    if bool.not(same(kind(bound), "integer")) {
+      let name = invoke py.type(bound)
+      let hoisted8 = text.join(["'", name, "' object cannot be interpreted as an integer"], "")
+      do invoke py.fail("TypeError", hoisted8)
+    }
+  }
+  if eq(step, 0) {
+    do invoke py.fail("ValueError", "range() arg 3 must not be zero")
+  }
+  let out = invoke collection.range(start, stop, step)
+  return out
+}
+
+function py.enumerate(values: Any, start?: Any) -> List(Any)
+kernel 1
+charge sum(4, size(values), size(result))
+body {
+  let position = 0
+  if bool.not(same(start, absent)) {
+    set position = start
+  }
+  let items = invoke py.to_list(values)
+  let out = []
+  for item in items {
+    set out[list.len(out)] = (position, item)
+    set position = add(position, 1)
+  }
+  return out
+}
+
+# `zip(...)` of the iterables in the tuple `sequences`, as a list of tuples
+# that stops with the shortest.
+function py.zip(sequences: Any) -> List(Any)
+kernel 1
+charge sum(4, deep(sequences), size(result))
+body {
+  let columns = []
+  let shortest = absent
+  for sequence in sequences {
+    let column = invoke py.to_list(sequence)
+    set columns[list.len(columns)] = column
+    if same(shortest, absent) {
+      set shortest = list.len(column)
+    } else {
+      if lt(list.len(column), shortest) {
+        set shortest = list.len(column)
+      }
+    }
+  }
+  let out = []
+  if same(shortest, absent) {
+    return out
+  }
+  let row = 0
+  while lt(row, shortest) {
+    let line = ()
+    for column in columns {
+      set line = tuple.concat(line, (column[row],))
+    }
+    set out[row] = line
+    set row = add(row, 1)
+  }
+  return out
+}
+
+function py.reversed(values: Any) -> List(Any)
+kernel 1
+charge sum(4, size(values), size(result))
+body {
+  let items = invoke py.to_list(values)
+  let out = []
+  let position = sub(list.len(items), 1)
+  while le(0, position) {
+    set out[list.len(out)] = items[position]
+    set position = sub(position, 1)
+  }
+  return out
+}
+
+function py.any(values: Any) -> Bool
+kernel 1
+charge sum(4, size(values))
+body {
+  let items = invoke py.to_list(values)
+  for item in items {
+    let holds = invoke py.truth(item)
+    if holds {
+      return true
+    }
+  }
+  return false
+}
+
+function py.all(values: Any) -> Bool
+kernel 1
+charge sum(4, size(values))
+body {
+  let items = invoke py.to_list(values)
+  for item in items {
+    let holds = invoke py.truth(item)
+    if bool.not(holds) {
+      return false
+    }
+  }
+  return true
+}
+
+# `round(value)` is the nearest integer, ties to even; `round(value, digits)`
+# keeps the number's kind.
+function py.round(value: Any, digits?: Any) -> Any
+kernel 1
+charge sum(6, size(value))
+body {
+  let ok = invoke py.is_number(value)
+  if bool.not(ok) {
+    let name = invoke py.type(value)
+    let hoisted9 = text.join(["type ", name, " doesn't define __round__ method"], "")
+    do invoke py.fail("TypeError", hoisted9)
+  }
+  let plain = same(digits, absent)
+  if bool.not(plain) {
+    set plain = same(digits, null)
+  }
+  if same(kind(value), "integer") {
+    return value
+  }
+  if bool.not(eq(value, value)) {
+    if plain {
+      do invoke py.fail("ValueError", "cannot convert float NaN to integer")
+    }
+    return value
+  }
+  if bool.not(is_finite(value)) {
+    if plain {
+      do invoke py.fail("OverflowError", "cannot convert float infinity to integer")
+    }
+    return value
+  }
+  if plain {
+    return num.to_int(round_even(value))
+  }
+  if lt(digits, 0) {
+    do invoke py.fail("ValueError", "round() to a negative number of digits is not supported")
+  }
+  return float.parse(format.fixed(value, digits))
+}
+
+# `isinstance(value, ...)` against the built-in type names in `names`. A
+# bool is an int, as in Python.
+function py.isinstance(value: Any, names: Any) -> Bool
+kernel 1
+charge sum(8, size(names))
+body {
+  let name = invoke py.type(value)
+  if tuple.contains(names, name) {
+    return true
+  }
+  if same(name, "bool") {
+    return tuple.contains(names, "int")
+  }
+  return false
+}
+
+function py.ord(value: Any) -> Int
+kernel 1
+charge 6
+body {
+  if bool.not(same(kind(value), "text")) {
+    let name = invoke py.type(value)
+    let hoisted10 = text.join(["ord() expected string of length 1, but ", name, " found"], "")
+    do invoke py.fail("TypeError", hoisted10)
+  }
+  if bool.not(eq(text.len(value), 1)) {
+    let hoisted11 = text.join(["ord() expected a character, but string of length ", num.to_text(text.len(value)), " found"], "")
+    do invoke py.fail("TypeError", hoisted11)
+  }
+  let points = text.to_code_points(value)
+  return points[0]
+}
+
+function py.chr(value: Any) -> Text
+kernel 1
+charge 6
+body {
+  if bool.not(same(kind(value), "integer")) {
+    let name = invoke py.type(value)
+    let hoisted12 = text.join(["'", name, "' object cannot be interpreted as an integer"], "")
+    do invoke py.fail("TypeError", hoisted12)
+  }
+  try {
+    return text.from_code_points([value])
+  } catch problem {
+    do invoke py.fail("ValueError", "chr() arg not in range(0x110000)")
+  }
+  return ""
+}
+
+function py.divmod(left: Any, right: Any) -> Any
+kernel 1
+charge sum(6, size(left), size(right))
+body {
+  let quotient = invoke py.floordiv(left, right)
+  let remainder = invoke py.mod(left, right)
+  return (quotient, remainder)
+}

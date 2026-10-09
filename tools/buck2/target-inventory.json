@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
-  "cargo_package_count": 65,
-  "cargo_target_count": 238,
+  "cargo_package_count": 66,
+  "cargo_target_count": 239,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -44494,7 +44494,7 @@
       "//crates/lash:lash__fv_eceef769"
     ]
   },
-  "generated_label_count": 316,
+  "generated_label_count": 318,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -44564,6 +44564,7 @@
     "//crates/lash-core:tool_execution_grant_layout__test__fv_b257469b",
     "//crates/lash-core:turn_event_schema__test__fv_8b518047",
     "//crates/lash-core:turn_event_schema__test__fv_b257469b",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:test_batch",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:attachment_delivery_secret__test",
@@ -45063,6 +45064,7 @@
     "//crates/lash-core:turn_event_schema__test",
     "//crates/lash-core:turn_event_schema__test__fv_8b518047",
     "//crates/lash-core:turn_event_schema__test__fv_b257469b",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
@@ -46123,6 +46125,49 @@
           "//crates/lash-core:tool_execution_grant_layout__test",
           "//crates/lash-core:turn_event_schema__test"
         ]
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
+        "lash-kernel-check",
+        "lash-kernel-dialect",
+        "lash-kernel-doc",
+        "lash-kernel-lib",
+        "lash-kernel-vm",
+        "ruff_python_ast",
+        "ruff_python_parser",
+        "ruff_text_size",
+        "serde",
+        "serde_json"
+      ],
+      "doc": "//crates/lash-dialect-python:lash-dialect-python__doc",
+      "manifest": "crates/lash-dialect-python/Cargo.toml",
+      "package": "lash-dialect-python",
+      "resolved_features": [],
+      "targets": [
+        {
+          "build_label": "//crates/lash-dialect-python:lash-dialect-python[static]",
+          "cargo": "lash_dialect_python",
+          "check_label": "//crates/lash-dialect-python:lash-dialect-python[check]",
+          "clippy_label": "//crates/lash-dialect-python:lash-dialect-python__clippy[clippy.txt]",
+          "doc_label": "//crates/lash-dialect-python:lash-dialect-python[doc]",
+          "kind": "lib",
+          "label": "//crates/lash-dialect-python:lash-dialect-python"
+        },
+        {
+          "build_label": "//crates/lash-dialect-python:lash-dialect-python__unit_test",
+          "cargo": "lash_dialect_python",
+          "check_label": "//crates/lash-dialect-python:lash-dialect-python__unit_test[check]",
+          "clippy_label": "//crates/lash-dialect-python:lash-dialect-python__unit_test__clippy[clippy.txt]",
+          "kind": "unit-test",
+          "label": "//crates/lash-dialect-python:lash-dialect-python__unit_test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
       }
     },
     {
@@ -50825,6 +50870,7 @@
     "//crates/lash-core:turn_event_schema__test": 300,
     "//crates/lash-core:turn_event_schema__test__fv_8b518047": 300,
     "//crates/lash-core:turn_event_schema__test__fv_b257469b": 300,
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test": 300,
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test": 300,
     "//crates/lash-dialect-typescript:test262_kernel__test": 300,
     "//crates/lash-dialect-typescript:test_batch": 300,
@@ -51336,6 +51382,8 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:tool_execution_grant_layout__test",
     "//crates/lash-core:turn_event_schema__test",
+    "//crates/lash-dialect-python:lash-dialect-python[static]",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:lash-dialect-typescript[static]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "//crates/lash-dialect-typescript:test262_kernel__test",
@@ -51668,6 +51716,8 @@
     "//crates/lash-core:runtime_turns__test[check]",
     "//crates/lash-core:tool_execution_grant_layout__test[check]",
     "//crates/lash-core:turn_event_schema__test[check]",
+    "//crates/lash-dialect-python:lash-dialect-python[check]",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test[check]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript[check]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test[check]",
     "//crates/lash-dialect-typescript:test262_kernel__test[check]",
@@ -52018,6 +52068,8 @@
     "//crates/lash-core:runtime_turns__test__clippy[clippy.txt]",
     "//crates/lash-core:tool_execution_grant_layout__test__clippy[clippy.txt]",
     "//crates/lash-core:turn_event_schema__test__clippy[clippy.txt]",
+    "//crates/lash-dialect-python:lash-dialect-python__clippy[clippy.txt]",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test__clippy[clippy.txt]",
     "//crates/lash-dialect-typescript:test262_kernel__test__clippy[clippy.txt]",
@@ -52334,6 +52386,8 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:tool_execution_grant_layout__test",
     "//crates/lash-core:turn_event_schema__test",
+    "//crates/lash-dialect-python:lash-dialect-python",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:lash-dialect-typescript",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "//crates/lash-dialect-typescript:test262_kernel__test",
@@ -52650,6 +52704,8 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:tool_execution_grant_layout__test",
     "//crates/lash-core:turn_event_schema__test",
+    "//crates/lash-dialect-python:lash-dialect-python",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:lash-dialect-typescript",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "//crates/lash-dialect-typescript:test262_kernel__test",
@@ -52951,6 +53007,7 @@
     "//crates/lash-core:runtime_scenarios__test",
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:test_batch",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:attachment_delivery_secret__test",
@@ -53113,6 +53170,7 @@
     "//crates/lash-core:runtime_scenarios__test",
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:test_batch",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:attachment_delivery_secret__test",
@@ -53292,6 +53350,7 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:tool_execution_grant_layout__test",
     "//crates/lash-core:turn_event_schema__test",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
@@ -53485,6 +53544,7 @@
     "//crates/lash-core-store:lash-core-store__doc",
     "//crates/lash-core-worker:lash-core-worker__doc",
     "//crates/lash-core:lash-core__doc",
+    "//crates/lash-dialect-python:lash-dialect-python__doc",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__doc",
     "//crates/lash-durable-test:lash-durable-test__doc",
     "//crates/lash-durable:lash-durable__doc",
@@ -53547,6 +53607,7 @@
     "//crates/lash-core-store:rust_sources",
     "//crates/lash-core-worker:rust_sources",
     "//crates/lash-core:rust_sources",
+    "//crates/lash-dialect-python:rust_sources",
     "//crates/lash-dialect-typescript:rust_sources",
     "//crates/lash-durable-test:rust_sources",
     "//crates/lash-durable:rust_sources",
@@ -53725,6 +53786,7 @@
     "//crates/lash-core:runtime_scenarios__test",
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:test_batch",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:attachment_delivery_secret__test",
@@ -53913,6 +53975,7 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:tool_execution_grant_layout__test",
     "//crates/lash-core:turn_event_schema__test",
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test",
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
     "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",

@@ -316,6 +316,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-core:turn_event_schema__test": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-core:turn_event_schema__test__fv_8b518047": {"cpu_count": 1, "memory_kb": 262144},
     "//crates/lash-core:turn_event_schema__test__fv_b257469b": {"cpu_count": 1, "memory_kb": 262144},
+    "//crates/lash-dialect-python:lash-dialect-python__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-dialect-typescript:test262_kernel__test": {"cpu_count": 2, "memory_kb": 524288},
     "//crates/lash-durable-test:after_turn_crash_laws__test": {"cpu_count": 2, "memory_kb": 524288},

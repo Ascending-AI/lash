@@ -1,0 +1,68 @@
+{
+  "end": {
+    "raised": {
+      "kind": "KeyError",
+      "message": "'uncaught'",
+      "data": "null"
+    }
+  },
+  "prints": [
+    {
+      "list": [
+        {
+          "text": "missing"
+        },
+        {
+          "text": "'pear'"
+        },
+        {
+          "text": "KeyError('pear')"
+        },
+        {
+          "tuple": [
+            {
+              "text": "pear"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "int": "3"
+        },
+        {
+          "int": "0"
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "text": "KeyError"
+        },
+        {
+          "text": "'plum'"
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "text": "IndexError"
+        },
+        {
+          "text": "list index out of range"
+        }
+      ]
+    },
+    {
+      "text": "inner finally"
+    },
+    {
+      "text": "KeyError((1, 'k'))"
+    }
+  ],
+  "trace": []
+}

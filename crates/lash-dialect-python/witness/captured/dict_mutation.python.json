@@ -1,0 +1,102 @@
+{
+  "end": {
+    "returned": {
+      "list": [
+        {
+          "int": "0"
+        },
+        {
+          "list": [
+            {
+              "tuple": [
+                {
+                  "text": "j"
+                },
+                {
+                  "int": "2"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "prints": [
+    {
+      "list": [
+        {
+          "text": "RuntimeError"
+        },
+        {
+          "text": "dictionary changed size during iteration"
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "tuple": [
+            {
+              "text": "a"
+            },
+            {
+              "int": "1"
+            }
+          ]
+        },
+        {
+          "tuple": [
+            {
+              "text": "b"
+            },
+            {
+              "int": "2"
+            }
+          ]
+        },
+        {
+          "tuple": [
+            {
+              "text": "a!"
+            },
+            {
+              "int": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "text": "Set changed size during iteration"
+    },
+    {
+      "list": [
+        {
+          "tuple": [
+            {
+              "text": "x"
+            },
+            {
+              "int": "2"
+            }
+          ]
+        },
+        {
+          "tuple": [
+            {
+              "text": "y"
+            },
+            {
+              "int": "3"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "text": "dictionary changed size during iteration"
+    }
+  ],
+  "trace": []
+}

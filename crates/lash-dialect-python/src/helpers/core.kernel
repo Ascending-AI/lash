@@ -1,0 +1,1195 @@
+# The Python dialect's own operations (tier 2): what Python means by an
+# operator, a truth test, a subscript, an iteration and the text of a value,
+# written in kernel code. The lowerer emits a call to one of these wherever
+# Python's meaning differs from the kernel's or an operand's type is not
+# known.
+#
+# Conventions: `None` is null; an `int` is a kernel integer and a `float` a
+# kernel float; `str` is text, `list` a list, `dict` a map, `set` a set and
+# `tuple` a tuple; a function is a closure that takes its parameters in
+# order, with absent for one the call omits. An exception is an error value
+# whose kind is the class name, whose message is `str(e)` and whose data is
+# the tuple `(args, cause)`. Absent is no Python value: it marks a variable
+# that is not bound yet and an argument that was not given.
+
+use kind
+use same
+use eq
+use lt
+use le
+use bool.not
+use error.new
+use add
+use sub
+use mul
+use div
+use div_floor
+use rem_floor
+use pow
+use neg
+use is_finite
+use num.to_float
+use num.to_text
+use text.concat
+use text.len
+use text.get
+use text.slice
+use text.find
+use text.repeat
+use text.split
+use text.join
+use text.replace
+use text.starts_with
+use list.len
+use list.slice
+use list.concat
+use list.contains
+use list.copy
+use tuple.len
+use tuple.slice
+use tuple.concat
+use tuple.contains
+use tuple.values
+use map.len
+use map.contains
+use map.keys
+use map.copy
+use set.len
+use set.contains
+use set.keys
+use set.copy
+use py.exc.name
+use py.exc.args
+use py.float_text
+use py.text_repr
+use py.repr
+use py.str
+use py.type
+use py.fail
+use py.is_number
+use py.operand_error
+use py.index
+use py.to_list
+use py.add
+
+# The Python class name of a raised value. A kernel operation's own error
+# kind is the Python exception a program would catch it as.
+function py.exc.name(value: Any) -> Text
+kernel 1
+charge 6
+body {
+  if bool.not(same(kind(value), "error")) {
+    return "Exception"
+  }
+  let kinds = map{"type_error": "TypeError", "unbound_variable": "NameError", "index_out_of_range": "IndexError", "key_missing": "KeyError", "invalid_key": "TypeError", "division_by_zero": "ZeroDivisionError", "number_range": "OverflowError", "unordered": "ValueError", "text_boundary": "ValueError", "arity": "TypeError", "cycle": "ValueError", "cyclic_value": "ValueError", "not_data": "TypeError", "effect_result": "TypeError", "cancelled": "CancelledError", "join_self": "RuntimeError", "empty_join": "ValueError", "all_failed": "RuntimeError", "too_deep": "RecursionError", "number_parse": "ValueError", "zero_step": "ValueError", "invalid_scalar": "ValueError", "invalid_utf16": "ValueError", "invalid_utf8": "ValueError", "json_syntax": "ValueError", "json_depth": "ValueError", "json_number": "ValueError", "json_key": "TypeError"}
+  let name = value.kind
+  if map.contains(kinds, name) {
+    return kinds[name]
+  }
+  return name
+}
+
+# `e.args`: the arguments the exception was made with, or its message alone
+# for an error no `raise` of this dialect made.
+function py.exc.args(value: Error) -> Any
+kernel 1
+charge 6
+body {
+  let data = value.data
+  if same(kind(data), "tuple") {
+    if eq(tuple.len(data), 2) {
+      if same(kind(data[0]), "tuple") {
+        return data[0]
+      }
+    }
+  }
+  return (value.message,)
+}
+
+# `repr` of a float: the kernel's shortest digits, with Python's exponent
+# (`1e+16`, `1.5e-05`).
+function py.float_text(value: Float) -> Text
+kernel 1
+charge 8
+body {
+  let digits = num.to_text(value)
+  let mark = text.find(digits, "e", 0)
+  if lt(mark, 0) {
+    return digits
+  }
+  let mantissa = text.slice(digits, 0, mark)
+  let exponent = text.slice(digits, add(mark, 1), text.len(digits))
+  let sign = "+"
+  if text.starts_with(exponent, "-") {
+    set sign = "-"
+    set exponent = text.slice(exponent, 1, text.len(exponent))
+  }
+  if lt(text.len(exponent), 2) {
+    set exponent = text.concat("0", exponent)
+  }
+  return text.join([mantissa, "e", sign, exponent], "")
+}
+
+# `repr` of a str: single quotes unless the text holds one and no double
+# quote; backslash, newline, carriage return and tab are escaped.
+function py.text_repr(value: Text) -> Text
+kernel 1
+charge sum(4, size(value), size(result))
+body {
+  let quote = "'"
+  if le(0, text.find(value, "'", 0)) {
+    if lt(text.find(value, "\"", 0), 0) {
+      set quote = "\""
+    }
+  }
+  let out = text.replace(value, "\\", "\\\\")
+  set out = text.replace(out, "\n", "\\n")
+  set out = text.replace(out, "\r", "\\r")
+  set out = text.replace(out, "\t", "\\t")
+  if same(quote, "'") {
+    set out = text.replace(out, "'", "\\'")
+  }
+  return text.join([quote, out, quote], "")
+}
+
+function py.repr(value: Any) -> Text
+kernel 1
+charge sum(8, deep(value), size(result))
+body {
+  let go = absent
+  set go = fn(v) {
+    let k = kind(v)
+    if same(k, "null") {
+      return "None"
+    }
+    if same(k, "bool") {
+      if v {
+        return "True"
+      }
+      return "False"
+    }
+    if same(k, "integer") {
+      return num.to_text(v)
+    }
+    if same(k, "float") {
+      let shown = invoke py.float_text(v)
+      return shown
+    }
+    if same(k, "text") {
+      let shown = invoke py.text_repr(v)
+      return shown
+    }
+    let parts = []
+    if same(k, "error") {
+      let name = invoke py.exc.name(v)
+      let args = invoke py.exc.args(v)
+      for item in args {
+        let part = apply go(item)
+        set parts[list.len(parts)] = part
+      }
+      return text.join([name, "(", text.join(parts, ", "), ")"], "")
+    }
+    if same(k, "list") {
+      for item in v {
+        let part = apply go(item)
+        set parts[list.len(parts)] = part
+      }
+      return text.join(["[", text.join(parts, ", "), "]"], "")
+    }
+    if same(k, "tuple") {
+      for item in v {
+        let part = apply go(item)
+        set parts[list.len(parts)] = part
+      }
+      if eq(tuple.len(v), 1) {
+        return text.join(["(", parts[0], ",)"], "")
+      }
+      return text.join(["(", text.join(parts, ", "), ")"], "")
+    }
+    if same(k, "set") {
+      if eq(set.len(v), 0) {
+        return "set()"
+      }
+      for item in v {
+        let part = apply go(item)
+        set parts[list.len(parts)] = part
+      }
+      return text.join(["{", text.join(parts, ", "), "}"], "")
+    }
+    if same(k, "map") {
+      for key in v {
+        let shown_key = apply go(key)
+        let item = v[key]
+        let shown_item = apply go(item)
+        set parts[list.len(parts)] = text.join([shown_key, ": ", shown_item], "")
+      }
+      return text.join(["{", text.join(parts, ", "), "}"], "")
+    }
+    if same(k, "closure") {
+      return "<function>"
+    }
+    if same(k, "task") {
+      return "<Task>"
+    }
+    return text.join(["<", k, ">"], "")
+  }
+  let shown = apply go(value)
+  return shown
+}
+
+function py.str(value: Any) -> Text
+kernel 1
+charge sum(8, deep(value), size(result))
+body {
+  let k = kind(value)
+  if same(k, "text") {
+    return value
+  }
+  if same(k, "error") {
+    return value.message
+  }
+  let shown = invoke py.repr(value)
+  return shown
+}
+
+# `type(value).__name__`.
+function py.type(value: Any) -> Text
+kernel 1
+charge 8
+body {
+  let k = kind(value)
+  if same(k, "null") {
+    return "NoneType"
+  }
+  if same(k, "integer") {
+    return "int"
+  }
+  if same(k, "text") {
+    return "str"
+  }
+  if same(k, "map") {
+    return "dict"
+  }
+  if same(k, "closure") {
+    return "function"
+  }
+  if same(k, "task") {
+    return "Task"
+  }
+  if same(k, "error") {
+    let name = invoke py.exc.name(value)
+    return name
+  }
+  return k
+}
+
+# Raises an exception of class `name` made with the one argument `message`.
+function py.fail(name: Text, message: Text) -> Any
+kernel 1
+charge 4
+body {
+  throw error.new(name, message, ((message,), null))
+}
+
+# A new exception of class `name` made with `args`. `str(e)` is its
+# message: the one argument as `str` gives it, or as `repr` does for
+# KeyError and its subclasses (`quoted`).
+function py.exc.new(name: Text, args: Any, cause: Any, quoted: Bool) -> Error
+kernel 1
+charge sum(8, deep(args))
+body {
+  let count = tuple.len(args)
+  let message = ""
+  if eq(count, 1) {
+    let only = args[0]
+    if quoted {
+      set message = invoke py.repr(only)
+    } else {
+      set message = invoke py.str(only)
+    }
+  } else {
+    if lt(1, count) {
+      set message = invoke py.repr(args)
+    }
+  }
+  return error.new(name, message, (args, cause))
+}
+
+# `e.__cause__`.
+function py.exc.cause(value: Error) -> Any
+kernel 1
+charge 6
+body {
+  let data = value.data
+  if same(kind(data), "tuple") {
+    if eq(tuple.len(data), 2) {
+      if same(kind(data[0]), "tuple") {
+        return data[1]
+      }
+    }
+  }
+  return null
+}
+
+# `raise value from cause`, for a value that is already an exception.
+function py.exc.with_cause(value: Any, cause: Any) -> Error
+kernel 1
+charge 8
+body {
+  if bool.not(same(kind(value), "error")) {
+    do invoke py.fail("TypeError", "exceptions must derive from BaseException")
+  }
+  let args = invoke py.exc.args(value)
+  return error.new(value.kind, value.message, (args, cause))
+}
+
+# Whether a raised value is an instance of one of the classes `names`,
+# which the lowerer writes out with every subclass it knows.
+function py.exc.matches(value: Any, names: Any) -> Bool
+kernel 1
+charge sum(6, size(names))
+body {
+  let name = invoke py.exc.name(value)
+  return tuple.contains(names, name)
+}
+
+# Whether `except Exception` takes a raised value: everything but a
+# cancellation and the exits Python keeps outside `Exception`.
+function py.exc.is_exception(value: Any) -> Bool
+kernel 1
+charge 8
+body {
+  let name = invoke py.exc.name(value)
+  return bool.not(tuple.contains(("CancelledError", "KeyboardInterrupt", "SystemExit", "GeneratorExit"), name))
+}
+
+# `raise value`.
+function py.exc.throw(value: Any) -> Any
+kernel 1
+charge 4
+body {
+  if same(kind(value), "error") {
+    throw value
+  }
+  do invoke py.fail("TypeError", "exceptions must derive from BaseException")
+  return null
+}
+
+# A read of a variable that may not be bound yet.
+function py.name_check(value: Any, name: Text, local: Bool) -> Any
+kernel 1
+charge 2
+body {
+  if same(value, absent) {
+    if local {
+      let hoisted1 = text.join(["cannot access local variable '", name, "' where it is not associated with a value"], "")
+      do invoke py.fail("UnboundLocalError", hoisted1)
+    }
+    let hoisted2 = text.join(["name '", name, "' is not defined"], "")
+    do invoke py.fail("NameError", hoisted2)
+  }
+  return value
+}
+
+# A call that left a parameter without a default unfilled.
+function py.arg_missing(callee: Text) -> Any
+kernel 1
+charge 2
+body {
+  let hoisted3 = text.concat(callee, "() missing a required positional argument")
+  do invoke py.fail("TypeError", hoisted3)
+  return null
+}
+
+function py.is_number(value: Any) -> Bool
+kernel 1
+charge 2
+body {
+  let k = kind(value)
+  if same(k, "integer") {
+    return true
+  }
+  return same(k, "float")
+}
+
+function py.operand_error(operator: Text, left: Any, right: Any) -> Any
+kernel 1
+charge 8
+body {
+  let left_type = invoke py.type(left)
+  let right_type = invoke py.type(right)
+  let hoisted4 = text.join(["unsupported operand type(s) for ", operator, ": '", left_type, "' and '", right_type, "'"], "")
+  do invoke py.fail("TypeError", hoisted4)
+  return null
+}
+
+function py.truth(value: Any) -> Bool
+kernel 1
+charge 4
+body {
+  let k = kind(value)
+  if same(k, "bool") {
+    return value
+  }
+  if same(k, "null") {
+    return false
+  }
+  if same(k, "integer") {
+    return bool.not(eq(value, 0))
+  }
+  if same(k, "float") {
+    return bool.not(eq(value, 0))
+  }
+  if same(k, "text") {
+    return bool.not(same(value, ""))
+  }
+  if same(k, "list") {
+    return lt(0, list.len(value))
+  }
+  if same(k, "tuple") {
+    return lt(0, tuple.len(value))
+  }
+  if same(k, "map") {
+    return lt(0, map.len(value))
+  }
+  if same(k, "set") {
+    return lt(0, set.len(value))
+  }
+  return true
+}
+
+function py.add(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  let k = kind(left)
+  if same(k, kind(right)) {
+    if same(k, "text") {
+      return text.concat(left, right)
+    }
+    if same(k, "list") {
+      return list.concat(left, right)
+    }
+    if same(k, "tuple") {
+      return tuple.concat(left, right)
+    }
+  }
+  let ok = invoke py.is_number(left)
+  if ok {
+    set ok = invoke py.is_number(right)
+  }
+  if ok {
+    return add(left, right)
+  }
+  do invoke py.operand_error("+", left, right)
+  return null
+}
+
+# `list(value)`: a new list of what iterating `value` gives.
+function py.to_list(value: Any) -> List(Any)
+kernel 1
+charge sum(4, size(value), size(result))
+body {
+  let k = kind(value)
+  if same(k, "list") {
+    return list.copy(value)
+  }
+  if same(k, "tuple") {
+    return tuple.values(value)
+  }
+  if same(k, "map") {
+    return map.keys(value)
+  }
+  if same(k, "set") {
+    return set.keys(value)
+  }
+  if same(k, "text") {
+    return text.split(value, "")
+  }
+  let name = invoke py.type(value)
+  let hoisted21 = text.join(["'", name, "' object is not iterable"], "")
+  do invoke py.fail("TypeError", hoisted21)
+  return []
+}
+
+# `left += right`: a list is extended in place, so its aliases see it.
+function py.iadd(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  if same(kind(left), "list") {
+    let items = invoke py.to_list(right)
+    for item in items {
+      set left[list.len(left)] = item
+    }
+    return left
+  }
+  let out = invoke py.add(left, right)
+  return out
+}
+
+function py.sub(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  let ok = invoke py.is_number(left)
+  if ok {
+    set ok = invoke py.is_number(right)
+  }
+  if ok {
+    return sub(left, right)
+  }
+  if same(kind(left), "set") {
+    if same(kind(right), "set") {
+      let out = set{}
+      for member in left {
+        if bool.not(set.contains(right, member)) {
+          set out[member] = true
+        }
+      }
+      return out
+    }
+  }
+  do invoke py.operand_error("-", left, right)
+  return null
+}
+
+function py.mul(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right), size(result))
+body {
+  let left_number = invoke py.is_number(left)
+  let right_number = invoke py.is_number(right)
+  if left_number {
+    if right_number {
+      return mul(left, right)
+    }
+  }
+  let sequence = left
+  let count = right
+  if same(kind(left), "integer") {
+    set sequence = right
+    set count = left
+  }
+  let k = kind(sequence)
+  if same(kind(count), "integer") {
+    if lt(count, 0) {
+      set count = 0
+    }
+    if same(k, "text") {
+      return text.repeat(sequence, count)
+    }
+    if same(k, "list") {
+      let out = []
+      let round = 0
+      while lt(round, count) {
+        for item in sequence {
+          set out[list.len(out)] = item
+        }
+        set round = add(round, 1)
+      }
+      return out
+    }
+    if same(k, "tuple") {
+      let out = ()
+      let round = 0
+      while lt(round, count) {
+        set out = tuple.concat(out, sequence)
+        set round = add(round, 1)
+      }
+      return out
+    }
+  }
+  do invoke py.operand_error("*", left, right)
+  return null
+}
+
+function py.truediv(left: Any, right: Any) -> Float
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  let ok = invoke py.is_number(left)
+  if ok {
+    set ok = invoke py.is_number(right)
+  }
+  if bool.not(ok) {
+    do invoke py.operand_error("/", left, right)
+  }
+  if eq(right, 0) {
+    if same(kind(left), "integer") {
+      if same(kind(right), "integer") {
+        do invoke py.fail("ZeroDivisionError", "division by zero")
+      }
+    }
+    do invoke py.fail("ZeroDivisionError", "float division by zero")
+  }
+  return div(left, right)
+}
+
+function py.floordiv(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  let ok = invoke py.is_number(left)
+  if ok {
+    set ok = invoke py.is_number(right)
+  }
+  if bool.not(ok) {
+    do invoke py.operand_error("//", left, right)
+  }
+  if eq(right, 0) {
+    if same(kind(left), "integer") {
+      if same(kind(right), "integer") {
+        do invoke py.fail("ZeroDivisionError", "integer division or modulo by zero")
+      }
+    }
+    do invoke py.fail("ZeroDivisionError", "float floor division by zero")
+  }
+  return div_floor(left, right)
+}
+
+function py.mod(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  let ok = invoke py.is_number(left)
+  if ok {
+    set ok = invoke py.is_number(right)
+  }
+  if bool.not(ok) {
+    do invoke py.operand_error("%", left, right)
+  }
+  if eq(right, 0) {
+    if same(kind(left), "integer") {
+      if same(kind(right), "integer") {
+        do invoke py.fail("ZeroDivisionError", "integer modulo by zero")
+      }
+    }
+    do invoke py.fail("ZeroDivisionError", "float modulo")
+  }
+  return rem_floor(left, right)
+}
+
+function py.pow(left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), product(size(left), magnitude(right)))
+body {
+  let ok = invoke py.is_number(left)
+  if ok {
+    set ok = invoke py.is_number(right)
+  }
+  if bool.not(ok) {
+    do invoke py.operand_error("** or pow()", left, right)
+  }
+  if lt(right, 0) {
+    if eq(left, 0) {
+      do invoke py.fail("ZeroDivisionError", "0.0 cannot be raised to a negative power")
+    }
+    if same(kind(left), "integer") {
+      set left = num.to_float(left)
+    }
+  }
+  let out = pow(left, right)
+  if same(kind(out), "float") {
+    if eq(out, out) {
+      if bool.not(is_finite(out)) {
+        if is_finite(left) {
+          if is_finite(right) {
+            do invoke py.fail("OverflowError", "(34, 'Numerical result out of range')")
+          }
+        }
+      }
+    } else {
+      if eq(left, left) {
+        if eq(right, right) {
+          do invoke py.fail("ValueError", "a negative number raised to a fractional power is complex, which this dialect does not have")
+        }
+      }
+    }
+  }
+  return out
+}
+
+function py.neg(value: Any) -> Any
+kernel 1
+charge sum(4, size(value))
+body {
+  let ok = invoke py.is_number(value)
+  if ok {
+    return neg(value)
+  }
+  let name = invoke py.type(value)
+  let hoisted5 = text.join(["bad operand type for unary -: '", name, "'"], "")
+  do invoke py.fail("TypeError", hoisted5)
+  return null
+}
+
+function py.pos(value: Any) -> Any
+kernel 1
+charge sum(4, size(value))
+body {
+  let ok = invoke py.is_number(value)
+  if ok {
+    return value
+  }
+  let name = invoke py.type(value)
+  let hoisted6 = text.join(["bad operand type for unary +: '", name, "'"], "")
+  do invoke py.fail("TypeError", hoisted6)
+  return null
+}
+
+# `|`, `&` and `^` of two sets. Integers have no bitwise operators here.
+function py.set_op(operator: Text, left: Any, right: Any) -> Any
+kernel 1
+charge sum(4, size(left), size(right))
+body {
+  let ok = same(kind(left), "set")
+  if ok {
+    set ok = same(kind(right), "set")
+  }
+  if bool.not(ok) {
+    do invoke py.operand_error(operator, left, right)
+  }
+  let out = set{}
+  if same(operator, "|") {
+    for member in left {
+      set out[member] = true
+    }
+    for member in right {
+      set out[member] = true
+    }
+    return out
+  }
+  if same(operator, "&") {
+    for member in left {
+      if set.contains(right, member) {
+        set out[member] = true
+      }
+    }
+    return out
+  }
+  for member in left {
+    if bool.not(set.contains(right, member)) {
+      set out[member] = true
+    }
+  }
+  for member in right {
+    if bool.not(set.contains(left, member)) {
+      set out[member] = true
+    }
+  }
+  return out
+}
+
+function py.contains(container: Any, item: Any) -> Bool
+kernel 1
+charge sum(4, size(container), deep(item))
+body {
+  let k = kind(container)
+  if same(k, "list") {
+    return list.contains(container, item)
+  }
+  if same(k, "tuple") {
+    return tuple.contains(container, item)
+  }
+  if same(k, "map") {
+    return map.contains(container, item)
+  }
+  if same(k, "set") {
+    return set.contains(container, item)
+  }
+  if same(k, "text") {
+    if same(kind(item), "text") {
+      return le(0, text.find(container, item, 0))
+    }
+    let name = invoke py.type(item)
+    let hoisted7 = text.join(["'in <string>' requires string as left operand, not ", name], "")
+    do invoke py.fail("TypeError", hoisted7)
+  }
+  let name = invoke py.type(container)
+  let hoisted8 = text.join(["argument of type '", name, "' is not iterable"], "")
+  do invoke py.fail("TypeError", hoisted8)
+  return false
+}
+
+# A subscript as a position in a sequence of `length`: an integer, counted
+# from the end when negative.
+function py.index(index: Any, length: Int, what: Text, problem: Text) -> Int
+kernel 1
+charge 6
+body {
+  if bool.not(same(kind(index), "integer")) {
+    let name = invoke py.type(index)
+    let hoisted9 = text.join([what, " indices must be integers or slices, not ", name], "")
+    do invoke py.fail("TypeError", hoisted9)
+  }
+  let position = index
+  if lt(position, 0) {
+    set position = add(position, length)
+  }
+  let inside = le(0, position)
+  if inside {
+    set inside = lt(position, length)
+  }
+  if bool.not(inside) {
+    do invoke py.fail("IndexError", problem)
+  }
+  return position
+}
+
+function py.getitem(target: Any, index: Any) -> Any
+kernel 1
+charge sum(6, deep(index))
+body {
+  let k = kind(target)
+  if same(k, "map") {
+    if map.contains(target, index) {
+      return target[index]
+    }
+    let shown = invoke py.repr(index)
+    throw error.new("KeyError", shown, ((index,), null))
+  }
+  if same(k, "list") {
+    let hoisted10 = list.len(target)
+    let position = invoke py.index(index, hoisted10, "list", "list index out of range")
+    return target[position]
+  }
+  if same(k, "tuple") {
+    let hoisted11 = tuple.len(target)
+    let position = invoke py.index(index, hoisted11, "tuple", "tuple index out of range")
+    return target[position]
+  }
+  if same(k, "text") {
+    let hoisted12 = text.len(target)
+    let position = invoke py.index(index, hoisted12, "string", "string index out of range")
+    return text.get(target, position)
+  }
+  let name = invoke py.type(target)
+  let hoisted13 = text.join(["'", name, "' object is not subscriptable"], "")
+  do invoke py.fail("TypeError", hoisted13)
+  return null
+}
+
+function py.setitem(target: Any, index: Any, value: Any) -> Null
+kernel 1
+charge sum(6, deep(index))
+body {
+  let k = kind(target)
+  if same(k, "map") {
+    set target[index] = value
+    return null
+  }
+  if same(k, "list") {
+    let hoisted14 = list.len(target)
+    let position = invoke py.index(index, hoisted14, "list", "list assignment index out of range")
+    set target[position] = value
+    return null
+  }
+  let name = invoke py.type(target)
+  let hoisted15 = text.join(["'", name, "' object does not support item assignment"], "")
+  do invoke py.fail("TypeError", hoisted15)
+  return null
+}
+
+function py.delitem(target: Any, index: Any) -> Null
+kernel 1
+charge sum(6, deep(index))
+body {
+  let k = kind(target)
+  if same(k, "map") {
+    if map.contains(target, index) {
+      remove target[index]
+      return null
+    }
+    let shown = invoke py.repr(index)
+    throw error.new("KeyError", shown, ((index,), null))
+  }
+  if same(k, "list") {
+    let hoisted16 = list.len(target)
+    let position = invoke py.index(index, hoisted16, "list", "list assignment index out of range")
+    remove target[position]
+    return null
+  }
+  let name = invoke py.type(target)
+  let hoisted17 = text.join(["'", name, "' object doesn't support item deletion"], "")
+  do invoke py.fail("TypeError", hoisted17)
+  return null
+}
+
+# `target[start:stop:step]`; null stands for a bound that was not written.
+function py.slice(target: Any, start: Any, stop: Any, step: Any) -> Any
+kernel 1
+charge sum(8, size(target), size(result))
+body {
+  let k = kind(target)
+  let length = 0
+  if same(k, "list") {
+    set length = list.len(target)
+  } else {
+    if same(k, "tuple") {
+      set length = tuple.len(target)
+    } else {
+      if same(k, "text") {
+        set length = text.len(target)
+      } else {
+        let name = invoke py.type(target)
+        let hoisted18 = text.join(["'", name, "' object is not subscriptable"], "")
+        do invoke py.fail("TypeError", hoisted18)
+      }
+    }
+  }
+  if same(step, null) {
+    set step = 1
+  }
+  for bound in [start, stop, step] {
+    if bool.not(same(bound, null)) {
+      if bool.not(same(kind(bound), "integer")) {
+        do invoke py.fail("TypeError", "slice indices must be integers or None")
+      }
+    }
+  }
+  if eq(step, 0) {
+    do invoke py.fail("ValueError", "slice step cannot be zero")
+  }
+  let low = 0
+  let high = length
+  if lt(step, 0) {
+    set low = -1
+    set high = sub(length, 1)
+  }
+  if same(start, null) {
+    if lt(step, 0) {
+      set start = high
+    } else {
+      set start = low
+    }
+  } else {
+    if lt(start, 0) {
+      set start = add(start, length)
+    }
+    if lt(start, low) {
+      set start = low
+    }
+    if lt(high, start) {
+      set start = high
+    }
+  }
+  if same(stop, null) {
+    if lt(step, 0) {
+      set stop = low
+    } else {
+      set stop = high
+    }
+  } else {
+    if lt(stop, 0) {
+      set stop = add(stop, length)
+    }
+    if lt(stop, low) {
+      set stop = low
+    }
+    if lt(high, stop) {
+      set stop = high
+    }
+  }
+  if eq(step, 1) {
+    if same(k, "list") {
+      return list.slice(target, start, stop)
+    }
+    if same(k, "tuple") {
+      return tuple.slice(target, start, stop)
+    }
+    return text.slice(target, start, stop)
+  }
+  let picked = []
+  let position = start
+  while true {
+    if lt(0, step) {
+      if le(stop, position) {
+        break
+      }
+    } else {
+      if le(position, stop) {
+        break
+      }
+    }
+    if same(k, "text") {
+      set picked[list.len(picked)] = text.get(target, position)
+    } else {
+      set picked[list.len(picked)] = target[position]
+    }
+    set position = add(position, step)
+  }
+  if same(k, "list") {
+    return picked
+  }
+  if same(k, "text") {
+    return text.join(picked, "")
+  }
+  let out = ()
+  for item in picked {
+    set out = tuple.concat(out, (item,))
+  }
+  return out
+}
+
+function py.length(value: Any) -> Int
+kernel 1
+charge 4
+body {
+  let k = kind(value)
+  if same(k, "list") {
+    return list.len(value)
+  }
+  if same(k, "text") {
+    return text.len(value)
+  }
+  if same(k, "map") {
+    return map.len(value)
+  }
+  if same(k, "tuple") {
+    return tuple.len(value)
+  }
+  if same(k, "set") {
+    return set.len(value)
+  }
+  let name = invoke py.type(value)
+  let hoisted19 = text.join(["object of type '", name, "' has no len()"], "")
+  do invoke py.fail("TypeError", hoisted19)
+  return 0
+}
+
+# What a `for` walks: a list, tuple, dict or set as it is, and a str as the
+# list of its characters.
+function py.iter(value: Any) -> Any
+kernel 1
+charge sum(4, size(value))
+body {
+  let k = kind(value)
+  if same(k, "text") {
+    return text.split(value, "")
+  }
+  for walked in ["list", "tuple", "map", "set"] {
+    if same(k, walked) {
+      return value
+    }
+  }
+  let name = invoke py.type(value)
+  let hoisted20 = text.join(["'", name, "' object is not iterable"], "")
+  do invoke py.fail("TypeError", hoisted20)
+  return null
+}
+
+# The size a dict or a set has when a loop over it starts, and -1 for
+# anything else.
+function py.iter_size(value: Any) -> Int
+kernel 1
+charge 3
+body {
+  let k = kind(value)
+  if same(k, "map") {
+    return map.len(value)
+  }
+  if same(k, "set") {
+    return set.len(value)
+  }
+  return -1
+}
+
+# Python refuses to go on iterating a dict or a set whose size changed.
+function py.iter_guard(value: Any, size: Int) -> Null
+kernel 1
+charge 4
+body {
+  if lt(size, 0) {
+    return null
+  }
+  if same(kind(value), "map") {
+    if bool.not(eq(map.len(value), size)) {
+      do invoke py.fail("RuntimeError", "dictionary changed size during iteration")
+    }
+    return null
+  }
+  if bool.not(eq(set.len(value), size)) {
+    do invoke py.fail("RuntimeError", "Set changed size during iteration")
+  }
+  return null
+}
+
+function py.to_tuple(value: Any) -> Any
+kernel 1
+charge sum(4, product(size(value), size(value)))
+body {
+  if same(kind(value), "tuple") {
+    return value
+  }
+  let items = invoke py.to_list(value)
+  let out = ()
+  for item in items {
+    set out = tuple.concat(out, (item,))
+  }
+  return out
+}
+
+function py.to_set(value: Any) -> Set(Any)
+kernel 1
+charge sum(4, size(value), size(result))
+body {
+  if same(kind(value), "set") {
+    return set.copy(value)
+  }
+  let items = invoke py.to_list(value)
+  let out = set{}
+  for item in items {
+    set out[item] = true
+  }
+  return out
+}
+
+# `dict(value)`: a copy of a dict, or a dict of key and value pairs.
+function py.to_dict(value: Any) -> Map(Any, Any)
+kernel 1
+charge sum(4, size(value), size(result))
+body {
+  if same(kind(value), "map") {
+    return map.copy(value)
+  }
+  let items = invoke py.to_list(value)
+  let out = map{}
+  for item in items {
+    let pair = invoke py.to_list(item)
+    if bool.not(eq(list.len(pair), 2)) {
+      do invoke py.fail("ValueError", "dictionary update sequence element has the wrong length; 2 is required")
+    }
+    set out[pair[0]] = pair[1]
+  }
+  return out
+}
+
+# The `count` values an unpacking assignment takes from `value`.
+function py.unpack(value: Any, count: Int) -> Any
+kernel 1
+charge sum(4, size(value))
+body {
+  let items = value
+  let k = kind(value)
+  let length = 0
+  if same(k, "tuple") {
+    set length = tuple.len(value)
+  } else {
+    if same(k, "list") {
+      set length = list.len(value)
+    } else {
+      set items = invoke py.to_list(value)
+      set length = list.len(items)
+    }
+  }
+  if lt(count, length) {
+    let hoisted22 = text.join(["too many values to unpack (expected ", num.to_text(count), ")"], "")
+    do invoke py.fail("ValueError", hoisted22)
+  }
+  if lt(length, count) {
+    let hoisted23 = text.join(["not enough values to unpack (expected ", num.to_text(count), ", got ", num.to_text(length), ")"], "")
+    do invoke py.fail("ValueError", hoisted23)
+  }
+  return items
+}

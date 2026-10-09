@@ -1,0 +1,35 @@
+[package]
+name = "lash-dialect-python"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme = "README.md"
+rust-version.workspace = true
+description = "The Python dialect of the lash kernel: a front end that lowers a Python subset to kernel documents, and the helper functions it emits calls to."
+keywords = ["lash", "kernel", "python", "dialect"]
+categories = ["compilers", "parser-implementations"]
+publish = false
+
+[lib]
+name = "lash_dialect_python"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-dialect = { workspace = true }
+lash-kernel-doc = { workspace = true }
+ruff_python_ast = { workspace = true }
+ruff_python_parser = { workspace = true }
+ruff_text_size = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+lash-kernel-check = { workspace = true }
+lash-kernel-lib = { path = "../lash-kernel-lib" }
+lash-kernel-vm = { workspace = true }
+serde = { workspace = true, features = ["derive"] }

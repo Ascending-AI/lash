@@ -41,6 +41,11 @@
       "postgres-process-replay-schema-shape.txt"
     ]
   },
+  "crates/lash-dialect-python": {
+    "compile_data": [
+      "src/helpers/*.kernel"
+    ]
+  },
   "crates/lash-dialect-typescript": {
     "compile_data": [
       "src/helpers/*.kernel"

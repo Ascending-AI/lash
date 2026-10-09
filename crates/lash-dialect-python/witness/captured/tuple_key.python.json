@@ -1,0 +1,134 @@
+{
+  "end": {
+    "returned": {
+      "list": [
+        {
+          "text": "absent"
+        },
+        {
+          "list": [
+            {
+              "tuple": [
+                {
+                  "tuple": [
+                    {
+                      "int": "0"
+                    },
+                    {
+                      "int": "0"
+                    }
+                  ]
+                },
+                {
+                  "text": "origin"
+                }
+              ]
+            },
+            {
+              "tuple": [
+                {
+                  "tuple": [
+                    {
+                      "int": "1"
+                    },
+                    {
+                      "int": "2"
+                    }
+                  ]
+                },
+                {
+                  "text": "b"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "list": [
+            {
+              "tuple": [
+                {
+                  "int": "0"
+                },
+                {
+                  "int": "0"
+                }
+              ]
+            },
+            {
+              "tuple": [
+                {
+                  "int": "1"
+                },
+                {
+                  "int": "2"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "prints": [
+    {
+      "list": [
+        {
+          "text": "origin"
+        },
+        {
+          "text": "b"
+        },
+        {
+          "int": "2"
+        },
+        {
+          "bool": true
+        },
+        {
+          "bool": false
+        }
+      ]
+    },
+    {
+      "tuple": [
+        {
+          "int": "0"
+        },
+        {
+          "int": "0"
+        },
+        {
+          "text": "origin"
+        }
+      ]
+    },
+    {
+      "tuple": [
+        {
+          "int": "1"
+        },
+        {
+          "int": "2"
+        },
+        {
+          "text": "b"
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "text": "deep"
+        },
+        {
+          "text": "mixed"
+        }
+      ]
+    },
+    {
+      "text": "a list is no key"
+    }
+  ],
+  "trace": []
+}

@@ -1,0 +1,130 @@
+{
+  "end": {
+    "returned": {
+      "list": [
+        {
+          "text": "aa"
+        },
+        {
+          "text": "bb"
+        },
+        {
+          "text": "cc"
+        }
+      ]
+    }
+  },
+  "prints": [
+    {
+      "list": [
+        {
+          "text": "C0"
+        },
+        {
+          "text": "B0"
+        },
+        {
+          "text": "A0"
+        },
+        {
+          "text": "B1"
+        },
+        {
+          "text": "A1"
+        },
+        {
+          "text": "A2"
+        }
+      ]
+    },
+    {
+      "int": "3"
+    }
+  ],
+  "trace": [
+    {
+      "phase": "requested",
+      "id": 0,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "a0"
+        }
+      ]
+    },
+    {
+      "phase": "requested",
+      "id": 1,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "b0"
+        }
+      ]
+    },
+    {
+      "phase": "requested",
+      "id": 2,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "c0"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 2
+    },
+    {
+      "phase": "delivered",
+      "id": 1
+    },
+    {
+      "phase": "delivered",
+      "id": 0
+    },
+    {
+      "phase": "requested",
+      "id": 3,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "b1"
+        }
+      ]
+    },
+    {
+      "phase": "requested",
+      "id": 4,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "a1"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 3
+    },
+    {
+      "phase": "delivered",
+      "id": 4
+    },
+    {
+      "phase": "requested",
+      "id": 5,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "a2"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 5
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "end": {
+    "returned": {
+      "list": [
+        {
+          "text": "a is clean"
+        },
+        {
+          "text": "b is clean"
+        },
+        {
+          "text": "c worked"
+        },
+        {
+          "text": "c is clean"
+        }
+      ]
+    }
+  },
+  "prints": [
+    {
+      "text": "a cleaned up"
+    },
+    {
+      "list": [
+        {
+          "text": "the failure passed through the cleanup"
+        },
+        {
+          "text": "the disk is full"
+        }
+      ]
+    },
+    {
+      "text": "b cleaned up"
+    },
+    {
+      "text": "the task was cancelled"
+    },
+    {
+      "text": "c cleaned up"
+    },
+    {
+      "text": "finished"
+    }
+  ],
+  "trace": [
+    {
+      "phase": "requested",
+      "id": 0,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "a:work"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 0
+    },
+    {
+      "phase": "requested",
+      "id": 1,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "a:cleanup"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 1
+    },
+    {
+      "phase": "requested",
+      "id": 2,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "b:cleanup"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 2
+    },
+    {
+      "phase": "requested",
+      "id": 3,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "c:work"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 3
+    },
+    {
+      "phase": "requested",
+      "id": 4,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "c:cleanup"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 4
+    }
+  ]
+}

@@ -1,0 +1,677 @@
+# Methods of the built-in types. `value.name(...)` lowers to a call of
+# `py.method.name` with the receiver first; the receiver's kind chooses what
+# runs, and a kind that has no such method raises AttributeError.
+
+use kind
+use same
+use eq
+use lt
+use le
+use bool.not
+use error.new
+use add
+use num.to_text
+use sub
+use text.concat
+use text.len
+use text.join
+use text.split
+use text.replace
+use text.find
+use text.starts_with
+use text.ends_with
+use text.upper_u17_0_0
+use text.lower_u17_0_0
+use text.trim_u17_0_0
+use text.trim_start_u17_0_0
+use text.trim_end_u17_0_0
+use list.len
+use list.copy
+use list.insert
+use list.clear
+use list.index_of
+use tuple.index_of
+use map.contains
+use map.keys
+use map.values
+use map.entries
+use map.copy
+use map.clear
+use set.contains
+use set.copy
+use set.clear
+use py.repr
+use py.type
+use py.fail
+use py.to_list
+use py.to_dict
+use py.to_set
+use py.sorted
+use py.set_op
+use py.no_attribute
+use py.text_of
+
+function py.no_attribute(receiver: Any, name: Text) -> Any
+kernel 1
+charge 8
+body {
+  let owner = invoke py.type(receiver)
+  let hoisted1 = text.join(["'", owner, "' object has no attribute '", name, "'"], "")
+  do invoke py.fail("AttributeError", hoisted1)
+  return null
+}
+
+# A str argument of a str method.
+function py.text_of(value: Any, method: Text) -> Text
+kernel 1
+charge 6
+body {
+  if same(kind(value), "text") {
+    return value
+  }
+  let name = invoke py.type(value)
+  let hoisted2 = text.join([method, "() argument must be str, not ", name], "")
+  do invoke py.fail("TypeError", hoisted2)
+  return ""
+}
+
+function py.method.append(self: Any, value: Any) -> Null
+kernel 1
+charge 4
+body {
+  if same(kind(self), "list") {
+    set self[list.len(self)] = value
+    return null
+  }
+  do invoke py.no_attribute(self, "append")
+  return null
+}
+
+function py.method.extend(self: Any, values: Any) -> Null
+kernel 1
+charge sum(4, size(values))
+body {
+  if same(kind(self), "list") {
+    let items = invoke py.to_list(values)
+    for item in items {
+      set self[list.len(self)] = item
+    }
+    return null
+  }
+  do invoke py.no_attribute(self, "extend")
+  return null
+}
+
+function py.method.insert(self: Any, index: Any, value: Any) -> Null
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "list") {
+    if bool.not(same(kind(index), "integer")) {
+      let name = invoke py.type(index)
+      let hoisted3 = text.join(["'", name, "' object cannot be interpreted as an integer"], "")
+      do invoke py.fail("TypeError", hoisted3)
+    }
+    let length = list.len(self)
+    let position = index
+    if lt(position, 0) {
+      set position = add(position, length)
+    }
+    if lt(position, 0) {
+      set position = 0
+    }
+    if lt(length, position) {
+      set position = length
+    }
+    do invoke list.insert(self, position, value)
+    return null
+  }
+  do invoke py.no_attribute(self, "insert")
+  return null
+}
+
+# `list.pop([index])`, `dict.pop(key[, default])` and `set.pop()`.
+function py.method.pop(self: Any, first?: Any, second?: Any) -> Any
+kernel 1
+charge sum(6, size(self))
+body {
+  let k = kind(self)
+  if same(k, "list") {
+    let length = list.len(self)
+    if eq(length, 0) {
+      do invoke py.fail("IndexError", "pop from empty list")
+    }
+    let position = sub(length, 1)
+    if bool.not(same(first, absent)) {
+      set position = first
+      if lt(position, 0) {
+        set position = add(position, length)
+      }
+      let inside = le(0, position)
+      if inside {
+        set inside = lt(position, length)
+      }
+      if bool.not(inside) {
+        do invoke py.fail("IndexError", "pop index out of range")
+      }
+    }
+    let value = self[position]
+    remove self[position]
+    return value
+  }
+  if same(k, "map") {
+    if map.contains(self, first) {
+      let value = self[first]
+      remove self[first]
+      return value
+    }
+    if same(second, absent) {
+      let shown = invoke py.repr(first)
+      throw error.new("KeyError", shown, ((first,), null))
+    }
+    return second
+  }
+  if same(k, "set") {
+    for member in self {
+      remove self[member]
+      return member
+    }
+    throw error.new("KeyError", "'pop from an empty set'", (("pop from an empty set",), null))
+  }
+  do invoke py.no_attribute(self, "pop")
+  return null
+}
+
+# `list.remove(value)` and `set.remove(member)`.
+function py.method.remove(self: Any, value: Any) -> Null
+kernel 1
+charge sum(6, size(self), deep(value))
+body {
+  let k = kind(self)
+  if same(k, "list") {
+    let position = list.index_of(self, value)
+    if lt(position, 0) {
+      do invoke py.fail("ValueError", "list.remove(x): x not in list")
+    }
+    remove self[position]
+    return null
+  }
+  if same(k, "set") {
+    if set.contains(self, value) {
+      remove self[value]
+      return null
+    }
+    let shown = invoke py.repr(value)
+    throw error.new("KeyError", shown, ((value,), null))
+  }
+  do invoke py.no_attribute(self, "remove")
+  return null
+}
+
+function py.method.index(self: Any, value: Any) -> Int
+kernel 1
+charge sum(6, size(self), deep(value))
+body {
+  let k = kind(self)
+  if same(k, "list") {
+    let position = list.index_of(self, value)
+    if lt(position, 0) {
+      let shown = invoke py.repr(value)
+      let hoisted4 = text.concat(shown, " is not in list")
+      do invoke py.fail("ValueError", hoisted4)
+    }
+    return position
+  }
+  if same(k, "tuple") {
+    let position = tuple.index_of(self, value)
+    if lt(position, 0) {
+      do invoke py.fail("ValueError", "tuple.index(x): x not in tuple")
+    }
+    return position
+  }
+  if same(k, "text") {
+    let needle = invoke py.text_of(value, "index")
+    let position = text.find(self, needle, 0)
+    if lt(position, 0) {
+      do invoke py.fail("ValueError", "substring not found")
+    }
+    return position
+  }
+  do invoke py.no_attribute(self, "index")
+  return 0
+}
+
+function py.method.count(self: Any, value: Any) -> Int
+kernel 1
+charge sum(6, size(self), deep(value))
+body {
+  let k = kind(self)
+  let total = 0
+  if same(k, "text") {
+    let needle = invoke py.text_of(value, "count")
+    if same(needle, "") {
+      return add(text.len(self), 1)
+    }
+    return sub(list.len(text.split(self, needle)), 1)
+  }
+  let walked = same(k, "list")
+  if bool.not(walked) {
+    set walked = same(k, "tuple")
+  }
+  if walked {
+    for item in self {
+      if eq(item, value) {
+        set total = add(total, 1)
+      }
+    }
+    return total
+  }
+  do invoke py.no_attribute(self, "count")
+  return 0
+}
+
+# `list.sort(key=key, reverse=reverse)`, in place.
+function py.method.sort(self: Any, key?: Any, reverse?: Any) -> Null
+kernel 1
+charge sum(8, product(size(self), size(self)))
+body {
+  if same(kind(self), "list") {
+    let ordered = invoke py.sorted(self, key, reverse)
+    do invoke list.clear(self)
+    for item in ordered {
+      set self[list.len(self)] = item
+    }
+    return null
+  }
+  do invoke py.no_attribute(self, "sort")
+  return null
+}
+
+function py.method.reverse(self: Any) -> Null
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "list") {
+    let items = list.copy(self)
+    let last = sub(list.len(items), 1)
+    let position = 0
+    while le(position, last) {
+      set self[position] = items[sub(last, position)]
+      set position = add(position, 1)
+    }
+    return null
+  }
+  do invoke py.no_attribute(self, "reverse")
+  return null
+}
+
+function py.method.copy(self: Any) -> Any
+kernel 1
+charge sum(4, size(self))
+body {
+  let k = kind(self)
+  if same(k, "list") {
+    return list.copy(self)
+  }
+  if same(k, "map") {
+    return map.copy(self)
+  }
+  if same(k, "set") {
+    return set.copy(self)
+  }
+  do invoke py.no_attribute(self, "copy")
+  return null
+}
+
+function py.method.clear(self: Any) -> Null
+kernel 1
+charge sum(4, size(self))
+body {
+  let k = kind(self)
+  if same(k, "list") {
+    do invoke list.clear(self)
+    return null
+  }
+  if same(k, "map") {
+    do invoke map.clear(self)
+    return null
+  }
+  if same(k, "set") {
+    do invoke set.clear(self)
+    return null
+  }
+  do invoke py.no_attribute(self, "clear")
+  return null
+}
+
+function py.method.get(self: Any, key: Any, default?: Any) -> Any
+kernel 1
+charge sum(4, deep(key))
+body {
+  if same(kind(self), "map") {
+    if map.contains(self, key) {
+      return self[key]
+    }
+    if same(default, absent) {
+      return null
+    }
+    return default
+  }
+  do invoke py.no_attribute(self, "get")
+  return null
+}
+
+function py.method.keys(self: Any) -> Any
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "map") {
+    return map.keys(self)
+  }
+  do invoke py.no_attribute(self, "keys")
+  return null
+}
+
+function py.method.values(self: Any) -> Any
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "map") {
+    return map.values(self)
+  }
+  do invoke py.no_attribute(self, "values")
+  return null
+}
+
+function py.method.items(self: Any) -> Any
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "map") {
+    return map.entries(self)
+  }
+  do invoke py.no_attribute(self, "items")
+  return null
+}
+
+function py.method.setdefault(self: Any, key: Any, default?: Any) -> Any
+kernel 1
+charge sum(4, deep(key))
+body {
+  if same(kind(self), "map") {
+    if map.contains(self, key) {
+      return self[key]
+    }
+    let value = null
+    if bool.not(same(default, absent)) {
+      set value = default
+    }
+    set self[key] = value
+    return value
+  }
+  do invoke py.no_attribute(self, "setdefault")
+  return null
+}
+
+# `dict.update(other)` and `set.update(other)`.
+function py.method.update(self: Any, other: Any) -> Null
+kernel 1
+charge sum(4, size(other))
+body {
+  let k = kind(self)
+  if same(k, "map") {
+    let entries = invoke py.to_dict(other)
+    for key in entries {
+      set self[key] = entries[key]
+    }
+    return null
+  }
+  if same(k, "set") {
+    let members = invoke py.to_list(other)
+    for member in members {
+      set self[member] = true
+    }
+    return null
+  }
+  do invoke py.no_attribute(self, "update")
+  return null
+}
+
+function py.method.add(self: Any, member: Any) -> Null
+kernel 1
+charge sum(4, deep(member))
+body {
+  if same(kind(self), "set") {
+    set self[member] = true
+    return null
+  }
+  do invoke py.no_attribute(self, "add")
+  return null
+}
+
+function py.method.discard(self: Any, member: Any) -> Null
+kernel 1
+charge sum(4, deep(member))
+body {
+  if same(kind(self), "set") {
+    remove self[member]
+    return null
+  }
+  do invoke py.no_attribute(self, "discard")
+  return null
+}
+
+function py.method.union(self: Any, other: Any) -> Any
+kernel 1
+charge sum(4, size(self), size(other))
+body {
+  if same(kind(self), "set") {
+    let members = invoke py.to_set(other)
+    let out = invoke py.set_op("|", self, members)
+    return out
+  }
+  do invoke py.no_attribute(self, "union")
+  return null
+}
+
+function py.method.intersection(self: Any, other: Any) -> Any
+kernel 1
+charge sum(4, size(self), size(other))
+body {
+  if same(kind(self), "set") {
+    let members = invoke py.to_set(other)
+    let out = invoke py.set_op("&", self, members)
+    return out
+  }
+  do invoke py.no_attribute(self, "intersection")
+  return null
+}
+
+function py.method.difference(self: Any, other: Any) -> Any
+kernel 1
+charge sum(4, size(self), size(other))
+body {
+  if same(kind(self), "set") {
+    let members = invoke py.to_set(other)
+    let out = set{}
+    for member in self {
+      if bool.not(set.contains(members, member)) {
+        set out[member] = true
+      }
+    }
+    return out
+  }
+  do invoke py.no_attribute(self, "difference")
+  return null
+}
+
+function py.method.join(self: Any, values: Any) -> Text
+kernel 1
+charge sum(4, deep(values), size(result))
+body {
+  if same(kind(self), "text") {
+    let items = invoke py.to_list(values)
+    let position = 0
+    for item in items {
+      if bool.not(same(kind(item), "text")) {
+        let name = invoke py.type(item)
+        let hoisted5 = text.join(["sequence item ", num.to_text(position), ": expected str instance, ", name, " found"], "")
+        do invoke py.fail("TypeError", hoisted5)
+      }
+      set position = add(position, 1)
+    }
+    return text.join(items, self)
+  }
+  do invoke py.no_attribute(self, "join")
+  return ""
+}
+
+# `str.split()` splits on runs of white space and drops empty pieces;
+# `str.split(separator)` keeps them.
+function py.method.split(self: Any, separator?: Any) -> Any
+kernel 1
+charge sum(4, size(self), size(result))
+body {
+  if same(kind(self), "text") {
+    let plain = same(separator, absent)
+    if bool.not(plain) {
+      set plain = same(separator, null)
+    }
+    if plain {
+      let spaced = text.replace(self, "\t", " ")
+      set spaced = text.replace(spaced, "\n", " ")
+      set spaced = text.replace(spaced, "\r", " ")
+      let out = []
+      for piece in text.split(spaced, " ") {
+        if bool.not(same(piece, "")) {
+          set out[list.len(out)] = piece
+        }
+      }
+      return out
+    }
+    let needle = invoke py.text_of(separator, "split")
+    if same(needle, "") {
+      do invoke py.fail("ValueError", "empty separator")
+    }
+    return text.split(self, needle)
+  }
+  do invoke py.no_attribute(self, "split")
+  return null
+}
+
+function py.method.strip(self: Any) -> Text
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "text") {
+    return text.trim_u17_0_0(self)
+  }
+  do invoke py.no_attribute(self, "strip")
+  return ""
+}
+
+function py.method.lstrip(self: Any) -> Text
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "text") {
+    return text.trim_start_u17_0_0(self)
+  }
+  do invoke py.no_attribute(self, "lstrip")
+  return ""
+}
+
+function py.method.rstrip(self: Any) -> Text
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "text") {
+    return text.trim_end_u17_0_0(self)
+  }
+  do invoke py.no_attribute(self, "rstrip")
+  return ""
+}
+
+function py.method.upper(self: Any) -> Text
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "text") {
+    return text.upper_u17_0_0(self)
+  }
+  do invoke py.no_attribute(self, "upper")
+  return ""
+}
+
+function py.method.lower(self: Any) -> Text
+kernel 1
+charge sum(4, size(self))
+body {
+  if same(kind(self), "text") {
+    return text.lower_u17_0_0(self)
+  }
+  do invoke py.no_attribute(self, "lower")
+  return ""
+}
+
+function py.method.startswith(self: Any, prefix: Any) -> Bool
+kernel 1
+charge sum(4, size(self), size(prefix))
+body {
+  if same(kind(self), "text") {
+    let needle = invoke py.text_of(prefix, "startswith")
+    return text.starts_with(self, needle)
+  }
+  do invoke py.no_attribute(self, "startswith")
+  return false
+}
+
+function py.method.endswith(self: Any, suffix: Any) -> Bool
+kernel 1
+charge sum(4, size(self), size(suffix))
+body {
+  if same(kind(self), "text") {
+    let needle = invoke py.text_of(suffix, "endswith")
+    return text.ends_with(self, needle)
+  }
+  do invoke py.no_attribute(self, "endswith")
+  return false
+}
+
+function py.method.replace(self: Any, old: Any, new: Any) -> Text
+kernel 1
+charge sum(4, size(self), size(result))
+body {
+  if same(kind(self), "text") {
+    let needle = invoke py.text_of(old, "replace")
+    let replacement = invoke py.text_of(new, "replace")
+    return text.replace(self, needle, replacement)
+  }
+  do invoke py.no_attribute(self, "replace")
+  return ""
+}
+
+function py.method.find(self: Any, value: Any) -> Int
+kernel 1
+charge sum(4, size(self), size(value))
+body {
+  if same(kind(self), "text") {
+    let needle = invoke py.text_of(value, "find")
+    return text.find(self, needle, 0)
+  }
+  do invoke py.no_attribute(self, "find")
+  return 0
+}
+
+# `task.cancel()`: the task meets CancelledError at the wait it is in.
+function py.method.cancel(self: Any) -> Bool
+kernel 1
+charge 4
+body {
+  if same(kind(self), "task") {
+    do cancel self
+    return true
+  }
+  do invoke py.no_attribute(self, "cancel")
+  return false
+}

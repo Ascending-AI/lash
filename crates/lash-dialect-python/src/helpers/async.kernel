@@ -1,0 +1,115 @@
+# asyncio over kernel tasks.
+#
+# A Python task is a kernel task handle. The task runs `py.task.run`, which
+# yields first, so the task starts when the ready queue reaches it, as
+# `asyncio.create_task` schedules it (`K-TASK-002`), and which ends with
+# `("ok", value)` or `("error", reason)` and never in an error of its own.
+# So a task nobody awaits leaves no unobserved error behind, as in asyncio,
+# and awaiting a task twice gives the same answer (`K-TASK-009`).
+#
+# A coroutine that is only awaited is an ordinary call and needs nothing
+# here.
+
+use kind
+use same
+use le
+use mul
+use list.len
+use text.join
+use py.type
+use py.fail
+use py.is_number
+use py.task.bridge
+
+# What a task runs: `work()` is the coroutine call the task was made from.
+function py.task.run(work: Any) -> Any
+kernel 1
+charge 6
+body {
+  try {
+    do yield
+    let value = apply work()
+    return ("ok", value)
+  } catch reason {
+    return ("error", reason)
+  }
+}
+
+# `await value`. A task gives its result or raises what ended it. When the
+# awaiting task is cancelled while it waits, the task it awaits is cancelled
+# too, as asyncio does. Any other value is what a coroutine call returned.
+function py.await(value: Any) -> Any
+kernel 1
+charge 6
+body {
+  if same(kind(value), "task") {
+    let outcome = absent
+    try {
+      set outcome = join value
+    } catch reason {
+      do cancel value
+      throw reason
+    }
+    if same(outcome[0], "ok") {
+      return outcome[1]
+    }
+    throw outcome[1]
+  }
+  return value
+}
+
+# One member of a `gather`: ends as the task did, in its result or its
+# error, so the gathering `join` sees the first failure when it happens.
+function py.task.bridge(task: Any) -> Any
+kernel 1
+charge 6
+body {
+  let outcome = join task
+  if same(outcome[0], "ok") {
+    return outcome[1]
+  }
+  throw outcome[1]
+}
+
+# `await asyncio.gather(...)` over tasks: their results in order, or the
+# first failure. The others keep running (`K-TASK-015`).
+function py.gather(tasks: Any) -> List(Any)
+kernel 1
+charge sum(6, size(tasks), size(result))
+body {
+  let members = []
+  for task in tasks {
+    if same(kind(task), "task") {
+      let member = spawn invoke py.task.bridge(task)
+      set members[list.len(members)] = member
+    } else {
+      let name = invoke py.type(task)
+      let hoisted1 = text.join(["An asyncio.Future, a coroutine or an awaitable is required, not '", name, "'"], "")
+      do invoke py.fail("TypeError", hoisted1)
+    }
+  }
+  let values = join all members
+  return values
+}
+
+# `await asyncio.sleep(seconds)`. A sleep of zero lets the other ready tasks
+# run and asks the host for nothing.
+function py.sleep(seconds: Any) -> Null
+kernel 1
+charge 6
+body {
+  let ok = invoke py.is_number(seconds)
+  if ok {
+    if le(seconds, 0) {
+      do yield
+      return null
+    }
+    let duration = mul(seconds, 1000)
+    do sleep duration
+    return null
+  }
+  let name = invoke py.type(seconds)
+  let hoisted2 = text.join(["asyncio.sleep() takes a number of seconds, not '", name, "'"], "")
+  do invoke py.fail("TypeError", hoisted2)
+  return null
+}

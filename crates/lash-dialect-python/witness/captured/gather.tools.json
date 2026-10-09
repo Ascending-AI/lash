@@ -1,0 +1,1 @@
+{"tools": [{"name": "echo", "args": ["a0"], "value": "A0"}, {"name": "echo", "args": ["b0"], "value": "B0"}, {"name": "echo", "args": ["c0"], "value": "C0"}, {"name": "echo", "args": ["b1"], "value": "B1"}, {"name": "echo", "args": ["a1"], "value": "A1"}, {"name": "echo", "args": ["a2"], "value": "A2"}], "deliveries": [[2], [1, 0], [3], [4], [5]]}

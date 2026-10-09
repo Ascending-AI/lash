@@ -1,0 +1,98 @@
+{
+  "end": {
+    "returned": {
+      "list": [
+        {
+          "int": "1"
+        },
+        {
+          "text": "one"
+        },
+        {
+          "int": "2"
+        }
+      ]
+    }
+  },
+  "prints": [
+    {
+      "list": [
+        {
+          "int": "1"
+        },
+        {
+          "text": "one"
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "bool": true
+        },
+        {
+          "bool": true
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "int": "1"
+        },
+        {
+          "text": "one"
+        },
+        {
+          "int": "2"
+        }
+      ]
+    },
+    {
+      "list": [
+        {
+          "bool": false
+        },
+        {
+          "bool": true
+        },
+        {
+          "int": "3"
+        },
+        {
+          "int": "4"
+        }
+      ]
+    }
+  ],
+  "trace": [
+    {
+      "phase": "requested",
+      "id": 0,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "first"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 0
+    },
+    {
+      "phase": "requested",
+      "id": 1,
+      "tool": "echo",
+      "args": [
+        {
+          "text": "second"
+        }
+      ]
+    },
+    {
+      "phase": "delivered",
+      "id": 1
+    }
+  ]
+}
