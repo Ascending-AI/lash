@@ -8,9 +8,10 @@ use lash_kernel_doc::{
 };
 
 use super::{decode_number, int, parse_json, register_text_json, stringify_json};
+use crate::tests::Room;
 
 #[derive(Default)]
-struct Heap(BTreeMap<ObjectId, Object>);
+struct Heap(BTreeMap<ObjectId, Object>, Room);
 
 impl NativeHeap for Heap {
     fn len(&self, object: ObjectId) -> usize {
@@ -75,6 +76,9 @@ impl NativeHeap for Heap {
         self.0.insert(id, object);
         Ok(id)
     }
+    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
+        self.1.reserve(values, bytes)
+    }
 }
 
 fn call(heap: &mut Heap, name: &str, args: &[Value]) -> Result<Value, NativeError> {
@@ -119,7 +123,12 @@ fn unicode(name: &str) -> String {
     format!("text.{name}_u{a}_{b}_{c}")
 }
 fn number(token: &str, ty: Type, policy: NumberPolicy) -> Result<Value, NativeError> {
-    decode_number(&NumberToken::new(token).unwrap(), &ty, policy)
+    decode_number(
+        &NumberToken::new(token).unwrap(),
+        &ty,
+        policy,
+        &mut Heap::default(),
+    )
 }
 
 #[test]
@@ -435,7 +444,7 @@ fn k_eff_005_json_integer_past_u64_round_trips_without_float() {
     let text = "18446744073709551617000000000000000000001";
     let value = parse_json(text, &Type::Int, NumberPolicy::Float, &mut heap).unwrap();
     assert_eq!(value, int(text.parse::<num_bigint::BigInt>().unwrap()));
-    assert_eq!(stringify_json(&value, &heap).unwrap(), text);
+    assert_eq!(stringify_json(&value, &mut heap).unwrap(), text);
     assert_eq!(
         number("9007199254740993", Type::Int, NumberPolicy::Float).unwrap(),
         int(9_007_199_254_740_993u64)
@@ -585,7 +594,7 @@ fn k_eff_003_json_collections_are_fresh_and_ordered() {
     let a = parse_json(json, &Type::Any, NumberPolicy::BySpelling, &mut heap).unwrap();
     let b = parse_json(json, &Type::Any, NumberPolicy::BySpelling, &mut heap).unwrap();
     assert_ne!(a.object(), b.object());
-    assert_eq!(stringify_json(&a, &heap).unwrap(), r#"{"z":3,"a":[2]}"#);
+    assert_eq!(stringify_json(&a, &mut heap).unwrap(), r#"{"z":3,"a":[2]}"#);
     assert_ne!(
         heap.record_get(a.object().unwrap(), "a").unwrap().object(),
         heap.record_get(b.object().unwrap(), "a").unwrap().object()
@@ -611,7 +620,10 @@ fn k_eff_007_json_structured_types_are_checked_before_allocation() {
         assert!(heap.0.is_empty());
     }
     let value = parse_json(r#"{"x":[1.0,1e3]}"#, &ty, NumberPolicy::Float, &mut heap).unwrap();
-    assert_eq!(stringify_json(&value, &heap).unwrap(), r#"{"x":[1,1000]}"#);
+    assert_eq!(
+        stringify_json(&value, &mut heap).unwrap(),
+        r#"{"x":[1,1000]}"#
+    );
     let value = parse_json(
         "[1,\"x\"]",
         &Type::Tuple(vec![Type::Int, Type::Text]),
@@ -644,20 +656,20 @@ fn k_ljson_004_stringify_refuses_absent_nonfinite_keys_and_handles() {
         })),
         Value::Bytes(Bytes::new(vec![1])),
     ] {
-        assert_eq!(error_kind(stringify_json(&value, &heap)), "not_data");
+        assert_eq!(error_kind(stringify_json(&value, &mut heap)), "not_data");
         let nested = list(&mut heap, vec![value]);
-        assert_eq!(error_kind(stringify_json(&nested, &heap)), "not_data");
+        assert_eq!(error_kind(stringify_json(&nested, &mut heap)), "not_data");
     }
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         assert_eq!(
-            error_kind(stringify_json(&Value::Float(Float::new(value)), &heap)),
+            error_kind(stringify_json(&Value::Float(Float::new(value)), &mut heap)),
             "json_number"
         );
     }
     let map = Value::Map(heap.allocate(Object::Map(vec![(int(1), s("x"))])).unwrap());
-    assert_eq!(error_kind(stringify_json(&map, &heap)), "json_key");
+    assert_eq!(error_kind(stringify_json(&map, &mut heap)), "json_key");
     assert_eq!(
-        stringify_json(&Value::Float(Float::new(-0.0)), &heap).unwrap(),
+        stringify_json(&Value::Float(Float::new(-0.0)), &mut heap).unwrap(),
         "-0.0"
     );
 }
@@ -667,10 +679,16 @@ fn k_ljson_005_cycles_are_refused_but_sharing_is_copied() {
     let mut heap = Heap::default();
     let child = list(&mut heap, vec![s("x")]);
     let shared = list(&mut heap, vec![child.clone(), child]);
-    assert_eq!(stringify_json(&shared, &heap).unwrap(), "[[\"x\"],[\"x\"]]");
+    assert_eq!(
+        stringify_json(&shared, &mut heap).unwrap(),
+        "[[\"x\"],[\"x\"]]"
+    );
     let id = heap.allocate(Object::List(vec![])).unwrap();
     heap.0.insert(id, Object::List(vec![Value::List(id)]));
-    assert_eq!(error_kind(stringify_json(&Value::List(id), &heap)), "cycle");
+    assert_eq!(
+        error_kind(stringify_json(&Value::List(id), &mut heap)),
+        "cycle"
+    );
 }
 
 #[test]
@@ -1277,4 +1295,83 @@ fn dump_input(heap: &Heap, value: &Value) -> lash_kernel_doc::Datum {
         Value::Handle(handle) => lash_kernel_doc::Datum::Handle(handle.as_ref().clone()),
         _ => dump(heap, value),
     }
+}
+
+/// What a result holds, as a native function reserves it: a text by its
+/// bytes, an integer by its magnitude, a list by its values.
+fn held(heap: &Heap, value: &Value) -> u64 {
+    match value {
+        Value::Text(text) => text.len() as u64,
+        Value::Int(integer) => integer.as_bigint().bits().div_ceil(8),
+        Value::List(id) => heap.len(*id) as u64 * Room::VALUE,
+        other => panic!("no amplifier returns {other:?}"),
+    }
+}
+
+/// `K-BND-001`, `K-LIB-007`: a function whose result follows a count, a
+/// product of two sizes or shared structure reserves the result before it
+/// builds it. A room the result does not fit refuses the call at its
+/// reservation, with no object allocated; a room it fits is asked for at
+/// least what the result holds.
+#[test]
+fn an_amplifier_reserves_its_result_before_it_builds_it() {
+    const ROOM: u64 = 16 << 10;
+    type Args = fn(&mut Heap) -> Vec<Value>;
+    let cases: &[(&str, Args)] = &[
+        ("text.repeat", |_| vec![s("ab"), int(40_000)]),
+        ("text.replace", |_| {
+            vec![s(&"x".repeat(300)), s("x"), s(&"y".repeat(300))]
+        }),
+        ("text.join", |heap| {
+            vec![list(heap, vec![s(""); 300]), s(&"-".repeat(300))]
+        }),
+        ("text.split", |_| vec![s(&"x".repeat(2_000)), s("")]),
+        ("text.to_code_points", |_| vec![s(&"x".repeat(2_000))]),
+        ("text.to_utf16_units", |_| vec![s(&"x".repeat(2_000))]),
+        ("text.pad_start", |_| vec![s(""), int(40_000), s("ab")]),
+        ("text.pad_end", |_| vec![s(""), int(40_000), s("ab")]),
+        ("format.pad", |_| {
+            vec![s(""), int(40_000), s("ab"), s("end")]
+        }),
+        ("format.fixed", |_| vec![int(1), int(40_000)]),
+        ("format.fixed", |_| {
+            vec![Value::Float(Float::new(1.5)), int(40_000)]
+        }),
+        ("format.scientific", |_| {
+            vec![Value::Float(Float::new(1.5)), int(40_000)]
+        }),
+        ("json.parse", |_| {
+            vec![s("1e40000"), s("int"), s("by_spelling")]
+        }),
+        ("json.stringify", |heap| {
+            let mut shared = list(heap, vec![s("xxxxxxxx")]);
+            for _ in 0..12 {
+                shared = list(heap, vec![shared.clone(), shared]);
+            }
+            vec![shared]
+        }),
+    ];
+    // Each function that builds a result its room refuses, or allocates
+    // an object before its reservation is refused.
+    let mut unreserved = Vec::new();
+    for (name, args) in cases {
+        let mut heap = Heap::default();
+        let args = args(&mut heap);
+        let objects = heap.0.len();
+        heap.1 = Room::of(ROOM);
+        let refused = call(&mut heap, name, &args) == Err(NativeError::Memory);
+        if !refused || heap.0.len() != objects {
+            unreserved.push(*name);
+            continue;
+        }
+        heap.1 = Room::default();
+        let value = call(&mut heap, name, &args).unwrap();
+        assert!(
+            heap.1.reserved >= held(&heap, &value),
+            "{name} reserved {} for a result of {}",
+            heap.1.reserved,
+            held(&heap, &value)
+        );
+    }
+    assert_eq!(unreserved, [""; 0]);
 }

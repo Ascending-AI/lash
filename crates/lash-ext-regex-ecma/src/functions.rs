@@ -4,8 +4,13 @@
 //! the matcher, spend the result's text, then build the result. A guard
 //! failure is therefore decided before anything is allocated, and by
 //! counts that are functions of the arguments alone.
+//!
+//! The guard is work, not memory. What a call keeps follows the number of
+//! matches times the number of groups, so each match kept, each text built
+//! and each list of values is reserved against the run's memory bound
+//! ([`NativeHeap::reserve`]) before it is allocated.
 
-use std::ops::Range;
+use std::ops::{ControlFlow, Range};
 use std::sync::Arc;
 
 use lash_kernel_doc::{
@@ -80,8 +85,9 @@ impl NativeFunction for Function {
                 )
             }
             Operation::MatchAll => {
-                let matches = subject.match_all(counter)?;
+                let matches = subject.match_all(heap, counter)?;
                 spend_text(counter, matches.iter().map(match_units).sum())?;
+                reserve_values(heap, matches.len())?;
                 let matches = matches
                     .iter()
                     .map(|found| subject.match_value(heap, found))
@@ -90,7 +96,7 @@ impl NativeFunction for Function {
             }
             Operation::Replace => {
                 let replacement = text_arg(arg(2), "replacement")?;
-                let (text, last_index) = subject.replace(replacement, counter)?;
+                let (text, last_index) = subject.replace(replacement, heap, counter)?;
                 record(
                     heap,
                     [("text", text), ("lastIndex", Value::Int(last_index))],
@@ -108,7 +114,7 @@ impl NativeFunction for Function {
                     Value::Int(limit) => limit.as_bigint().to_usize().unwrap_or(usize::MAX),
                     other => return Err(wrong_type("limit", "an integer", other)),
                 };
-                let pieces = subject.split(limit, counter)?;
+                let pieces = subject.split(limit, heap, counter)?;
                 spend_text(
                     counter,
                     pieces
@@ -117,9 +123,10 @@ impl NativeFunction for Function {
                         .map(|range| range.len() as u64)
                         .sum(),
                 )?;
+                reserve_values(heap, pieces.len())?;
                 let pieces = pieces
                     .into_iter()
-                    .map(|piece| piece.map_or(Ok(Value::Null), |range| subject.text(range)))
+                    .map(|piece| piece.map_or(Ok(Value::Null), |range| subject.text(heap, range)))
                     .collect::<Result<Vec<_>, _>>()?;
                 heap.allocate(Object::List(pieces)).map(Value::List)
             }
@@ -208,7 +215,11 @@ impl Subject<'_> {
 
     /// Every match a global regex finds from its `lastIndex` on; for any
     /// other regex, the one match `exec` finds, or none.
-    fn match_all(&self, counter: &mut WorkCounter) -> Result<Vec<Found>, NativeError> {
+    fn match_all(
+        &self,
+        heap: &mut dyn NativeHeap,
+        counter: &mut WorkCounter,
+    ) -> Result<Vec<Found>, NativeError> {
         let flags = self.regex.flags;
         if !flags.global {
             return Ok(self.exec(counter)?.0.into_iter().collect());
@@ -219,14 +230,12 @@ impl Subject<'_> {
             .as_bigint()
             .to_usize()
             .filter(|start| *start <= self.units().len());
-        let mut matches = Vec::new();
+        let mut matches = Kept::new(heap);
         if let Some(start) = start {
-            self.search.each(start, flags.sticky, counter, |found| {
-                matches.push(found);
-                std::ops::ControlFlow::Continue(())
-            })?;
+            self.search
+                .each(start, flags.sticky, counter, |found| matches.keep(found))?;
         }
-        Ok(matches)
+        matches.done()
     }
 
     /// ECMAScript's `RegExp.prototype[@@replace]` with a replacement text:
@@ -235,16 +244,15 @@ impl Subject<'_> {
     fn replace(
         &self,
         replacement: &str,
+        heap: &mut dyn NativeHeap,
         counter: &mut WorkCounter,
     ) -> Result<(Value, Integer), NativeError> {
         let flags = self.regex.flags;
         let (matches, last_index) = if flags.global {
-            let mut matches = Vec::new();
-            self.search.each(0, flags.sticky, counter, |found| {
-                matches.push(found);
-                std::ops::ControlFlow::Continue(())
-            })?;
-            (matches, Integer::new(0))
+            let mut matches = Kept::new(heap);
+            self.search
+                .each(0, flags.sticky, counter, |found| matches.keep(found))?;
+            (matches.done()?, Integer::new(0))
         } else {
             let (found, last_index) = self.exec(counter)?;
             (found.into_iter().collect(), last_index)
@@ -254,6 +262,7 @@ impl Subject<'_> {
         let mut output = Output {
             units: Vec::new(),
             counter,
+            heap,
         };
         let mut end = 0;
         for found in &matches {
@@ -262,8 +271,8 @@ impl Subject<'_> {
             end = found.range.end;
         }
         output.push(&units[end..])?;
-        let text = text_from_units(&output.units).ok_or_else(lone_surrogate)?;
-        Ok((Value::text(text), last_index))
+        let Output { units, heap, .. } = output;
+        Ok((text_value(heap, &units)?, last_index))
     }
 
     /// ECMAScript's `RegExp.prototype[@@split]`: the pieces of the input
@@ -273,9 +282,11 @@ impl Subject<'_> {
     fn split(
         &self,
         limit: usize,
+        heap: &mut dyn NativeHeap,
         counter: &mut WorkCounter,
     ) -> Result<Vec<Option<Range<usize>>>, NativeError> {
         let mut pieces = Vec::new();
+        let mut refused = None;
         if limit == 0 {
             return Ok(pieces);
         }
@@ -297,6 +308,11 @@ impl Subject<'_> {
             if found.range.is_empty() && found.range.start == end {
                 return Continue(());
             }
+            // A piece and the match's captures: reserved before they are kept.
+            if let Err(error) = heap.reserve(found.captures.len() as u64 + 1, 0) {
+                refused = Some(error);
+                return Break(());
+            }
             pieces.push(Some(end..found.range.start));
             pieces.extend(found.captures);
             end = found.range.end;
@@ -306,6 +322,9 @@ impl Subject<'_> {
                 Continue(())
             }
         })?;
+        if let Some(refused) = refused {
+            return Err(refused);
+        }
         if pieces.len() < limit {
             pieces.push(Some(end..size));
         }
@@ -313,10 +332,8 @@ impl Subject<'_> {
         Ok(pieces)
     }
 
-    fn text(&self, range: Range<usize>) -> Result<Value, NativeError> {
-        text_from_units(&self.units()[range])
-            .map(Value::text)
-            .ok_or_else(lone_surrogate)
+    fn text(&self, heap: &mut dyn NativeHeap, range: Range<usize>) -> Result<Value, NativeError> {
+        text_value(heap, &self.units()[range])
     }
 
     /// `{index, groups, named}`: where the match begins, the text of the
@@ -324,14 +341,15 @@ impl Subject<'_> {
     /// that took no part), and the named groups by name, or `null` when the
     /// pattern names none.
     fn match_value(&self, heap: &mut dyn NativeHeap, found: &Found) -> Result<Value, NativeError> {
-        let group = |range: &Option<Range<usize>>| match range {
-            Some(range) => self.text(range.clone()),
+        let group = |heap: &mut dyn NativeHeap, range: &Option<Range<usize>>| match range {
+            Some(range) => self.text(heap, range.clone()),
             None => Ok(Value::Null),
         };
+        reserve_values(heap, found.captures.len() + 1 + found.named.len())?;
         let mut groups = Vec::with_capacity(found.captures.len() + 1);
-        groups.push(self.text(found.range.clone())?);
+        groups.push(self.text(heap, found.range.clone())?);
         for capture in &found.captures {
-            groups.push(group(capture)?);
+            groups.push(group(heap, capture)?);
         }
         let named = if found.named.is_empty() {
             Value::Null
@@ -339,7 +357,7 @@ impl Subject<'_> {
             let fields = found
                 .named
                 .iter()
-                .map(|(name, range)| Ok((name.clone(), group(range)?)))
+                .map(|(name, range)| Ok((name.clone(), group(heap, range)?)))
                 .collect::<Result<Vec<_>, NativeError>>()?;
             heap.allocate(Object::Record(fields)).map(Value::Record)?
         };
@@ -371,15 +389,78 @@ fn spend_text(counter: &mut WorkCounter, units: u64) -> Result<(), NativeError> 
     Ok(counter.spend(units)?)
 }
 
-/// A replacement's output: every unit written is spent first.
+/// The matches a call keeps: each is reserved before it is kept.
+struct Kept<'a> {
+    heap: &'a mut dyn NativeHeap,
+    matches: Vec<Found>,
+    refused: Option<NativeError>,
+}
+
+impl<'a> Kept<'a> {
+    fn new(heap: &'a mut dyn NativeHeap) -> Self {
+        Self {
+            heap,
+            matches: Vec::new(),
+            refused: None,
+        }
+    }
+
+    /// Keeps a match, or ends the search at the one the heap refuses.
+    fn keep(&mut self, found: Found) -> ControlFlow<()> {
+        // The match, each capture and each named group is one range; a
+        // named group also keeps its name.
+        let ranges = 1 + found.captures.len() + found.named.len();
+        let names: usize = found.named.iter().map(|(name, _)| name.len()).sum();
+        match self.heap.reserve(ranges as u64, names as u64) {
+            Ok(()) => {
+                self.matches.push(found);
+                ControlFlow::Continue(())
+            }
+            Err(refused) => {
+                self.refused = Some(refused);
+                ControlFlow::Break(())
+            }
+        }
+    }
+
+    fn done(self) -> Result<Vec<Found>, NativeError> {
+        match self.refused {
+            Some(refused) => Err(refused),
+            None => Ok(self.matches),
+        }
+    }
+}
+
+/// Reserves a list of `count` values before the values are built.
+fn reserve_values(heap: &mut dyn NativeHeap, count: usize) -> Result<(), NativeError> {
+    heap.reserve(count as u64, 0)
+}
+
+/// The text of some of the input's code units. Its bytes are counted and
+/// reserved, as the text and as the buffer it is decoded into, before it
+/// is built.
+fn text_value(heap: &mut dyn NativeHeap, units: &[u16]) -> Result<Value, NativeError> {
+    let bytes: usize = char::decode_utf16(units.iter().copied())
+        .map(|unit| unit.map_or(0, char::len_utf8))
+        .sum();
+    heap.reserve(0, 2 * bytes as u64)?;
+    text_from_units(units)
+        .map(Value::text)
+        .ok_or_else(lone_surrogate)
+}
+
+/// A replacement's output: every unit written is spent first, as work, and
+/// reserved, as memory.
 struct Output<'a> {
     units: Vec<u16>,
     counter: &'a mut WorkCounter,
+    heap: &'a mut dyn NativeHeap,
 }
 
 impl Output<'_> {
     fn push(&mut self, piece: &[u16]) -> Result<(), NativeError> {
         self.counter.spend(piece.len() as u64)?;
+        self.heap.reserve(0, 2 * piece.len() as u64)?;
         self.units.extend_from_slice(piece);
         Ok(())
     }

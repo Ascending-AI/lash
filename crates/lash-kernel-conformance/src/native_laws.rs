@@ -57,6 +57,9 @@ impl NativeHeap for ScalarHeap {
     fn allocate(&mut self, _: Object) -> Result<ObjectId, NativeError> {
         panic!("scalar native allocated heap")
     }
+    fn reserve(&mut self, _: u64, _: u64) -> Result<(), NativeError> {
+        panic!("scalar native reserved heap")
+    }
 }
 
 fn registry(cache_sensitive: bool, limit: u64) -> Result<FunctionRegistry, HarnessError> {

@@ -87,8 +87,9 @@ pub enum Element<'a> {
 }
 
 /// What a native function sees of the run's heap: it reads the objects its
-/// arguments name and allocates the objects of its result. It cannot change
-/// an object that exists (`K-LIB-007`).
+/// arguments name, reserves the room its result needs and allocates the
+/// objects of its result. It cannot change an object that exists
+/// (`K-LIB-007`).
 ///
 /// An identity the heap does not hold, or one of another kind than the
 /// method asks for, reads as empty.
@@ -108,6 +109,20 @@ pub trait NativeHeap {
     /// is refused, as is a map key or set member that is not a legal key,
     /// with a [`NativeError::Raised`] of kind `type_error`.
     fn allocate(&mut self, object: Object) -> Result<ObjectId, NativeError>;
+    /// Reserves room for what the call is about to hold, as its result or
+    /// as a temporary, out of what the run's memory bound leaves: `values`
+    /// values (the elements of a list, the pieces a search keeps) and
+    /// `bytes` bytes of text, bytes or integer digits. The heap prices
+    /// them; how memory is counted is its own (`K-BND-003`). A refusal is
+    /// [`NativeError::Memory`]; the function returns it and allocates
+    /// nothing.
+    ///
+    /// A function whose result or temporary can outgrow its arguments (it
+    /// follows a count, a product of two sizes or structure that is shared)
+    /// reserves the size before it allocates it. Reservations add up over
+    /// the call and end with it, and [`NativeHeap::allocate`] draws on
+    /// them.
+    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError>;
 }
 
 /// One call of a native function: its arguments, the heap they live in and

@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_kernel_doc::{
     Datum, Document, ErrorDatum, ErrorValue, FunctionId, FunctionRegistry, Handle, Integer,
@@ -102,6 +103,23 @@ impl NativeFunction for Fill {
     }
 }
 
+/// How many texts `work.repeat` has built.
+pub(crate) static REPEAT_BUILDS: AtomicUsize = AtomicUsize::new(0);
+
+/// Reserves a text of that many bytes, then builds it.
+struct Repeat;
+impl NativeFunction for Repeat {
+    fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+        let [Value::Int(length)] = call.args else {
+            return Err(type_error("work.repeat takes an integer"));
+        };
+        let length = u64::try_from(length.as_bigint()).unwrap_or(0);
+        call.heap.reserve(0, length)?;
+        REPEAT_BUILDS.fetch_add(1, Ordering::Relaxed);
+        Ok(Value::text("x".repeat(length as usize)))
+    }
+}
+
 struct Ref;
 impl NativeFunction for Ref {
     fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
@@ -139,7 +157,7 @@ pub(crate) fn library(native_twice: bool) -> Library {
     let machine = register_machine_functions(&mut registry).unwrap();
     ids.insert("deref", machine.deref);
     ids.insert("tasks.unfinished", machine.tasks_unfinished);
-    let natives: [(&'static str, &str, Arc<dyn NativeFunction>); 7] = [
+    let natives: [(&'static str, &str, Arc<dyn NativeFunction>); 8] = [
         (
             "num.add",
             "(a: Any, b: Any) -> Any\nkernel 1\ncharge 1",
@@ -169,6 +187,11 @@ pub(crate) fn library(native_twice: bool) -> Library {
             "work.fill",
             "(length: Any) -> Any\nkernel 1\ncharge 1",
             Arc::new(Fill),
+        ),
+        (
+            "work.repeat",
+            "(length: Any) -> Any\nkernel 1\ncharge 1",
+            Arc::new(Repeat),
         ),
         (
             "ident.ref",

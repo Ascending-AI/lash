@@ -57,8 +57,8 @@ pub(super) fn functions() -> Vec<Function> {
     ]
 }
 
-fn bytes_arg<'a>(call: &'a NativeCall<'_>, index: usize) -> Result<&'a [u8], NativeError> {
-    match arg(call, index)? {
+fn bytes_arg(args: &[Value], index: usize) -> Result<&[u8], NativeError> {
+    match arg(args, index)? {
         Value::Bytes(bytes) => Ok(bytes.as_slice()),
         _ => Err(raise("type_error", "expected bytes")),
     }
@@ -80,9 +80,9 @@ fn from_octets(call: NativeCall<'_>) -> Result<Value, NativeError> {
 }
 
 fn slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let bytes = bytes_arg(&call, 0)?;
-    let start = position(integer_arg(&call, 1)?, bytes.len());
-    let end = position(integer_arg(&call, 2)?, bytes.len());
+    let bytes = bytes_arg(call.args, 0)?;
+    let start = position(integer_arg(call.args, 1)?, bytes.len());
+    let end = position(integer_arg(call.args, 2)?, bytes.len());
     Ok(Value::Bytes(Bytes::new(if start > end {
         Vec::new()
     } else {
@@ -92,22 +92,24 @@ fn slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
 
 fn concat(call: NativeCall<'_>) -> Result<Value, NativeError> {
     Ok(Value::Bytes(Bytes::new(
-        [bytes_arg(&call, 0)?, bytes_arg(&call, 1)?].concat(),
+        [bytes_arg(call.args, 0)?, bytes_arg(call.args, 1)?].concat(),
     )))
 }
 
 fn compare(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    Ok(ordering(bytes_arg(&call, 0)?.cmp(bytes_arg(&call, 1)?)))
+    Ok(ordering(
+        bytes_arg(call.args, 0)?.cmp(bytes_arg(call.args, 1)?),
+    ))
 }
 
 fn encode(call: NativeCall<'_>) -> Result<Value, NativeError> {
     Ok(Value::Bytes(Bytes::new(
-        text_arg(&call, 0)?.as_bytes().to_vec(),
+        text_arg(call.args, 0)?.as_bytes().to_vec(),
     )))
 }
 
 fn decode(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    std::str::from_utf8(bytes_arg(&call, 0)?)
+    std::str::from_utf8(bytes_arg(call.args, 0)?)
         .map(Value::text)
         .map_err(|_| raise("invalid_utf8", "bytes are not well-formed UTF-8"))
 }

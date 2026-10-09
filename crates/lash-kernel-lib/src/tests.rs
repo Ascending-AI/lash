@@ -19,7 +19,38 @@ use crate::{
 };
 
 #[derive(Default)]
-pub(crate) struct Heap(BTreeMap<ObjectId, Object>);
+pub(crate) struct Heap(BTreeMap<ObjectId, Object>, pub(crate) Room);
+
+/// A reservation spy: it adds up what a call reserves, a value at
+/// [`Room::VALUE`] bytes, and refuses the reservation that passes its limit.
+#[derive(Default)]
+pub(crate) struct Room {
+    pub(crate) limit: Option<u64>,
+    pub(crate) reserved: u64,
+}
+
+impl Room {
+    pub(crate) const VALUE: u64 = 16;
+
+    pub(crate) fn of(limit: u64) -> Self {
+        Self {
+            limit: Some(limit),
+            reserved: 0,
+        }
+    }
+
+    pub(crate) fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
+        let reserved = self
+            .reserved
+            .saturating_add(values.saturating_mul(Self::VALUE))
+            .saturating_add(bytes);
+        if self.limit.is_some_and(|limit| reserved > limit) {
+            return Err(NativeError::Memory);
+        }
+        self.reserved = reserved;
+        Ok(())
+    }
+}
 
 impl NativeHeap for Heap {
     fn len(&self, id: ObjectId) -> usize {
@@ -94,6 +125,9 @@ impl NativeHeap for Heap {
         let id = ObjectId(self.0.len() as u64 + 1);
         self.0.insert(id, object);
         Ok(id)
+    }
+    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
+        self.1.reserve(values, bytes)
     }
 }
 
@@ -705,6 +739,23 @@ fn n_pow_nonnegative_integer_exponents_are_exact_and_guarded() {
         invoke("int.pow", &[int(2), int(1 << 30)]),
         Err(NativeError::Guard(_))
     ));
+}
+/// `K-BND-001`, `K-LIB-007`: an integer power's size follows its exponent.
+/// The guard counts its work; the room for each product is reserved before
+/// the product is taken.
+#[test]
+fn n_pow_reserves_each_product_before_it_multiplies() {
+    let args = [int(2), int(1 << 20)];
+    let mut heap = Heap(BTreeMap::new(), Room::of(16 << 10));
+    assert_eq!(
+        invoke_heap("int.pow", &args, &mut heap),
+        Err(NativeError::Memory)
+    );
+    let mut heap = Heap::default();
+    let Ok(Value::Int(power)) = invoke_heap("int.pow", &args, &mut heap) else {
+        panic!("the power fits a roomy heap");
+    };
+    assert!(heap.1.reserved >= power.as_bigint().bits().div_ceil(8));
 }
 #[test]
 fn n_abs_neg_and_min_max_preserve_pinned_zero_and_nan_edges() {

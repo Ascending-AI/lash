@@ -411,6 +411,8 @@ impl Heap {
 pub(crate) struct NativeView<'a> {
     pub(crate) heap: &'a mut Heap,
     pub(crate) bound: u64,
+    /// What the call has reserved and not yet allocated.
+    pub(crate) reserved: u64,
 }
 
 fn refused(message: &str) -> NativeError {
@@ -506,11 +508,28 @@ impl NativeHeap for NativeView<'_> {
                 ));
             }
         };
-        let memory = self.heap.memory.saturating_add(object_bytes(&object));
-        if memory > self.bound {
+        // An object draws on what the call reserved before it counts
+        // against the room that is left.
+        let bytes = object_bytes(&object);
+        let reserved = self.reserved.saturating_sub(bytes);
+        let memory = self.heap.memory.saturating_add(bytes);
+        if memory.saturating_add(reserved) > self.bound {
             return Err(NativeError::Memory);
         }
+        self.reserved = reserved;
         self.heap.memory = memory;
         Ok(self.heap.insert(object))
+    }
+
+    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
+        let reserved = self
+            .reserved
+            .saturating_add(values.saturating_mul(VALUE_BYTES))
+            .saturating_add(bytes);
+        if self.heap.memory.saturating_add(reserved) > self.bound {
+            return Err(NativeError::Memory);
+        }
+        self.reserved = reserved;
+        Ok(())
     }
 }

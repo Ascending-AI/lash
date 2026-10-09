@@ -310,6 +310,7 @@ impl KernelMachine {
                     let mut view = NativeView {
                         heap: &mut self.heap,
                         bound: self.bounds.memory,
+                        reserved: 0,
                     };
                     let call = NativeCall {
                         args: &args,
@@ -324,6 +325,8 @@ impl KernelMachine {
                                     format!("a value nests more than {MAX_VALUE_DEPTH} levels"),
                                 ));
                             }
+                            // What the call reserved was room the bound
+                            // had; this accounts the result itself.
                             self.pin(&value)?;
                             break Ok(value);
                         }

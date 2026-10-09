@@ -1,4 +1,38 @@
 //! The embedder-facing interface of the machine.
+//!
+//! # Memory a native function allocates
+//!
+//! [`Bounds::memory`] bounds what the machine accounts, and the machine
+//! accounts a library call's result when the call returns (`K-CHG-003`). A
+//! native function runs to its end inside one machine step: the machine
+//! asks [`Host::cancel_requested`] only between slices, so neither a
+//! deadline nor a cancel can stop it, and the charge for the call is taken
+//! after it. A function whose result follows a count, a product of two
+//! sizes or shared structure (`text.repeat`, `text.replace`,
+//! `json.stringify`) can therefore ask the allocator for far more than the
+//! bound before the machine sees a byte of it. A guard (`K-LIB-008`) does
+//! not help: it counts work, and its limit is in the function's identity,
+//! not in the embedder's bounds.
+//!
+//! The check belongs to the native function, at
+//! `lash_kernel_doc::NativeHeap::reserve`: the function computes what it is
+//! about to hold, reserves it against the room the bound leaves and only
+//! then allocates. The machine answers a refusal as it answers any refused
+//! allocation: it collects the heap and makes the call again, and a second
+//! refusal ends the run with [`Bound::Memory`]. The accounting after the
+//! call still runs for every function, and for one that reserved it
+//! confirms room the reservation already took. A function whose result is
+//! no larger than a fixed multiple of its arguments reserves nothing: its
+//! arguments are live and inside the bound, so it can pass the bound by
+//! that multiple at most before the accounting refuses it.
+//!
+//! The laws: `the_memory_bound_refuses_a_native_reservation_before_the_allocation`
+//! here pins the machine's side. The functions that must reserve are pinned
+//! where they live: `an_amplifier_reserves_its_result_before_it_builds_it`
+//! and `n_pow_reserves_each_product_before_it_multiplies` in
+//! `lash-kernel-lib`, and
+//! `a_result_the_heap_has_no_room_for_is_refused_at_its_reservation` in
+//! `lash-ext-regex-ecma`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

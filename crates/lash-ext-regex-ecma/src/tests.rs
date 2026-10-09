@@ -19,6 +19,9 @@ use crate::{
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Heap {
     objects: Vec<Object>,
+    /// The most a call may reserve; `None` is no limit.
+    room: Option<u64>,
+    reserved: u64,
 }
 
 impl Heap {
@@ -159,6 +162,18 @@ impl NativeHeap for Heap {
     fn allocate(&mut self, object: Object) -> Result<ObjectId, NativeError> {
         self.objects.push(object);
         Ok(ObjectId(self.objects.len() as u64 - 1))
+    }
+
+    fn reserve(&mut self, values: u64, bytes: u64) -> Result<(), NativeError> {
+        let reserved = self
+            .reserved
+            .saturating_add(values.saturating_mul(16))
+            .saturating_add(bytes);
+        if self.room.is_some_and(|room| reserved > room) {
+            return Err(NativeError::Memory);
+        }
+        self.reserved = reserved;
+        Ok(())
     }
 }
 
@@ -305,6 +320,25 @@ fn raised(outcome: &Result<Datum, NativeError>) -> &ErrorValue {
     match outcome {
         Err(NativeError::Raised(error)) => error,
         other => panic!("expected a raised error, got {other:?}"),
+    }
+}
+
+/// `K-BND-001`, `K-LIB-007`: what a call keeps follows its matches times
+/// its groups, so it is reserved as it is kept. A heap with no room for it
+/// refuses the call, which the guard's work limit alone would let finish.
+#[test]
+fn a_result_the_heap_has_no_room_for_is_refused_at_its_reservation() {
+    let input = "a".repeat(200);
+    for operation in [Operation::MatchAll, Operation::Replace, Operation::Split] {
+        let arguments = arguments(operation, "(a)", "g", &input);
+        let roomy = run(&cold(), operation, Limit::Stated, &arguments);
+        assert!(roomy.outcome.is_ok(), "{operation:?}: {:?}", roomy.outcome);
+        let tight = run(&cold(), operation, Limit::Stated, &|heap| {
+            let args = arguments(heap);
+            heap.room = Some(1 << 10);
+            args
+        });
+        assert_eq!(tight.outcome, Err(NativeError::Memory), "{operation:?}");
     }
 }
 

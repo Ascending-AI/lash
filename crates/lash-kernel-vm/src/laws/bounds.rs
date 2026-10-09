@@ -1,7 +1,9 @@
 //! The bound laws (`K-BND-001`): each bound ends the run with its typed
 //! error, and no `catch` or `finally` sees it (`K-ERR-004`).
 
-use super::embedder::{Embedder, ROOMY, Setup, int, result};
+use std::sync::atomic::Ordering;
+
+use super::embedder::{Embedder, REPEAT_BUILDS, ROOMY, Setup, int, result};
 use crate::{Bound, BoundExceeded, Bounds, End, Machine, RunError};
 
 /// Wraps `body` so that a raise would be caught and a cleanup would
@@ -124,6 +126,40 @@ fn the_memory_bound_holds_inside_a_native_call() {
         },
     );
     assert_eq!(result(embedder.run_to_end(&[])), int(200));
+}
+
+/// `K-BND-001`, `K-LIB-007`: a native function reserves what it is about
+/// to build, and a reservation the bound has no room for ends the run
+/// before the function builds anything.
+#[test]
+fn the_memory_bound_refuses_a_native_reservation_before_the_allocation() {
+    let bounds = Bounds {
+        memory: 64 << 10,
+        ..ROOMY
+    };
+    assert_eq!(
+        passes("let big = work.repeat(100000)", bounds),
+        exceeded(Bound::Memory, 64 << 10)
+    );
+    assert_eq!(REPEAT_BUILDS.load(Ordering::Relaxed), 0);
+    // A reservation is refused only by what is live: the garbage of
+    // earlier calls is collected and the call made again.
+    let mut embedder = Embedder::with(
+        r#"main {
+  let i = 0
+  while num.lt(i, 200) {
+    let held = work.repeat(1000)
+    set i = num.add(i, 1)
+  }
+  return i
+}"#,
+        Setup {
+            bounds,
+            ..Setup::default()
+        },
+    );
+    assert_eq!(result(embedder.run_to_end(&[])), int(200));
+    assert_eq!(REPEAT_BUILDS.load(Ordering::Relaxed), 200);
 }
 
 /// `K-BND-002`: call depth is counted per task.

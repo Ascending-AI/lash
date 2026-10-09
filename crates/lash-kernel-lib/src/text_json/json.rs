@@ -10,7 +10,7 @@ use lash_kernel_doc::{
 use num_bigint::BigInt;
 use num_traits::ToPrimitive;
 
-use super::{Function, arg, definition, raise, text_arg};
+use super::{Function, arg, definition, raise, room, text_arg};
 
 /// Decodes one JSON number without passing integers through a float.
 ///
@@ -18,12 +18,14 @@ use super::{Function, arg, definition, raise, text_arg};
 /// spellings. `Float` rounds once to nearest binary64, ties to even, rejecting
 /// infinity. `Number` and `Any` use `policy`. A union selects its first fitting
 /// member. A wrong type, fractional integer or float overflow raises
-/// `effect_result` (`K-EFF-005` to `K-EFF-007`). An unrepresentable allocation
+/// `effect_result` (`K-EFF-005` to `K-EFF-007`). The digits an exponent adds
+/// to an integer are reserved in `heap` before they are written; a refusal
 /// ends with `NativeError::Memory`.
 pub fn decode_number(
     token: &NumberToken,
     expected: &Type,
     policy: NumberPolicy,
+    heap: &mut dyn NativeHeap,
 ) -> Result<Value, NativeError> {
     let selected = match expected {
         Type::Number | Type::Any => {
@@ -35,7 +37,7 @@ pub fn decode_number(
         }
         Type::Union(members) => {
             for member in members {
-                match decode_number(token, member, policy) {
+                match decode_number(token, member, policy, heap) {
                     Ok(value) => return Ok(value),
                     Err(NativeError::Raised(_)) => {}
                     Err(error) => return Err(error),
@@ -46,7 +48,9 @@ pub fn decode_number(
         other => other,
     };
     match selected {
-        Type::Int => exact_integer(token.as_str()).map(|integer| Value::Int(Integer::new(integer))),
+        Type::Int => {
+            exact_integer(token.as_str(), heap).map(|integer| Value::Int(Integer::new(integer)))
+        }
         Type::Float => token
             .as_str()
             .parse::<f64>()
@@ -62,7 +66,7 @@ fn mismatch() -> NativeError {
     raise("effect_result", "JSON value does not fit the stated type")
 }
 
-fn exact_integer(token: &str) -> Result<BigInt, NativeError> {
+fn exact_integer(token: &str, heap: &mut dyn NativeHeap) -> Result<BigInt, NativeError> {
     let (mantissa, exponent) = token.split_once(['e', 'E']).unwrap_or((token, "0"));
     let exponent = exponent.parse::<BigInt>().map_err(|_| mismatch())?;
     let negative = mantissa.starts_with('-');
@@ -84,7 +88,11 @@ fn exact_integer(token: &str) -> Result<BigInt, NativeError> {
         }
         digits.truncate(keep);
     } else {
+        // An exponent's magnitude, not the token's length, sets how many
+        // digits the integer has: the zeros and the integer they spell are
+        // reserved first.
         let add = shift.to_usize().ok_or(NativeError::Memory)?;
+        heap.reserve(0, room(add).saturating_mul(2))?;
         digits.try_reserve(add).map_err(|_| NativeError::Memory)?;
         digits.extend(std::iter::repeat_n('0', add));
     }
@@ -239,10 +247,15 @@ fn read(text: &str) -> Result<Json, NativeError> {
     Ok(json)
 }
 
-fn fits(json: &Json, ty: &Type, policy: NumberPolicy) -> Result<(), NativeError> {
+fn fits(
+    json: &Json,
+    ty: &Type,
+    policy: NumberPolicy,
+    heap: &mut dyn NativeHeap,
+) -> Result<(), NativeError> {
     if let Type::Union(members) = ty {
         for member in members {
-            match fits(json, member, policy) {
+            match fits(json, member, policy, heap) {
                 Ok(()) => return Ok(()),
                 Err(NativeError::Raised(_)) => {}
                 Err(error) => return Err(error),
@@ -252,7 +265,7 @@ fn fits(json: &Json, ty: &Type, policy: NumberPolicy) -> Result<(), NativeError>
     }
     match (json, ty) {
         (Json::Number(token), _) => {
-            decode_number(token, ty, policy)?;
+            decode_number(token, ty, policy, heap)?;
         }
         (Json::Null, Type::Null | Type::Any)
         | (Json::Bool(_), Type::Bool | Type::Any)
@@ -260,22 +273,22 @@ fn fits(json: &Json, ty: &Type, policy: NumberPolicy) -> Result<(), NativeError>
         (Json::Text(text), Type::Enum(members)) if members.contains(text) => {}
         (Json::Array(items), Type::Tuple(types)) if items.len() == types.len() => {
             for (item, ty) in items.iter().zip(types) {
-                fits(item, ty, policy)?;
+                fits(item, ty, policy, heap)?;
             }
         }
         (Json::Array(items), Type::List(element)) => {
             for item in items {
-                fits(item, element, policy)?;
+                fits(item, element, policy, heap)?;
             }
         }
         (Json::Array(items), Type::Any) => {
             for item in items {
-                fits(item, &Type::Any, policy)?;
+                fits(item, &Type::Any, policy, heap)?;
             }
         }
         (Json::Object(fields), Type::Any) => {
             for (_, value) in fields {
-                fits(value, &Type::Any, policy)?;
+                fits(value, &Type::Any, policy, heap)?;
             }
         }
         (Json::Object(fields), Type::Record(record)) => {
@@ -292,13 +305,13 @@ fn fits(json: &Json, ty: &Type, policy: NumberPolicy) -> Result<(), NativeError>
                     .map(|field| &field.ty)
                     .or(record.rest.as_deref())
                     .ok_or_else(mismatch)?;
-                fits(value, ty, policy)?;
+                fits(value, ty, policy, heap)?;
             }
         }
         (Json::Object(fields), Type::Map(map)) => {
             for (name, value) in fields {
-                fits(&Json::Text(name.clone()), &map.key, policy)?;
-                fits(value, &map.value, policy)?;
+                fits(&Json::Text(name.clone()), &map.key, policy, heap)?;
+                fits(value, &map.value, policy, heap)?;
             }
         }
         _ => return Err(mismatch()),
@@ -313,17 +326,20 @@ fn decode(
     heap: &mut dyn NativeHeap,
 ) -> Result<Value, NativeError> {
     if let Type::Union(members) = ty {
-        let member = members
-            .iter()
-            .find(|member| fits(json, member, policy).is_ok())
-            .ok_or_else(mismatch)?;
-        return decode(json, member, policy, heap);
+        for member in members {
+            match fits(json, member, policy, heap) {
+                Ok(()) => return decode(json, member, policy, heap),
+                Err(NativeError::Raised(_)) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        return Err(mismatch());
     }
     match json {
         Json::Null => Ok(Value::Null),
         Json::Bool(value) => Ok(Value::Bool(*value)),
         Json::Text(text) => Ok(Value::text(text.as_str())),
-        Json::Number(token) => decode_number(token, ty, policy),
+        Json::Number(token) => decode_number(token, ty, policy, heap),
         Json::Array(items) => {
             let values: Result<Vec<_>, _> = items
                 .iter()
@@ -392,32 +408,46 @@ pub fn parse_json(
     heap: &mut dyn NativeHeap,
 ) -> Result<Value, NativeError> {
     let json = read(text)?;
-    fits(&json, expected, policy)?;
+    fits(&json, expected, policy, heap)?;
     decode(&json, expected, policy, heap)
 }
 
-fn quote(text: &str, out: &mut String) -> Result<(), NativeError> {
-    out.push_str(&serde_json::to_string(text).map_err(|_| syntax())?);
-    Ok(())
+/// The text `stringify` writes. A shared object is written once for every
+/// place that holds it, so the text can outgrow the value: each piece is
+/// reserved, as text and as the buffer it is built in, before it is appended.
+struct Out<'a> {
+    text: String,
+    heap: &'a mut dyn NativeHeap,
+}
+
+impl Out<'_> {
+    fn push(&mut self, piece: &str) -> Result<(), NativeError> {
+        self.heap.reserve(0, room(piece.len()).saturating_mul(2))?;
+        self.text.push_str(piece);
+        Ok(())
+    }
+
+    fn quote(&mut self, text: &str) -> Result<(), NativeError> {
+        self.push(&serde_json::to_string(text).map_err(|_| syntax())?)
+    }
 }
 
 fn write(
     value: &Value,
-    heap: &dyn NativeHeap,
     active: &mut BTreeSet<ObjectId>,
     depth: usize,
-    out: &mut String,
+    out: &mut Out<'_>,
 ) -> Result<(), NativeError> {
     if depth > MAX_NESTING_DEPTH {
         return Err(raise("json_depth", "JSON exceeds the kernel nesting limit"));
     }
     match value {
-        Value::Null => out.push_str("null"),
-        Value::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
-        Value::Int(integer) => out.push_str(&integer.to_string()),
-        Value::Float(float) if float.get().is_finite() => out.push_str(&float.to_string()),
-        Value::Text(text) => quote(text, out)?,
-        Value::Tuple(items) => write_array(items, heap, active, depth, out)?,
+        Value::Null => out.push("null")?,
+        Value::Bool(value) => out.push(if *value { "true" } else { "false" })?,
+        Value::Int(integer) => out.push(&integer.to_string())?,
+        Value::Float(float) if float.get().is_finite() => out.push(&float.to_string())?,
+        Value::Text(text) => out.quote(text)?,
+        Value::Tuple(items) => write_array(items, active, depth, out)?,
         Value::List(id) | Value::Map(id) | Value::Record(id) => {
             if !active.insert(*id) {
                 return Err(raise("cycle", "cyclic value cannot be JSON"));
@@ -425,7 +455,7 @@ fn write(
             let mut items = Vec::new();
             let mut fields = Vec::new();
             let mut error = None;
-            heap.visit(*id, &mut |element| {
+            out.heap.visit(*id, &mut |element| {
                 match (value, element) {
                     (Value::List(_), Element::Item(value)) => items.push(value.clone()),
                     (Value::Record(_), Element::Field { name, value }) => {
@@ -453,18 +483,18 @@ fn write(
                 return Err(error);
             }
             if matches!(value, Value::List(_)) {
-                write_array(&items, heap, active, depth, out)?;
+                write_array(&items, active, depth, out)?;
             } else {
-                out.push('{');
+                out.push("{")?;
                 for (index, (name, value)) in fields.iter().enumerate() {
                     if index != 0 {
-                        out.push(',');
+                        out.push(",")?;
                     }
-                    quote(name, out)?;
-                    out.push(':');
-                    write(value, heap, active, depth + 1, out)?;
+                    out.quote(name)?;
+                    out.push(":")?;
+                    write(value, active, depth + 1, out)?;
                 }
-                out.push('}');
+                out.push("}")?;
             }
             active.remove(id);
         }
@@ -476,20 +506,18 @@ fn write(
 
 fn write_array(
     items: &[Value],
-    heap: &dyn NativeHeap,
     active: &mut BTreeSet<ObjectId>,
     depth: usize,
-    out: &mut String,
+    out: &mut Out<'_>,
 ) -> Result<(), NativeError> {
-    out.push('[');
+    out.push("[")?;
     for (index, value) in items.iter().enumerate() {
         if index != 0 {
-            out.push(',');
+            out.push(",")?;
         }
-        write(value, heap, active, depth + 1, out)?;
+        write(value, active, depth + 1, out)?;
     }
-    out.push(']');
-    Ok(())
+    out.push("]")
 }
 
 /// Writes compact JSON in insertion order, preserving all integer digits.
@@ -499,10 +527,15 @@ fn write_array(
 /// sets, errors, functions, closures, task handles, host handles and refs raise
 /// `not_data`; no value is silently omitted or coerced. NaN/infinity raise
 /// `json_number`, non-text map keys `json_key`, excessive nesting `json_depth`.
-pub fn stringify_json(value: &Value, heap: &dyn NativeHeap) -> Result<String, NativeError> {
-    let mut out = String::new();
-    write(value, heap, &mut BTreeSet::new(), 0, &mut out)?;
-    Ok(out)
+/// The text is reserved in `heap` as it grows; a refusal ends with
+/// `NativeError::Memory`.
+pub fn stringify_json(value: &Value, heap: &mut dyn NativeHeap) -> Result<String, NativeError> {
+    let mut out = Out {
+        text: String::new(),
+        heap,
+    };
+    write(value, &mut BTreeSet::new(), 0, &mut out)?;
+    Ok(out.text)
 }
 
 pub(super) fn functions() -> Vec<Function> {
@@ -535,14 +568,14 @@ pub(super) fn functions() -> Vec<Function> {
 }
 
 fn parse(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    let json = read(text_arg(&call, 0)?)?;
-    let numbers = match text_arg(&call, 1)? {
+    let json = read(text_arg(call.args, 0)?)?;
+    let numbers = match text_arg(call.args, 1)? {
         "int" => Type::Int,
         "float" => Type::Float,
         "number" => Type::Number,
         _ => return Err(raise("type_error", "expected int, float or number")),
     };
-    let policy = match text_arg(&call, 2)? {
+    let policy = match text_arg(call.args, 2)? {
         "by_spelling" => NumberPolicy::BySpelling,
         "float" => NumberPolicy::Float,
         _ => return Err(raise("type_error", "expected a number policy")),
@@ -557,7 +590,7 @@ fn decode_with_numbers(
     heap: &mut dyn NativeHeap,
 ) -> Result<Value, NativeError> {
     match json {
-        Json::Number(token) => decode_number(token, numbers, policy),
+        Json::Number(token) => decode_number(token, numbers, policy, heap),
         Json::Array(items) => {
             let values = items
                 .iter()
@@ -582,5 +615,5 @@ fn decode_with_numbers(
 }
 
 fn stringify(call: NativeCall<'_>) -> Result<Value, NativeError> {
-    stringify_json(arg(&call, 0)?, call.heap).map(Value::text)
+    stringify_json(arg(call.args, 0)?, call.heap).map(Value::text)
 }

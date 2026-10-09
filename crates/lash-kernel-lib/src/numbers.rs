@@ -429,7 +429,9 @@ impl NativeFunction for NumericFunction {
         }
         let a = &call.args[0];
         match self.operation {
-            Operation::Binary(op) => arithmetic::binary(op, a, &call.args[1], call.counter),
+            Operation::Binary(op) => {
+                arithmetic::binary(op, a, &call.args[1], call.counter, call.heap)
+            }
             Operation::Unary(op) => arithmetic::unary(op, a),
             Operation::Math(op) => op.call(call.args),
             Operation::Eq => Ok(Value::Bool(equal(a, &call.args[1], call.heap))),

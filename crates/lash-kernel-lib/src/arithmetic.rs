@@ -2,7 +2,7 @@
 
 use std::cmp::Ordering;
 
-use lash_kernel_doc::{Float, Integer, NativeError, Value, WorkCounter};
+use lash_kernel_doc::{Float, Integer, NativeError, NativeHeap, Value, WorkCounter};
 use num_bigint::BigInt;
 use num_traits::{One, Signed, Zero};
 
@@ -46,6 +46,7 @@ pub(crate) fn binary(
     a: &Value,
     b: &Value,
     counter: &mut WorkCounter,
+    heap: &mut dyn NativeHeap,
 ) -> Result<Value, NativeError> {
     if let (Value::Int(a), Value::Int(b)) = (a, b) {
         let a = a.as_bigint();
@@ -76,7 +77,7 @@ pub(crate) fn binary(
                     r
                 }
             }
-            Binary::Pow => integer_pow(a, b, counter)?,
+            Binary::Pow => integer_pow(a, b, counter, heap)?,
             Binary::Min => a.min(b).clone(),
             Binary::Max => a.max(b).clone(),
         };
@@ -145,7 +146,12 @@ fn floor_remainder(a: f64, b: f64) -> f64 {
     }
 }
 
-fn integer_pow(a: &BigInt, b: &BigInt, counter: &mut WorkCounter) -> Result<BigInt, NativeError> {
+fn integer_pow(
+    a: &BigInt,
+    b: &BigInt,
+    counter: &mut WorkCounter,
+    heap: &mut dyn NativeHeap,
+) -> Result<BigInt, NativeError> {
     if b.is_negative() {
         return Err(raised(
             "number_range",
@@ -155,24 +161,53 @@ fn integer_pow(a: &BigInt, b: &BigInt, counter: &mut WorkCounter) -> Result<BigI
     let mut exponent = b.clone();
     let mut base = a.clone();
     let mut result = BigInt::one();
+    let mut room = Room { heap, peak: 0 };
     while !exponent.is_zero() {
         if exponent.bit(0) {
-            spend_product(&result, &base, counter)?;
+            room.product(&result, &base, &result, &base, counter)?;
             result *= &base;
         }
         exponent >>= 1usize;
         if !exponent.is_zero() {
-            spend_product(&base, &base, counter)?;
+            room.product(&result, &base, &base, &base, counter)?;
             base = &base * &base;
         }
     }
     Ok(result)
 }
 
-fn spend_product(a: &BigInt, b: &BigInt, counter: &mut WorkCounter) -> Result<(), NativeError> {
-    // Upper bound on output magnitude in 64-bit words; spent before allocating.
-    counter.spend(a.bits().saturating_add(b.bits()).div_ceil(64).max(1))?;
-    Ok(())
+/// The memory an integer power holds at its largest: the result so far, the
+/// base and the product being taken.
+struct Room<'a> {
+    heap: &'a mut dyn NativeHeap,
+    /// The most bytes any product so far has needed, all of it reserved.
+    peak: u64,
+}
+
+impl Room<'_> {
+    /// Admits the product `a * b`, taken while `result` and `base` are
+    /// held. The guard counts its words as work; the bytes it adds to the
+    /// most the call has held are reserved against the run's memory bound.
+    /// Both come before the multiplication allocates.
+    fn product(
+        &mut self,
+        result: &BigInt,
+        base: &BigInt,
+        a: &BigInt,
+        b: &BigInt,
+        counter: &mut WorkCounter,
+    ) -> Result<(), NativeError> {
+        // Upper bound on output magnitude in 64-bit words.
+        let words = a.bits().saturating_add(b.bits()).div_ceil(64).max(1);
+        counter.spend(words)?;
+        let held = result.bits().saturating_add(base.bits()).div_ceil(8);
+        let needed = held.saturating_add(words.saturating_mul(8));
+        if needed > self.peak {
+            self.heap.reserve(0, needed - self.peak)?;
+            self.peak = needed;
+        }
+        Ok(())
+    }
 }
 
 pub(crate) fn unary(op: Unary, value: &Value) -> Result<Value, NativeError> {
