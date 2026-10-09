@@ -1,0 +1,47 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "😀a"
+        },
+        {
+          "text": "😀"
+        }
+      ],
+      "expected": {
+        "charged": 13,
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "work": 0
+      },
+      "function": "370c831de807cfa61febb471cb6c487a293889b8d57f4390432b4ee90ebc17d8",
+      "name": "text.starts_with.12"
+    },
+    {
+      "args": [
+        {
+          "text": "😀a"
+        },
+        {
+          "text": "a"
+        }
+      ],
+      "expected": {
+        "charged": 10,
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "work": 0
+      },
+      "function": "b782906ddc04ea5eb5b82804d02344ef6ee0b6897ee6b9a0bb957797846cbdd5",
+      "name": "text.ends_with.13"
+    }
+  ],
+  "rule": "K-LTXT-008"
+}

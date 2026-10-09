@@ -1,0 +1,61 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "int": "18446744073709551617"
+        }
+      ],
+      "expected": {
+        "charged": 25,
+        "outcome": {
+          "returned": {
+            "text": "18446744073709551617"
+          }
+        },
+        "work": 0
+      },
+      "function": "6b74d661b91fa9216e6496ad256d1b4a75a0c3e8b18dba88b281a3e51c2ec005",
+      "name": "json.stringify.37"
+    },
+    {
+      "args": [
+        {
+          "float": "nan"
+        }
+      ],
+      "expected": {
+        "charged": 2,
+        "outcome": {
+          "raised": {
+            "data": "null",
+            "kind": "json_number",
+            "message": "JSON refuses NaN and infinity"
+          }
+        },
+        "work": 0
+      },
+      "function": "6b74d661b91fa9216e6496ad256d1b4a75a0c3e8b18dba88b281a3e51c2ec005",
+      "name": "json.stringify.38"
+    },
+    {
+      "args": [
+        "absent"
+      ],
+      "expected": {
+        "charged": 2,
+        "outcome": {
+          "raised": {
+            "data": "null",
+            "kind": "not_data",
+            "message": "value kind has no JSON representation"
+          }
+        },
+        "work": 0
+      },
+      "function": "6b74d661b91fa9216e6496ad256d1b4a75a0c3e8b18dba88b281a3e51c2ec005",
+      "name": "json.stringify.39"
+    }
+  ],
+  "rule": "K-LJSON-004"
+}

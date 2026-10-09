@@ -1,0 +1,29 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "18446744073709551617e2"
+        },
+        {
+          "text": "int"
+        },
+        {
+          "text": "float"
+        }
+      ],
+      "expected": {
+        "charged": 37,
+        "outcome": {
+          "returned": {
+            "int": "1844674407370955161700"
+          }
+        },
+        "work": 0
+      },
+      "function": "846571ceca540e19a8ea7a47734e2ed329393282a010dd802ce5098d1cc57237",
+      "name": "json.parse.33"
+    }
+  ],
+  "rule": "K-EFF-005"
+}

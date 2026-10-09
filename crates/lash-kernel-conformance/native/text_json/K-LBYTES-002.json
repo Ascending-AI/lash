@@ -1,0 +1,61 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "😀"
+        }
+      ],
+      "expected": {
+        "charged": 11,
+        "outcome": {
+          "returned": {
+            "bytes": "f09f9880"
+          }
+        },
+        "work": 0
+      },
+      "function": "40ce9899bb5a7767f020533b6eea18cb4c17af392fb612c1ccafec13e5c5a104",
+      "name": "bytes.utf8_encode.30"
+    },
+    {
+      "args": [
+        {
+          "bytes": "f09f9880"
+        }
+      ],
+      "expected": {
+        "charged": 11,
+        "outcome": {
+          "returned": {
+            "text": "😀"
+          }
+        },
+        "work": 0
+      },
+      "function": "4685876ba48b9ce95ac3e0cd5134d688840eaed4ab8c1d5997d30a7c667b285d",
+      "name": "bytes.utf8_decode.31"
+    },
+    {
+      "args": [
+        {
+          "bytes": "eda080"
+        }
+      ],
+      "expected": {
+        "charged": 5,
+        "outcome": {
+          "raised": {
+            "data": "null",
+            "kind": "invalid_utf8",
+            "message": "bytes are not well-formed UTF-8"
+          }
+        },
+        "work": 0
+      },
+      "function": "4685876ba48b9ce95ac3e0cd5134d688840eaed4ab8c1d5997d30a7c667b285d",
+      "name": "bytes.utf8_decode.32"
+    }
+  ],
+  "rule": "K-LBYTES-002"
+}

@@ -1,0 +1,47 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "😀"
+        },
+        {
+          "text": ""
+        }
+      ],
+      "expected": {
+        "charged": 12,
+        "outcome": {
+          "returned": {
+            "int": "1"
+          }
+        },
+        "work": 0
+      },
+      "function": "d04d5c71719a06095b691eecfbf7927af5a47f6841866452d4a6c4e493c46dc5",
+      "name": "text.compare.9"
+    },
+    {
+      "args": [
+        {
+          "text": "😀"
+        },
+        {
+          "text": ""
+        }
+      ],
+      "expected": {
+        "charged": 12,
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "work": 0
+      },
+      "function": "15c6510d0d30f3e63bcfbf687087316bb27e25a2cbe3a90938d99ef2bdb867f8",
+      "name": "text.utf16_compare.10"
+    }
+  ],
+  "rule": "K-VAL-030"
+}

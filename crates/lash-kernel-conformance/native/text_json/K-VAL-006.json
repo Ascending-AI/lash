@@ -1,0 +1,106 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "list": [
+            {
+              "int": "128512"
+            },
+            {
+              "int": "97"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "charged": 14,
+        "outcome": {
+          "returned": {
+            "text": "😀a"
+          }
+        },
+        "work": 0
+      },
+      "function": "e834b2d932248e7c512e2920764878b56a534e25febe9c6c4bc3de9d2bf3fb1a",
+      "name": "text.from_code_points.22"
+    },
+    {
+      "args": [
+        {
+          "list": [
+            {
+              "int": "55296"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "charged": 5,
+        "outcome": {
+          "raised": {
+            "data": "null",
+            "kind": "invalid_scalar",
+            "message": "code point is not a Unicode scalar"
+          }
+        },
+        "work": 0
+      },
+      "function": "e834b2d932248e7c512e2920764878b56a534e25febe9c6c4bc3de9d2bf3fb1a",
+      "name": "text.from_code_points.23"
+    },
+    {
+      "args": [
+        {
+          "list": [
+            {
+              "int": "55357"
+            },
+            {
+              "int": "56832"
+            },
+            {
+              "int": "97"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "charged": 17,
+        "outcome": {
+          "returned": {
+            "text": "😀a"
+          }
+        },
+        "work": 0
+      },
+      "function": "393343160a5dda8248d7c93524754111a3c3fb49a293b0f9099f4b499df358de",
+      "name": "text.from_utf16_units.24"
+    },
+    {
+      "args": [
+        {
+          "list": [
+            {
+              "int": "55296"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "charged": 5,
+        "outcome": {
+          "raised": {
+            "data": "null",
+            "kind": "invalid_utf16",
+            "message": "UTF-16 contains an unpaired surrogate"
+          }
+        },
+        "work": 0
+      },
+      "function": "393343160a5dda8248d7c93524754111a3c3fb49a293b0f9099f4b499df358de",
+      "name": "text.from_utf16_units.25"
+    }
+  ],
+  "rule": "K-VAL-006"
+}

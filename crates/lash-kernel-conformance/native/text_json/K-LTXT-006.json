@@ -1,0 +1,95 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "a"
+        }
+      ],
+      "expected": {
+        "charged": 10,
+        "outcome": {
+          "returned": {
+            "text": "a"
+          }
+        },
+        "work": 0
+      },
+      "function": "6338e6b195164fba148cffd027beb84f57fffc0b3116662ec19ae318bc40e929",
+      "name": "text.trim_u17_0_0.44"
+    },
+    {
+      "args": [
+        {
+          "text": "a "
+        }
+      ],
+      "expected": {
+        "charged": 10,
+        "outcome": {
+          "returned": {
+            "text": "a "
+          }
+        },
+        "work": 0
+      },
+      "function": "d793a8b1d2569d48bb9fe996d80a047c323f1eea8581f673ea4ab4c8c609c928",
+      "name": "text.trim_start_u17_0_0.45"
+    },
+    {
+      "args": [
+        {
+          "text": " a"
+        }
+      ],
+      "expected": {
+        "charged": 9,
+        "outcome": {
+          "returned": {
+            "text": " a"
+          }
+        },
+        "work": 0
+      },
+      "function": "04a7a50a8ada98cdabd725ff895f8f75ae0dea82ecab320d1103cd0023d745f0",
+      "name": "text.trim_end_u17_0_0.46"
+    },
+    {
+      "args": [
+        {
+          "text": "İΟΣ"
+        }
+      ],
+      "expected": {
+        "charged": 16,
+        "outcome": {
+          "returned": {
+            "text": "i̇ος"
+          }
+        },
+        "work": 0
+      },
+      "function": "f761dc19cfe690ebe8f14d6b227b4433e19102f0b7d3a3f4cfd958e39d0d5eeb",
+      "name": "text.lower_u17_0_0.47"
+    },
+    {
+      "args": [
+        {
+          "text": "straße"
+        }
+      ],
+      "expected": {
+        "charged": 17,
+        "outcome": {
+          "returned": {
+            "text": "STRASSE"
+          }
+        },
+        "work": 0
+      },
+      "function": "f5af101c2fe3ef41babf867442d03ea1a51ff0a11e9b86c38643d3bfe120f213",
+      "name": "text.upper_u17_0_0.48"
+    }
+  ],
+  "rule": "K-LTXT-006"
+}

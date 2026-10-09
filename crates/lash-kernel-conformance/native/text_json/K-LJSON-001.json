@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "\"\\ud800\""
+        },
+        {
+          "text": "number"
+        },
+        {
+          "text": "by_spelling"
+        }
+      ],
+      "expected": {
+        "charged": 29,
+        "outcome": {
+          "raised": {
+            "data": "null",
+            "kind": "json_syntax",
+            "message": "invalid JSON, including unpaired surrogates"
+          }
+        },
+        "work": 0
+      },
+      "function": "846571ceca540e19a8ea7a47734e2ed329393282a010dd802ce5098d1cc57237",
+      "name": "json.parse.36"
+    }
+  ],
+  "rule": "K-LJSON-001"
+}

@@ -985,6 +985,16 @@ PACKAGE_DEPS = {
             "thiserror": "//third-party/rust:p0364"
         }
     },
+    "lash-kernel-lib": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "num_bigint": "//third-party/rust:p0210",
+            "num_traits": "//third-party/rust:p0216",
+            "serde_json": "//third-party/rust:p0313"
+        }
+    },
     "lash-kernel-vm": {
         "build": {},
         "dev": {},

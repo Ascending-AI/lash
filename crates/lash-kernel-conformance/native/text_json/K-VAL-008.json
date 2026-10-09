@@ -1,0 +1,96 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "list": [
+            {
+              "int": "0"
+            },
+            {
+              "int": "255"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "charged": 10,
+        "outcome": {
+          "returned": {
+            "bytes": "00ff"
+          }
+        },
+        "work": 0
+      },
+      "function": "a677fcb6830dea0b329311fd94e6842f93a93eafebbe9152441f7d25a99390a0",
+      "name": "bytes.from_octets.26"
+    },
+    {
+      "args": [
+        {
+          "bytes": "0080ff"
+        },
+        {
+          "int": "-2"
+        },
+        {
+          "int": "9"
+        }
+      ],
+      "expected": {
+        "charged": 12,
+        "outcome": {
+          "returned": {
+            "bytes": "80ff"
+          }
+        },
+        "work": 0
+      },
+      "function": "6fe09bebb68b68d03e3602273ec3ce592cc6ce0f7c2789ff9fdc1195db8073b9",
+      "name": "bytes.slice.27"
+    },
+    {
+      "args": [
+        {
+          "bytes": "00"
+        },
+        {
+          "bytes": "ff"
+        }
+      ],
+      "expected": {
+        "charged": 8,
+        "outcome": {
+          "returned": {
+            "bytes": "00ff"
+          }
+        },
+        "work": 0
+      },
+      "function": "aacadcf76173cb2a8db3e57851bacc3e37429fe0f49aee57a169a5db43feaa99",
+      "name": "bytes.concat.28"
+    },
+    {
+      "args": [
+        {
+          "bytes": "00"
+        },
+        {
+          "bytes": "0001"
+        }
+      ],
+      "expected": {
+        "charged": 8,
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "work": 0
+      },
+      "function": "36711f5928bad3bc12ef6244a8c0ea93a681e0c912f4e0eeffd55cd04d7d4d1f",
+      "name": "bytes.compare.29"
+    }
+  ],
+  "rule": "K-VAL-008"
+}

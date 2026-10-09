@@ -1,0 +1,31 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "1.5"
+        },
+        {
+          "text": "int"
+        },
+        {
+          "text": "by_spelling"
+        }
+      ],
+      "expected": {
+        "charged": 21,
+        "outcome": {
+          "raised": {
+            "data": "null",
+            "kind": "effect_result",
+            "message": "JSON value does not fit the stated type"
+          }
+        },
+        "work": 0
+      },
+      "function": "846571ceca540e19a8ea7a47734e2ed329393282a010dd802ce5098d1cc57237",
+      "name": "json.parse.35"
+    }
+  ],
+  "rule": "K-EFF-007"
+}

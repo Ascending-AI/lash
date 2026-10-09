@@ -1,0 +1,586 @@
+//! Token-preserving JSON (`K-EFF-005` to `K-EFF-007`).
+
+use std::collections::BTreeSet;
+use std::ops::ControlFlow;
+
+use lash_kernel_doc::{
+    Element, Float, Integer, MAX_NESTING_DEPTH, NativeCall, NativeError, NativeHeap, NumberPolicy,
+    NumberToken, Object, ObjectId, Type, Value,
+};
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
+
+use super::{Function, arg, definition, raise, text_arg};
+
+/// Decodes one JSON number without passing integers through a float.
+///
+/// `Int` accepts any integral mathematical value, including fraction/exponent
+/// spellings. `Float` rounds once to nearest binary64, ties to even, rejecting
+/// infinity. `Number` and `Any` use `policy`. A union selects its first fitting
+/// member. A wrong type, fractional integer or float overflow raises
+/// `effect_result` (`K-EFF-005` to `K-EFF-007`). An unrepresentable allocation
+/// ends with `NativeError::Memory`.
+pub fn decode_number(
+    token: &NumberToken,
+    expected: &Type,
+    policy: NumberPolicy,
+) -> Result<Value, NativeError> {
+    let selected = match expected {
+        Type::Number | Type::Any => {
+            if policy == NumberPolicy::BySpelling && token.is_integer_spelling() {
+                &Type::Int
+            } else {
+                &Type::Float
+            }
+        }
+        Type::Union(members) => {
+            for member in members {
+                match decode_number(token, member, policy) {
+                    Ok(value) => return Ok(value),
+                    Err(NativeError::Raised(_)) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            return Err(mismatch());
+        }
+        other => other,
+    };
+    match selected {
+        Type::Int => exact_integer(token.as_str()).map(|integer| Value::Int(Integer::new(integer))),
+        Type::Float => token
+            .as_str()
+            .parse::<f64>()
+            .ok()
+            .filter(|f| f.is_finite())
+            .map(|f| Value::Float(Float::new(f)))
+            .ok_or_else(mismatch),
+        _ => Err(mismatch()),
+    }
+}
+
+fn mismatch() -> NativeError {
+    raise("effect_result", "JSON value does not fit the stated type")
+}
+
+fn exact_integer(token: &str) -> Result<BigInt, NativeError> {
+    let (mantissa, exponent) = token.split_once(['e', 'E']).unwrap_or((token, "0"));
+    let exponent = exponent.parse::<BigInt>().map_err(|_| mismatch())?;
+    let negative = mantissa.starts_with('-');
+    let mantissa = mantissa.strip_prefix('-').unwrap_or(mantissa);
+    let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let mut digits = format!("{whole}{fraction}");
+    if digits.bytes().all(|b| b == b'0') {
+        return Ok(BigInt::from(0));
+    }
+    let shift = exponent - BigInt::from(fraction.len());
+    if shift < BigInt::from(0) {
+        let remove = (-shift)
+            .to_usize()
+            .filter(|remove| *remove <= digits.len())
+            .ok_or_else(mismatch)?;
+        let keep = digits.len() - remove;
+        if !digits[keep..].bytes().all(|b| b == b'0') {
+            return Err(mismatch());
+        }
+        digits.truncate(keep);
+    } else {
+        let add = shift.to_usize().ok_or(NativeError::Memory)?;
+        digits.try_reserve(add).map_err(|_| NativeError::Memory)?;
+        digits.extend(std::iter::repeat_n('0', add));
+    }
+    let value = digits.parse::<BigInt>().map_err(|_| mismatch())?;
+    Ok(if negative { -value } else { value })
+}
+
+#[derive(Debug)]
+enum Json {
+    Null,
+    Bool(bool),
+    Number(NumberToken),
+    Text(String),
+    Array(Vec<Json>),
+    Object(Vec<(String, Json)>),
+}
+
+struct Parser<'a> {
+    text: &'a str,
+    cursor: usize,
+}
+
+impl<'a> Parser<'a> {
+    fn whitespace(&mut self) {
+        while self
+            .text
+            .as_bytes()
+            .get(self.cursor)
+            .is_some_and(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
+        {
+            self.cursor += 1;
+        }
+    }
+
+    fn take(&mut self, byte: u8) -> bool {
+        self.whitespace();
+        if self.text.as_bytes().get(self.cursor) == Some(&byte) {
+            self.cursor += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn string(&mut self) -> Result<String, NativeError> {
+        self.whitespace();
+        let start = self.cursor;
+        if !self.take(b'"') {
+            return Err(syntax());
+        }
+        let mut escaped = false;
+        while let Some(byte) = self.text.as_bytes().get(self.cursor) {
+            self.cursor += 1;
+            if *byte == b'"' && !escaped {
+                return serde_json::from_str(&self.text[start..self.cursor]).map_err(|_| syntax());
+            }
+            escaped = *byte == b'\\' && !escaped;
+        }
+        Err(syntax())
+    }
+
+    fn value(&mut self, depth: usize) -> Result<Json, NativeError> {
+        self.whitespace();
+        if depth > MAX_NESTING_DEPTH {
+            return Err(raise("json_depth", "JSON exceeds the kernel nesting limit"));
+        }
+        match self.text.as_bytes().get(self.cursor) {
+            Some(b'"') => self.string().map(Json::Text),
+            Some(b'[') => {
+                self.cursor += 1;
+                let mut items = Vec::new();
+                if self.take(b']') {
+                    return Ok(Json::Array(items));
+                }
+                loop {
+                    items.push(self.value(depth + 1)?);
+                    if self.take(b']') {
+                        return Ok(Json::Array(items));
+                    }
+                    if !self.take(b',') {
+                        return Err(syntax());
+                    }
+                }
+            }
+            Some(b'{') => {
+                self.cursor += 1;
+                let mut fields: Vec<(String, Json)> = Vec::new();
+                if self.take(b'}') {
+                    return Ok(Json::Object(fields));
+                }
+                loop {
+                    let name = self.string()?;
+                    if !self.take(b':') {
+                        return Err(syntax());
+                    }
+                    let value = self.value(depth + 1)?;
+                    if let Some((_, old)) = fields.iter_mut().find(|(key, _)| *key == name) {
+                        *old = value;
+                    } else {
+                        fields.push((name, value));
+                    }
+                    if self.take(b'}') {
+                        return Ok(Json::Object(fields));
+                    }
+                    if !self.take(b',') {
+                        return Err(syntax());
+                    }
+                }
+            }
+            Some(b'-' | b'0'..=b'9') => {
+                let start = self.cursor;
+                while self
+                    .text
+                    .as_bytes()
+                    .get(self.cursor)
+                    .is_some_and(|b| matches!(b, b'-' | b'+' | b'.' | b'e' | b'E' | b'0'..=b'9'))
+                {
+                    self.cursor += 1;
+                }
+                NumberToken::new(&self.text[start..self.cursor])
+                    .map(Json::Number)
+                    .map_err(|_| syntax())
+            }
+            _ => {
+                for (word, value) in [
+                    ("null", Json::Null),
+                    ("true", Json::Bool(true)),
+                    ("false", Json::Bool(false)),
+                ] {
+                    if self.text[self.cursor..].starts_with(word) {
+                        self.cursor += word.len();
+                        return Ok(value);
+                    }
+                }
+                Err(syntax())
+            }
+        }
+    }
+}
+
+fn syntax() -> NativeError {
+    raise("json_syntax", "invalid JSON, including unpaired surrogates")
+}
+
+fn read(text: &str) -> Result<Json, NativeError> {
+    let mut parser = Parser { text, cursor: 0 };
+    let json = parser.value(0)?;
+    parser.whitespace();
+    if parser.cursor != text.len() {
+        return Err(syntax());
+    }
+    Ok(json)
+}
+
+fn fits(json: &Json, ty: &Type, policy: NumberPolicy) -> Result<(), NativeError> {
+    if let Type::Union(members) = ty {
+        for member in members {
+            match fits(json, member, policy) {
+                Ok(()) => return Ok(()),
+                Err(NativeError::Raised(_)) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        return Err(mismatch());
+    }
+    match (json, ty) {
+        (Json::Number(token), _) => {
+            decode_number(token, ty, policy)?;
+        }
+        (Json::Null, Type::Null | Type::Any)
+        | (Json::Bool(_), Type::Bool | Type::Any)
+        | (Json::Text(_), Type::Text | Type::Any) => {}
+        (Json::Text(text), Type::Enum(members)) if members.contains(text) => {}
+        (Json::Array(items), Type::Tuple(types)) if items.len() == types.len() => {
+            for (item, ty) in items.iter().zip(types) {
+                fits(item, ty, policy)?;
+            }
+        }
+        (Json::Array(items), Type::List(element)) => {
+            for item in items {
+                fits(item, element, policy)?;
+            }
+        }
+        (Json::Array(items), Type::Any) => {
+            for item in items {
+                fits(item, &Type::Any, policy)?;
+            }
+        }
+        (Json::Object(fields), Type::Any) => {
+            for (_, value) in fields {
+                fits(value, &Type::Any, policy)?;
+            }
+        }
+        (Json::Object(fields), Type::Record(record)) => {
+            for field in &record.fields {
+                if !field.optional && !fields.iter().any(|(name, _)| *name == field.name) {
+                    return Err(mismatch());
+                }
+            }
+            for (name, value) in fields {
+                let ty = record
+                    .fields
+                    .iter()
+                    .find(|field| field.name == *name)
+                    .map(|field| &field.ty)
+                    .or(record.rest.as_deref())
+                    .ok_or_else(mismatch)?;
+                fits(value, ty, policy)?;
+            }
+        }
+        (Json::Object(fields), Type::Map(map)) => {
+            for (name, value) in fields {
+                fits(&Json::Text(name.clone()), &map.key, policy)?;
+                fits(value, &map.value, policy)?;
+            }
+        }
+        _ => return Err(mismatch()),
+    }
+    Ok(())
+}
+
+fn decode(
+    json: &Json,
+    ty: &Type,
+    policy: NumberPolicy,
+    heap: &mut dyn NativeHeap,
+) -> Result<Value, NativeError> {
+    if let Type::Union(members) = ty {
+        let member = members
+            .iter()
+            .find(|member| fits(json, member, policy).is_ok())
+            .ok_or_else(mismatch)?;
+        return decode(json, member, policy, heap);
+    }
+    match json {
+        Json::Null => Ok(Value::Null),
+        Json::Bool(value) => Ok(Value::Bool(*value)),
+        Json::Text(text) => Ok(Value::text(text.as_str())),
+        Json::Number(token) => decode_number(token, ty, policy),
+        Json::Array(items) => {
+            let values: Result<Vec<_>, _> = items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let ty = match ty {
+                        Type::List(element) => element.as_ref(),
+                        Type::Tuple(types) => &types[index],
+                        _ => &Type::Any,
+                    };
+                    decode(item, ty, policy, heap)
+                })
+                .collect();
+            let values = values?;
+            match ty {
+                Type::Tuple(_) => Ok(Value::Tuple(values.into())),
+                _ => Ok(Value::List(heap.allocate(Object::List(values))?)),
+            }
+        }
+        Json::Object(fields) => {
+            let values: Result<Vec<_>, NativeError> = fields
+                .iter()
+                .map(|(name, item)| {
+                    let ty = match ty {
+                        Type::Record(record) => record
+                            .fields
+                            .iter()
+                            .find(|field| field.name == *name)
+                            .map(|field| &field.ty)
+                            .or(record.rest.as_deref())
+                            .ok_or_else(mismatch)?,
+                        Type::Map(map) => &map.value,
+                        _ => &Type::Any,
+                    };
+                    Ok((name.clone(), decode(item, ty, policy, heap)?))
+                })
+                .collect();
+            let values = values?;
+            if matches!(ty, Type::Map(_)) {
+                Ok(Value::Map(
+                    heap.allocate(Object::Map(
+                        values
+                            .into_iter()
+                            .map(|(key, value)| (Value::text(key), value))
+                            .collect(),
+                    ))?,
+                ))
+            } else {
+                Ok(Value::Record(heap.allocate(Object::Record(values))?))
+            }
+        }
+    }
+}
+
+/// Parses strict JSON into a fresh kernel graph, decoded by the stated type.
+///
+/// Numbers retain their spelling until `decode_number`; arrays under `Any`
+/// become lists and objects become records. Duplicate keys take their last
+/// value in the position of their first occurrence. Invalid JSON, including
+/// lone surrogates, raises `json_syntax`; nesting past 64 raises `json_depth`.
+/// Stated-type mismatches raise `effect_result`. Validation precedes allocation.
+pub fn parse_json(
+    text: &str,
+    expected: &Type,
+    policy: NumberPolicy,
+    heap: &mut dyn NativeHeap,
+) -> Result<Value, NativeError> {
+    let json = read(text)?;
+    fits(&json, expected, policy)?;
+    decode(&json, expected, policy, heap)
+}
+
+fn quote(text: &str, out: &mut String) -> Result<(), NativeError> {
+    out.push_str(&serde_json::to_string(text).map_err(|_| syntax())?);
+    Ok(())
+}
+
+fn write(
+    value: &Value,
+    heap: &dyn NativeHeap,
+    active: &mut BTreeSet<ObjectId>,
+    depth: usize,
+    out: &mut String,
+) -> Result<(), NativeError> {
+    if depth > MAX_NESTING_DEPTH {
+        return Err(raise("json_depth", "JSON exceeds the kernel nesting limit"));
+    }
+    match value {
+        Value::Null => out.push_str("null"),
+        Value::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
+        Value::Int(integer) => out.push_str(&integer.to_string()),
+        Value::Float(float) if float.get().is_finite() => out.push_str(&float.to_string()),
+        Value::Text(text) => quote(text, out)?,
+        Value::Tuple(items) => write_array(items, heap, active, depth, out)?,
+        Value::List(id) | Value::Map(id) | Value::Record(id) => {
+            if !active.insert(*id) {
+                return Err(raise("cycle", "cyclic value cannot be JSON"));
+            }
+            let mut items = Vec::new();
+            let mut fields = Vec::new();
+            let mut error = None;
+            heap.visit(*id, &mut |element| {
+                match (value, element) {
+                    (Value::List(_), Element::Item(value)) => items.push(value.clone()),
+                    (Value::Record(_), Element::Field { name, value }) => {
+                        fields.push((name.to_owned(), value.clone()))
+                    }
+                    (
+                        Value::Map(_),
+                        Element::Entry {
+                            key: Value::Text(key),
+                            value,
+                        },
+                    ) => fields.push((key.to_string(), value.clone())),
+                    (Value::Map(_), Element::Entry { .. }) => {
+                        error = Some(raise("json_key", "JSON map keys must be text"));
+                        return ControlFlow::Break(());
+                    }
+                    _ => {
+                        error = Some(raise("not_data", "invalid heap object for JSON"));
+                        return ControlFlow::Break(());
+                    }
+                }
+                ControlFlow::Continue(())
+            });
+            if let Some(error) = error {
+                return Err(error);
+            }
+            if matches!(value, Value::List(_)) {
+                write_array(&items, heap, active, depth, out)?;
+            } else {
+                out.push('{');
+                for (index, (name, value)) in fields.iter().enumerate() {
+                    if index != 0 {
+                        out.push(',');
+                    }
+                    quote(name, out)?;
+                    out.push(':');
+                    write(value, heap, active, depth + 1, out)?;
+                }
+                out.push('}');
+            }
+            active.remove(id);
+        }
+        Value::Float(_) => return Err(raise("json_number", "JSON refuses NaN and infinity")),
+        _ => return Err(raise("not_data", "value kind has no JSON representation")),
+    }
+    Ok(())
+}
+
+fn write_array(
+    items: &[Value],
+    heap: &dyn NativeHeap,
+    active: &mut BTreeSet<ObjectId>,
+    depth: usize,
+    out: &mut String,
+) -> Result<(), NativeError> {
+    out.push('[');
+    for (index, value) in items.iter().enumerate() {
+        if index != 0 {
+            out.push(',');
+        }
+        write(value, heap, active, depth + 1, out)?;
+    }
+    out.push(']');
+    Ok(())
+}
+
+/// Writes compact JSON in insertion order, preserving all integer digits.
+///
+/// Tuples and lists are arrays; records and text-keyed maps are objects. Shared
+/// objects are copied each time; cycles raise `cycle`. Absent, bytes, timestamps,
+/// sets, errors, functions, closures, task handles, host handles and refs raise
+/// `not_data`; no value is silently omitted or coerced. NaN/infinity raise
+/// `json_number`, non-text map keys `json_key`, excessive nesting `json_depth`.
+pub fn stringify_json(value: &Value, heap: &dyn NativeHeap) -> Result<String, NativeError> {
+    let mut out = String::new();
+    write(value, heap, &mut BTreeSet::new(), 0, &mut out)?;
+    Ok(out)
+}
+
+pub(super) fn functions() -> Vec<Function> {
+    vec![
+        definition(
+            "json.parse",
+            &[
+                ("text", Type::Text),
+                (
+                    "numbers",
+                    Type::Enum(vec!["int".into(), "float".into(), "number".into()]),
+                ),
+                (
+                    "policy",
+                    Type::Enum(vec!["by_spelling".into(), "float".into()]),
+                ),
+            ],
+            Type::Any,
+            &["json_syntax", "json_depth"],
+            parse,
+        ),
+        definition(
+            "json.stringify",
+            &[("value", Type::Any)],
+            Type::Text,
+            &["json_number", "json_key", "json_depth"],
+            stringify,
+        ),
+    ]
+}
+
+fn parse(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let json = read(text_arg(&call, 0)?)?;
+    let numbers = match text_arg(&call, 1)? {
+        "int" => Type::Int,
+        "float" => Type::Float,
+        "number" => Type::Number,
+        _ => return Err(raise("type_error", "expected int, float or number")),
+    };
+    let policy = match text_arg(&call, 2)? {
+        "by_spelling" => NumberPolicy::BySpelling,
+        "float" => NumberPolicy::Float,
+        _ => return Err(raise("type_error", "expected a number policy")),
+    };
+    decode_with_numbers(&json, &numbers, policy, call.heap)
+}
+
+fn decode_with_numbers(
+    json: &Json,
+    numbers: &Type,
+    policy: NumberPolicy,
+    heap: &mut dyn NativeHeap,
+) -> Result<Value, NativeError> {
+    match json {
+        Json::Number(token) => decode_number(token, numbers, policy),
+        Json::Array(items) => {
+            let values = items
+                .iter()
+                .map(|item| decode_with_numbers(item, numbers, policy, heap))
+                .collect::<Result<_, _>>()?;
+            Ok(Value::List(heap.allocate(Object::List(values))?))
+        }
+        Json::Object(fields) => {
+            let values = fields
+                .iter()
+                .map(|(key, item)| {
+                    Ok((
+                        key.clone(),
+                        decode_with_numbers(item, numbers, policy, heap)?,
+                    ))
+                })
+                .collect::<Result<_, NativeError>>()?;
+            Ok(Value::Record(heap.allocate(Object::Record(values))?))
+        }
+        _ => decode(json, &Type::Any, policy, heap),
+    }
+}
+
+fn stringify(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    stringify_json(arg(&call, 0)?, call.heap).map(Value::text)
+}

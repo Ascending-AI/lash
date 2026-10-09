@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "int": "-255"
+        },
+        {
+          "int": "16"
+        }
+      ],
+      "expected": {
+        "charged": 9,
+        "outcome": {
+          "returned": {
+            "text": "-ff"
+          }
+        },
+        "work": 0
+      },
+      "function": "d7976e4f7c70153f8db1a350fe6f7188c51a977759f3b2a705085dd7c7b909e5",
+      "name": "format.radix.42"
+    },
+    {
+      "args": [
+        {
+          "text": "😀"
+        },
+        {
+          "int": "3"
+        },
+        {
+          "text": "0"
+        },
+        {
+          "text": "start"
+        }
+      ],
+      "expected": {
+        "charged": 23,
+        "outcome": {
+          "returned": {
+            "text": "00😀"
+          }
+        },
+        "work": 0
+      },
+      "function": "e1221e015ed8cd93008eae625e62959f3e56dbb336a1e852bb6ef329039165d3",
+      "name": "format.pad.43"
+    }
+  ],
+  "rule": "K-LFMT-002"
+}

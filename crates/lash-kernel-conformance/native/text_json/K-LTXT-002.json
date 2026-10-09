@@ -1,0 +1,29 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "a😀z"
+        },
+        {
+          "int": "1"
+        },
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "charged": 17,
+        "outcome": {
+          "returned": {
+            "text": "😀"
+          }
+        },
+        "work": 0
+      },
+      "function": "beb8641e7c50c24e17631035f77144f760116ffbb7bc09d76f2c19097eee960f",
+      "name": "text.slice.4"
+    }
+  ],
+  "rule": "K-LTXT-002"
+}

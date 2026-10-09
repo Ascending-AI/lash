@@ -1,0 +1,109 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "a"
+        },
+        {
+          "text": "😀"
+        }
+      ],
+      "expected": {
+        "charged": 14,
+        "outcome": {
+          "returned": {
+            "text": "a😀"
+          }
+        },
+        "work": 0
+      },
+      "function": "053bb9fc397751e38be4d2253523e0f9955a9c041635e37278c46f23466b9a3b",
+      "name": "text.concat.11"
+    },
+    {
+      "args": [
+        {
+          "text": "a..b.."
+        },
+        {
+          "text": ".."
+        }
+      ],
+      "expected": {
+        "charged": 20,
+        "outcome": {
+          "returned": {
+            "list": [
+              {
+                "text": "a"
+              },
+              {
+                "text": "b"
+              },
+              {
+                "text": ""
+              }
+            ]
+          }
+        },
+        "work": 0
+      },
+      "function": "13dc6b48bba57ab47a155ce27f81ac5ea0f434e3c920431a22d256321b891e70",
+      "name": "text.split.14"
+    },
+    {
+      "args": [
+        {
+          "list": [
+            {
+              "text": "a"
+            },
+            {
+              "text": "😀"
+            }
+          ]
+        },
+        {
+          "text": "|"
+        }
+      ],
+      "expected": {
+        "charged": 20,
+        "outcome": {
+          "returned": {
+            "text": "a|😀"
+          }
+        },
+        "work": 0
+      },
+      "function": "3032f575e3093e9e652f62859d7dcecfb95d6e3e2c5669dc3bb55181fb269283",
+      "name": "text.join.15"
+    },
+    {
+      "args": [
+        {
+          "text": "aaa"
+        },
+        {
+          "text": "aa"
+        },
+        {
+          "text": "x"
+        }
+      ],
+      "expected": {
+        "charged": 13,
+        "outcome": {
+          "returned": {
+            "text": "xa"
+          }
+        },
+        "work": 0
+      },
+      "function": "f4cb1896b1f18a441a139d14f57e97370ce6d16c3d913b8c70228d088c489bb7",
+      "name": "text.replace.16"
+    }
+  ],
+  "rule": "K-LTXT-005"
+}

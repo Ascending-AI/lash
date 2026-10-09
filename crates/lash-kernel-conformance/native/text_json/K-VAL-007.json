@@ -1,0 +1,133 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "a😀z"
+        }
+      ],
+      "expected": {
+        "charged": 10,
+        "outcome": {
+          "returned": {
+            "int": "3"
+          }
+        },
+        "work": 0
+      },
+      "function": "b66f4b89cffe6636459db57eae646b19497ac8d5ce2dadd5fa80edf2c607b14a",
+      "name": "text.len.0"
+    },
+    {
+      "args": [
+        {
+          "text": "a😀z"
+        }
+      ],
+      "expected": {
+        "charged": 10,
+        "outcome": {
+          "returned": {
+            "int": "4"
+          }
+        },
+        "work": 0
+      },
+      "function": "0ab8890e98fd70cf14e795cde85189a9575f955aae05d972e0ec6e22f77c0942",
+      "name": "text.utf16_len.1"
+    },
+    {
+      "args": [
+        {
+          "text": "a😀z"
+        },
+        {
+          "int": "1"
+        }
+      ],
+      "expected": {
+        "charged": 15,
+        "outcome": {
+          "returned": {
+            "text": "😀"
+          }
+        },
+        "work": 0
+      },
+      "function": "b8bd55e5290609b8cac9374d52e5d3d12749ee890a8ae7f3c884478fbdc9f72c",
+      "name": "text.get.2"
+    },
+    {
+      "args": [
+        {
+          "text": "a😀z"
+        },
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "charged": 12,
+        "outcome": {
+          "returned": {
+            "int": "56832"
+          }
+        },
+        "work": 0
+      },
+      "function": "c6e4f893a9d4cdccb5327a96351d64cb5b66019aeaf1c65bf364b6835f47794d",
+      "name": "text.utf16_get.3"
+    },
+    {
+      "args": [
+        {
+          "text": "a😀z"
+        },
+        {
+          "int": "1"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "charged": 17,
+        "outcome": {
+          "returned": {
+            "text": "😀"
+          }
+        },
+        "work": 0
+      },
+      "function": "c5122544b5fe555fed7c1c724d948c1ec55dd6e1e4cea2d2ed64bcad6cabcd34",
+      "name": "text.utf16_slice.5"
+    },
+    {
+      "args": [
+        {
+          "text": "a😀z"
+        },
+        {
+          "int": "1"
+        },
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "charged": 12,
+        "outcome": {
+          "raised": {
+            "data": "null",
+            "kind": "text_boundary",
+            "message": "UTF-16 slice splits a surrogate pair"
+          }
+        },
+        "work": 0
+      },
+      "function": "c5122544b5fe555fed7c1c724d948c1ec55dd6e1e4cea2d2ed64bcad6cabcd34",
+      "name": "text.utf16_slice.6"
+    }
+  ],
+  "rule": "K-VAL-007"
+}

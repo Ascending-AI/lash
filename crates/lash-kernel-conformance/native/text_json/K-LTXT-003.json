@@ -1,0 +1,53 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "😀z"
+        },
+        {
+          "text": "z"
+        },
+        {
+          "int": "0"
+        }
+      ],
+      "expected": {
+        "charged": 12,
+        "outcome": {
+          "returned": {
+            "int": "1"
+          }
+        },
+        "work": 0
+      },
+      "function": "94bfbb8a0581ee8cecf48e5d7b2e2e20da5efc495140b9c588aab76fd82d7b26",
+      "name": "text.find.7"
+    },
+    {
+      "args": [
+        {
+          "text": "😀z"
+        },
+        {
+          "text": "z"
+        },
+        {
+          "int": "0"
+        }
+      ],
+      "expected": {
+        "charged": 12,
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "work": 0
+      },
+      "function": "26ba50c6c819b02e8bd3506be9931ec6efa819afbd06a7321ee008a36eea0c2d",
+      "name": "text.utf16_find.8"
+    }
+  ],
+  "rule": "K-LTXT-003"
+}

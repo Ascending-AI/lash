@@ -1,0 +1,497 @@
+use lash_kernel_doc::{NativeCall, NativeError, Object, Type, Value};
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
+
+use super::{
+    Function, count_arg, definition, int, integer_arg, ordering, raise, sequence, sequence_type,
+    text_arg,
+};
+
+pub(super) fn functions() -> Vec<Function> {
+    let mut functions = Vec::new();
+    for (name, native) in [
+        (
+            "text.len",
+            len as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+        ),
+        ("text.utf16_len", utf16_len),
+    ] {
+        functions.push(definition(
+            name,
+            &[("text", Type::Text)],
+            Type::Int,
+            &[],
+            native,
+        ));
+    }
+    for (name, result, native) in [
+        (
+            "text.get",
+            Type::Text,
+            get as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+        ),
+        ("text.utf16_get", Type::Int, utf16_get),
+    ] {
+        functions.push(definition(
+            name,
+            &[("text", Type::Text), ("index", Type::Int)],
+            result,
+            &[],
+            native,
+        ));
+    }
+    for (name, native) in [
+        (
+            "text.slice",
+            slice as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+        ),
+        ("text.utf16_slice", utf16_slice),
+    ] {
+        functions.push(definition(
+            name,
+            &[
+                ("text", Type::Text),
+                ("start", Type::Int),
+                ("end", Type::Int),
+            ],
+            Type::Text,
+            &[],
+            native,
+        ));
+    }
+    for (name, native) in [
+        (
+            "text.find",
+            find as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+        ),
+        ("text.utf16_find", utf16_find),
+    ] {
+        functions.push(definition(
+            name,
+            &[
+                ("text", Type::Text),
+                ("needle", Type::Text),
+                ("start", Type::Int),
+            ],
+            Type::Int,
+            &[],
+            native,
+        ));
+    }
+    for (name, result, native) in [
+        (
+            "text.compare",
+            Type::Int,
+            compare as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+        ),
+        ("text.utf16_compare", Type::Int, utf16_compare),
+        ("text.concat", Type::Text, concat),
+        ("text.starts_with", Type::Bool, starts_with),
+        ("text.ends_with", Type::Bool, ends_with),
+        ("text.split", sequence_type(Type::Text), split),
+    ] {
+        functions.push(definition(
+            name,
+            &[("text", Type::Text), ("other", Type::Text)],
+            result,
+            &[],
+            native,
+        ));
+    }
+    functions.push(definition(
+        "text.join",
+        &[
+            ("items", sequence_type(Type::Text)),
+            ("separator", Type::Text),
+        ],
+        Type::Text,
+        &[],
+        join,
+    ));
+    functions.push(definition(
+        "text.replace",
+        &[
+            ("text", Type::Text),
+            ("needle", Type::Text),
+            ("replacement", Type::Text),
+        ],
+        Type::Text,
+        &[],
+        replace,
+    ));
+    functions.push(definition(
+        "text.repeat",
+        &[("text", Type::Text), ("count", Type::Int)],
+        Type::Text,
+        &[],
+        repeat,
+    ));
+    for (name, native) in [
+        (
+            "text.pad_start",
+            pad_start as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+        ),
+        ("text.pad_end", pad_end),
+    ] {
+        functions.push(definition(
+            name,
+            &[
+                ("text", Type::Text),
+                ("width", Type::Int),
+                ("fill", Type::Text),
+            ],
+            Type::Text,
+            &[],
+            native,
+        ));
+    }
+    let (major, minor, patch) = char::UNICODE_VERSION;
+    for (name, native) in [
+        (
+            "trim",
+            trim as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+        ),
+        ("trim_start", trim_start),
+        ("trim_end", trim_end),
+        ("lower", lower),
+        ("upper", upper),
+    ] {
+        functions.push(definition(
+            &format!("text.{name}_u{major}_{minor}_{patch}"),
+            &[("text", Type::Text)],
+            Type::Text,
+            &[],
+            native,
+        ));
+    }
+    for (name, native) in [
+        (
+            "text.to_code_points",
+            to_code_points as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+        ),
+        ("text.to_utf16_units", to_utf16_units),
+    ] {
+        functions.push(definition(
+            name,
+            &[("text", Type::Text)],
+            sequence_type(Type::Int),
+            &[],
+            native,
+        ));
+    }
+    for (name, native) in [
+        (
+            "text.from_code_points",
+            from_code_points as fn(NativeCall<'_>) -> Result<Value, NativeError>,
+        ),
+        ("text.from_utf16_units", from_utf16_units),
+    ] {
+        functions.push(definition(
+            name,
+            &[("items", sequence_type(Type::Int))],
+            Type::Text,
+            &["invalid_scalar", "invalid_utf16"],
+            native,
+        ));
+    }
+    functions
+}
+
+/// Negative positions count from the end; slice positions are clamped.
+pub(super) fn position(index: &BigInt, len: usize) -> usize {
+    let index = if index < &BigInt::from(0) {
+        index + BigInt::from(len)
+    } else {
+        index.clone()
+    };
+    if index < BigInt::from(0) {
+        0
+    } else {
+        index.to_usize().unwrap_or(usize::MAX).min(len)
+    }
+}
+
+fn element_position(index: &BigInt, len: usize) -> Result<usize, NativeError> {
+    let index = if index < &BigInt::from(0) {
+        index + BigInt::from(len)
+    } else {
+        index.clone()
+    };
+    index
+        .to_usize()
+        .filter(|i| *i < len)
+        .ok_or_else(|| raise("index_out_of_range", "text index is out of range"))
+}
+
+fn len(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(int(text_arg(&call, 0)?.chars().count()))
+}
+fn utf16_len(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(int(text_arg(&call, 0)?.encode_utf16().count()))
+}
+
+fn get(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let text = text_arg(&call, 0)?;
+    let index = element_position(integer_arg(&call, 1)?, text.chars().count())?;
+    text.chars()
+        .nth(index)
+        .map(|c| Value::text(c.to_string()))
+        .ok_or_else(|| raise("index_out_of_range", "text index is out of range"))
+}
+
+fn utf16_get(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let text = text_arg(&call, 0)?;
+    let index = element_position(integer_arg(&call, 1)?, text.encode_utf16().count())?;
+    text.encode_utf16()
+        .nth(index)
+        .map(int)
+        .ok_or_else(|| raise("index_out_of_range", "text index is out of range"))
+}
+
+fn byte_at_point(text: &str, position: usize) -> usize {
+    text.char_indices()
+        .nth(position)
+        .map_or(text.len(), |(byte, _)| byte)
+}
+
+fn byte_at_unit(text: &str, position: usize) -> Result<usize, NativeError> {
+    let mut unit = 0;
+    for (byte, c) in text.char_indices() {
+        if unit == position {
+            return Ok(byte);
+        }
+        unit += c.len_utf16();
+        if unit > position {
+            return Err(raise(
+                "text_boundary",
+                "UTF-16 slice splits a surrogate pair",
+            ));
+        }
+    }
+    Ok(text.len())
+}
+
+fn slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    slice_by(call, false)
+}
+fn utf16_slice(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    slice_by(call, true)
+}
+
+fn slice_by(call: NativeCall<'_>, units: bool) -> Result<Value, NativeError> {
+    let text = text_arg(&call, 0)?;
+    let len = if units {
+        text.encode_utf16().count()
+    } else {
+        text.chars().count()
+    };
+    let start = position(integer_arg(&call, 1)?, len);
+    let end = position(integer_arg(&call, 2)?, len);
+    let (start, end) = if units {
+        (byte_at_unit(text, start)?, byte_at_unit(text, end)?)
+    } else {
+        (byte_at_point(text, start), byte_at_point(text, end))
+    };
+    Ok(Value::text(if start > end {
+        ""
+    } else {
+        &text[start..end]
+    }))
+}
+
+fn find(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let text = text_arg(&call, 0)?;
+    let needle = text_arg(&call, 1)?;
+    let start = position(integer_arg(&call, 2)?, text.chars().count());
+    let suffix = &text[byte_at_point(text, start)..];
+    Ok(suffix.find(needle).map_or_else(
+        || int(-1),
+        |byte| int(start + suffix[..byte].chars().count()),
+    ))
+}
+
+fn utf16_find(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let text: Vec<_> = text_arg(&call, 0)?.encode_utf16().collect();
+    let needle: Vec<_> = text_arg(&call, 1)?.encode_utf16().collect();
+    let start = position(integer_arg(&call, 2)?, text.len());
+    if needle.is_empty() {
+        return Ok(int(start));
+    }
+    Ok(text[start..]
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .map_or_else(|| int(-1), |i| int(start + i)))
+}
+
+fn compare(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(ordering(
+        text_arg(&call, 0)?.chars().cmp(text_arg(&call, 1)?.chars()),
+    ))
+}
+fn utf16_compare(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(ordering(
+        text_arg(&call, 0)?
+            .encode_utf16()
+            .cmp(text_arg(&call, 1)?.encode_utf16()),
+    ))
+}
+fn concat(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(Value::text(format!(
+        "{}{}",
+        text_arg(&call, 0)?,
+        text_arg(&call, 1)?
+    )))
+}
+fn starts_with(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(Value::Bool(
+        text_arg(&call, 0)?.starts_with(text_arg(&call, 1)?),
+    ))
+}
+fn ends_with(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(Value::Bool(
+        text_arg(&call, 0)?.ends_with(text_arg(&call, 1)?),
+    ))
+}
+
+fn split(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let text = text_arg(&call, 0)?;
+    let separator = text_arg(&call, 1)?;
+    let items = if separator.is_empty() {
+        text.chars().map(|c| Value::text(c.to_string())).collect()
+    } else {
+        text.split(separator)
+            .map(|s| Value::text(s.to_owned()))
+            .collect()
+    };
+    Ok(Value::List(call.heap.allocate(Object::List(items))?))
+}
+
+fn join(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let items = sequence(&call, 0)?;
+    let items: Result<Vec<_>, _> = items
+        .iter()
+        .map(|v| match v {
+            Value::Text(s) => Ok(s.as_ref()),
+            _ => Err(raise("type_error", "join requires text members")),
+        })
+        .collect();
+    Ok(Value::text(items?.join(text_arg(&call, 1)?)))
+}
+
+fn replace(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(Value::text(
+        text_arg(&call, 0)?.replace(text_arg(&call, 1)?, text_arg(&call, 2)?),
+    ))
+}
+fn trim(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(Value::text(text_arg(&call, 0)?.trim()))
+}
+fn trim_start(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(Value::text(text_arg(&call, 0)?.trim_start()))
+}
+fn trim_end(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(Value::text(text_arg(&call, 0)?.trim_end()))
+}
+fn lower(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(Value::text(text_arg(&call, 0)?.to_lowercase()))
+}
+fn upper(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    Ok(Value::text(text_arg(&call, 0)?.to_uppercase()))
+}
+
+fn repeat(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let text = text_arg(&call, 0)?;
+    let count = count_arg(&call, 1)?;
+    let size = text.len().checked_mul(count).ok_or(NativeError::Memory)?;
+    let mut out = String::new();
+    out.try_reserve(size).map_err(|_| NativeError::Memory)?;
+    if !text.is_empty() {
+        for _ in 0..count {
+            out.push_str(text);
+        }
+    }
+    Ok(Value::text(out))
+}
+
+fn pad_start(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    pad(call, true)
+}
+fn pad_end(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    pad(call, false)
+}
+
+pub(super) fn padded(
+    text: &str,
+    width: usize,
+    fill: &str,
+    start: bool,
+) -> Result<Value, NativeError> {
+    let needed = width.saturating_sub(text.chars().count());
+    if needed == 0 || fill.is_empty() {
+        return Ok(Value::text(text));
+    }
+    let mut padding = String::new();
+    padding
+        .try_reserve(needed.checked_mul(4).ok_or(NativeError::Memory)?)
+        .map_err(|_| NativeError::Memory)?;
+    padding.extend(fill.chars().cycle().take(needed));
+    Ok(Value::text(if start {
+        format!("{padding}{text}")
+    } else {
+        format!("{text}{padding}")
+    }))
+}
+
+fn pad(call: NativeCall<'_>, start: bool) -> Result<Value, NativeError> {
+    padded(
+        text_arg(&call, 0)?,
+        count_arg(&call, 1)?,
+        text_arg(&call, 2)?,
+        start,
+    )
+}
+
+fn to_code_points(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let items = text_arg(&call, 0)?
+        .chars()
+        .map(|c| int(u32::from(c)))
+        .collect();
+    Ok(Value::List(call.heap.allocate(Object::List(items))?))
+}
+fn to_utf16_units(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let items = text_arg(&call, 0)?.encode_utf16().map(int).collect();
+    Ok(Value::List(call.heap.allocate(Object::List(items))?))
+}
+
+fn from_code_points(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let chars: Result<String, _> = sequence(&call, 0)?
+        .iter()
+        .map(|v| {
+            let Value::Int(i) = v else {
+                return Err(raise("type_error", "expected integer code point"));
+            };
+            i.as_bigint()
+                .to_u32()
+                .and_then(char::from_u32)
+                .ok_or_else(|| raise("invalid_scalar", "code point is not a Unicode scalar"))
+        })
+        .collect();
+    Ok(Value::text(chars?))
+}
+
+fn from_utf16_units(call: NativeCall<'_>) -> Result<Value, NativeError> {
+    let units: Result<Vec<_>, _> = sequence(&call, 0)?
+        .iter()
+        .map(|v| {
+            let Value::Int(i) = v else {
+                return Err(raise("type_error", "expected integer UTF-16 unit"));
+            };
+            i.as_bigint()
+                .to_u16()
+                .ok_or_else(|| raise("invalid_utf16", "UTF-16 unit is outside 0..65535"))
+        })
+        .collect();
+    String::from_utf16(&units?)
+        .map(Value::text)
+        .map_err(|_| raise("invalid_utf16", "UTF-16 contains an unpaired surrogate"))
+}

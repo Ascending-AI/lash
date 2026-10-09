@@ -1,0 +1,47 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "float": "2.5"
+        },
+        {
+          "int": "0"
+        }
+      ],
+      "expected": {
+        "charged": 5,
+        "outcome": {
+          "returned": {
+            "text": "2"
+          }
+        },
+        "work": 0
+      },
+      "function": "2ca19578b4ce086641453e4dd70f5ac9d011480c49eabe57a14ab1e082d370e8",
+      "name": "format.fixed.40"
+    },
+    {
+      "args": [
+        {
+          "float": "125.0"
+        },
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "charged": 11,
+        "outcome": {
+          "returned": {
+            "text": "1.25e2"
+          }
+        },
+        "work": 0
+      },
+      "function": "ab278ef5e5a1595b580dbd24d48fb041f83a731c41dc400ae3349ec786985f64",
+      "name": "format.scientific.41"
+    }
+  ],
+  "rule": "K-LFMT-001"
+}

@@ -1,0 +1,58 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "😀a"
+        }
+      ],
+      "expected": {
+        "charged": 14,
+        "outcome": {
+          "returned": {
+            "list": [
+              {
+                "int": "128512"
+              },
+              {
+                "int": "97"
+              }
+            ]
+          }
+        },
+        "work": 0
+      },
+      "function": "03c540506ed58e84b3427032fb5add8ef8bc8e24644f3d0b9d2aec517fadb3d0",
+      "name": "text.to_code_points.20"
+    },
+    {
+      "args": [
+        {
+          "text": "😀a"
+        }
+      ],
+      "expected": {
+        "charged": 17,
+        "outcome": {
+          "returned": {
+            "list": [
+              {
+                "int": "55357"
+              },
+              {
+                "int": "56832"
+              },
+              {
+                "int": "97"
+              }
+            ]
+          }
+        },
+        "work": 0
+      },
+      "function": "50091377eecbdc3327e5e09312928233e3712759993e3eab042693ba6803388a",
+      "name": "text.to_utf16_units.21"
+    }
+  ],
+  "rule": "K-LTXT-009"
+}

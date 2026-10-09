@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "args": [
+        {
+          "text": "😀a"
+        },
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "charged": 20,
+        "outcome": {
+          "returned": {
+            "text": "😀a😀a"
+          }
+        },
+        "work": 0
+      },
+      "function": "e8c515ecd4b4c385c9b50bcaef2b4d86467a8f8289f3fb8cbd55463bb9ae8b18",
+      "name": "text.repeat.17"
+    },
+    {
+      "args": [
+        {
+          "text": "😀"
+        },
+        {
+          "int": "4"
+        },
+        {
+          "text": "ab"
+        }
+      ],
+      "expected": {
+        "charged": 19,
+        "outcome": {
+          "returned": {
+            "text": "aba😀"
+          }
+        },
+        "work": 0
+      },
+      "function": "72220a9f047af7722f5b69c5d7feae9d11ed2f7926345724aec90c6983cddc74",
+      "name": "text.pad_start.18"
+    },
+    {
+      "args": [
+        {
+          "text": "😀"
+        },
+        {
+          "int": "3"
+        },
+        {
+          "text": "ab"
+        }
+      ],
+      "expected": {
+        "charged": 18,
+        "outcome": {
+          "returned": {
+            "text": "😀ab"
+          }
+        },
+        "work": 0
+      },
+      "function": "bba2416c6f14fe3b06274cbbf4c740354f425cb6758852d9f570d67f880e5d9b",
+      "name": "text.pad_end.19"
+    }
+  ],
+  "rule": "K-LTXT-007"
+}

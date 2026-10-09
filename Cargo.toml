@@ -48,6 +48,7 @@ members = [
     "crates/lash-vm-client",
     "crates/lash-kernel-check",
     "crates/lash-kernel-doc",
+    "crates/lash-kernel-lib",
     "crates/lash-kernel-vm",
     "crates/lash-ext-regex-ecma",
     "examples/agent-workbench",
