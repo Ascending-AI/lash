@@ -245,7 +245,7 @@ impl Adapter<'_> {
         }
         if let Some(diagnostic) = unparenthesized
             .as_member()
-            .and_then(builtin_prototype_mutation)
+            .and_then(|member| builtin_prototype_mutation(self, member))
         {
             return Err(diagnostic);
         }
@@ -258,11 +258,17 @@ impl Adapter<'_> {
                 "Unsupported: delete on a non-member expression. Use delete object.member.",
                 span,
             )),
-            _ => Err(Diagnostic::new(
-                DiagnosticCode::DeleteNonReferenceUnsupported,
-                "`delete` of an operand that is not a property reference is refused, as `tsc --strict` refuses it (TS2703)",
-                span,
-            )),
+            _ => {
+                let Some(text) = self.source_text(operand.span()) else {
+                    unreachable!("the operand has source text");
+                };
+                Err(Diagnostic::with_repair(
+                    DiagnosticCode::DeleteNonReferenceUnsupported,
+                    "`delete` of an operand that is not a property reference is refused, as `tsc --strict` refuses it (TS2703)",
+                    format!("evaluate the operand as its own statement: `{text};`"),
+                    span,
+                ))
+            }
         }
     }
 

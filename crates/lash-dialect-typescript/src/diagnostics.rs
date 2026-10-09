@@ -213,7 +213,7 @@ impl DiagnosticCode {
             }
             Self::UsingUnsupported => "release the resource explicitly in a `finally` block",
             Self::NewUnsupported => {
-                "only the Error family, `Map`, `Set`, `Date`, `RegExp`, `URL`, and `URLSearchParams` are constructible"
+                "only the Error family, `Array`, `Map`, `Set`, `Date`, `RegExp`, `URL`, and `URLSearchParams` are constructible"
             }
             Self::ForUnsupported => {
                 "run the update in the body before a `continue` that leaves a `try` with a `finally`, and drop it from the loop head"
@@ -712,6 +712,347 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// FIG-5765: a repair preserves the operands the model actually wrote.
+    #[test]
+    fn repairs_name_the_rejected_operands() {
+        let error =
+            crate::validate("const renderInvoice = (text) => text; renderInvoice`invoice`;")
+                .expect_err("tagged templates are refused");
+        assert_eq!(error.code, DiagnosticCode::TaggedTemplateUnsupported);
+        assert!(error.is_dialect_refusal());
+        assert!(
+            error
+                .suggestions
+                .iter()
+                .any(|repair| repair.contains("renderInvoice(`invoice`)")),
+            "the repair must name the user's function and argument: {error}"
+        );
+        for (source, names) in [
+            (
+                "const invoice = [1]; invoice.toLocaleString();",
+                vec!["invoice.toLocaleString"],
+            ),
+            (
+                "const invoice = { total: 1 }; invoice.__proto__;",
+                vec!["invoice", "__proto__"],
+            ),
+            (
+                "const invoice = { total: 1 }; const baseInvoice = { paid: true }; invoice.__proto__ = baseInvoice;",
+                vec!["invoice", "__proto__", "baseInvoice"],
+            ),
+            (
+                "const invoice = { total: 1 }; const CustomInvoice = () => ({}); invoice instanceof CustomInvoice;",
+                vec!["invoice", "CustomInvoice"],
+            ),
+            (
+                "const CustomInvoice = () => ({}); new CustomInvoice();",
+                vec!["CustomInvoice", "`Array`"],
+            ),
+            ("Math.extra();", vec!["Math.extra"]),
+            ("Math;", vec!["Math"]),
+            (
+                "const loadInvoice = () => 1; delete loadInvoice();",
+                vec!["loadInvoice()"],
+            ),
+        ] {
+            let error = crate::validate(source).expect_err("the construct is refused");
+            assert!(error.is_dialect_refusal(), "{error}");
+            for name in names {
+                assert!(
+                    error.suggestions.iter().any(|repair| repair.contains(name)),
+                    "the repair must preserve {name}: {error}"
+                );
+            }
+        }
+    }
+
+    /// FIG-5765: every advertised repair idiom is accepted by the dialect.
+    /// Prose-only idioms have a complete cell witness; concrete site repairs
+    /// are checked against the actual suggestion before lowering that form.
+    #[test]
+    fn every_accepted_repair_idiom_lowers() {
+        use DiagnosticCode::*;
+        let examples = [
+            (
+                ClassUnsupported,
+                "function make(message, code) { return Object.assign(new Error(message), { code }); } make('oops', 'bad');",
+            ),
+            (
+                GeneratorUnsupported,
+                "function collect() { const values = []; for (const n of [1, 2]) values.push(n); return values; } collect();",
+            ),
+            (
+                WithUnsupported,
+                "const invoice = { total: 1 }; invoice.total;",
+            ),
+            (EvalUnsupported, "const answer = 1 + 2; answer;"),
+            (
+                FunctionConstructorUnsupported,
+                "function add(n) { return n + 1; } const inc = n => n + 1; inc(add(1));",
+            ),
+            (
+                LabelUnsupported,
+                "function region() { while (true) { return 1; } } region();",
+            ),
+            (RegexFlagUnsupported, "const r = /x/gimsuy; r.exec('x');"),
+            (
+                RegexIndicesFlagUnsupported,
+                "const match = /x/.exec('x'); if (match) { match.index; match[0]; }",
+            ),
+            (
+                RegexUnicodeSetsFlagUnsupported,
+                "const r = /[a-z]/u; r.test('x');",
+            ),
+            (
+                AccessorUnsupported,
+                "const o = { value: 1, compute: () => 1 }; o.value; o.compute();",
+            ),
+            (
+                PrototypeMutationUnsupported,
+                "const invoice = { total: 1 }; Object.assign({}, invoice, { paid: true });",
+            ),
+            (
+                ThisUnsupported,
+                "function read(value) { return value; } const invoice = read(1); globalThis.invoice;",
+            ),
+            (
+                ArgumentsUnsupported,
+                "function read(...rest) { return rest; } read(1, 2);",
+            ),
+            (NamespaceUnsupported, "const invoice = 1; invoice;"),
+            (
+                DecoratorUnsupported,
+                "const wrap = value => value; const invoice = wrap(1); invoice;",
+            ),
+            (DynamicImportUnsupported, "await echo(1);"),
+            (
+                JsxUnsupported,
+                "const element = { tag: 'p', text: 'invoice' }; const html = `<p>${element.text}</p>`; html;",
+            ),
+            (ImportExportUnsupported, "await echo(1);"),
+            (
+                UsingUnsupported,
+                "const release = () => 1; try { 1; } finally { release(); }",
+            ),
+            (
+                NewUnsupported,
+                "new Array(3); new Map(); new Set(); new Date(0); new RegExp('x'); new URL('https://example.com'); new URLSearchParams('a=b'); new Error('x'); new TypeError('x'); new RangeError('x'); new SyntaxError('x'); new ReferenceError('x'); new URIError('x'); new EvalError('x'); new AggregateError([], 'x');",
+            ),
+            (
+                ForUnsupported,
+                "let i = 0; for (; i < 2;) { try { i++; continue; } finally { console.log(i); } }",
+            ),
+            (
+                ForOfUnsupported,
+                "const values = [1, 2]; for (const value of values) console.log(value);",
+            ),
+            (AwaitRequired, "await echo(1);"),
+            (
+                UnawaitedTool,
+                "await echo(1); await Promise.all([echo(2)]); await Promise.allSettled([echo(3)]);",
+            ),
+            (
+                YieldUnsupported,
+                "function collect() { return [1, 2]; } collect();",
+            ),
+            (
+                TaggedTemplateUnsupported,
+                "const renderInvoice = text => text; renderInvoice(`invoice`);",
+            ),
+            (
+                SuperUnsupported,
+                "const helper = value => value; helper(1);",
+            ),
+            (
+                MetaPropertyUnsupported,
+                "const context = { name: 'invoice' }; context.name;",
+            ),
+            (
+                BigIntUnsupported,
+                "const n = 12; const decimal = '12345678901234567890'; n; decimal;",
+            ),
+            (
+                PrivateNameUnsupported,
+                "function make() { const field = { value: 1 }; return () => field.value; } make()();",
+            ),
+            (SequenceUnsupported, "console.log(1); console.log(2);"),
+            (
+                InstanceOfUnsupported,
+                "const err = new Error('x'); err.name; Array.isArray([]); [] instanceof Array;",
+            ),
+            (DebuggerUnsupported, "console.log({ total: 1 });"),
+            (
+                LoneSurrogateLiteralUnsupported,
+                r"const character = '\u{1F639}'; character;",
+            ),
+            (DeclareUnsupported, "const invoice = 1; invoice;"),
+            (
+                MutualRecursionUnsupported,
+                "function second(n) { return n; } function first(n) { return second(n); } first(1); const work = [1]; while (work.length) work.pop();",
+            ),
+            (
+                FunctionNotPersisted,
+                "function read(value) { return value; } const invoice = read(1); globalThis.invoice;",
+            ),
+            (
+                NonLiftableCapture,
+                "const job = async (value: number): Promise<number> => { return value; }; job;",
+            ),
+            (
+                ProcessParamTypeUnsupported,
+                "const job = async (n: number, items: number[], row: { total: number }, status: 'open' | 'paid'): Promise<number> => { return n; }; job;",
+            ),
+            (
+                ProcessReturnTypeUnsupported,
+                "const job = async (n: number): Promise<number> => { return n; }; job;",
+            ),
+            (
+                MethodUnsupported,
+                "const invoice = [1]; invoice.map(n => n + 1);",
+            ),
+            (
+                DateImmutable,
+                "const d = new Date(0); const n = 1; new Date(d.getTime() + n);",
+            ),
+            (
+                DeleteNonReferenceUnsupported,
+                "const object = { member: 1 }; delete object.member;",
+            ),
+            (
+                FunctionRedeclarationUnsupported,
+                "function first() { return 1; } function second() { return 2; } let value = first(); value = second();",
+            ),
+            (
+                UnsupportedStatement,
+                "const invoice = 1; console.log(invoice);",
+            ),
+            (UnsupportedExpression, "const invoice = 1; invoice + 2;"),
+            (
+                RegexIteratorPosition,
+                "[...'x'.matchAll(/x/g)]; for (const match of 'x'.matchAll(/x/g)) match[0]; Array.from('x'.matchAll(/x/g)); new Map([[1, 2]]); new Set('x'.matchAll(/x/g)); Object.fromEntries([[1, 2]]);",
+            ),
+            (
+                RegexPatternTooLong,
+                "const first = /x/; const second = /y/; first.test('x'); second.test('y');",
+            ),
+            (
+                RegexNestingLimit,
+                "const first = /x/; const second = /y/; first.test('x'); second.test('y');",
+            ),
+            (
+                SourceNestingLimit,
+                "const subtotal = 1 + 2; const total = subtotal + 3; total;",
+            ),
+            (SourceTooLarge, "const invoice = 1;"),
+            (ReservedIdentifier, "const invoice = 1; invoice;"),
+        ];
+        for code in DiagnosticCode::ALL {
+            if code.accepted_idiom().is_some() {
+                assert!(
+                    examples.iter().any(|(sample_code, _)| sample_code == code),
+                    "{} advertises an idiom with no lowering witness",
+                    code.as_str()
+                );
+            }
+        }
+        for (code, source) in examples {
+            crate::tests::lower_with_effects(source).unwrap_or_else(|error| {
+                panic!(
+                    "{} suggests an unaccepted idiom: {error}\n{source}",
+                    code.as_str()
+                )
+            });
+        }
+
+        let sites = [
+            (
+                "const invoice = { name: 'Invoice' }; const CustomInvoice = () => ({});",
+                "invoice instanceof CustomInvoice;",
+                InstanceOfUnsupported,
+                "(invoice).name",
+            ),
+            (
+                "const renderInvoice = text => text;",
+                "renderInvoice`invoice`;",
+                TaggedTemplateUnsupported,
+                "renderInvoice(`invoice`)",
+            ),
+            (
+                "const renderInvoice = text => text;",
+                r"renderInvoice`\8`;",
+                TaggedTemplateUnsupported,
+                r#"renderInvoice("`\\8`")"#,
+            ),
+            (
+                "const renderInvoice = text => text; const invoice = { total: 1 };",
+                "renderInvoice`total ${invoice.total}`;",
+                TaggedTemplateUnsupported,
+                "renderInvoice(`total ${invoice.total}`)",
+            ),
+            (
+                "let invoice = { total: 1 }; const baseInvoice = { paid: true };",
+                "invoice.__proto__ = baseInvoice;",
+                PrototypeMutationUnsupported,
+                "Object.assign({}, invoice, baseInvoice)",
+            ),
+            (
+                "let invoice = { total: 1 }; const baseInvoice = { paid: true };",
+                "invoice['__proto__'] = baseInvoice;",
+                PrototypeMutationUnsupported,
+                "Object.assign({}, invoice, baseInvoice)",
+            ),
+            (
+                "const paid = true;",
+                "Array.prototype.paid = paid;",
+                PrototypeMutationUnsupported,
+                "({ paid: paid })",
+            ),
+            (
+                "const paid = true; const field = 'paid';",
+                "Array.prototype[field] = paid;",
+                PrototypeMutationUnsupported,
+                "({ [field]: paid })",
+            ),
+            (
+                "const invoice = { total: 1 }; const CustomInvoice = () => ({});",
+                "invoice instanceof CustomInvoice;",
+                InstanceOfUnsupported,
+                "Array.isArray(invoice)",
+            ),
+            (
+                "const invoices = [{ total: 1 }]; const CustomInvoice = () => ({});",
+                "invoices[0] instanceof CustomInvoice;",
+                InstanceOfUnsupported,
+                "Array.isArray(invoices[0])",
+            ),
+            (
+                "const loadInvoice = () => 1;",
+                "delete loadInvoice();",
+                DeleteNonReferenceUnsupported,
+                "loadInvoice();",
+            ),
+        ];
+        for (prelude, refused, code, form) in sites {
+            let error = crate::validate(&format!("{prelude} {refused}"))
+                .expect_err("the source construct is refused");
+            assert_eq!(error.code, code);
+            assert!(error.is_dialect_refusal(), "{error}");
+            assert!(
+                error.suggestions.iter().any(|repair| repair.contains(form)),
+                "the offered form must be the one we lower: {error}\nexpected {form}"
+            );
+            crate::validate(&format!("{prelude} {form};"))
+                .unwrap_or_else(|error| panic!("a repair must lower: {form}: {error}"));
+        }
+        let constructors = NewUnsupported
+            .accepted_idiom()
+            .expect("constructors offer a repair");
+        assert!(
+            constructors.contains("`Array`"),
+            "Array is constructible: {constructors}"
+        );
     }
 
     /// Codes that answer for themselves still answer correctly end to end.

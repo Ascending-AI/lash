@@ -4,7 +4,7 @@ use lash_kernel_doc::{Action, Atom, Callee, Expr, Literal, Place, Stmt};
 
 use super::{Buf, Lowerer, Lowering, Operand, Ty};
 use crate::adapter as ast;
-use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+use crate::{Diagnostic, DiagnosticCode, DiagnosticKind, SourceSpan};
 
 /// A property key, already evaluated.
 #[derive(Clone, Debug)]
@@ -172,11 +172,15 @@ impl Lowerer<'_> {
         }
         let root = path.split('.').next().unwrap_or(path);
         crate::builtins::is_global(root).then(|| {
-            Err(Diagnostic::refusal(
-                DiagnosticCode::UnsupportedExpression,
-                format!("Unsupported: `{path}` as a value. Call one of its functions or read one of its constants."),
-                span,
-            ))
+            Err(Diagnostic {
+                kind: DiagnosticKind::Refusal,
+                ..Diagnostic::with_repair(
+                    DiagnosticCode::UnsupportedExpression,
+                    format!("Unsupported: `{path}` as a value"),
+                    format!("call a function of `{path}` or read one of its constants"),
+                    span,
+                )
+            })
         })
     }
 
@@ -269,15 +273,23 @@ impl Lowerer<'_> {
     ) -> Lowering<Operand> {
         if let ast::Expr::Member {
             property: ast::MemberProperty::Field(name),
+            span: member_span,
             ..
         } = callee
             && name == "toLocaleString"
         {
-            return Err(Diagnostic::refusal(
-                DiagnosticCode::MethodUnsupported,
-                "Unsupported: toLocaleString/Intl formatting is locale-dependent. Build the deterministic string explicitly.",
-                Some(span),
-            ));
+            let method = &self.source[member_span.start..member_span.end];
+            return Err(Diagnostic {
+                kind: DiagnosticKind::Refusal,
+                ..Diagnostic::with_repair(
+                    DiagnosticCode::MethodUnsupported,
+                    "Unsupported: toLocaleString/Intl formatting is locale-dependent",
+                    format!(
+                        "build the deterministic string explicitly from the receiver of `{method}`"
+                    ),
+                    Some(span),
+                )
+            });
         }
         if let Some(wait) = self.wait_of(callee) {
             return self.lower_wait_call(wait, args, span);
@@ -315,11 +327,19 @@ impl Lowerer<'_> {
                 return self.invoke(function, &[receiver, args], Ty::Unknown);
             }
             if !path.starts_with("globalThis.") && !self.table.values.contains_key(path.as_str()) {
-                return Err(Diagnostic::refusal(
-                    DiagnosticCode::MethodUnsupported,
-                    format!("Unsupported: `{path}` is not a function the TypeScript dialect has."),
-                    Some(span),
-                ));
+                return Err(Diagnostic {
+                    kind: DiagnosticKind::Refusal,
+                    ..Diagnostic::with_repair(
+                        DiagnosticCode::MethodUnsupported,
+                        format!(
+                            "Unsupported: `{path}` is not a function the TypeScript dialect has"
+                        ),
+                        format!(
+                            "replace `{path}` with a method the dialect's standard-library contract lists for that receiver"
+                        ),
+                        Some(span),
+                    )
+                });
             }
         }
         match callee {
@@ -372,9 +392,13 @@ impl Lowerer<'_> {
             .then(|| self.table.constructors.get(constructor).copied())
             .flatten();
         let Some(function) = function else {
-            return Err(Diagnostic::new(
+            let Some(idiom) = DiagnosticCode::NewUnsupported.accepted_idiom() else {
+                unreachable!("constructors name their accepted forms");
+            };
+            return Err(Diagnostic::with_repair(
                 DiagnosticCode::NewUnsupported,
                 format!("`new {constructor}` is not in the TypeScript dialect"),
+                format!("use a plain-object factory for `{constructor}`; {}", idiom),
                 self.span,
             ));
         };

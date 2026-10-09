@@ -81,7 +81,9 @@ pub(crate) fn narrow(
                 when_false: Vec::new(),
             }
         }
-        Expr::Binary { left, op, right } => {
+        Expr::Binary {
+            left, op, right, ..
+        } => {
             let (strict, negated) = match op {
                 BinaryOp::StrictEqual => (true, false),
                 BinaryOp::StrictNotEqual => (true, true),

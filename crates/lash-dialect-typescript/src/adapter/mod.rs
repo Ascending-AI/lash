@@ -7,6 +7,7 @@ use swc_common::comments::{CommentKind, Comments, SingleThreadedComments};
 use swc_common::{BytePos, Spanned};
 use swc_ecma_ast as swc;
 
+mod assignments;
 mod declarations;
 mod early_errors;
 mod enums;
@@ -15,6 +16,7 @@ mod goal;
 pub(crate) mod nesting;
 mod optional_chain;
 mod parser;
+mod repairs;
 pub(crate) use parser::Parser;
 mod prototype_chain;
 mod rejections;
@@ -23,10 +25,7 @@ mod types;
 use enums::{ConstEnumValue, enum_member_property_name};
 use goal::Goal;
 use nesting::{guard_source_nesting, source_nesting_diagnostic};
-use prototype_chain::{
-    builtin_prototype_mutation, check_property_key, is_prototype_chain_property,
-    prototype_access_rejection,
-};
+use prototype_chain::{check_property_key, is_prototype_chain_property};
 use rejections::{parser_diagnostic, reject, reject_defect, reject_refusal, source_span};
 use types::unasserted;
 pub(crate) use types::{TypeAnnotation, TypeShape};
@@ -256,6 +255,8 @@ pub(crate) enum Expr {
         value: Box<Expr>,
     },
     Binary {
+        /// Source operands for repairs; synthesized binary tests have none.
+        operand_spans: Option<[SourceSpan; 2]>,
         left: Box<Expr>,
         op: BinaryOp,
         right: Box<Expr>,
@@ -1178,11 +1179,14 @@ impl Adapter<'_> {
                 }
             }
             swc::Expr::Bin(expr) => self.convert_binary(expr)?,
-            swc::Expr::Assign(expr) => Expr::Assign {
-                target: self.convert_assign_target(&expr.left)?,
-                op: convert_assign_op(expr.op),
-                value: Box::new(self.convert_expr(&expr.right)?),
-            },
+            swc::Expr::Assign(expr) => {
+                self.check_assignment_repair(expr)?;
+                Expr::Assign {
+                    target: self.convert_assign_target(&expr.left)?,
+                    op: convert_assign_op(expr.op),
+                    value: Box::new(self.convert_expr(&expr.right)?),
+                }
+            }
             swc::Expr::Member(member) => self.convert_member(member)?,
             swc::Expr::Cond(expr) => Expr::Conditional {
                 test: Box::new(self.convert_expr(&expr.test)?),
@@ -1271,13 +1275,7 @@ impl Adapter<'_> {
                     span,
                 ));
             }
-            swc::Expr::TaggedTpl(_) => {
-                return Err(reject(
-                    DiagnosticCode::TaggedTemplateUnsupported,
-                    "tagged templates",
-                    span,
-                ));
-            }
+            swc::Expr::TaggedTpl(template) => return Err(self.tagged_template_repair(template)),
             swc::Expr::Class(class) => {
                 if let Some(name) = &class.ident {
                     self.identifier(name)?;
@@ -1424,7 +1422,15 @@ impl Adapter<'_> {
                         unreachable!("logical operators are classified above")
                     }
                 };
-                Expr::Binary { left, op, right }
+                Expr::Binary {
+                    operand_spans: Some([
+                        source_span(expr.left.span()),
+                        source_span(expr.right.span()),
+                    ]),
+                    left,
+                    op,
+                    right,
+                }
             }
         })
     }
@@ -1439,11 +1445,7 @@ impl Adapter<'_> {
         }
         let object = self.convert_expr(&member.obj)?;
         if matches!(&object, Expr::Ident(name, _) if name == "prototype") {
-            return Err(reject(
-                DiagnosticCode::PrototypeMutationUnsupported,
-                "prototype access",
-                Some(source_span(member.span)),
-            ));
+            return Err(self.prototype_member_repair(member));
         }
         let property = match &member.prop {
             swc::MemberProp::Ident(name) => {
@@ -1451,7 +1453,7 @@ impl Adapter<'_> {
                     && !(name.sym.as_ref() == "prototype"
                         && matches!(&member.obj.as_ref(), swc::Expr::Ident(owner) if crate::builtins::is_global(owner.sym.as_ref())))
                 {
-                    return Err(prototype_access_rejection(member.span));
+                    return Err(self.prototype_member_repair(member));
                 }
                 MemberProperty::Field(self.identifier_name(name)?)
             }
@@ -1459,7 +1461,7 @@ impl Adapter<'_> {
                 if let swc::Expr::Lit(swc::Lit::Str(name)) = property.expr.as_ref()
                     && is_prototype_chain_property(&name.value.to_string_lossy())
                 {
-                    return Err(prototype_access_rejection(member.span));
+                    return Err(self.prototype_member_repair(member));
                 }
                 MemberProperty::Index(Box::new(self.convert_expr(&property.expr)?))
             }
@@ -1492,70 +1494,6 @@ impl Adapter<'_> {
                 })
             })
             .collect()
-    }
-
-    fn convert_update_target(&self, expr: &swc::Expr) -> Result<AssignTarget, Diagnostic> {
-        if let Some(diagnostic) = expr.as_member().and_then(builtin_prototype_mutation) {
-            return Err(diagnostic);
-        }
-        match unasserted(self.convert_expr(expr)?) {
-            Expr::Ident(name, _) => Ok(AssignTarget::Ident(name)),
-            Expr::Member {
-                object, property, ..
-            } => Ok(AssignTarget::Member { object, property }),
-            _ => Err(Diagnostic::refusal(
-                DiagnosticCode::UnsupportedExpression,
-                "Unsupported: update on a non-assignment target. Assign the expression to a variable first.",
-                Some(source_span(expr.span())),
-            )),
-        }
-    }
-
-    fn convert_assign_target(
-        &self,
-        target: &swc::AssignTarget,
-    ) -> Result<AssignTarget, Diagnostic> {
-        match target {
-            swc::AssignTarget::Simple(swc::SimpleAssignTarget::Ident(name)) => {
-                Ok(AssignTarget::Ident(self.identifier(&name.id)?))
-            }
-            swc::AssignTarget::Simple(swc::SimpleAssignTarget::Member(member)) => {
-                if let Some(diagnostic) = builtin_prototype_mutation(member) {
-                    return Err(diagnostic);
-                }
-                let Expr::Member {
-                    object, property, ..
-                } = self.convert_member(member)?
-                else {
-                    unreachable!()
-                };
-                Ok(AssignTarget::Member { object, property })
-            }
-            swc::AssignTarget::Simple(swc::SimpleAssignTarget::Paren(paren)) => {
-                match unasserted(self.convert_expr(&paren.expr)?) {
-                    Expr::Ident(name, _) => Ok(AssignTarget::ParenIdent(name)),
-                    Expr::Member {
-                        object, property, ..
-                    } => Ok(AssignTarget::Member { object, property }),
-                    _ => Err(Diagnostic::refusal(
-                        DiagnosticCode::UnsupportedExpression,
-                        "Unsupported: this assignment target. Assign to an identifier, member, index, or destructuring pattern.",
-                        Some(source_span(paren.expr.span())),
-                    )),
-                }
-            }
-            swc::AssignTarget::Pat(pattern) => {
-                let pattern: swc::Pat = pattern.clone().into();
-                Ok(AssignTarget::Pattern(Box::new(
-                    self.convert_pattern(&pattern)?,
-                )))
-            }
-            _ => Err(Diagnostic::refusal(
-                DiagnosticCode::UnsupportedExpression,
-                "Unsupported: this assignment target. Assign to an identifier, member, index, or destructuring pattern.",
-                Some(source_span(target.span())),
-            )),
-        }
     }
 }
 

@@ -196,9 +196,9 @@ impl Facts {
             },
             Expr::As { ty, .. } => self.believed(ty),
             Expr::Unary { op, .. } => unary_result(*op),
-            Expr::Binary { left, op, right } => {
-                binary_result(*op, &self.type_of(left), &self.type_of(right))
-            }
+            Expr::Binary {
+                left, op, right, ..
+            } => binary_result(*op, &self.type_of(left), &self.type_of(right)),
             Expr::Logical { left, right, .. } => self.type_of(left).join(&self.type_of(right)),
             Expr::Conditional {
                 consequent,

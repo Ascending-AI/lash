@@ -214,11 +214,13 @@ impl Lowerer<'_> {
         };
         let is_object = both(
             Box::new(ast::Expr::Binary {
+                operand_spans: None,
                 left: held(),
                 op: ast::BinaryOp::StrictNotEqual,
                 right: Box::new(ast::Expr::Null),
             }),
             Box::new(ast::Expr::Binary {
+                operand_spans: None,
                 left: Box::new(ast::Expr::Unary {
                     op: ast::UnaryOp::TypeOf,
                     value: held(),
@@ -230,6 +232,7 @@ impl Lowerer<'_> {
         let is_handle = both(
             is_object,
             Box::new(ast::Expr::Binary {
+                operand_spans: None,
                 left: Box::new(ast::Expr::String(HANDLE_FIELD.to_owned())),
                 op: ast::BinaryOp::In,
                 right: held(),

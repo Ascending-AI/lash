@@ -86,7 +86,12 @@ impl Lowerer<'_> {
                 span,
             } => self.lower_member(expr, object, property, *span),
             ast::Expr::Unary { op, value } => self.lower_unary(*op, value),
-            ast::Expr::Binary { left, op, right } => self.lower_binary(left, *op, right),
+            ast::Expr::Binary {
+                left,
+                op,
+                right,
+                operand_spans,
+            } => self.lower_binary(left, *op, right, *operand_spans),
             ast::Expr::Logical { left, op, right } => {
                 let shown = self.narrowing(left);
                 let left = self.lower_expr(left)?;
@@ -394,6 +399,7 @@ impl Lowerer<'_> {
         left: &ast::Expr,
         op: BinaryOp,
         right: &ast::Expr,
+        operand_spans: Option<[SourceSpan; 2]>,
     ) -> Lowering<Operand> {
         if op == BinaryOp::InstanceOf {
             let test = match right {
@@ -403,9 +409,17 @@ impl Lowerer<'_> {
                 _ => None,
             };
             let Some(test) = test else {
-                return Err(Diagnostic::new(
+                let Some([left_span, right_span]) = operand_spans else {
+                    unreachable!("an instanceof has source operands");
+                };
+                let value = &self.source[left_span.start..left_span.end];
+                let class = &self.source[right_span.start..right_span.end];
+                return Err(Diagnostic::with_repair(
                     DiagnosticCode::InstanceOfUnsupported,
                     "`instanceof` needs a built-in class on its right",
+                    format!(
+                        "for `{value} instanceof {class}`, check `({value}).name` for an error name, or use `Array.isArray({value})` for an array"
+                    ),
                     self.span,
                 ));
             };

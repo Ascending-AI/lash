@@ -245,6 +245,7 @@ struct FunctionFrame {
 }
 
 pub(crate) struct Lowerer<'a> {
+    source: &'a str,
     library: &'a dyn Library,
     /// The effects the host supplies: a call of one is a tool call.
     effects: &'a BTreeMap<EffectName, Signature>,
@@ -294,6 +295,7 @@ pub(crate) fn lower(
             .map(|name| name.as_str().to_string()),
     );
     let mut lowerer = Lowerer {
+        source,
         library: environment.library,
         effects: environment.effects,
         performed: BTreeMap::new(),

@@ -8,7 +8,7 @@
 //! `TS_PROTOTYPE_MUTATION_UNSUPPORTED` for this family since it was written;
 //! this module is what makes the claim true.
 
-use super::{Diagnostic, DiagnosticCode, reject, source_span};
+use super::{Adapter, Diagnostic, DiagnosticCode, reject, source_span};
 use swc_common::Spanned;
 use swc_ecma_ast as swc;
 
@@ -49,8 +49,11 @@ pub(super) fn is_builtin_prototype_object(expr: &swc::Expr) -> bool {
 }
 
 /// The refusal for a member write whose object is `<built-in global>.prototype`.
-pub(super) fn builtin_prototype_mutation(member: &swc::MemberExpr) -> Option<Diagnostic> {
-    is_builtin_prototype_object(&member.obj).then(|| prototype_access_rejection(member.span))
+pub(super) fn builtin_prototype_mutation(
+    adapter: &Adapter<'_>,
+    member: &swc::MemberExpr,
+) -> Option<Diagnostic> {
+    is_builtin_prototype_object(&member.obj).then(|| adapter.prototype_member_repair(member))
 }
 
 pub(super) fn prototype_access_rejection(span: swc_common::Span) -> Diagnostic {
