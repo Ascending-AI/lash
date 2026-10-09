@@ -254,7 +254,11 @@ mod enabled {
     }
     fn histogram(meter: &Meter, metric: Metric) -> Histogram<u64> {
         let def = metric.definition();
-        meter.u64_histogram(def.name).with_unit(def.unit).build()
+        let builder = meter.u64_histogram(def.name).with_unit(def.unit);
+        match super::registry::recommended_latency_histogram_boundaries(def.name) {
+            Some(boundaries) => builder.with_boundaries(boundaries).build(),
+            None => builder.build(),
+        }
     }
     fn gauge(meter: &Meter, metric: Metric) -> Gauge<u64> {
         let def = metric.definition();

@@ -1328,3 +1328,226 @@ fn failure_attributes_preserve_typed_classes_and_model_http_status() {
         );
     }
 }
+
+/// FIG-5728: host resource identity and Lash source identity accompany both
+/// exported signals, independently of the instrumentation schema version.
+#[test]
+fn host_and_lash_versions_accompany_exported_spans_and_metric_points() {
+    use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::trace::{SpanData, SpanExporter};
+
+    #[derive(Debug)]
+    struct Exporter {
+        resource: Resource,
+        exported: Arc<Mutex<Vec<(Resource, SpanData)>>>,
+    }
+    impl SpanExporter for Exporter {
+        async fn export(&self, batch: Vec<SpanData>) -> opentelemetry_sdk::error::OTelSdkResult {
+            self.exported
+                .lock()
+                .unwrap()
+                .extend(batch.into_iter().map(|span| (self.resource.clone(), span)));
+            Ok(())
+        }
+        fn set_resource(&mut self, resource: &Resource) {
+            self.resource = resource.clone();
+        }
+    }
+    let resource = Resource::builder_empty()
+        .with_attributes([KeyValue::new("service.version", "host-release-42")])
+        .build();
+    let spans = Arc::new(Mutex::new(Vec::new()));
+    let provider = SdkTracerProvider::builder()
+        .with_resource(resource.clone())
+        .with_simple_exporter(Exporter {
+            resource: resource.clone(),
+            exported: spans.clone(),
+        })
+        .build();
+    let metrics = InMemoryMetricExporter::default();
+    let meter = SdkMeterProvider::builder()
+        .with_resource(resource)
+        .with_reader(PeriodicReader::builder(metrics.clone()).build())
+        .build();
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::standard());
+    let scope = admit(&adapter, TraceCause::Root);
+    adapter.project(
+        &scope,
+        None,
+        &EmissionSource::NewTransition,
+        &completed(&scope),
+    );
+    adapter
+        .metrics()
+        .runtime_tuning
+        .record_pool_acquire_wait(Duration::from_secs(30), "success");
+    meter.force_flush().unwrap();
+    let spans = spans.lock().unwrap();
+    assert_eq!(spans.len(), 2);
+    let host_version = Some(opentelemetry::Value::from("host-release-42"));
+    let lash_version = KeyValue::new("lash.version", env!("CARGO_PKG_VERSION"));
+    for (resource, span) in spans.iter() {
+        assert_eq!(resource.get(&"service.version".into()), host_version);
+        assert!(
+            span.instrumentation_scope
+                .attributes()
+                .any(|attr| attr == &lash_version)
+        );
+        assert_eq!(
+            span.instrumentation_scope.version(),
+            Some(LASH_INSTRUMENTATION_CONTRACT)
+        );
+        let revision = span
+            .instrumentation_scope
+            .attributes()
+            .find(|attr| attr.key.as_str() == "lash.build.revision");
+        let expected_revision = option_env!("LASH_BUILD_REVISION")
+            .filter(|value| !value.is_empty())
+            .map(|value| KeyValue::new("lash.build.revision", value));
+        assert_eq!(revision, expected_revision.as_ref());
+    }
+    let exported = metrics.get_finished_metrics().unwrap();
+    let resource = exported.last().unwrap();
+    assert_eq!(
+        resource.resource().get(&"service.version".into()),
+        host_version
+    );
+    let scopes: Vec<_> = resource.scope_metrics().collect();
+    assert_eq!(scopes.len(), 1);
+    assert_eq!(scopes[0].scope(), &spans[0].1.instrumentation_scope);
+    let points: Vec<_> = scopes[0].metrics().collect();
+    assert_eq!(points.len(), 1);
+    let opentelemetry_sdk::metrics::data::AggregatedMetrics::U64(
+        opentelemetry_sdk::metrics::data::MetricData::Histogram(histogram),
+    ) = points[0].data()
+    else {
+        panic!("latency histogram");
+    };
+    assert_eq!(histogram.data_points().next().unwrap().sum(), 30_000);
+}
+
+/// FIG-5728: each latency histogram retains the 30-second tail separately
+/// from 5 seconds, with dense subsecond buckets in its declared unit.
+#[test]
+fn latency_histograms_distinguish_thirty_seconds_from_five_seconds() {
+    use opentelemetry_sdk::metrics::data::{AggregatedMetrics, MetricData};
+    let (provider, meter, _, metrics) = providers(Sampler::AlwaysOn);
+    let adapter = OtelTelemetry::new(&provider, &meter, OtelOptions::standard());
+    for seconds in [5, 30] {
+        let wait = Duration::from_secs(seconds);
+        adapter
+            .metrics()
+            .runtime_tuning
+            .record_provider_throttle_wait("fixture", wait);
+        adapter
+            .metrics()
+            .runtime_tuning
+            .record_pool_acquire_wait(wait, "success");
+        adapter.metrics().runtime_tuning.record_durable_commit(
+            "turn.commit",
+            "success",
+            crate::telemetry::metrics::DurableCommitCost {
+                acquire_wait: wait,
+                transaction_duration: wait,
+                lock_statement_elapsed: wait,
+                ..Default::default()
+            },
+        );
+    }
+    meter.force_flush().unwrap();
+    let exported = metrics.get_finished_metrics().unwrap();
+    let mut latencies = 0;
+    for metric in exported
+        .last()
+        .unwrap()
+        .scope_metrics()
+        .flat_map(|scope| scope.metrics())
+    {
+        let scale = match metric.unit() {
+            "ms" => 1.0,
+            "us" => 1000.0,
+            _ => continue,
+        };
+        let AggregatedMetrics::U64(MetricData::Histogram(histogram)) = metric.data() else {
+            panic!("latency histogram");
+        };
+        let point = histogram.data_points().next().unwrap();
+        let bounds: Vec<_> = point.bounds().collect();
+        assert!(
+            bounds.last().unwrap() >= &(60_000.0 * scale),
+            "{} retains a 60s tail",
+            metric.name()
+        );
+        assert!(
+            bounds
+                .iter()
+                .filter(|bound| **bound < 1000.0 * scale)
+                .count()
+                >= 10
+        );
+        let bucket = |value| bounds.iter().position(|bound| value <= *bound).unwrap();
+        let five = bucket(5000.0 * scale);
+        let thirty = bucket(30_000.0 * scale);
+        assert_ne!(five, thirty, "{} separates 5s and 30s", metric.name());
+        let counts: Vec<_> = point.bucket_counts().collect();
+        assert_eq!(counts[five], 1);
+        assert_eq!(counts[thirty], 1);
+        assert_eq!(point.count(), 2);
+        latencies += 1;
+    }
+    assert_eq!(latencies, 5);
+
+    // The host's provider view is authoritative over instrument hints, and
+    // can start from the recommended helper before choosing its own bounds.
+    use opentelemetry_sdk::metrics::{Aggregation, Instrument, Stream};
+    let overridden = InMemoryMetricExporter::default();
+    let host_meter = SdkMeterProvider::builder()
+        .with_reader(PeriodicReader::builder(overridden.clone()).build())
+        .with_view(|instrument: &Instrument| {
+            if instrument.scope().name() != registry::LASH_INSTRUMENTATION_NAME {
+                return None;
+            }
+            let mut boundaries = recommended_latency_histogram_boundaries(instrument.name())?;
+            boundaries.push(
+                120_000.0
+                    * if instrument.unit() == "us" {
+                        1000.0
+                    } else {
+                        1.0
+                    },
+            );
+            Some(
+                Stream::builder()
+                    .with_aggregation(Aggregation::ExplicitBucketHistogram {
+                        boundaries,
+                        record_min_max: true,
+                    })
+                    .build()
+                    .unwrap(),
+            )
+        })
+        .build();
+    TelemetryMetrics::from_provider(&host_meter)
+        .runtime_tuning
+        .record_pool_acquire_wait(Duration::from_secs(90), "success");
+    host_meter.force_flush().unwrap();
+    let exported = overridden.get_finished_metrics().unwrap();
+    let metric = exported
+        .last()
+        .unwrap()
+        .scope_metrics()
+        .next()
+        .unwrap()
+        .metrics()
+        .next()
+        .unwrap();
+    let AggregatedMetrics::U64(MetricData::Histogram(histogram)) = metric.data() else {
+        panic!("host latency histogram");
+    };
+    let point = histogram.data_points().next().unwrap();
+    assert_eq!(point.bounds().last(), Some(120_000.0));
+    assert_eq!(
+        point.bucket_counts().nth(point.bounds().count() - 1),
+        Some(1)
+    );
+}

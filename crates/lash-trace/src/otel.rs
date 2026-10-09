@@ -569,7 +569,7 @@ fn admitted(kind: TraceScopeKind) -> DomainSpan {
     }
 }
 
-pub use registry::instrumentation_scope;
+pub use registry::{instrumentation_scope, recommended_latency_histogram_boundaries};
 
 /// A retained or transported context always has remote provenance.
 pub fn span_context(context: &TraceCarrier) -> Option<SpanContext> {

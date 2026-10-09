@@ -201,10 +201,46 @@ pub fn contract_markdown() -> String {
     out
 }
 
-/// The scope shared by tracing and metric providers.
+/// Recommended explicit boundaries for a Lash latency instrument, in its
+/// declared unit. Non-latency instruments return `None`.
+///
+/// Instruments supply these as default hints. Hosts can use this helper in
+/// their provider's views, or select a different aggregation there. The
+/// millisecond preset has dense subsecond buckets and reaches 60 seconds;
+/// microsecond instruments receive the same time boundaries scaled by 1000.
+pub fn recommended_latency_histogram_boundaries(name: &str) -> Option<Vec<f64>> {
+    let metric = METRICS.iter().find(|metric| metric.name == name)?;
+    if metric.kind != MetricKind::Histogram {
+        return None;
+    }
+    let scale = match metric.unit {
+        "ms" => 1.0,
+        "us" => 1000.0,
+        _ => return None,
+    };
+    Some(
+        [
+            0.0, 1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 75.0, 100.0, 250.0, 500.0, 750.0, 1000.0, 2500.0,
+            5000.0, 10_000.0, 15_000.0, 30_000.0, 60_000.0,
+        ]
+        .into_iter()
+        .map(|bound| bound * scale)
+        .collect(),
+    )
+}
+
+/// The scope shared by tracing and metric providers. Source identity is
+/// separate from the instrumentation contract; the host owns `service.version`
+/// on its providers' shared resource. A build revision is exported only when
+/// supplied as a deterministic compile-time input.
 #[cfg(feature = "otel")]
 pub fn instrumentation_scope() -> opentelemetry::InstrumentationScope {
+    let mut attributes = vec![KeyValue::new("lash.version", env!("CARGO_PKG_VERSION"))];
+    if let Some(revision) = option_env!("LASH_BUILD_REVISION").filter(|value| !value.is_empty()) {
+        attributes.push(KeyValue::new("lash.build.revision", revision));
+    }
     opentelemetry::InstrumentationScope::builder(LASH_INSTRUMENTATION_NAME)
         .with_version(LASH_INSTRUMENTATION_CONTRACT)
+        .with_attributes(attributes)
         .build()
 }

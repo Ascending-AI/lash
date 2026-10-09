@@ -42,7 +42,7 @@ pub use lash_trace::otel::api as otel;
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::registry::{
     GEN_AI_SEMCONV_SNAPSHOT, LASH_INSTRUMENTATION_CONTRACT, LASH_INSTRUMENTATION_NAME,
-    contract_markdown,
+    contract_markdown, recommended_latency_histogram_boundaries,
 };
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelAdmissionLimits, OtelOptions, OtelSpanEnricher, OtelTelemetry};
