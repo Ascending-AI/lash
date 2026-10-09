@@ -148,15 +148,7 @@ Buck2's tool bootstrap may differ; an end-to-end difference cannot automatically
 be attributed to coordinator efficiency.
 
 [Exact measurements](build-coordinator-benchmarks.json) include byte counts and
-separate client CPU. The passive sampler is `tools/buck2/benchmarks/measure.py`;
-`pair.py` records individual durations and the slowest concurrent workload.
-Neither tool signals processes or clears caches. For example, in an owned fork:
-
-```sh
-python3 tools/buck2/benchmarks/measure.py --repo "$PWD" \
-  --result /tmp/lash-build-metrics.json --log /tmp/lash-build.log -- \
-  scripts/hermetic-build.sh build //crates/lash-store-sql:lash-store-sql --jobs 2
-```
+separate client CPU.
 
 The first matched workspace-analysis observations used the owning Kiln CLI,
 the same source baseline and the complete generated default graph, with tools

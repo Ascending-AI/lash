@@ -934,20 +934,6 @@ def test_shard_count(package_name: str, kind: str, target_name: str) -> int:
     return target_policy(package_name, kind, target_name).shards
 
 
-def nextest_filter_term(package_name: str, target: dict) -> str:
-    """Select exactly one Cargo test binary in nextest's filter language."""
-    kind = target["kind"]
-    if kind == "unit-test":
-        target_filter = "kind(lib)"
-    elif kind == "bin-unit-test":
-        target_filter = f"kind(bin) & binary({target['cargo']})"
-    elif kind == "test":
-        target_filter = f"kind(test) & binary({target['cargo']})"
-    else:
-        raise ValueError(f"unsupported nextest target kind: {kind}")
-    return f"(package({package_name}) & {target_filter})"
-
-
 def library_compile_data(package_name: str, library_name: str) -> list[str]:
     """Sandbox inputs the library compile of one package needs."""
     return target_policy(package_name, "lib", library_name).compile_data
@@ -1763,29 +1749,6 @@ def generated(
     )
     outputs[ROOT / "tools/buck2/target-inventory.json"] = (
         json.dumps(inventory_payload, indent=2, sort_keys=True) + "\n"
-    )
-    def cargo_owned_terms(*exclude_tags: str) -> list[str]:
-        excluded = set(exclude_tags)
-        return sorted(
-            nextest_filter_term(package["package"], target)
-            for package in inventory
-            for target in package["targets"]
-            if target.get("label") is not None
-            and target["kind"] in ("bin-unit-test", "test", "unit-test")
-            and "manual" in target["tags"]
-            and not excluded.intersection(target["tags"])
-        )
-
-    cargo_nextest_terms = cargo_owned_terms(
-        "cargo-service-gate",
-        "cargo-trybuild",
-        "cargo-frontend-assets",
-    )
-    # `none()` rather than an empty expression: every Cargo-owned deterministic
-    # binary has moved to the Buck2 partition, and an empty string would be a
-    # nextest syntax error at the call site rather than an empty selection.
-    outputs[ROOT / "tools/buck2/cargo_owned_nextest_filter.txt"] = (
-        " + ".join(cargo_nextest_terms) + "\n" if cargo_nextest_terms else "none()\n"
     )
     # Service membership follows each test's execution policy, including
     # runnable feature variants. PostgreSQL tests run hermetically on the
