@@ -89,11 +89,7 @@
             "kind": "resource_operation",
             "label": "lookup"
           }
-        ],
-        "source_span": {
-          "start": 0,
-          "end": 50
-        }
+        ]
       },
       {
         "id": "node:e5da609e1296a1d8e31ae439",
@@ -136,11 +132,7 @@
             "kind": "terminal",
             "label": "result"
           }
-        ],
-        "source_span": {
-          "start": 51,
-          "end": 65
-        }
+        ]
       }
     ],
     "edges": [

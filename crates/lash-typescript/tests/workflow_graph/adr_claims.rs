@@ -162,61 +162,6 @@ fn editable_ir_fields_survive_every_lens_direction() {
 }
 
 #[test]
-fn workflow_projection_preserves_shadow_loop_label_spans() {
-    let source = "const scoped = async () => {\n  const item = 'outer';\n  /** @label Loop read */\n  for (const item of [1,2]) {\n    /** @label Inner read */\n    console.log(item);\n  }\n  /** @label Outer read */\n  console.log(item);\n  return item;\n};\n";
-    let environment = lash_vm::testing::harness::labeled_test_environment();
-    let canonical = canonical(source);
-    assert_lens_laws(&canonical);
-    let graph = workflow_graph_from_source_with_facets(&canonical, Some(&environment))
-        .expect("faceted projection");
-    let artifact = lash_typescript::link(&canonical, &environment)
-        .expect("admit")
-        .artifact;
-    let runnable = lash_typescript::workflow_graph::workflow_graph_from_artifact(&artifact);
-    assert_eq!(graph.source_identity, runnable.source_identity);
-    for (label, expected) in [("Inner read", TypeExpr::Int), ("Outer read", TypeExpr::Str)] {
-        let node = graph
-            .nodes()
-            .find(|node| node.name == label)
-            .expect("labeled read");
-        let span = node.source_span.expect("labeled read has canonical span");
-        assert!(
-            canonical[span.start..span.end].contains("console.log(item)"),
-            "{label}: {span:?}"
-        );
-        assert_eq!(
-            node.type_facets
-                .as_ref()
-                .expect("facets")
-                .available_variables
-                .iter()
-                .find(|variable| variable.name == "item")
-                .map(|variable| &variable.ty),
-            Some(&expected),
-            "{label}: lexical binder"
-        );
-        let admitted_node = runnable
-            .nodes()
-            .find(|candidate| candidate.id == node.id)
-            .expect("same admitted owner/path");
-        assert_eq!(admitted_node.source_span, node.source_span);
-        assert_eq!(admitted_node.execution_sites, node.execution_sites);
-        assert!(
-            !node.execution_sites.is_empty(),
-            "the label names a real print execution site"
-        );
-    }
-    let loop_node = graph
-        .nodes()
-        .find(|node| node.name == "Loop read")
-        .expect("loop label");
-    assert!(matches!(
-        loop_node.kind,
-        WorkflowNodeKind::Container(WorkflowContainer::For { .. })
-    ));
-}
-
-#[test]
 fn facet_echo_changes_no_execution_or_canonical_diff() {
     let source = "const value = [1,2]; if (true) { console.log(value[0]); } finish(value.length);";
     let environment = LashVmHostEnvironment::new(LashVmHostCatalog::new());

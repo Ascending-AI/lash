@@ -23,9 +23,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[path = "workflow_graph/goldens.rs"]
 mod goldens;
 
-use lash_typescript::workflow_graph::{
-    workflow_graph_from_artifact, workflow_graph_from_source, workflow_graph_to_source,
-};
+use lash_typescript::workflow_graph::{workflow_graph_from_source, workflow_graph_to_source};
 use lash_vm::testing::harness::test_environment;
 use lash_vm::{
     Declaration, Expr, LinkedModule, ModuleArtifact, Program, WorkflowDeclaration, WorkflowGraph,
@@ -350,7 +348,7 @@ fn l4_draft_and_admitted_projections_agree() {
     for source in goldens::CARRIER_LAWS {
         let draft = workflow_graph_from_source(source).expect("corpus source projects");
         let linked = link(source);
-        let admitted = workflow_graph_from_artifact(&linked.artifact);
+        let admitted = lash_vm::workflow_graph_from_artifact(&linked.artifact);
         assert_eq!(
             process_owners(&draft),
             process_owners(&admitted),

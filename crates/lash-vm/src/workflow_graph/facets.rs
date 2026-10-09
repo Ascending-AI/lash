@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Span, WorkflowNodeId};
+use super::WorkflowNodeId;
 use crate::ast::{AstPath, AstString, Expr, ExprSlot, TypeExpr};
 use crate::linker::{LinkError, WorkflowLinkAnalysis};
 
@@ -197,6 +197,8 @@ fn receiver_calls<'a>(expression: &'a Expr, calls: &mut Vec<&'a Expr>) {
     }
 }
 
+/// A semantic diagnostic at a node and optional argument slot. A source view
+/// supplies text coordinates when a host shows the diagnostic in source.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WorkflowTypeDiagnostic {
     pub node_id: WorkflowNodeId,
@@ -205,8 +207,6 @@ pub struct WorkflowTypeDiagnostic {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<WorkflowSlotPath>,
     pub message: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub span: Option<Span>,
 }
 
 /// Whether a diagnostic establishes an admission failure for the analyzed
@@ -466,7 +466,6 @@ pub fn projected_node_type_facets(
                 classification: diagnostic.classification,
                 slot: diagnostic_slot(&diagnostic.path, &facts.expected_arguments),
                 message: diagnostic.error.to_string(),
-                span: diagnostic.span,
             })
             .collect(),
     })

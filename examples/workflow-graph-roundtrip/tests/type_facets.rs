@@ -3,6 +3,42 @@ mod runtime;
 use serde_json::Value;
 use workflow_graph_roundtrip::{EditableValue, WorkflowDocument};
 
+/// Source coordinates in the host's diagnostic DTO come from the source
+/// view of the projected document, including diagnostics in a process body.
+#[tokio::test]
+async fn projected_diagnostics_are_located_by_the_source_view() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener");
+    let addr = listener.local_addr().expect("address");
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(
+        listener,
+        runtime::state().await,
+    ));
+    let response = reqwest::Client::new()
+        .post(format!("http://{addr}/project"))
+        .json(&serde_json::json!({ "source": "const worker = async () => { const shape = { ready: true }; for (const item of [shape.missing]) { console.log(item); } return 1; };" }))
+        .send().await.expect("project");
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body: Value = response.json().await.expect("projection");
+    let document: WorkflowDocument =
+        serde_json::from_value(body["document"].clone()).expect("document");
+    let diagnostic = document
+        .nodes
+        .iter()
+        .flat_map(|node| &node.data.diagnostics)
+        .find(|diagnostic| diagnostic.kind == "unknown_object_field")
+        .expect("diagnostic in lifted body");
+    let graph = lash::typescript::workflow_graph::workflow_graph_from_source(&document.source)
+        .expect("graph");
+    let view = lash::typescript::workflow_graph::source_view(&graph).expect("source view");
+    let id = lash::vm::ir::WorkflowNodeId::new(diagnostic.node_id.clone());
+    let span = diagnostic.span.expect("source coordinates");
+    assert_eq!(Some(&span), view.spans.get(&id));
+    assert!(document.source[span.start..span.end].contains("shape.missing"));
+    server.abort();
+}
+
 #[tokio::test]
 async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")

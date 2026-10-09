@@ -9,7 +9,7 @@
 //! refuses it with a typed [`GraphRenderError`], and the graph is unaffected.
 //!
 //! The lens's text is canonical: comments and authored formatting are
-//! discarded, and a node's `source_span` addresses the canonical output, not
+//! discarded, and [`SourceView::spans`] addresses the canonical output, not
 //! the author's formatting.
 
 use std::collections::BTreeMap;
@@ -41,11 +41,11 @@ pub use printer::{
 /// with optional host-derived, non-authoritative type facets.
 ///
 /// The projection itself is `lash_vm`'s ([`WorkflowGraphProjector`]); this
-/// dialect contributes the canonical text the node spans address. With no
+/// dialect contributes the canonical program. With no
 /// environment the result is the draft: it
 /// claims no runtime identity and carries no facets. With one, the source is
 /// admitted (linked) against it, and the result is the admitted artifact's
-/// runnable view ([`workflow_graph_from_artifact`]) with facets computed over
+/// runnable view ([`lash_vm::workflow_graph_from_artifact`]) with facets computed over
 /// that artifact's resolved IR and paths, lifted declarations included. A
 /// source that does not admit stays a draft: the facets of its canonical
 /// program carry the link errors as node diagnostics, and it claims no
@@ -76,33 +76,19 @@ fn draft_graph(
     program: &Program,
     analysis: Option<&lash_vm::WorkflowLinkAnalysis>,
 ) -> WorkflowGraph {
-    let mut projector = WorkflowGraphProjector::new(program).with_spans(program.spans.clone());
+    let mut projector = WorkflowGraphProjector::new(program);
     if let Some(analysis) = analysis {
         projector = projector.with_analysis(analysis);
     }
     projector.project()
 }
 
-/// The runnable view of an admitted module artifact: the graph of exactly the
-/// program the artifact executes, carrying its source identity, with spans
-/// addressing the artifact's canonical TypeScript text.
-///
-/// The artifact's program is printed and reparsed, and each canonical span is
-/// carried to the artifact path it describes: a lifted process's body sits
-/// under its literal's site in the text and under its declaration in the
-/// artifact ([`lash_vm::ProcessOrigin::Lifted`]). A program with no
-/// TypeScript spelling projects with no spans.
-pub fn workflow_graph_from_artifact(artifact: &lash_vm::ModuleArtifact) -> WorkflowGraph {
-    artifact_graph(artifact, None)
-}
-
 fn artifact_graph(
     artifact: &lash_vm::ModuleArtifact,
     analysis: Option<&lash_vm::WorkflowLinkAnalysis>,
 ) -> WorkflowGraph {
-    let mut projector = WorkflowGraphProjector::new(artifact.ir())
-        .with_source_identity(artifact.source_identity())
-        .with_spans(canonical_spans(artifact.ir()).unwrap_or_default());
+    let mut projector =
+        WorkflowGraphProjector::new(artifact.ir()).with_source_identity(artifact.source_identity());
     if let Some(analysis) = analysis {
         projector = projector.with_analysis(analysis);
     }
@@ -120,9 +106,8 @@ fn artifact_graph(
 /// holding it. A span is kept only when the artifact has a node at its path of
 /// the same form as the text's node there, so a path the printing and the
 /// linking do not share can never carry another node's span.
-fn canonical_spans(ir: &Program) -> Option<BTreeMap<lash_vm::AstPath, Span>> {
-    let canonical = typescript_program_source(ir).ok()?;
-    let draft = crate::parse(&canonical).ok()?;
+fn canonical_spans(ir: &Program, source: &str) -> Option<BTreeMap<lash_vm::AstPath, Span>> {
+    let draft = crate::parse(source).ok()?;
     let bodies = process_body_text_paths(ir);
     let spans = draft
         .spans
@@ -397,15 +382,13 @@ pub struct SourceView {
 pub fn source_view(graph: &WorkflowGraph) -> Result<SourceView, GraphRenderError> {
     let program = validated_program(graph, lash_core_execution::FleetFormat::current())?;
     let source = typescript_program_source(&program)?;
-    // Spans come from the canonical text's own parse, keyed by the canonical
-    // projection's ids. A draft of the document carries each of the host's
-    // own node ids onto the node it is there, so those ids key the result.
-    let canonical = WorkflowGraphProjector::new(&program)
-        .with_spans(canonical_spans(&program).unwrap_or_default())
-        .project();
-    let located = canonical
-        .nodes()
-        .filter_map(|node| Some((node.id.clone(), node.source_span?)))
+    // The ownership walk locates statements in the reconstructed program;
+    // canonical text supplies coordinates, without another graph projection.
+    let canonical = canonical_spans(&program, &source).unwrap_or_default();
+    let located = WorkflowGraphProjector::new(&program)
+        .statement_addresses()
+        .into_iter()
+        .filter_map(|(id, path)| Some((id, statement_span(&program, &canonical, path)?)))
         .collect::<BTreeMap<_, _>>();
     let draft = WorkflowDraft::open(graph).map_err(|error| match error {
         WorkflowDraftOpenError::Document(error) => GraphRenderError::Document(error),
@@ -420,4 +403,30 @@ pub fn source_view(graph: &WorkflowGraph) -> Result<SourceView, GraphRenderError
         source,
         spans,
     })
+}
+
+/// A flattened statement can inherit its completion wrapper's coordinates.
+fn statement_span(
+    program: &Program,
+    spans: &BTreeMap<lash_vm::AstPath, Span>,
+    mut path: lash_vm::AstPath,
+) -> Option<Span> {
+    loop {
+        if let Some(span) = spans.get(&path) {
+            return Some(*span);
+        }
+        if !path.steps.ends_with(&[0, 0]) {
+            return None;
+        }
+        path.steps.truncate(path.steps.len() - 2);
+        if !matches!(
+            expr_at(program, &path),
+            Some(Expr::Role {
+                role: lash_vm::StructuralRole::Completion,
+                ..
+            })
+        ) {
+            return None;
+        }
+    }
 }

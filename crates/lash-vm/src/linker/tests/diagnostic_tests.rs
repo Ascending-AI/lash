@@ -109,27 +109,6 @@ fn effect_in_function_body_carries_the_constructs_own_span() {
 }
 
 #[test]
-fn process_body_facets_carry_node_spans() {
-    // process scan() { finish missing }
-    //
-    // FIG-1752: workflow analysis walks declaration bodies, so the diagnostic
-    // on the offending node's facts carries the span recorded at its AstPath.
-    let mut program = unknown_name_in_process_body();
-    program.spans.insert(
-        AstPath::declaration(0, vec![0, 0]),
-        Span { start: 7, end: 14 },
-    );
-    let analysis = analyze_workflow_program(&program, &full_host_environment());
-    let facts = analysis
-        .facts_for(&AstPath::declaration(0, vec![0]))
-        .expect("declaration body nodes carry facts");
-    assert!(facts.diagnostics.iter().any(|diagnostic| {
-        diagnostic.error.kind() == "unknown_name"
-            && diagnostic.span == Some(Span { start: 7, end: 14 })
-    }));
-}
-
-#[test]
 fn unknown_top_level_name_on_line_40_fails_at_link() {
     // 38 more assignments ... finish value_39_typo
     //

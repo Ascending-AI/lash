@@ -133,7 +133,6 @@ impl<'module> Linker<'module> {
     }
 
     pub(super) fn record_workflow_error(&self, expr: &Expr, path: &AstPath, error: LinkError) {
-        let span = error.span();
         let error_path = self
             .workflow_error_path
             .borrow_mut()
@@ -148,7 +147,6 @@ impl<'module> Linker<'module> {
         facts.diagnostics.push(WorkflowLinkDiagnostic {
             classification: crate::WorkflowDiagnosticKind::from_link_error(&error).classification(),
             error,
-            span,
             path: error_path,
         });
         facts.expected_arguments = expected_arguments;
@@ -168,12 +166,6 @@ impl<'module> Linker<'module> {
         let Some(analysis) = &self.workflow_analysis else {
             return;
         };
-        let span = self
-            .program
-            .spans
-            .get(&owner)
-            .copied()
-            .or_else(|| error.span());
         let error_path = self
             .workflow_error_path
             .borrow_mut()
@@ -189,7 +181,6 @@ impl<'module> Linker<'module> {
                 classification: crate::WorkflowDiagnosticKind::from_link_error(&error)
                     .classification(),
                 error,
-                span,
                 path: error_path,
             });
     }

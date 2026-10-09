@@ -26,12 +26,9 @@ fn assert_classified_producer(recovered: bool, with_owner: bool) {
         serde_json::from_value(serde_json::json!("node-fixture")).expect("node id");
     for (kind, error) in fixtures {
         let mut linker = Linker::new(&program, &environment).with_workflow_analysis();
-        let expected_span = if with_owner {
+        if with_owner {
             *linker.workflow_diagnostic_owner.borrow_mut() = Some(owner.clone());
-            program.spans.get(&owner).copied().or_else(|| error.span())
-        } else {
-            error.span()
-        };
+        }
         let message = error.to_string();
         if recovered {
             linker.record_recovered_workflow_error(&program.main, &path, error);
@@ -51,7 +48,6 @@ fn assert_classified_producer(recovered: bool, with_owner: bool) {
         assert_eq!(diagnostic.kind.as_str(), kind);
         assert_eq!(diagnostic.node_id, id);
         assert_eq!(diagnostic.message, message);
-        assert_eq!(diagnostic.span, expected_span);
         let wire = serde_json::to_value(diagnostic).expect("diagnostic encodes");
         assert_eq!(wire["classification"], "definite", "{kind}");
     }

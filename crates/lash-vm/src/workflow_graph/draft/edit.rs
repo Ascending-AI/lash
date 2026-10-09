@@ -897,7 +897,6 @@ fn statement_node(handle: WorkflowDraftHandle, statement: Expr) -> WorkflowNode 
         type_facets: None,
         outputs: Vec::new(),
         execution_sites: Vec::new(),
-        source_span: None,
     };
     set_label(&mut node, label);
     node

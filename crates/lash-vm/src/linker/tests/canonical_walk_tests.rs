@@ -345,11 +345,8 @@ fn invalid_control_headers_keep_nested_facets_and_restore_the_outer_scope() {
 /// expression, not on the expression itself.
 ///
 /// The owner is the statement the projector makes a node from, so this is the
-/// property that decides which node a host sees the error on. The witnesses
-/// carry an unresolvable name and so have no TypeScript spelling; the owner
-/// relation is read off the analysis the projector reads. The projector-side
-/// half — that the diagnostic's span is the owning node's `source_span` — has
-/// no TypeScript witness at all and is not proved here (FIG-3033).
+/// property that decides which node a host sees the error on. Source offsets
+/// are supplied separately by the source view.
 #[test]
 fn recovered_diagnostics_follow_the_workflow_projection_owner() {
     let environment = full_label_environment();
@@ -372,8 +369,6 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
             builders::record(vec![("choice", conditional())]),
         ),
     ] {
-        // The statement's own span is stated, since the recovered diagnostic
-        // falls back to the span of the statement that owns the expression.
         let program = builders::with_source_spans(
             builders::program(vec![builders::assign("value", assigned)]),
             &[(&[0], 0, source.len())],
@@ -387,7 +382,6 @@ fn recovered_diagnostics_follow_the_workflow_projection_owner() {
         );
         assert_eq!(owner.diagnostics[0].error.kind(), "unknown_name");
         assert!(owner.diagnostics[0].error.to_string().contains("missing"));
-        assert!(owner.diagnostics[0].span.is_some());
         assert!(matches!(
             LinkedModule::link(program, environment.clone()),
             Err(LinkError::UnknownName { ref name, .. }) if name == "missing"

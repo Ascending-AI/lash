@@ -16,7 +16,7 @@ use lash_typescript::workflow_graph::{
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
 use lash_vm::{
-    LashVmHostCatalog, LashVmHostEnvironment, TypeExpr, TypeField, VariableVersion,
+    Expr, LashVmHostCatalog, LashVmHostEnvironment, TypeExpr, TypeField, VariableVersion,
     WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument,
     WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdgeKind,
     WorkflowGraph, WorkflowGraphDecodeError, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
@@ -85,6 +85,130 @@ fn assert_lens_laws(source: &str) {
 #[test]
 fn canonical_get_put_and_put_get() {
     assert_lens_laws(goldens::REPRESENTATIVE);
+}
+
+/// FIG-5646: source coordinates belong to the source view alone, including
+/// for admitted documents whose process bodies were lifted out of the text.
+#[test]
+fn source_coordinates_live_only_in_the_source_view() {
+    let environment = lash_vm::testing::harness::labeled_test_environment();
+    for source in [
+        "const worker = async () => { await sleep(1); return 1; }; finish(worker);",
+        "const worker = async () => {\n  const item = 'outer';\n  /** @label Loop */\n  for (const item of [1, 2]) {\n    /** @label Inner */\n    console.log(item);\n  }\n  /** @label Outer */\n  console.log(item);\n  return item;\n};\nfinish(worker);",
+    ] {
+        for graph in [
+            workflow_graph_from_source(source).expect("draft"),
+            workflow_graph_from_source_with_facets(source, Some(&environment)).expect("admitted"),
+        ] {
+            for node in graph.nodes() {
+                let wire = serde_json::to_value(node).expect("node serializes");
+                assert!(
+                    wire.get("source_span").is_none(),
+                    "coordinates leaked: {wire}"
+                );
+            }
+            let view = lash_typescript::workflow_graph::source_view(&graph).expect("source view");
+            let text = |node: &WorkflowNode| {
+                let span = view.spans[&node.id];
+                &view.source[span.start..span.end]
+            };
+            if source.contains("sleep") {
+                let process = only_process(&graph);
+                assert_eq!(
+                    process.body.nodes.iter().map(text).collect::<Vec<_>>(),
+                    ["sleep(1)", "return 1;"]
+                );
+            } else {
+                for label in ["Inner", "Outer"] {
+                    let node = graph
+                        .nodes()
+                        .find(|node| node.name == label)
+                        .expect("labeled read");
+                    assert!(
+                        text(node).contains("console.log(item)"),
+                        "{label}: {}",
+                        text(node)
+                    );
+                }
+            }
+            assert_eq!(view.source_identity, graph.source_identity);
+        }
+    }
+    let graph = workflow_graph_from_source_with_facets(
+        "await tools.compose({ query: \"bad\", items: [\"a\"] });",
+        Some(&slot_path_environment()),
+    )
+    .expect("diagnostic draft");
+    let node = &graph.main.nodes[0];
+    let facets = node.type_facets.as_ref().expect("facets");
+    assert!(!facets.diagnostics.is_empty());
+    for diagnostic in &facets.diagnostics {
+        let wire = serde_json::to_value(diagnostic).expect("diagnostic serializes");
+        assert!(wire.get("span").is_none(), "coordinates leaked: {wire}");
+    }
+    let view =
+        lash_typescript::workflow_graph::source_view(&graph).expect("diagnostic source view");
+    let span = view.spans[&node.id];
+    assert!(view.source[span.start..span.end].contains("tools.compose"));
+}
+
+/// A declared body's nested lifted literal is located in the same source
+/// view, even though its artifact path is rooted at a different declaration.
+#[test]
+fn a_source_view_locates_nested_lifted_declaration_bodies() {
+    let mut program = parse("const worker = async () => { const inner = async () => { await sleep(2); return 2; }; await sleep(1); return 1; };").expect("source");
+    let Expr::Block(statements) = &mut program.main else {
+        panic!("block")
+    };
+    let Expr::Assign { expr, .. } = &mut statements[0] else {
+        panic!("binding")
+    };
+    let Expr::ProcessLiteral(literal) = std::mem::replace(
+        expr.as_mut(),
+        Expr::ProcessRef {
+            process: "worker".into(),
+        },
+    ) else {
+        panic!("literal")
+    };
+    program
+        .declarations
+        .push(lash_vm::Declaration::Process(lash_vm::ProcessDecl {
+            name: "worker".into(),
+            params: vec![],
+            return_ty: None,
+            label: None,
+            origin: lash_vm::ProcessOrigin::Declared,
+            body: *literal.body,
+        }));
+    let linked =
+        lash_vm::LinkedModule::link(program, lash_vm::testing::harness::test_environment())
+            .expect("admit");
+    let graph = lash_vm::workflow_graph_from_artifact(&linked.artifact);
+    let view = lash_typescript::workflow_graph::source_view(&graph).expect("source view");
+    let mut bodies = Vec::new();
+    for declaration in &graph.declarations {
+        let WorkflowDeclaration::Process(process) = declaration else {
+            continue;
+        };
+        let slices = process
+            .body
+            .nodes
+            .iter()
+            .map(|node| {
+                let span = view.spans[&node.id];
+                &view.source[span.start..span.end]
+            })
+            .collect::<Vec<_>>();
+        if process.name == "worker" {
+            assert_eq!(&slices[1..], ["sleep(1)", "return 1;"]);
+        } else {
+            assert!(process.origin.is_lifted());
+            assert_eq!(slices, ["sleep(2)", "return 2;"]);
+        }
+        bodies.push(process.name.as_str());
+    }
+    assert_eq!(bodies.len(), 2);
 }
 
 #[test]
@@ -276,19 +400,6 @@ fn workflow_graph_decode_refuses_unknown_fields_in_nested_non_facet_payloads() {
         serde_json::from_str::<serde_json::Value>(golden).expect("the graph golden is JSON");
     let mut cases = Vec::new();
 
-    let mut source_span = golden_value.clone();
-    source_span["main"]["nodes"][0]["source_span"]["future"] = serde_json::json!(true);
-    cases.push(("source_span", "future", source_span));
-
-    let mut source_span_facet_collision = golden_value.clone();
-    source_span_facet_collision["main"]["nodes"][0]["source_span"]["type_facets"] =
-        serde_json::json!({});
-    cases.push((
-        "source_span type_facets collision",
-        "type_facets",
-        source_span_facet_collision,
-    ));
-
     let mut root_facet_collision = golden_value.clone();
     root_facet_collision["type_facets"] = serde_json::json!({});
     cases.push((
@@ -371,8 +482,7 @@ fn source_identity_is_the_admitted_artifacts_and_ignores_input_formatting() {
         "the draft names the identity of the artifact it admits to"
     );
     assert_eq!(
-        lash_typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact)
-            .source_identity,
+        lash_vm::workflow_graph_from_artifact(&linked.artifact).source_identity,
         Some(formatted.clone()),
         "the runnable view and the trace name the same identity"
     );
@@ -393,9 +503,8 @@ fn a_draft_claims_no_runtime_identity_and_identity_never_depends_on_printing() {
         }]))
         .expect("a non-sourceable program still forms an artifact");
     assert!(typescript_program_source(artifact.ir()).is_err());
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_artifact(&artifact);
+    let graph = lash_vm::workflow_graph_from_artifact(&artifact);
     assert_eq!(graph.source_identity, Some(artifact.source_identity()));
-    assert!(graph.nodes().all(|node| node.source_span.is_none()));
 }
 
 #[test]
@@ -659,7 +768,6 @@ fn a_source_view_addresses_the_documents_own_nodes() {
     let mut graph = workflow_graph_from_source(&canonical).expect("fixture projects");
     for (index, node) in graph.main.nodes.iter_mut().enumerate() {
         node.id = WorkflowNodeId::new(format!("node:host-{index}"));
-        node.source_span = None;
     }
     let view = lash_typescript::workflow_graph::source_view(&graph).expect("the lens has a view");
     assert_eq!(view.source, canonical);
@@ -959,15 +1067,6 @@ finish(1);
     );
 }
 
-fn source_slice<'a>(source: &'a str, node: &WorkflowNode) -> &'a str {
-    let span = node
-        .source_span
-        .expect("a projected node with canonical text carries a source span");
-    source
-        .get(span.start..span.end)
-        .expect("the source span addresses canonical UTF-8 boundaries")
-}
-
 #[test]
 fn cloned_do_while_conditions_keep_provenance_for_every_destination_path() {
     for (source, expected_condition_paths) in [
@@ -993,51 +1092,6 @@ fn cloned_do_while_conditions_keep_provenance_for_every_destination_path() {
                 .collect::<Vec<_>>()
         );
     }
-}
-
-#[test]
-fn artifact_projection_rebuilds_canonical_spans_for_lifted_processes() {
-    let authored = "const worker=async()=>{await sleep(1);return 1;};";
-    let linked = lash_typescript::link(authored, &lash_vm::testing::harness::test_environment())
-        .expect("compact process source links");
-    let canonical =
-        typescript_program_source(linked.artifact.ir()).expect("the artifact prints canonically");
-    assert_ne!(authored, canonical, "the fixture must change formatting");
-
-    let graph = lash_typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
-    let process = only_process(&graph);
-    assert_eq!(
-        process
-            .body
-            .nodes
-            .iter()
-            .map(|node| source_slice(&canonical, node))
-            .collect::<Vec<_>>(),
-        ["sleep(1)", "return 1;"]
-    );
-    let draft = workflow_graph_from_source(authored).expect("source projection succeeds");
-    assert_eq!(
-        graph
-            .nodes()
-            .map(|node| node.id.clone())
-            .collect::<Vec<_>>(),
-        draft
-            .nodes()
-            .map(|node| node.id.clone())
-            .collect::<Vec<_>>(),
-        "the runnable view and the draft mint the same node ids"
-    );
-    assert_eq!(
-        graph
-            .nodes()
-            .map(|node| node.source_span)
-            .collect::<Vec<_>>(),
-        draft
-            .nodes()
-            .map(|node| node.source_span)
-            .collect::<Vec<_>>(),
-        "the runnable view carries the draft's canonical provenance"
-    );
 }
 
 fn facet_environment() -> LashVmHostEnvironment {

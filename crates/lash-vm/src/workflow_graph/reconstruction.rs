@@ -76,7 +76,7 @@ impl WorkflowGraphError {
 ///
 /// Only authoritative fields are read (see the module docs of
 /// [`super`]): edges, ids, available variables, outputs, facets, execution
-/// sites, spans and the source identity never reach the result.
+/// sites and the source identity never reach the result.
 ///
 /// An admitted document rebuilds its artifact's program, lifted declarations
 /// included. A draft that still holds a process literal inline rebuilds the

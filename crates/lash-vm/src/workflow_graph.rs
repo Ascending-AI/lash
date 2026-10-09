@@ -20,7 +20,7 @@
 //!
 //! *Derived* fields are read views a projection computes from those: node and
 //! process ids, edges, `available_variables`, `outputs`, `type_facets`,
-//! `execution_sites`, `source_span`, a derived node's `name`, and
+//! `execution_sites`, a derived node's `name`, and
 //! `source_identity`. Reconstruction never reads them, so editing one changes
 //! nothing; [`WorkflowGraph::rederive`] recomputes them all from the
 //! authoritative fields. An edited document is a draft: it names no admitted
@@ -54,7 +54,6 @@ use lash_sansio::core_support::Blake3DomainHasher;
 use crate::ast::{
     AssignTarget, AstString, Expr, FunctionDecl, ProcessOrigin, ProcessParam, TypeExpr,
 };
-use crate::span::Span;
 
 mod admission;
 mod body;
@@ -628,9 +627,6 @@ pub struct WorkflowNode {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[serde(deserialize_with = "deserialize_strict")]
     pub execution_sites: Vec<WorkflowExecutionSite>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(deserialize_with = "deserialize_strict")]
-    pub source_span: Option<Span>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

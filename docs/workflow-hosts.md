@@ -33,9 +33,11 @@ assignment, for example. Slot paths are how you address an expression to
 edit, how an execution site is named, and where a diagnostic points.
 
 Some of what a document carries is derived from the rest: node ids, edges,
-the variables in scope at a node, type facets, execution sites and source
-spans. Read them; do not write them. Lash recomputes them whenever the
+the variables in scope at a node, type facets and execution sites.
+Read them; do not write them. Lash recomputes them whenever the
 document changes, and ignores what a submitted document claims for them.
+Source coordinates live only in the optional `SourceView`: look up a node
+or diagnostic by its node id in that view's `spans` map.
 
 A document states the version of the IR it was written under
 (`WORKFLOW_IR_VERSION`). A document this build does not read is refused when

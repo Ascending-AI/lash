@@ -20,8 +20,7 @@
 use std::collections::BTreeMap;
 
 use lash_typescript::workflow_graph::{
-    GraphRenderError, typescript_program_source, workflow_graph_from_artifact,
-    workflow_graph_to_source,
+    GraphRenderError, typescript_program_source, workflow_graph_to_source,
 };
 
 use super::corpora::{self, CorpusProgram};
@@ -87,7 +86,7 @@ fn round_trip(program: &CorpusProgram) -> Result<Trip, String> {
     if let Some(violation) = readmits(&linked, &canonical, &environment, "canonical text") {
         return Ok(Trip::Violates(violation));
     }
-    let graph = workflow_graph_from_artifact(&linked.artifact);
+    let graph = lash_vm::workflow_graph_from_artifact(&linked.artifact);
     // The document is the admitted program: reconstruction is IR-owned and
     // exact, whether or not the lens can spell the result (FIG-5572).
     // The programs are compared as printed: a `NaN` literal is the same

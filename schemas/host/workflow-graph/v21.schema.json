@@ -1556,25 +1556,6 @@
       ],
       "type": "object"
     },
-    "Span": {
-      "properties": {
-        "end": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
-        "start": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "start",
-        "end"
-      ],
-      "type": "object"
-    },
     "StructuralRole": {
       "description": "The structural roles a front end marks its generated IR with.\n\nEach role is language-neutral: it names what a shape does, not the source\nconstruct that produced it, and each front end chooses which of its\nconstructs lower to which role.",
       "oneOf": [
@@ -2315,16 +2296,6 @@
             "$ref": "#/$defs/VariableVersion"
           },
           "type": "array"
-        },
-        "source_span": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Span"
-            },
-            {
-              "type": "null"
-            }
-          ]
         },
         "type_facets": {
           "anyOf": [
@@ -3105,6 +3076,7 @@
       "type": "string"
     },
     "WorkflowTypeDiagnostic": {
+      "description": "A semantic diagnostic at a node and optional argument slot. A source view\nsupplies text coordinates when a host shows the diagnostic in source.",
       "properties": {
         "classification": {
           "$ref": "#/$defs/WorkflowDiagnosticClassification"
@@ -3122,16 +3094,6 @@
           "anyOf": [
             {
               "$ref": "#/$defs/WorkflowSlotPath"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "span": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Span"
             },
             {
               "type": "null"

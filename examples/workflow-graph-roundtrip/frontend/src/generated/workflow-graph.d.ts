@@ -866,7 +866,6 @@ export interface WorkflowNode {
   name: string;
   name_source: WorkflowNodeNameSource;
   outputs?: VariableVersion[];
-  source_span?: Span | null;
   /**
    * Optional host-derived type information. It is never used to render source.
    */
@@ -907,11 +906,6 @@ export interface VariableVersion {
   variable: string;
   version: number;
 }
-export interface Span {
-  end: number;
-  start: number;
-  [k: string]: unknown;
-}
 export interface WorkflowNodeTypeFacets {
   available_variables?: WorkflowTypedVariable[];
   diagnostics?: WorkflowTypeDiagnostic[];
@@ -923,13 +917,16 @@ export interface WorkflowTypedVariable {
   ty: TypeExpr;
   [k: string]: unknown;
 }
+/**
+ * A semantic diagnostic at a node and optional argument slot. A source view
+ * supplies text coordinates when a host shows the diagnostic in source.
+ */
 export interface WorkflowTypeDiagnostic {
   classification: WorkflowDiagnosticClassification;
   kind: WorkflowDiagnosticKind;
   message: string;
   node_id: WorkflowNodeId;
   slot?: WorkflowSlotPath | null;
-  span?: Span | null;
   [k: string]: unknown;
 }
 export interface WorkflowExpectedArgument {

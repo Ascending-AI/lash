@@ -26,7 +26,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use lash::typescript::workflow_graph::{
     GraphRenderError, WorkflowGraphBuildError, workflow_graph_from_source,
-    workflow_graph_from_source_with_facets, workflow_graph_to_source,
+    workflow_graph_from_source_with_facets,
 };
 use lash::vm::ir::WorkflowNodeId;
 use lash::workflow::{
@@ -162,16 +162,11 @@ impl SavedWorkflow {
             .collect()
     }
 
-    /// The TypeScript lens's view of the version, or why it has none. The
-    /// lens runs here, when a client asks to see source; saving printed
-    /// nothing.
-    fn source(&self) -> Result<String, String> {
-        workflow_graph_to_source(self.draft.document()).map_err(|error| error.to_string())
-    }
-
     fn document(&self) -> WorkflowDocument {
-        let mut document =
-            graph::document_from_graph(self.version, self.source(), faceted(&self.graph));
+        let graph = faceted(&self.graph);
+        let view = lash::typescript::workflow_graph::source_view(&graph)
+            .map_err(|error| error.to_string());
+        let mut document = graph::document_from_graph(self.version, view, graph);
         document.not_admitted = self
             .published
             .as_ref()
@@ -337,7 +332,7 @@ async fn project_source(
     let environment = runtime::host_environment();
     let graph = workflow_graph_from_source_with_facets(&request.source, Some(&environment))
         .map_err(|error| SourceProjectionErrorResponse::invalid_source(error.to_string()))?;
-    let source = workflow_graph_to_source(&graph)
+    let source = lash::typescript::workflow_graph::source_view(&graph)
         .map_err(|error| SourceProjectionErrorResponse::invalid_source(error.to_string()))?;
     Ok(Json(ProjectWorkflowResponse {
         document: graph::document_from_graph(version, Ok(source), graph),

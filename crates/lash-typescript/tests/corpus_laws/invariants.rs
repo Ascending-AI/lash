@@ -118,7 +118,7 @@ fn check(program: &CorpusProgram, session: Option<&SessionAnswer>) -> Vec<String
             Err(error) => failures.push(format!("the draft does not project: {error}")),
         }
     }
-    let admitted = lash_typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
+    let admitted = lash_vm::workflow_graph_from_artifact(&linked.artifact);
     if admitted.source_identity.as_deref() != Some(linked.artifact.source_identity().as_str()) {
         failures.push("the admitted view does not carry its artifact's identity".to_string());
     }

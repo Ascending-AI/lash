@@ -469,7 +469,6 @@ fn derived_views_are_recomputed_and_never_read() {
             node.available_variables = vec!["stale".to_string()];
             node.outputs.clear();
             node.execution_sites.clear();
-            node.source_span = None;
             if node.name_source == crate::WorkflowNodeNameSource::Derived {
                 node.name = "renamed by a host".to_string();
             }

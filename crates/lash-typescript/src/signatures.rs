@@ -518,7 +518,7 @@ mod tests {
             let linked = crate::link(source, &environment).expect("link process");
             for graph in [
                 crate::workflow_graph::workflow_graph_from_source(source).expect("source graph"),
-                crate::workflow_graph::workflow_graph_from_artifact(&linked.artifact),
+                lash_vm::workflow_graph_from_artifact(&linked.artifact),
             ] {
                 let rendered =
                     crate::workflow_graph::workflow_graph_to_source(&graph).expect("render graph");

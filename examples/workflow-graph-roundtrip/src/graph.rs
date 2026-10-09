@@ -1,9 +1,11 @@
+use std::collections::BTreeMap;
+
 use lash::typescript::workflow_graph::{
     typescript_assign_target_source, typescript_expression_source, typescript_for_of_source,
 };
 use lash::vm::ir::{
     Expr, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge, WorkflowNode,
-    WorkflowNodeKind, WorkflowSubgraph, format_type_expr, workflow_call_from_ir,
+    WorkflowNodeId, WorkflowNodeKind, WorkflowSubgraph, format_type_expr, workflow_call_from_ir,
     workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
 };
 use lash::workflow::{WorkflowCatch, WorkflowGraph};
@@ -54,12 +56,12 @@ pub(crate) fn validate_fragment(request: ValidateRequest) -> ValidateResponse {
 /// it, or the reason the lens has none; the document is complete either way.
 pub(crate) fn document_from_graph(
     version: u64,
-    source: Result<String, String>,
+    source: Result<lash::typescript::workflow_graph::SourceView, String>,
     graph: WorkflowGraph,
 ) -> WorkflowDocument {
-    let (source, source_unavailable) = match source {
-        Ok(source) => (source, None),
-        Err(reason) => (String::new(), Some(reason)),
+    let (source, spans, source_unavailable) = match source {
+        Ok(view) => (view.source, view.spans, None),
+        Err(reason) => (String::new(), BTreeMap::new(), Some(reason)),
     };
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
@@ -123,6 +125,13 @@ pub(crate) fn document_from_graph(
             &mut edges,
             &graph_scope.in_process(),
         );
+    }
+    for node in &mut nodes {
+        for diagnostic in &mut node.data.diagnostics {
+            diagnostic.span = spans
+                .get(&WorkflowNodeId::new(diagnostic.node_id.clone()))
+                .copied();
+        }
     }
     WorkflowDocument {
         schema_version: graph.schema_version,
@@ -346,7 +355,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
                         classification: diagnostic.classification,
                         slot: diagnostic.slot.as_ref().map(ToString::to_string),
                         message: diagnostic.message.clone(),
-                        span: diagnostic.span,
+                        span: None,
                     })
                     .collect()
             })
@@ -586,7 +595,6 @@ fn node_from_flow_data(
         type_facets: None,
         outputs,
         execution_sites: Vec::new(),
-        source_span: None,
     })
 }
 

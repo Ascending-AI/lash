@@ -82,5 +82,5 @@ change evaluation order.
 ## Implementation
 
 - [Graph types and structural identity](../../crates/lash-vm/src/workflow_graph.rs) and [IR projector](../../crates/lash-vm/src/workflow_graph/projection.rs).
-- [TypeScript lens and artifact projection](../../crates/lash-typescript/src/workflow_graph/mod.rs).
+- [TypeScript lens and source view](../../crates/lash-typescript/src/workflow_graph/mod.rs).
 - [Editable-field and round-trip laws](../../crates/lash-typescript/tests/workflow_graph/adr_claims.rs).

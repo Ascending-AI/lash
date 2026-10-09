@@ -16,7 +16,6 @@ use crate::ast::{
     ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessWrapperParts, Program, StructuralRole,
 };
 use crate::linker::WorkflowLinkAnalysis;
-use crate::span::Span;
 
 use super::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_IR_VERSION,
@@ -47,7 +46,6 @@ pub fn workflow_graph_from_artifact(artifact: &crate::ModuleArtifact) -> Workflo
 pub struct WorkflowGraphProjector<'a> {
     program: &'a Program,
     source_identity: Option<String>,
-    spans: BTreeMap<AstPath, Span>,
     analysis: Option<&'a WorkflowLinkAnalysis>,
     fleet_format: lash_core_execution::FleetFormat,
 }
@@ -57,7 +55,6 @@ impl<'a> WorkflowGraphProjector<'a> {
         Self {
             program,
             source_identity: None,
-            spans: BTreeMap::new(),
             analysis: None,
             fleet_format: lash_core_execution::FleetFormat::current(),
         }
@@ -77,17 +74,18 @@ impl<'a> WorkflowGraphProjector<'a> {
         self
     }
 
-    /// Source spans keyed by the projected program's own AST paths.
-    pub fn with_spans(mut self, spans: BTreeMap<AstPath, Span>) -> Self {
-        self.spans = spans;
-        self
-    }
-
     /// Link facts for optional type facets, keyed by the projected program's
     /// AST paths.
     pub fn with_analysis(mut self, analysis: &'a WorkflowLinkAnalysis) -> Self {
         self.analysis = Some(analysis);
         self
+    }
+
+    /// Each visible statement's node id and rooted path in this program.
+    /// Source lenses use these structural addresses to locate nodes without
+    /// putting source coordinates in the semantic document.
+    pub fn statement_addresses(&self) -> Vec<(WorkflowNodeId, AstPath)> {
+        statement_addresses(self.program)
     }
 
     pub fn project(&self) -> WorkflowGraph {
@@ -283,7 +281,6 @@ impl Session<'_, '_> {
             statement.ast_path.clone()
         };
         let path = statement.node_path.indices();
-        let source_span = self.source_span(&statement.ast_path);
         let available_variables: Vec<String> = versions.known.iter().cloned().collect();
         let (kind, derived_name, outputs) =
             self.project_kind(statement, expression, owner, ownership, versions);
@@ -330,41 +327,7 @@ impl Session<'_, '_> {
             type_facets,
             outputs,
             execution_sites,
-            source_span,
         }
-    }
-
-    /// The span of a statement, or of the nearest enclosing expression a
-    /// front end recorded one for: a statement the front end gave a completion
-    /// value carries its span on that wrapper.
-    fn source_span(&self, ast_path: &AstPath) -> Option<Span> {
-        let spans = &self.projector.spans;
-        let mut path = ast_path.clone();
-        loop {
-            if let Some(span) = spans.get(&path) {
-                return Some(*span);
-            }
-            let wrapper = path.steps.len() >= 2
-                && path.steps[path.steps.len() - 2..] == [0, 0]
-                && self.is_completion_wrapper(&AstPath {
-                    root: path.root,
-                    steps: path.steps[..path.steps.len() - 2].to_vec(),
-                });
-            if !wrapper {
-                return None;
-            }
-            path.steps.truncate(path.steps.len() - 2);
-        }
-    }
-
-    fn is_completion_wrapper(&self, path: &AstPath) -> bool {
-        matches!(
-            expr_at(self.projector.program, path),
-            Some(Expr::Role {
-                role: StructuralRole::Completion,
-                ..
-            })
-        )
     }
 
     fn project_kind(
