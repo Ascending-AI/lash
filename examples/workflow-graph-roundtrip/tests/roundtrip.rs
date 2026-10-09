@@ -50,7 +50,7 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     let entries: Value = response.json().await.expect("operation catalog JSON");
     let entries = entries.as_array().expect("operation catalog array");
-    assert_eq!(entries.len(), 23);
+    assert_eq!(entries.len(), 25);
     assert_eq!(
         entries[0],
         serde_json::json!({
@@ -96,13 +96,22 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
             ]
         }),
         serde_json::json!({
-            "id": "stmt.opaque",
-            "label": "Raw statement",
-            "nodeKind": "opaque",
+            "id": "control.try",
+            "label": "Try",
+            "nodeKind": "container",
+            "subkind": "try",
+            "fields": [
+                { "name": "catchBinding", "type": "identifier", "default": { "kind": "string", "value": "error" } }
+            ]
+        }),
+        serde_json::json!({
+            "id": "stmt.throw",
+            "label": "Throw",
+            "nodeKind": "throw",
             "fields": [{
-                "name": "source",
+                "name": "expression",
                 "type": "expression",
-                "default": { "kind": "expr", "value": "await display.show_message({ text: \"raw\" })" }
+                "default": { "kind": "expr", "value": "\"failed\"" }
             }]
         }),
         serde_json::json!({
@@ -246,8 +255,8 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
         .iter()
         .find(|node| node.data.binding().as_deref() == Some("my_process"))
         .expect("reprojected added process binding");
-    // In the admitted view the binding holds the reference to its lifted
-    // process, which is pure data (FIG-3571).
+    // The binding holds the reference to its process, which is pure data
+    // (FIG-3571).
     assert_eq!(added.data.kind(), "data");
     let container_id = &saved.document.roots.processes[0];
     let added = saved
@@ -257,13 +266,9 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
         .find(|node| &node.id == container_id)
         .expect("reprojected added process container");
     assert_eq!(added.data.kind(), "process");
-    assert!(
-        added
-            .data
-            .process_name()
-            .as_deref()
-            .is_some_and(|name| name.starts_with(lash::vm::ir::LIFTED_PROCESS_NAME_PREFIX))
-    );
+    // The host declared the process by a typed edit, and no source round
+    // trip re-spells it as a lifted literal: it keeps the name it was given.
+    assert_eq!(added.data.process_name().as_deref(), Some("my_process"));
     assert!(added.data.params().is_empty());
     let body = added
         .data
@@ -443,11 +448,26 @@ async fn newly_catalogued_nodes_save_reproject_and_run_from_their_catalog_shapes
             .unwrap_or_else(|| panic!("catalog entry {id}"))
     };
 
+    // A `try` and a `throw` are typed forms like any other: the catalog
+    // inserts them as a container with child bodies and a statement.
     let mut document = select_workflow(&client, &base, "blank").await;
-    append_process_node(
-        &mut document,
-        new_flow_node_from_catalog(entry("stmt.opaque"), "new:opaque"),
-    );
+    let mut thrown = new_flow_node_from_catalog(entry("stmt.throw"), "new:throw");
+    thrown.parent_id = Some("new:try".to_string());
+    let mut region = new_flow_node_from_catalog(entry("control.try"), "new:try");
+    *region.data.children_mut().expect("children node") = vec![
+        ChildGroup {
+            slot: "body".to_string(),
+            scope: "container:new-try:body".to_string(),
+            node_ids: vec![thrown.id.clone()],
+        },
+        ChildGroup {
+            slot: "catch".to_string(),
+            scope: "container:new-try:catch".to_string(),
+            node_ids: Vec::new(),
+        },
+    ];
+    append_process_node(&mut document, region);
+    document.nodes.push(thrown);
 
     let response = client
         .post(format!("{base}/workflow"))
@@ -460,15 +480,27 @@ async fn newly_catalogued_nodes_save_reproject_and_run_from_their_catalog_shapes
     // FIG-3033: the `control.comprehension` and `stmt.fail` catalog shapes are
     // gone -- TypeScript has no list-comprehension expression and no authorable
     // `fail(...)` terminal, so neither shape can be rendered back to source.
-    assert!(saved.id_map.contains_key("new:opaque"));
-    assert!(saved.document.nodes.iter().any(|node| {
-        node.data.operation().as_deref() == Some("show_message")
-            && node
-                .data
-                .fields()
-                .get("text")
-                .is_some_and(|value| value == &EditableValue::String("raw".to_string()))
-    }));
+    let region = saved
+        .document
+        .nodes
+        .iter()
+        .find(|node| Some(&node.id) == saved.id_map.get("new:try"))
+        .expect("the saved try region");
+    assert!(matches!(
+        &region.data.body,
+        workflow_graph_roundtrip::NodeBody::Container(
+            workflow_graph_roundtrip::NodeContainer::Try { catch_binding, finally: false, .. }
+        ) if catch_binding.as_deref() == Some("error")
+    ));
+    let thrown = saved
+        .document
+        .nodes
+        .iter()
+        .find(|node| Some(&node.id) == saved.id_map.get("new:throw"))
+        .expect("the saved throw");
+    assert_eq!(thrown.node_type, "throw");
+    assert_eq!(thrown.data.expression().as_deref(), Some("\"failed\""));
+    assert_eq!(thrown.parent_id.as_ref(), Some(&region.id));
     let graph =
         lash::typescript::workflow_graph::workflow_graph_from_source(&saved.document.source)
             .expect("saved catalog-created workflow reprojects");
@@ -478,12 +510,10 @@ async fn newly_catalogued_nodes_save_reproject_and_run_from_their_catalog_shapes
         saved.document.source
     );
 
-    // The `fail` terminal that used to end this run is gone with its catalog
-    // shape, so the catalogued nodes now run to a successful finish.
+    // The throw is caught by its region, so the run finishes.
     let events = run_workflow(&client, &base).await;
     let last = events.last().expect("terminal run event");
     assert_eq!(last.status, RunStatus::Succeeded);
-    assert!(last.display.messages.iter().any(|message| message == "raw"));
 
     server.abort();
 }
@@ -973,7 +1003,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
         }
 
         if entry.id == "counter-loop" {
-            assert!(!document.nodes.iter().any(|node| node.node_type == "opaque"));
+            assert!(!document.nodes.iter().any(|node| node.node_type == "throw"));
             assert!(
                 document
                     .nodes
@@ -2281,7 +2311,15 @@ fn new_flow_node_from_catalog(entry: &Value, id: &str) -> FlowNode {
             "expression" => *node.data.expression_mut().expect("expression node") = Some(default),
             "condition" => *node.data.condition_mut().expect("condition node") = Some(default),
             "iterable" => *node.data.iterable_mut().expect("iterable node") = Some(default),
-            "source" => *node.data.source_mut().expect("source node") = Some(default),
+            "catchBinding" => {
+                let workflow_graph_roundtrip::NodeBody::Container(
+                    workflow_graph_roundtrip::NodeContainer::Try { catch_binding, .. },
+                ) = &mut node.data.body
+                else {
+                    panic!("a catch binding belongs to a try");
+                };
+                *catch_binding = Some(default);
+            }
             _ => {
                 node.data.fields_mut().expect("fields node").insert(
                     name.to_string(),

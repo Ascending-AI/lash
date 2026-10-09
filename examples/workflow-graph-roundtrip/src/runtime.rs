@@ -4,8 +4,13 @@ use std::sync::Arc;
 use lash::LashCore;
 use lash::process::*;
 use lash::tracing::TraceLanguageExecutionPayload;
-use lash::vm::{LinkedModule, ProcessRef};
-use lash::workflow::{WorkflowDocument, WorkflowRead};
+use lash::vm::ir::{WorkflowDeclaration, WorkflowNodeId};
+use lash::workflow::{
+    WorkflowAdmissionDiagnosticKind, WorkflowCorrespondence, WorkflowCorrespondenceEntry,
+    WorkflowDocumentRead, WorkflowDraft, WorkflowDraftHandle, WorkflowEntry,
+    WorkflowExecutionDocument, WorkflowExecutionOverlayAccumulator, WorkflowGraph,
+    WorkflowOverlayOccurrence, WorkflowOverlaySettlement, WorkflowOverlayTerminal, WorkflowPublish,
+};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt as _;
 
@@ -16,9 +21,9 @@ pub(crate) enum RunError {
     #[error(transparent)]
     Lash(#[from] lash::EmbedError),
     #[error(transparent)]
-    Link(#[from] lash::typescript::Diagnostic),
+    Refused(#[from] lash::workflow::WorkflowAdmissionRefusal),
     #[error(transparent)]
-    Definition(#[from] ProcessDefinitionDraftError),
+    Overlay(#[from] lash::workflow::WorkflowOverlayFoldError),
     #[error(transparent)]
     Display(#[from] lash::vm::ExecutionHostError),
     #[error(transparent)]
@@ -27,201 +32,160 @@ pub(crate) enum RunError {
     Invalid(String),
 }
 
-/// A saved version's admission: the module a run publishes and the process
-/// it starts. The run's graph is not kept here: lash answers it for the
-/// process it started ([`RunView::read`]).
+/// The environment a process of a saved workflow runs under, which is the
+/// environment lash admits the workflow against.
+fn environment() -> ProcessExecutionEnvSpec {
+    ProcessExecutionEnvSpec::new(
+        lash::plugins::AdmittedPluginConfig::default(),
+        lash::runtime::SessionPolicy::new(
+            lash::TurnBudget::bounded(32),
+            lash::MaxToolCalls::new(1024),
+            lash::NoProgressBudget::bounded(12),
+        ),
+        lash::plugins::SessionToolAccess::ambient(),
+    )
+}
+
+/// A saved version as lash holds it: the definition a run starts, the
+/// environment it starts under, and the pin that retains both.
 #[derive(Clone)]
-pub(crate) struct AdmittedWorkflow {
-    linked: LinkedModule,
-    entry: Option<ProcessRef>,
+pub(crate) struct Published {
+    definition: ProcessDefinition,
+    env_ref: ProcessExecutionEnvRef,
+    pub(crate) pin: HostArtifactPin,
 }
 
-impl AdmittedWorkflow {
-    pub(crate) fn admit(source: &str) -> Result<Self, RunError> {
-        let linked = lash::typescript::link(source, &host_environment())?;
-        let entry = linked
-            .artifact
-            .ir()
-            .declarations
-            .iter()
-            .find_map(|declaration| match declaration {
-                lash::vm::ir::Declaration::Process(process) => {
-                    linked.artifact.process_ref(process.name.as_str()).cloned()
+impl Published {
+    pub(crate) fn start_request(&self, key: &str) -> ProcessStartRequest {
+        ProcessStartRequest::new(
+            ProcessStartTarget::Definition {
+                definition_id: self.definition.id.clone(),
+                signature_claim: Some(self.definition.signature.clone()),
+                args: Default::default(),
+            },
+            ProcessOriginator::host(),
+            Lifetime::Detached,
+        )
+        .with_host_start_key(key)
+        .with_env_ref(self.env_ref.clone())
+    }
+}
+
+/// A draft lash admitted: what it published, the admitted document, and the
+/// admitted id of every node the draft still holds.
+pub(crate) struct Publication {
+    pub(crate) published: Published,
+    pub(crate) graph: WorkflowGraph,
+    pub(crate) ids: BTreeMap<WorkflowDraftHandle, WorkflowNodeId>,
+}
+
+/// Where each node a correspondence still holds ended up.
+pub(crate) fn surviving_ids(
+    correspondence: &WorkflowCorrespondence,
+) -> BTreeMap<WorkflowDraftHandle, WorkflowNodeId> {
+    let mut ids = BTreeMap::new();
+    for entry in &correspondence.entries {
+        match entry {
+            WorkflowCorrespondenceEntry::Retained { handle, to, .. }
+            | WorkflowCorrespondenceEntry::Moved { handle, to, .. }
+            | WorkflowCorrespondenceEntry::Inserted { handle, to, .. }
+            | WorkflowCorrespondenceEntry::Merged { handle, to, .. } => {
+                ids.insert(*handle, to.clone());
+            }
+            WorkflowCorrespondenceEntry::Split { into, .. } => {
+                ids.extend(into.iter().cloned());
+            }
+            _ => {}
+        }
+    }
+    ids
+}
+
+/// Publishes `draft` as a definition under a pin of its own. Lash admits
+/// the document's IR in its VM workers against the run environment; no
+/// source is printed or parsed. The entry is the first process of the
+/// document the admitted module exports.
+pub(crate) async fn publish(
+    core: &LashCore,
+    draft: &WorkflowDraft,
+) -> Result<Publication, RunError> {
+    let entries = draft
+        .document()
+        .declarations
+        .iter()
+        .filter_map(|declaration| match declaration {
+            WorkflowDeclaration::Process(process) => Some(process.id.clone()),
+            WorkflowDeclaration::Function(_) => None,
+        })
+        .collect::<Vec<_>>();
+    let pin = HostArtifactPin::mint();
+    let artifacts = core.host_artifacts();
+    let environment = environment();
+    let result = async {
+        let mut refused = None;
+        for entry in entries {
+            match artifacts
+                .publish_workflow(&pin, draft, WorkflowEntry::Process(entry), &environment)
+                .await?
+            {
+                WorkflowPublish::Published(publication) => {
+                    let env_ref = artifacts.publish_process_env(&pin, &environment).await?;
+                    return Ok(Publication {
+                        published: Published {
+                            definition: publication.definition,
+                            env_ref,
+                            pin: pin.clone(),
+                        },
+                        graph: publication.document.graph,
+                        ids: surviving_ids(&publication.correspondence),
+                    });
                 }
-                _ => None,
-            });
-        Ok(Self { linked, entry })
-    }
-}
-
-pub(crate) struct PreparedRun {
-    admitted: AdmittedWorkflow,
-    workflow_version: u64,
-    process_name: String,
-}
-
-/// What a run's overlay binds to, read from lash for the process itself:
-/// the definition it executes and the nodes of its entry process.
-struct RunView {
-    workflow_version: u64,
-    definition: String,
-    root_node: String,
-    nodes: BTreeSet<String>,
-}
-
-impl RunView {
-    async fn read(
-        core: &LashCore,
-        process: &lash::ProcessId,
-        workflow_version: u64,
-    ) -> Result<Self, RunError> {
-        match core.processes().graph(process).await? {
-            WorkflowRead::Inspected(inspection) => Self::of(&inspection.document, workflow_version),
-            unreadable => Err(RunError::Invalid(format!(
-                "the run's workflow cannot be read: {unreadable:?}"
-            ))),
-        }
-    }
-
-    fn of(document: &WorkflowDocument, workflow_version: u64) -> Result<Self, RunError> {
-        let definition = document
-            .graph
-            .source_identity
-            .clone()
-            .ok_or_else(|| RunError::Invalid("the run's graph names no artifact".into()))?;
-        let process = document
-            .graph
-            .process(&document.entry)
-            .ok_or_else(|| RunError::Invalid("the run's process has no graph".into()))?;
-        let mut nodes = BTreeSet::new();
-        executing_nodes(&process.body, &mut nodes);
-        Ok(Self {
-            workflow_version,
-            definition,
-            root_node: process.id.to_string(),
-            nodes,
-        })
-    }
-}
-
-/// The nodes of `body`, nested ones included, that have an execution site:
-/// the nodes a run can report on.
-fn executing_nodes(body: &lash::vm::ir::WorkflowSubgraph, nodes: &mut BTreeSet<String>) {
-    for node in &body.nodes {
-        if !node.execution_sites.is_empty() {
-            nodes.insert(node.id.to_string());
-        }
-        if let lash::vm::ir::WorkflowNodeKind::Container(container) = &node.kind {
-            for (_, child) in container.child_subgraphs() {
-                executing_nodes(child, nodes);
+                // A process the module does not export is not an entry; the
+                // next one may be.
+                WorkflowPublish::Refused(refusal)
+                    if refusal.diagnostics.iter().all(|diagnostic| {
+                        diagnostic.kind == WorkflowAdmissionDiagnosticKind::Entry
+                    }) =>
+                {
+                    refused.get_or_insert(refusal);
+                }
+                WorkflowPublish::Refused(refusal) => return Err(RunError::Refused(refusal)),
+                WorkflowPublish::Unsupported { engine_kind } => {
+                    return Err(RunError::Invalid(format!(
+                        "engine `{engine_kind}` admits no workflow documents"
+                    )));
+                }
             }
         }
-    }
-}
-
-impl PreparedRun {
-    pub(crate) fn new(
-        admitted: &AdmittedWorkflow,
-        workflow_version: u64,
-    ) -> Result<Self, RunError> {
-        let entry = admitted
-            .entry
-            .as_ref()
-            .ok_or_else(|| RunError::Invalid("saved workflow has no process to run".into()))?;
-        let process_name = admitted
-            .linked
-            .artifact
-            .exports()
-            .processes
-            .keys()
-            .find(|name| {
-                admitted
-                    .linked
-                    .artifact
-                    .process_ref(name)
-                    .is_some_and(|reference| reference == entry)
-            })
-            .ok_or_else(|| RunError::Invalid("saved entry is not exported".into()))?
-            .clone();
-        Ok(Self {
-            admitted: admitted.clone(),
-            workflow_version,
-            process_name,
+        Err(match refused {
+            Some(refusal) => RunError::Refused(refusal),
+            None => RunError::Invalid("saved workflow has no process to run".into()),
         })
     }
-
-    pub(crate) async fn publish(
-        &self,
-        core: &LashCore,
-        key: &str,
-    ) -> Result<(ProcessStartRequest, HostArtifactPin), RunError> {
-        let pin = HostArtifactPin::mint();
-        let artifacts = core.host_artifacts();
-        let result = async {
-            let artifact = &self.admitted.linked.artifact;
-            artifacts.publish_module(&pin, artifact).await?;
-            let identity = lash::vm::ProcessDefinitionIdentity::from_artifact_export(
-                artifact,
-                &self.process_name,
-            )
-            .ok_or_else(|| RunError::Invalid("saved entry is not exported".into()))?;
-            let definition = artifacts
-                .publish_definition(&pin, &identity.draft()?)
-                .await?;
-            let env = ProcessExecutionEnvSpec::new(
-                lash::plugins::AdmittedPluginConfig::default(),
-                lash::runtime::SessionPolicy::new(
-                    lash::TurnBudget::bounded(32),
-                    lash::MaxToolCalls::new(1024),
-                    lash::NoProgressBudget::bounded(12),
-                ),
-                lash::plugins::SessionToolAccess::ambient(),
-            );
-            let env_ref = artifacts.publish_process_env(&pin, &env).await?;
-            Ok(ProcessStartRequest::new(
-                ProcessStartTarget::Definition {
-                    definition_id: definition.id,
-                    signature_claim: Some(definition.signature),
-                    args: Default::default(),
-                },
-                ProcessOriginator::host(),
-                Lifetime::Detached,
-            )
-            .with_host_start_key(key)
-            .with_env_ref(env_ref))
-        }
-        .await;
-        // The admission caller releases this only after start acquires the closure.
-        match result {
-            Ok(request) => Ok((request, pin)),
-            Err(error) => {
-                artifacts.release(pin).await?;
-                Err(error)
-            }
-        }
+    .await;
+    if result.is_err() {
+        artifacts.release(pin).await?;
     }
+    result
+}
 
-    pub(crate) async fn observe(
-        self,
-        core: LashCore,
-        process: lash::ProcessId,
-        sender: mpsc::Sender<Result<RunEvent, RunError>>,
-        host: Arc<crate::display::HostTools>,
-    ) -> Result<(), RunError> {
-        let observed = core.processes().observe(&process);
-        let snapshot = observed.snapshot().await?;
-        // The feed retains everything published while the workflow is read.
-        let mut feed = observed.subscribe_and_recover(snapshot.cursor);
-        let mut overlay = Overlay {
-            view: RunView::read(&core, &process, self.workflow_version).await?,
-            process,
-            sequence: 0,
-            display: DisplayState::default(),
-            completed_calls: BTreeMap::new(),
-            delivered: BTreeSet::new(),
-            host,
-        };
-        let (events, terminal) = overlay.snapshot(snapshot.read_view)?;
+/// Follows `process` on its one recovering feed and sends what the execution
+/// overlay shows of it until the process ends or the receiver goes away.
+pub(crate) async fn observe(
+    core: LashCore,
+    process: lash::ProcessId,
+    workflow_version: u64,
+    sender: mpsc::Sender<Result<RunEvent, RunError>>,
+    host: Arc<crate::display::HostTools>,
+) -> Result<(), RunError> {
+    let observed = core.processes().observe(&process);
+    let snapshot = observed.snapshot().await?;
+    // The feed retains everything published while the document is read.
+    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let document = execution_document(&core, &snapshot.read_view).await?;
+    let mut overlay = Overlay::new(&document, process, workflow_version, host)?;
+    let (mut events, mut terminal) = overlay.snapshot(snapshot.read_view)?;
+    loop {
         for event in events {
             if sender.send(Ok(event)).await.is_err() {
                 return Ok(());
@@ -230,52 +194,96 @@ impl PreparedRun {
         if terminal {
             return Ok(());
         }
-        loop {
-            let item = tokio::select! {
-                _ = sender.closed() => return Ok(()),
-                item = feed.next() => item,
-            };
-            let Some(item) = item else {
-                return Err(RunError::Invalid(
-                    "the process observation feed ended".into(),
-                ));
-            };
-            let (events, terminal) = match item? {
-                ProcessObservationStreamItem::Event(event) => match &event.payload {
-                    ProcessObservationEventPayload::LanguageExecution(observation) => {
-                        (overlay.language_observation(&observation.execution)?, false)
-                    }
-                    // The admitted body of a tool step started: its node runs.
-                    ProcessObservationEventPayload::StepBodyStarted(observation) => {
-                        (overlay.step_body_started(&observation.step), false)
-                    }
-                    ProcessObservationEventPayload::Committed { event } => (
-                        overlay.durable(event)?,
-                        matches!(event.fact, ProcessLifecycleFact::Terminal { .. }),
-                    ),
-                },
-                ProcessObservationStreamItem::Gap { observation, .. } => {
-                    // A gap retires provisional bindings. Applied display operations
-                    // remain host state; retained effect evidence rebuilds bindings.
-                    overlay.completed_calls.clear();
-                    overlay.snapshot(observation.read_view)?
+        let item = tokio::select! {
+            _ = sender.closed() => return Ok(()),
+            item = feed.next() => item,
+        };
+        let Some(item) = item else {
+            return Err(RunError::Invalid(
+                "the process observation feed ended".into(),
+            ));
+        };
+        (events, terminal) = match item? {
+            ProcessObservationStreamItem::Event(event) => match &event.payload {
+                ProcessObservationEventPayload::LanguageExecution(observation) => {
+                    (overlay.language_observation(observation)?, false)
                 }
-            };
-            for event in events {
-                if sender.send(Ok(event)).await.is_err() {
-                    return Ok(());
+                // The admitted body of a tool step started: its site runs.
+                ProcessObservationEventPayload::StepBodyStarted(observation) => {
+                    overlay.accumulator.step_body_started(observation)?;
+                    (overlay.changed(), false)
                 }
+                ProcessObservationEventPayload::Committed { event } => (
+                    overlay.durable(event)?,
+                    matches!(event.fact, ProcessLifecycleFact::Terminal { .. }),
+                ),
+            },
+            ProcessObservationStreamItem::Gap { observation, .. } => {
+                // A gap retires provisional history. Applied display operations
+                // remain host state; retained effect evidence rebuilds bindings.
+                overlay.accumulator.reset_live();
+                overlay.completed_calls.clear();
+                overlay.snapshot(observation.read_view)?
             }
-            if terminal {
-                return Ok(());
-            }
-        }
+        };
     }
 }
 
+/// The document the process runs, read from lash by the reference the
+/// process's own snapshot names.
+async fn execution_document(
+    core: &LashCore,
+    view: &ProcessReadView,
+) -> Result<WorkflowExecutionDocument, RunError> {
+    let ProcessReadView::Retained(view) = view else {
+        return Err(RunError::Invalid(
+            "the process is no longer retained".into(),
+        ));
+    };
+    let ProcessDocumentIdentity::Available(reference) = &view.document else {
+        return Err(RunError::Invalid(format!(
+            "the run names no workflow document: {:?}",
+            view.document
+        )));
+    };
+    match core.host_artifacts().execution_document(reference).await? {
+        WorkflowDocumentRead::Read(document) => Ok(*document),
+        unreadable => Err(RunError::Invalid(format!(
+            "the run's workflow document cannot be read: {unreadable:?}"
+        ))),
+    }
+}
+
+fn settlement(
+    status: ProcessStatus,
+    occurred_at_ms: Option<u64>,
+) -> Option<WorkflowOverlaySettlement> {
+    let terminal = match status {
+        ProcessStatus::Completed => WorkflowOverlayTerminal::Completed,
+        ProcessStatus::Failed => WorkflowOverlayTerminal::Failed,
+        ProcessStatus::Cancelled => WorkflowOverlayTerminal::Cancelled,
+        ProcessStatus::Abandoned => WorkflowOverlayTerminal::Abandoned,
+        _ => return None,
+    };
+    Some(WorkflowOverlaySettlement {
+        terminal,
+        occurred_at: occurred_at_ms
+            .and_then(|at| i64::try_from(at).ok())
+            .and_then(chrono::DateTime::from_timestamp_millis),
+    })
+}
+
+/// One run as this host shows it: lash's execution overlay of the process,
+/// reduced to a status per node, beside the host's own display state.
 struct Overlay {
-    view: RunView,
+    accumulator: WorkflowExecutionOverlayAccumulator,
     process: lash::ProcessId,
+    workflow_version: u64,
+    definition: String,
+    root_node: String,
+    /// What each node was last sent as: its status and how many of its
+    /// occurrences had started and ended by then.
+    shown: BTreeMap<String, (RunStatus, u64, u64)>,
     sequence: u64,
     display: DisplayState,
     completed_calls: BTreeMap<String, String>,
@@ -284,6 +292,41 @@ struct Overlay {
 }
 
 impl Overlay {
+    fn new(
+        document: &WorkflowExecutionDocument,
+        process: lash::ProcessId,
+        workflow_version: u64,
+        host: Arc<crate::display::HostTools>,
+    ) -> Result<Self, RunError> {
+        let definition = document
+            .graph
+            .source_identity
+            .clone()
+            .ok_or_else(|| RunError::Invalid("the run's graph names no artifact".into()))?;
+        let root_node = document
+            .entry
+            .as_deref()
+            .and_then(|entry| document.graph.process(entry))
+            .ok_or_else(|| RunError::Invalid("the run's process has no graph".into()))?
+            .id
+            .to_string();
+        let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
+        accumulator.set_document(document.overlay_document());
+        Ok(Self {
+            accumulator,
+            process,
+            workflow_version,
+            definition,
+            root_node,
+            shown: BTreeMap::new(),
+            sequence: 0,
+            display: DisplayState::default(),
+            completed_calls: BTreeMap::new(),
+            delivered: BTreeSet::new(),
+            host,
+        })
+    }
+
     fn event(
         &mut self,
         node_id: String,
@@ -294,8 +337,8 @@ impl Overlay {
         self.sequence += 1;
         RunEvent {
             run_id: self.process.to_string(),
-            workflow_version: self.view.workflow_version,
-            definition: self.view.definition.clone(),
+            workflow_version: self.workflow_version,
+            definition: self.definition.clone(),
             sequence: self.sequence,
             node_id,
             status,
@@ -306,11 +349,56 @@ impl Overlay {
         }
     }
 
+    /// The nodes whose state in lash's overlay changed since they were last
+    /// sent. A node shows its site in flight, else its latest ended one.
+    fn changed(&mut self) -> Vec<RunEvent> {
+        let Some(overlay) = self.accumulator.snapshot() else {
+            return Vec::new();
+        };
+        let mut nodes = BTreeMap::<&str, (u8, RunStatus, Option<String>, u64, u64)>::new();
+        for site in &overlay.sites {
+            let (rank, status, error) = match &site.occurrence {
+                WorkflowOverlayOccurrence::Unobserved => continue,
+                WorkflowOverlayOccurrence::Running { .. } => (3, RunStatus::Started, None),
+                WorkflowOverlayOccurrence::Waiting { .. } => (3, RunStatus::Waiting, None),
+                WorkflowOverlayOccurrence::Failed { failure, .. } => {
+                    (2, RunStatus::Failed, Some(failure.message().to_owned()))
+                }
+                WorkflowOverlayOccurrence::Cancelled { .. } => {
+                    (2, RunStatus::Failed, Some("cancelled".to_owned()))
+                }
+                WorkflowOverlayOccurrence::Completed { .. } => (1, RunStatus::Succeeded, None),
+                WorkflowOverlayOccurrence::Incomplete { terminal, .. } => match terminal {
+                    WorkflowOverlayTerminal::Completed => (1, RunStatus::Succeeded, None),
+                    _ => (2, RunStatus::Failed, Some("the run ended first".to_owned())),
+                },
+            };
+            let node = nodes
+                .entry(site.site.node_id.as_str())
+                .or_insert((0, status, None, 0, 0));
+            if rank > node.0 {
+                (node.0, node.1, node.2) = (rank, status, error);
+            }
+            node.3 += site.summary.started_count;
+            node.4 += site.summary.terminal_count;
+        }
+        let mut events = Vec::new();
+        for (node, (_, status, error, started, ended)) in nodes {
+            let shown = (status, started, ended);
+            if self.shown.get(node) == Some(&shown) {
+                continue;
+            }
+            self.shown.insert(node.to_owned(), shown);
+            events.push(self.event(node.to_owned(), status, DisplayDelta::default(), error));
+        }
+        events
+    }
+
     fn durable(&mut self, event: &ObservedProcessEvent) -> Result<Vec<RunEvent>, RunError> {
         let mut events = Vec::new();
         match &event.fact {
             ProcessLifecycleFact::EffectOutcome(occurrence) => {
-                events.extend(self.effect(occurrence)?);
+                events.extend(self.effect(occurrence));
                 events.extend(self.deliver_display()?);
             }
             ProcessLifecycleFact::Waiting { wait } => events.push(self.waiting(wait)),
@@ -320,9 +408,17 @@ impl Overlay {
                 } else {
                     RunStatus::Failed
                 };
+                // The committed end settles what the overlay still shows in
+                // flight; it never invents an execution of an untouched node.
+                if let Some(settlement) =
+                    settlement(outcome.status().into(), Some(event.occurred_at_ms))
+                {
+                    self.accumulator.settle(settlement);
+                }
+                events.extend(self.changed());
                 events.extend(self.deliver_display()?);
                 events.push(self.event(
-                    self.view.root_node.clone(),
+                    self.root_node.clone(),
                     status,
                     DisplayDelta::default(),
                     (status == RunStatus::Failed).then(|| format!("{outcome:?}")),
@@ -333,13 +429,9 @@ impl Overlay {
         Ok(events)
     }
 
-    fn effect(&mut self, occurrence: &ProcessEffectOccurrence) -> Result<Vec<RunEvent>, RunError> {
-        if !self.view.nodes.contains(&occurrence.node_id) {
-            return Err(RunError::Invalid(format!(
-                "process event names a node outside the saved workflow document: {}",
-                occurrence.node_id
-            )));
-        }
+    /// A committed effect outcome: durable evidence of one call of a node,
+    /// which outlives the provisional overlay.
+    fn effect(&mut self, occurrence: &ProcessEffectOccurrence) -> Vec<RunEvent> {
         let status = match occurrence.outcome_class {
             ProcessEffectOutcomeClass::Success => {
                 if let Some(call) = &occurrence.call_id {
@@ -352,17 +444,17 @@ impl Overlay {
                 RunStatus::Failed
             }
         };
-        Ok(vec![self.event(
+        vec![self.event(
             occurrence.node_id.clone(),
             status,
             DisplayDelta::default(),
             occurrence.code.as_ref().map(ToString::to_string),
-        )])
+        )]
     }
 
     fn waiting(&mut self, wait: &WaitState) -> RunEvent {
         let mut event = self.event(
-            self.view.root_node.clone(),
+            self.root_node.clone(),
             RunStatus::Waiting,
             DisplayDelta::default(),
             None,
@@ -402,10 +494,17 @@ impl Overlay {
         let mut events = Vec::new();
         for node in view.effects.report.nodes() {
             for occurrence in &node.occurrences {
-                events.extend(self.effect(occurrence)?);
+                events.extend(self.effect(occurrence));
             }
         }
         events.extend(self.deliver_display()?);
+        if let Some(settlement) = settlement(
+            view.process.status(),
+            view.process.lifecycle.terminal_at_ms(),
+        ) {
+            self.accumulator.settle(settlement);
+        }
+        events.extend(self.changed());
         let status = match view.process.status() {
             ProcessStatus::Completed => RunStatus::Succeeded,
             ProcessStatus::Failed | ProcessStatus::Cancelled | ProcessStatus::Abandoned => {
@@ -422,7 +521,7 @@ impl Overlay {
         } else {
             events.push(
                 self.event(
-                    self.view.root_node.clone(),
+                    self.root_node.clone(),
                     status,
                     DisplayDelta::default(),
                     view.process
@@ -437,32 +536,8 @@ impl Overlay {
 
     fn language_observation(
         &mut self,
-        observed: &lash::tracing::TraceLanguageExecution,
+        observation: &LanguageExecutionObservation,
     ) -> Result<Vec<RunEvent>, RunError> {
-        if observed.identity.source_identity != self.view.definition {
-            return Ok(Vec::new());
-        }
-        let mut events = self
-            .language(observed.payload.clone())
-            .into_iter()
-            .collect::<Vec<_>>();
-        events.extend(self.deliver_display()?);
-        Ok(events)
-    }
-
-    fn step_body_started(&mut self, step: &lash::tracing::StepBodyStarted) -> Vec<RunEvent> {
-        if !self.view.nodes.contains(&step.node_id) {
-            return Vec::new();
-        }
-        vec![self.event(
-            step.node_id.clone(),
-            RunStatus::Started,
-            DisplayDelta::default(),
-            None,
-        )]
-    }
-
-    fn language(&mut self, payload: TraceLanguageExecutionPayload) -> Option<RunEvent> {
         // The engine resumes the VM with a settled step's recorded output.
         // NodeCompleted identifies that logical call even after the bounded
         // effect summary stops carrying individual loop occurrences.
@@ -470,48 +545,15 @@ impl Overlay {
             node_id,
             call_id: Some(call),
             ..
-        } = &payload
-            && self.view.nodes.contains(node_id)
+        } = &observation.execution.payload
         {
             self.completed_calls
                 .insert(call.to_string(), node_id.clone());
         }
-        let (node, status, error) = match payload {
-            TraceLanguageExecutionPayload::NodeStarted { node_id, .. }
-            | TraceLanguageExecutionPayload::NodeResumed { node_id, .. } => {
-                (node_id, RunStatus::Started, None)
-            }
-            TraceLanguageExecutionPayload::NodeWaiting { node_id, .. } => {
-                if !self.view.nodes.contains(&node_id) {
-                    return None;
-                }
-                return Some(self.event(
-                    node_id,
-                    RunStatus::Waiting,
-                    DisplayDelta::default(),
-                    None,
-                ));
-            }
-            TraceLanguageExecutionPayload::NodeCompleted { node_id, .. }
-            | TraceLanguageExecutionPayload::BranchSelected { node_id, .. } => {
-                (node_id, RunStatus::Succeeded, None)
-            }
-            TraceLanguageExecutionPayload::NodeFailed {
-                node_id, failure, ..
-            } => (
-                node_id,
-                RunStatus::Failed,
-                Some(failure.message().to_owned()),
-            ),
-            TraceLanguageExecutionPayload::NodeCancelled { node_id, .. } => {
-                (node_id, RunStatus::Failed, Some("cancelled".into()))
-            }
-            _ => return None,
-        };
-        self.view
-            .nodes
-            .contains(&node)
-            .then(|| self.event(node, status, DisplayDelta::default(), error))
+        self.accumulator.observe(observation)?;
+        let mut events = self.changed();
+        events.extend(self.deliver_display()?);
+        Ok(events)
     }
 }
 
@@ -567,7 +609,7 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
     Ok(WorkflowHost { core, tools })
 }
 
-/// Starts run through the engine's process admission API.
+/// Starts runs through the engine's process admission API.
 #[derive(Clone)]
 pub(crate) struct CommandClient(lash::LashCore);
 
@@ -585,59 +627,5 @@ impl CommandClient {
             .processes()
             .start(request, self.0.effect_host())
             .await?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_call_wait_shows_the_run_waiting_without_an_unregistered_approval() {
-        let linked = lash::typescript::link(crate::DEFAULT_WORKFLOW, &host_environment())
-            .expect("the default workflow admits");
-        let graph =
-            lash::typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
-        let entry = linked
-            .artifact
-            .exports()
-            .processes
-            .keys()
-            .next()
-            .expect("the default workflow exports a process")
-            .clone();
-        let view = RunView::of(&WorkflowDocument { graph, entry }, 1).expect("the run view");
-        let mut overlay = Overlay {
-            view,
-            process: lash::ProcessId::fixture("call-wait-overlay"),
-            sequence: 0,
-            display: DisplayState::default(),
-            completed_calls: BTreeMap::new(),
-            delivered: BTreeSet::new(),
-            host: Arc::new(crate::display::HostTools::default()),
-        };
-        let event = ObservedProcessEvent {
-            sequence: 1,
-            fact: ProcessLifecycleFact::Waiting {
-                wait: WaitState {
-                    kind: WaitKind::Call {
-                        call_id: lash::ToolCallId::fixture("call-wait-overlay"),
-                        tool_id: lash::tools::ToolId::new("tool:overlay"),
-                    },
-                    since_ms: 42,
-                    site: None,
-                },
-            },
-            occurred_at_ms: 42,
-        };
-        let projected = overlay.durable(&event).expect("project the call wait");
-        let [waiting] = projected.as_slice() else {
-            panic!("one overlay event per wait: {projected:?}");
-        };
-        assert_eq!(waiting.status, RunStatus::Waiting);
-        assert!(
-            waiting.approval_key.is_none(),
-            "a call the host registered no approval for offers no key"
-        );
     }
 }

@@ -1164,6 +1164,7 @@ PACKAGE_DEPS = {
         "normal": {
             "anyhow": "//third-party/rust:p0011",
             "axum": "//third-party/rust:p0021",
+            "chrono": "//third-party/rust:p0044",
             "lash": "//crates/lash:lash",
             "reqwest": "//third-party/rust:p0277",
             "schemars": "//third-party/rust:p0299",

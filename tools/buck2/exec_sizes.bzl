@@ -756,6 +756,7 @@ TEST_RUN_REQUESTS = {
     "//examples/toolbench:toolbench__unit_test": {"cpu_count": 2, "memory_kb": 786432},
     "//examples/workflow-graph-roundtrip:authoring__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/workflow-graph-roundtrip:durable_run__test": {"cpu_count": 2, "memory_kb": 524288},
+    "//examples/workflow-graph-roundtrip:generic_editing__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/workflow-graph-roundtrip:roundtrip__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/workflow-graph-roundtrip:type_facets__test": {"cpu_count": 2, "memory_kb": 524288},
     "//examples/workflow-graph-roundtrip:workflow-graph-roundtrip__bin__unit_test": {"cpu_count": 1, "memory_kb": 262144},

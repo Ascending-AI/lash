@@ -126,11 +126,14 @@ export function containerSubkindOf(node) {
 }
 
 // A sub-header for a child group, or null when the group's steps read directly
-// under the container's own label. Only the `if`'s `else` arm needs one
-// ("Otherwise"). Everything else (a `then`, a loop `body`, a process `body`, a
-// comprehension `element`) flows straight under the parent line.
+// under the container's own label. The `if`'s `else` arm needs one
+// ("Otherwise"), and so do a `try`'s clauses. Everything else (a `then`, a loop
+// `body`, a process `body`, a comprehension `element`) flows straight under the
+// parent line.
 export function groupHeader(subkind, slot) {
   if (subkind === 'if' && slot === 'else') return 'Otherwise';
+  if (subkind === 'try' && slot === 'catch') return 'If it fails';
+  if (subkind === 'try' && slot === 'finally') return 'Always, at the end';
   return null;
 }
 
@@ -179,8 +182,8 @@ export function stepLabel(node, catalog = []) {
         lead: 'Background task',
         name: d.name ?? d.title ?? 'task',
       };
-    case 'opaque':
-      return { category: 'opaque', glyph: '{}', lead: 'Advanced step', name: d.title ?? null };
+    case 'throw':
+      return { category: 'throw', glyph: '↯', lead: 'Throw', name: null };
     case 'effect':
       return effectLabel(node);
     case 'container':
@@ -203,6 +206,15 @@ function containerLabel(node) {
         lead: 'For each',
         name: node.data?.binding ?? 'item',
       };
+    case 'try':
+      return {
+        category: 'try',
+        glyph: '⛨',
+        lead: 'Try',
+        name: node.data?.catchBinding ? `catch ${node.data.catchBinding}` : null,
+      };
+    case 'scope':
+      return { category: 'scope', glyph: '{}', lead: 'Block', name: null };
     case 'comprehension':
       return { category: 'comprehension', glyph: '⟦⟧', lead: 'Make a list', name: null };
     default:

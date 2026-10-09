@@ -28,7 +28,7 @@ describe('stepLabel — plain-language, never leaks jargon', () => {
     [{ kind: 'terminal', terminalKind: 'finish', expression: 'x' }, 'finish', 'Finish with'],
     [{ kind: 'terminal', terminalKind: 'fail', expression: '"e"' }, 'fail', 'Stop with an error'],
     [{ kind: 'process', name: 'onboarding' }, 'process', 'Background task'],
-    [{ kind: 'opaque', source: 'foo()' }, 'opaque', 'Advanced step'],
+    [{ kind: 'throw', expression: '"failed"' }, 'throw', 'Throw'],
     [{ kind: 'effect', effect: 'start_process', fields: { name: { kind: 'string', value: 'w' } } }, 'start', 'Start'],
     [{ kind: 'effect', effect: 'await_join', fields: { name: { kind: 'string', value: 'w' } } }, 'await', 'Wait for'],
     [{ kind: 'effect', effect: 'sleep_for', fields: { duration: { kind: 'string', value: '400ms' } } }, 'sleep', 'Wait for'],
@@ -396,10 +396,13 @@ describe('stepTag — trigger vs action vs step', () => {
 });
 
 describe('groupHeader / containerSubkindOf', () => {
-  it('only the if-else arm gets a header', () => {
+  it('an if-else arm and a try clause get a header', () => {
     expect(groupHeader('if', 'then')).toBeNull();
     expect(groupHeader('if', 'else')).toBe('Otherwise');
     expect(groupHeader('for', 'body')).toBeNull();
+    expect(groupHeader('try', 'body')).toBeNull();
+    expect(groupHeader('try', 'catch')).toBe('If it fails');
+    expect(groupHeader('try', 'finally')).toBe('Always, at the end');
     expect(groupHeader('process', 'body')).toBeNull();
   });
   it('recovers a sub-kind from slots when subkind is absent', () => {

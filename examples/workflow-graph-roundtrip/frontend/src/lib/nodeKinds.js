@@ -8,8 +8,8 @@ export const NODE_KINDS = {
   data: { label: 'data', hue: 152, glyph: '≋', accent: '#5fd08a' },
   computation: { label: 'computation', hue: 72, glyph: 'ƒ', accent: '#cdd94a' },
   state_update: { label: 'state', hue: 312, glyph: '≔', accent: '#e77ec8' },
-  container: { label: 'branch / loop', hue: 210, glyph: '⋔', accent: '#6ab0ff' },
-  opaque: { label: 'opaque', hue: 8, glyph: '{}', accent: '#ff8f6b' },
+  container: { label: 'branch / loop / try', hue: 210, glyph: '⋔', accent: '#6ab0ff' },
+  throw: { label: 'throw', hue: 8, glyph: '↯', accent: '#ff8f6b' },
   terminal: { label: 'terminal', hue: 340, glyph: '◉', accent: '#ff6b9d' },
 };
 
@@ -27,6 +27,7 @@ export function containerSubkind(node) {
   const slots = (node?.data?.children ?? []).map((g) => g.slot);
   if (slots.includes('then') || slots.includes('else')) return 'if';
   if (slots.includes('element')) return 'comprehension';
+  if (slots.includes('catch') || slots.includes('finally')) return 'try';
   const title = (node?.data?.title ?? '').trim();
   if (/^for\b/.test(title)) return 'for';
   if (/^while\b/.test(title)) return 'while';
@@ -39,6 +40,8 @@ export const CONTAINER_SUBKINDS = {
   if: { label: 'if', glyph: '⋔' },
   for: { label: 'for', glyph: '↻' },
   while: { label: 'while', glyph: '⟳' },
+  try: { label: 'try', glyph: '⛨' },
+  scope: { label: 'block', glyph: '{}' },
   comprehension: { label: 'comprehension', glyph: '⟦⟧' },
   loop: { label: 'loop', glyph: '↻' },
 };

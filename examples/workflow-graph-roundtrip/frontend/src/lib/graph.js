@@ -36,7 +36,7 @@ export function buildFlow(doc, storedPositions, handlers = {}) {
     const isContainer = (node.data.children ?? []).length > 0;
     return {
       id: node.id,
-      type: isContainer ? 'container' : node.data.kind === 'opaque' ? 'opaque' : 'workflow',
+      type: isContainer ? 'container' : 'workflow',
       position: stored ? { x: stored.x, y: stored.y } : { x: auto.x, y: auto.y },
       parentId: node.parentId,
       extent: node.parentId ? 'parent' : undefined,
@@ -182,8 +182,8 @@ function nodeDataFromOperation(op) {
   const byName = Object.fromEntries((op.fields ?? []).map((f) => [f.name, f]));
 
   switch (kind) {
-    case 'opaque':
-      data.source = slotText(byName.source);
+    case 'throw':
+      data.expression = slotText(byName.expression) || '"failed"';
       break;
     case 'call':
       // The receiver rides on the node too, so a save that omits the
@@ -218,6 +218,9 @@ function nodeDataFromOperation(op) {
       } else if (op.subkind === 'for') {
         data.binding = slotText(byName.binding) || 'item';
         data.iterable = slotText(byName.iterable) || '[1, 2, 3]';
+      } else if (op.subkind === 'try') {
+        data.catchBinding = slotText(byName.catchBinding) || 'error';
+        data.finally = false;
       } else if (op.subkind === 'comprehension') {
         const binding = slotText(byName.binding);
         if (binding) data.binding = binding;
@@ -259,7 +262,13 @@ function containerSlots(kind) {
       return [{ slot: 'then', seeded: true }];
     case 'while':
     case 'for':
+    case 'scope':
       return [{ slot: 'body', seeded: true }];
+    case 'try':
+      return [
+        { slot: 'body', seeded: true },
+        { slot: 'catch', seeded: false },
+      ];
     case 'comprehension':
       return [{ slot: 'element', seeded: true }];
     default:

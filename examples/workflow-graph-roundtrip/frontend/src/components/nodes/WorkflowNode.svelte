@@ -40,8 +40,12 @@
   const hasBinding = $derived(isInvoke || isData);
   // state_update / computation always carry an editable expression; data /
   // terminal expose one only when the backend surfaces `expression` on them.
+  const isThrow = $derived(kind === 'throw');
   const hasExpr = $derived(
-    isAssign || isComputation || ((isData || isTerminal) && node.data.expression !== undefined),
+    isAssign ||
+      isComputation ||
+      isThrow ||
+      ((isData || isTerminal) && node.data.expression !== undefined),
   );
 
   const availableVars = $derived(node.data.availableVars ?? []);

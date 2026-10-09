@@ -806,19 +806,19 @@
               },
               "type": "array"
             },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "kind": {
-              "const": "opaque",
+              "const": "throw",
               "type": "string"
             },
             "nameSource": {
               "const": "label",
               "type": "string"
-            },
-            "source": {
-              "type": [
-                "string",
-                "null"
-              ]
             },
             "title": {
               "type": "string"
@@ -1024,6 +1024,148 @@
             },
             "subkind": {
               "const": "for",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A `try`: its `body` child group runs, `catch` runs with the thrown\nvalue bound to `catchBinding`, and `finally` runs on every exit.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "catchBinding": {
+              "description": "The name the catch clause binds; absent when there is no clause.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "finally": {
+              "default": false,
+              "description": "Whether the `try` has a `finally` body.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "try",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A nested statement block with its own `body` child group.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "label",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "scope",
               "type": "string"
             },
             "title": {
@@ -1494,19 +1636,19 @@
               },
               "type": "array"
             },
+            "expression": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "kind": {
-              "const": "opaque",
+              "const": "throw",
               "type": "string"
             },
             "nameSource": {
               "const": "derived",
               "type": "string"
-            },
-            "source": {
-              "type": [
-                "string",
-                "null"
-              ]
             },
             "title": {
               "type": "string"
@@ -1707,6 +1849,136 @@
             "subkind"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A `try`: its `body` child group runs, `catch` runs with the thrown\nvalue bound to `catchBinding`, and `finally` runs on every exit.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "catchBinding": {
+              "description": "The name the catch clause binds; absent when there is no clause.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "finally": {
+              "default": false,
+              "description": "Whether the `try` has a `finally` body.",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "try",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A nested statement block with its own `body` child group.",
+          "properties": {
+            "availableVars": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TypedVariable"
+              },
+              "type": "array"
+            },
+            "binding": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "children": {
+              "items": {
+                "$ref": "#/$defs/ChildGroup"
+              },
+              "type": "array"
+            },
+            "diagnostics": {
+              "items": {
+                "$ref": "#/$defs/TypeDiagnostic"
+              },
+              "type": "array"
+            },
+            "expectedArgTypes": {
+              "items": {
+                "$ref": "#/$defs/ExpectedArgumentType"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "container",
+              "type": "string"
+            },
+            "nameSource": {
+              "const": "derived",
+              "type": "string"
+            },
+            "subkind": {
+              "const": "scope",
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nameSource",
+            "title",
+            "kind",
+            "subkind"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -1839,6 +2111,13 @@
       },
       "type": "array"
     },
+    "notAdmitted": {
+      "description": "Why Lash did not admit this version as a definition. It is saved as\na draft and cannot run until an edit makes it admissible.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "roots": {
       "$ref": "#/$defs/GraphRoots"
     },
@@ -1848,7 +2127,15 @@
       "type": "integer"
     },
     "source": {
+      "description": "The workflow's canonical TypeScript, a view the optional TypeScript\nlens gives of the document. Empty when the lens has no spelling for\nit; the document is complete and editable either way.",
       "type": "string"
+    },
+    "sourceUnavailable": {
+      "description": "Why the TypeScript lens has no spelling for this workflow.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "version": {
       "format": "uint64",

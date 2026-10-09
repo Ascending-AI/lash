@@ -42,7 +42,7 @@ vi.mock(
   () => import('../test/FlowStub.svelte'),
 );
 vi.mock(
-  '../components/nodes/OpaqueNode.svelte',
+  '../components/IrEditor.svelte',
   () => import('../test/FlowStub.svelte'),
 );
 vi.mock(

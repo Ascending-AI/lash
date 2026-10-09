@@ -113,9 +113,9 @@ export type NodeData =
       description?: string | null;
       diagnostics?: TypeDiagnostic[];
       expectedArgTypes?: ExpectedArgumentType[];
-      kind: 'opaque';
+      expression?: string | null;
+      kind: 'throw';
       nameSource: 'label';
-      source?: string | null;
       title: string;
     }
   | {
@@ -154,6 +154,38 @@ export type NodeData =
       kind: 'container';
       nameSource: 'label';
       subkind: 'for';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      /**
+       * The name the catch clause binds; absent when there is no clause.
+       */
+      catchBinding?: string | null;
+      children?: ChildGroup[];
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      /**
+       * Whether the `try` has a `finally` body.
+       */
+      finally?: boolean;
+      kind: 'container';
+      nameSource: 'label';
+      subkind: 'try';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      children?: ChildGroup[];
+      description?: string | null;
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'container';
+      nameSource: 'label';
+      subkind: 'scope';
       title: string;
     }
   | {
@@ -249,9 +281,9 @@ export type NodeData =
       availableVars?: TypedVariable[];
       diagnostics?: TypeDiagnostic[];
       expectedArgTypes?: ExpectedArgumentType[];
-      kind: 'opaque';
+      expression?: string | null;
+      kind: 'throw';
       nameSource: 'derived';
-      source?: string | null;
       title: string;
     }
   | {
@@ -287,6 +319,36 @@ export type NodeData =
       kind: 'container';
       nameSource: 'derived';
       subkind: 'for';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      /**
+       * The name the catch clause binds; absent when there is no clause.
+       */
+      catchBinding?: string | null;
+      children?: ChildGroup[];
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      /**
+       * Whether the `try` has a `finally` body.
+       */
+      finally?: boolean;
+      kind: 'container';
+      nameSource: 'derived';
+      subkind: 'try';
+      title: string;
+    }
+  | {
+      availableVars?: TypedVariable[];
+      binding?: string | null;
+      children?: ChildGroup[];
+      diagnostics?: TypeDiagnostic[];
+      expectedArgTypes?: ExpectedArgumentType[];
+      kind: 'container';
+      nameSource: 'derived';
+      subkind: 'scope';
       title: string;
     };
 /**
@@ -342,9 +404,23 @@ export interface WorkflowDocument {
   edges: FlowEdge[];
   facetSchemaVersion?: number | null;
   nodes: FlowNode[];
+  /**
+   * Why Lash did not admit this version as a definition. It is saved as
+   * a draft and cannot run until an edit makes it admissible.
+   */
+  notAdmitted?: string | null;
   roots: GraphRoots;
   schemaVersion: number;
+  /**
+   * The workflow's canonical TypeScript, a view the optional TypeScript
+   * lens gives of the document. Empty when the lens has no spelling for
+   * it; the document is complete and editable either way.
+   */
   source: string;
+  /**
+   * Why the TypeScript lens has no spelling for this workflow.
+   */
+  sourceUnavailable?: string | null;
   version: number;
   [k: string]: unknown;
 }

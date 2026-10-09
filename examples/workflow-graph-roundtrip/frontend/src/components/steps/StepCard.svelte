@@ -43,7 +43,9 @@
 
   // A container/process carries nested body slot(s) directly under its own line.
   const isContainerLike = $derived(
-    ['if', 'while', 'for', 'comprehension', 'loop', 'process'].includes(label.category),
+    ['if', 'while', 'for', 'comprehension', 'loop', 'process', 'try', 'scope'].includes(
+      label.category,
+    ),
   );
   const clauses = $derived(node.data.clauses ?? []);
 
@@ -301,9 +303,9 @@
             <span class="lead">{label.lead}</span>
             {#if label.name}<span class="name">{label.name}</span>{/if}
             {#if label.tail}<span class="lead">{label.tail}</span>{/if}
-          {:else if label.category === 'opaque'}
-            <span class="lead">Advanced step</span>
-            <code class="opaque">{node.data.source ?? node.data.title ?? ''}</code>
+          {:else if label.category === 'throw'}
+            <span class="lead">Throw</span>
+            <code class="thrown">{node.data.expression ?? ''}</code>
           {:else}
             <span class="lead">{label.lead}</span>
             {#if label.name}<span class="name">{label.name}</span>{/if}
@@ -691,7 +693,7 @@
   .name-slot--wide {
     max-width: 240px;
   }
-  .opaque {
+  .thrown {
     font-family: var(--font-mono);
     font-size: 11.5px;
     color: var(--text-dim);

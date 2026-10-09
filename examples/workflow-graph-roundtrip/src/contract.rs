@@ -23,7 +23,17 @@ pub struct WorkflowDocument {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub facet_schema_version: Option<u32>,
     pub version: u64,
+    /// The workflow's canonical TypeScript, a view the optional TypeScript
+    /// lens gives of the document. Empty when the lens has no spelling for
+    /// it; the document is complete and editable either way.
     pub source: String,
+    /// Why the TypeScript lens has no spelling for this workflow.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_unavailable: Option<String>,
+    /// Why Lash did not admit this version as a definition. It is saved as
+    /// a draft and cannot run until an edit makes it admissible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_admitted: Option<String>,
     pub nodes: Vec<FlowNode>,
     pub edges: Vec<FlowEdge>,
     pub roots: GraphRoots,
@@ -35,6 +45,31 @@ pub struct SaveWorkflowResponse {
     #[serde(flatten)]
     pub document: WorkflowDocument,
     pub id_map: BTreeMap<String, String>,
+}
+
+/// A set of typed edits to apply to the saved workflow as one transaction.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EditWorkflowRequest {
+    pub version: u64,
+    pub edits: Vec<crate::edits::EditOperation>,
+}
+
+/// A workflow to open, given as Lash's typed workflow document.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenWorkflowRequest {
+    /// The document as JSON. Its version is checked before anything else.
+    pub graph: Value,
+}
+
+/// The saved workflow as Lash's typed document, for a generic editor.
+#[derive(Clone, Debug, Serialize)]
+pub struct WorkflowIrResponse {
+    pub version: u64,
+    pub graph: lash::workflow::WorkflowGraph,
+    /// Each node's statement and replaceable expressions, by node id.
+    pub nodes: BTreeMap<String, crate::edits::NodeIr>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -319,9 +354,9 @@ pub enum NodeBody {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expression: Option<String>,
     },
-    Opaque {
+    Throw {
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        source: Option<String>,
+        expression: Option<String>,
     },
     Container(NodeContainer),
 }
@@ -351,6 +386,28 @@ pub enum NodeContainer {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         children: Vec<ChildGroup>,
     },
+    /// A `try`: its `body` child group runs, `catch` runs with the thrown
+    /// value bound to `catchBinding`, and `finally` runs on every exit.
+    #[serde(rename_all = "camelCase")]
+    Try {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<String>,
+        /// The name the catch clause binds; absent when there is no clause.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        catch_binding: Option<String>,
+        /// Whether the `try` has a `finally` body.
+        #[serde(default)]
+        finally: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        children: Vec<ChildGroup>,
+    },
+    /// A nested statement block with its own `body` child group.
+    Scope {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        binding: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        children: Vec<ChildGroup>,
+    },
 }
 
 impl NodeData {
@@ -363,7 +420,7 @@ impl NodeData {
             NodeBody::StateUpdate { .. } => "state_update",
             NodeBody::Computation { .. } => "computation",
             NodeBody::Terminal { .. } => "terminal",
-            NodeBody::Opaque { .. } => "opaque",
+            NodeBody::Throw { .. } => "throw",
             NodeBody::Container(_) => "container",
         }
     }
@@ -372,6 +429,8 @@ impl NodeData {
             NodeBody::Container(NodeContainer::If { .. }) => Some("if"),
             NodeBody::Container(NodeContainer::While { .. }) => Some("while"),
             NodeBody::Container(NodeContainer::For { .. }) => Some("for"),
+            NodeBody::Container(NodeContainer::Try { .. }) => Some("try"),
+            NodeBody::Container(NodeContainer::Scope { .. }) => Some("scope"),
             _ => None,
         }
     }
@@ -409,6 +468,8 @@ impl NodeData {
             NodeBody::Container(NodeContainer::If { children, .. }) => children,
             NodeBody::Container(NodeContainer::While { children, .. }) => children,
             NodeBody::Container(NodeContainer::For { children, .. }) => children,
+            NodeBody::Container(NodeContainer::Try { children, .. }) => children,
+            NodeBody::Container(NodeContainer::Scope { children, .. }) => children,
             _ => {
                 static EMPTY: std::sync::LazyLock<Vec<ChildGroup>> =
                     std::sync::LazyLock::new(Vec::new);
@@ -422,6 +483,8 @@ impl NodeData {
             NodeBody::Container(NodeContainer::If { children, .. }) => Some(children),
             NodeBody::Container(NodeContainer::While { children, .. }) => Some(children),
             NodeBody::Container(NodeContainer::For { children, .. }) => Some(children),
+            NodeBody::Container(NodeContainer::Try { children, .. }) => Some(children),
+            NodeBody::Container(NodeContainer::Scope { children, .. }) => Some(children),
             _ => None,
         }
     }
@@ -433,6 +496,8 @@ impl NodeData {
             NodeBody::Computation { binding, .. } => binding,
             NodeBody::Container(NodeContainer::If { binding, .. }) => binding,
             NodeBody::Container(NodeContainer::For { binding, .. }) => binding,
+            NodeBody::Container(NodeContainer::Try { binding, .. }) => binding,
+            NodeBody::Container(NodeContainer::Scope { binding, .. }) => binding,
             _ => &None,
         }
     }
@@ -444,6 +509,8 @@ impl NodeData {
             NodeBody::Computation { binding, .. } => Some(binding),
             NodeBody::Container(NodeContainer::If { binding, .. }) => Some(binding),
             NodeBody::Container(NodeContainer::For { binding, .. }) => Some(binding),
+            NodeBody::Container(NodeContainer::Try { binding, .. }) => Some(binding),
+            NodeBody::Container(NodeContainer::Scope { binding, .. }) => Some(binding),
             _ => None,
         }
     }
@@ -455,6 +522,7 @@ impl NodeData {
             NodeBody::StateUpdate { expression, .. } => expression,
             NodeBody::Computation { expression, .. } => expression,
             NodeBody::Terminal { expression, .. } => expression,
+            NodeBody::Throw { expression } => expression,
             _ => &None,
         }
     }
@@ -466,6 +534,7 @@ impl NodeData {
             NodeBody::StateUpdate { expression, .. } => Some(expression),
             NodeBody::Computation { expression, .. } => Some(expression),
             NodeBody::Terminal { expression, .. } => Some(expression),
+            NodeBody::Throw { expression } => Some(expression),
             _ => None,
         }
     }
@@ -526,18 +595,6 @@ impl NodeData {
     pub fn target_mut(&mut self) -> Option<&mut Option<String>> {
         match &mut self.body {
             NodeBody::StateUpdate { target, .. } => Some(target),
-            _ => None,
-        }
-    }
-    pub fn source(&self) -> &Option<String> {
-        match &self.body {
-            NodeBody::Opaque { source, .. } => source,
-            _ => &None,
-        }
-    }
-    pub fn source_mut(&mut self) -> Option<&mut Option<String>> {
-        match &mut self.body {
-            NodeBody::Opaque { source, .. } => Some(source),
             _ => None,
         }
     }
@@ -829,10 +886,12 @@ mod node_name_tests {
             json!({"kind":"state_update"}),
             json!({"kind":"computation"}),
             json!({"kind":"terminal","terminalKind":"finish"}),
-            json!({"kind":"opaque"}),
+            json!({"kind":"throw"}),
             json!({"kind":"container","subkind":"if"}),
             json!({"kind":"container","subkind":"while"}),
             json!({"kind":"container","subkind":"for"}),
+            json!({"kind":"container","subkind":"try"}),
+            json!({"kind":"container","subkind":"scope"}),
         ] {
             let mut payload = body;
             payload["title"] = json!("node");
@@ -1183,6 +1242,72 @@ impl RenderErrorResponse {
             },
         ));
         response.body.error.message = host_message;
+        response
+    }
+
+    /// A typed document this build does not read.
+    pub(crate) fn decode(error: lash::vm::ir::WorkflowGraphDecodeError) -> Self {
+        use lash::vm::ir::WorkflowGraphDecodeError as Decode;
+        match error {
+            Decode::UnsupportedSchemaVersion(refusal) => Self::render(refusal.into()),
+            error => Self::document(error.to_string(), json!({})),
+        }
+    }
+
+    /// A document that does not open as a draft.
+    pub(crate) fn open(error: lash::workflow::WorkflowDraftOpenError) -> Self {
+        use lash::workflow::WorkflowDraftOpenError as Open;
+        Self::render(match error {
+            Open::Document(error) => GraphRenderError::Document(error),
+            Open::Program(error) => GraphRenderError::InvalidProgram(error),
+        })
+    }
+
+    /// A set of typed edits the draft refused. Nothing was saved.
+    pub(crate) fn edit(error: crate::edits::EditError) -> Self {
+        use crate::edits::EditError;
+        use lash::workflow::WorkflowEditDiagnosticKind as Kind;
+        let refusal = match error {
+            EditError::Statement { node, error } => {
+                let mut response = Self::render(GraphRenderError::Document(error));
+                response.body.error.details["nodeId"] = json!(node);
+                return response;
+            }
+            EditError::Refused(refusal) => refusal,
+            unknown @ (EditError::UnknownNode { .. } | EditError::UnknownSlot { .. }) => {
+                return Self::document(unknown.to_string(), json!({}));
+            }
+        };
+        let diagnostics = refusal
+            .diagnostics
+            .iter()
+            .map(|diagnostic| {
+                json!({
+                    "edit": diagnostic.edit,
+                    "code": diagnostic.kind.code(),
+                    "message": diagnostic.kind.to_string(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut response = match refusal
+            .diagnostics
+            .into_iter()
+            .next()
+            .map(|first| first.kind)
+        {
+            Some(Kind::InvalidDocument(error)) => Self::render(GraphRenderError::Document(error)),
+            Some(Kind::InvalidProgram(error)) => {
+                Self::render(GraphRenderError::InvalidProgram(error))
+            }
+            Some(kind) => Self::new(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                kind.code(),
+                kind.to_string(),
+                json!({}),
+            ),
+            None => Self::document("the edit was refused", json!({})),
+        };
+        response.body.error.details["diagnostics"] = json!(diagnostics);
         response
     }
 

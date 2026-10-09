@@ -1593,11 +1593,11 @@ fn comments_that_are_not_the_label_form_stay_trivia() {
 ///
 /// Every top-level `const` arrow is a process literal (FIG-2999), so the lens
 /// projects it twice: the statement node in `main` carries the arrow as
-/// authored text, and the body is projected again as the lifted process's own
-/// subgraph — which is the editable surface. Rendering `main` alone would take
-/// the statement's pre-edit text and silently drop everything a host changed
-/// inside the container, so `graph_to_program` splices the rendered lifted body
-/// back into the literal it was projected from.
+/// typed IR, and the body is projected again as the lifted process's own
+/// subgraph — which is the editable surface. Rebuilding `main` alone would take
+/// the statement's pre-edit literal and silently drop everything a host changed
+/// inside the container, so `workflow_program_from_graph` splices the lifted
+/// body back into the literal it was projected from.
 #[test]
 fn an_edit_inside_a_process_container_survives_the_round_trip() {
     const SOURCE: &str = "const flow = async () => {\n  \

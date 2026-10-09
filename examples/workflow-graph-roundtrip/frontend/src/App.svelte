@@ -3,9 +3,9 @@
   import { SvelteFlow, Background, Controls, MiniMap, BackgroundVariant } from '@xyflow/svelte';
   import WorkflowNode from './components/nodes/WorkflowNode.svelte';
   import ContainerNode from './components/nodes/ContainerNode.svelte';
-  import OpaqueNode from './components/nodes/OpaqueNode.svelte';
   import DisplayPanel from './components/DisplayPanel.svelte';
   import SourceView from './components/SourceView.svelte';
+  import IrEditor from './components/IrEditor.svelte';
   import StepsView from './components/steps/StepsView.svelte';
   import {
     fetchWorkflow,
@@ -57,7 +57,7 @@
 
   const history = new History();
 
-  const nodeTypes = { workflow: WorkflowNode, container: ContainerNode, opaque: OpaqueNode };
+  const nodeTypes = { workflow: WorkflowNode, container: ContainerNode };
 
   let draftDoc = $state(null);
   let canonicalSource = $state('');
@@ -341,6 +341,19 @@
         details: {},
       };
     }
+  }
+
+  // A transaction of the generic structured editor was applied and published:
+  // adopt the new version exactly as a save does.
+  function onEdited(result) {
+    const selectedIds = flowNodes.filter((n) => n.selected).map((n) => n.id);
+    migratePositions(result.idMap ?? {});
+    positions = loadPositions();
+    const keepSelection = new Set(selectedIds.map((oldId) => result.idMap?.[oldId] ?? oldId));
+    adoptDocument(result.document, keepSelection);
+    saveError = null;
+    saveOk = `edited as v${result.document.version}`;
+    run.reset();
   }
 
   // --- Undo / redo -----------------------------------------------------------
@@ -684,6 +697,13 @@
           {dirty}
           {documentEpoch}
           onProject={projectSupported ? handleProject : undefined}
+        />
+        <IrEditor
+          version={savedVersion}
+          {dirty}
+          nodes={draftDoc.nodes}
+          selected={flowNodes.filter((n) => n.selected).map((n) => n.id)}
+          {onEdited}
         />
       {/if}
     </aside>

@@ -13,7 +13,6 @@ import { parseList } from './fields.js';
 // nested-node coordinate system expects.
 
 const NODE_W = 264;
-const OPAQUE_W = 340;
 const SMALL_W = 208;
 const HEADER_BAND = 60; // container title band (leaves clear space between the
 // editable condition/iterable/binding row and the group label + first body node)
@@ -33,32 +32,27 @@ export function layoutDocument(doc) {
   function estimateLeaf(node) {
     const kind = node.data.kind;
     let w = NODE_W;
-    if (kind === 'opaque') w = OPAQUE_W;
-    else if (kind === 'terminal' || kind === 'data') w = SMALL_W;
+    if (kind === 'terminal' || kind === 'data') w = SMALL_W;
 
     let h = 56; // kind badge + title
     if (node.data.description) h += 20;
-    if (kind === 'opaque') {
-      const lines = (node.data.source ?? '').split('\n').length;
-      h += Math.min(Math.max(lines, 3), 16) * 17 + 34;
-    } else {
-      const fields = node.data.fields ?? {};
-      const fieldCount = Object.keys(fields).length;
-      h += fieldCount * 48;
-      // Expression-valued fields render as a code input with
-      // an "expr" affordance badge — a touch taller than a plain literal row.
-      const exprCount = Object.values(fields).filter(
-        (v) => editableKind(v) === 'expr',
-      ).length;
-      h += exprCount * 10;
-      // Typed assignment / computation nodes render dedicated expression rows
-      // that are not part of `fields`, so reserve space for them here.
-      if (kind === 'terminal') h += 76;
-      else if (kind === 'state_update') h += 52; // target ≔ expression
-      else if (kind === 'computation') h += 84; // optional binding + expression
-      // data / call / effect nodes render an optional `let <binding> =` row.
-      else if (kind === 'data' || kind === 'call' || kind === 'effect') h += 30;
-    }
+    const fields = node.data.fields ?? {};
+    const fieldCount = Object.keys(fields).length;
+    h += fieldCount * 48;
+    // Expression-valued fields render as a code input with
+    // an "expr" affordance badge — a touch taller than a plain literal row.
+    const exprCount = Object.values(fields).filter(
+      (v) => editableKind(v) === 'expr',
+    ).length;
+    h += exprCount * 10;
+    // Typed assignment / computation nodes render dedicated expression rows
+    // that are not part of `fields`, so reserve space for them here.
+    if (kind === 'terminal') h += 76;
+    else if (kind === 'state_update') h += 52; // target ≔ expression
+    else if (kind === 'computation') h += 84; // optional binding + expression
+    else if (kind === 'throw') h += 52; // thrown value expression
+    // data / call / effect nodes render an optional `let <binding> =` row.
+    else if (kind === 'data' || kind === 'call' || kind === 'effect') h += 30;
     h += 26; // footer / delete affordance
     return { w, h: Math.max(h, 82) };
   }

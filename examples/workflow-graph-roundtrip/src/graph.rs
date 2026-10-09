@@ -1,17 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash::typescript::workflow_graph::{
-    parse_typescript_process_statement, parse_typescript_statement,
     typescript_assign_target_source, typescript_expression_source, typescript_for_of_source,
-    typescript_process_wrapper, typescript_statement_source,
+    typescript_process_wrapper,
 };
 use lash::vm::ir::{
-    Expr, ProcessParam, Program, VariableVersion, WorkflowContainer, WorkflowDeclaration,
-    WorkflowEdge, WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource,
-    WorkflowSubgraph, format_type_expr, workflow_call_from_ir, workflow_call_to_ir,
-    workflow_effect_from_ir, workflow_effect_to_ir, workflow_graph_from_program,
+    Expr, ProcessParam, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
+    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowSubgraph, format_type_expr,
+    workflow_call_from_ir, workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
 };
-use lash::workflow::{WorkflowBodyForm, WorkflowGraph, workflow_node_statement};
+use lash::workflow::{WorkflowBodyForm, WorkflowCatch, WorkflowGraph};
 use serde_json::json;
 
 use crate::{
@@ -55,11 +53,17 @@ pub(crate) fn validate_fragment(request: ValidateRequest) -> ValidateResponse {
     }
 }
 
+/// The wire document of `graph`. `source` is the TypeScript lens's view of
+/// it, or the reason the lens has none; the document is complete either way.
 pub(crate) fn document_from_graph(
     version: u64,
-    source: String,
+    source: Result<String, String>,
     graph: WorkflowGraph,
 ) -> WorkflowDocument {
+    let (source, source_unavailable) = match source {
+        Ok(source) => (source, None),
+        Err(reason) => (String::new(), Some(reason)),
+    };
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut roots = GraphRoots {
@@ -129,12 +133,19 @@ pub(crate) fn document_from_graph(
         facet_schema_version: graph.facet_schema_version,
         version,
         source,
+        source_unavailable,
+        not_admitted: None,
         nodes,
         edges,
         roots,
     }
 }
 
+/// The document `document` asks for, as a graph over `baseline`: a node the
+/// document still names keeps its id, and keeps its typed IR exactly unless
+/// its form was edited. The result states what to reach, not a program to
+/// trust: [`crate::edits::apply_document`] turns it into typed edits of the
+/// baseline's draft, and lash derives everything else again.
 pub(crate) fn graph_from_document(
     document: WorkflowDocument,
     baseline: &WorkflowGraph,
@@ -239,15 +250,11 @@ pub(crate) fn graph_from_document(
             &edges,
             &graph_scope.in_process(),
         )?;
-        process.body = match baseline_process {
-            Some(baseline) => rebuilt_body(&baseline.body, rebuilt),
-            None => rebuilt,
-        };
+        process.body = rebuilt;
         declarations.push(WorkflowDeclaration::Process(process));
     }
     graph.declarations = declarations;
     bind_declared_processes(&mut graph);
-    graph.main = rebuilt_body(&baseline.main, std::mem::take(&mut graph.main));
     Ok(graph)
 }
 
@@ -395,9 +402,6 @@ fn flatten_subgraph(
             parent_id: parent_id.clone(),
             data,
         });
-        if shown_as_text(&node.kind) {
-            continue;
-        }
         if let WorkflowNodeKind::Container(container) = &node.kind {
             for (slot, subgraph) in container.child_subgraphs() {
                 let scope = format!("container:{}:{slot}", node.id);
@@ -444,7 +448,8 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
         WorkflowNodeKind::Terminal { expression, .. } => {
             terminal_value(expression, &FragmentScope::of_node(node, graph_scope))
         }
-        _ => None,
+        WorkflowNodeKind::Throw { value } => typescript_expression_source(value).ok(),
+        WorkflowNodeKind::Container(_) => None,
     };
     let binding = |target: &Option<lash::vm::ir::AssignTarget>| {
         target
@@ -497,12 +502,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
             terminal_kind: terminal.clone(),
             expression,
         },
-        WorkflowNodeKind::Throw { .. }
-        | WorkflowNodeKind::Container(
-            WorkflowContainer::Try { .. } | WorkflowContainer::Scope { .. },
-        ) => NodeBody::Opaque {
-            source: Some(region_source(node)),
-        },
+        WorkflowNodeKind::Throw { .. } => NodeBody::Throw { expression },
         WorkflowNodeKind::Container(container) => NodeBody::Container(match container {
             WorkflowContainer::If {
                 binding: target,
@@ -522,9 +522,23 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
                 iterable: typescript_expression_source(typescript_for_of_source(iterable)).ok(),
                 children,
             },
-            WorkflowContainer::Try { .. } | WorkflowContainer::Scope { .. } => {
-                unreachable!("a try and a scope are shown as text, by the arm above")
-            }
+            WorkflowContainer::Try {
+                binding: target,
+                catch,
+                finally,
+                ..
+            } => NodeContainer::Try {
+                binding: binding(target),
+                catch_binding: catch.as_ref().map(|catch| catch.binding.clone()),
+                finally: finally.is_some(),
+                children,
+            },
+            WorkflowContainer::Scope {
+                binding: target, ..
+            } => NodeContainer::Scope {
+                binding: binding(target),
+                children,
+            },
         }),
     };
     NodeData {
@@ -615,105 +629,12 @@ fn child_groups(node: &WorkflowNode) -> Vec<ChildGroup> {
         node_ids: node_ids(graph),
     };
     match &node.kind {
-        WorkflowNodeKind::Container(container) if !shown_as_text(&node.kind) => container
+        WorkflowNodeKind::Container(container) => container
             .child_subgraphs()
             .map(|(slot, graph)| group(slot, graph))
             .collect(),
         _ => Vec::new(),
     }
-}
-
-/// Whether this host shows a node as one block of TypeScript text.
-///
-/// A `try`, a `throw` and a nested scope are typed regions of the document
-/// like any other. This example has no form for them yet, so it presents each
-/// through the TypeScript lens as an "advanced" card: the text is a view of
-/// the region, and an edit of it is parsed back into the typed region.
-fn shown_as_text(kind: &WorkflowNodeKind) -> bool {
-    matches!(
-        kind,
-        WorkflowNodeKind::Throw { .. }
-            | WorkflowNodeKind::Container(
-                WorkflowContainer::Try { .. } | WorkflowContainer::Scope { .. }
-            )
-    )
-}
-
-/// The TypeScript text of a region shown as text.
-fn region_source(node: &WorkflowNode) -> String {
-    let mut statement = node.clone();
-    // The label is the card's own name field, not part of its text.
-    statement.name_source = WorkflowNodeNameSource::Derived;
-    let printed = workflow_node_statement(&statement)
-        .map_err(|error| error.to_string())
-        .and_then(|statement| {
-            typescript_statement_source(&statement, &node.available_variables)
-                .map_err(|error| error.to_string())
-        });
-    printed.unwrap_or_else(|error| format!("<non-sourceable statement: {error}>"))
-}
-
-/// The typed region a block of TypeScript text spells, for a node this host
-/// shows as text.
-fn region_from_source(
-    id: &str,
-    source: &str,
-    scope: &FragmentScope,
-) -> Result<WorkflowNodeKind, RenderErrorResponse> {
-    let parsed = if scope.in_process {
-        parse_typescript_process_statement(source, &scope.globals, &scope.processes)
-    } else {
-        parse_typescript_statement(source, &scope.globals, &scope.processes)
-    };
-    let statement = parsed.map_err(|error| {
-        RenderErrorResponse::invalid_node_payload(
-            id,
-            format!("`data.source` is not exactly one valid statement: {error}"),
-        )
-    })?;
-    let mut projected = workflow_graph_from_program(&Program::block(vec![statement])).main;
-    let [node] = projected.nodes.as_mut_slice() else {
-        return Err(RenderErrorResponse::invalid_node_payload(
-            id,
-            "`data.source` is not exactly one statement",
-        ));
-    };
-    // The region was projected on its own, so its inner nodes carry the ids
-    // of a one-statement program; they are named under this node instead.
-    let mut counter = 0;
-    rename_children(&mut node.kind, id, &mut counter);
-    Ok(node.kind.clone())
-}
-
-fn rename_children(kind: &mut WorkflowNodeKind, id: &str, counter: &mut usize) {
-    if let WorkflowNodeKind::Container(container) = kind {
-        for (_, child) in container.child_subgraphs_mut() {
-            child.edges.clear();
-            for node in &mut child.nodes {
-                *counter += 1;
-                node.id = workflow_node_id(&format!("{id}:region:{counter}"));
-                rename_children(&mut node.kind, id, counter);
-            }
-        }
-    }
-}
-
-/// A body rebuilt from the document keeps the IR spelling of the body it
-/// replaces. Unchanged statements keep it exactly; a body whose statements
-/// were added, removed or reordered keeps its list form without the
-/// per-statement groups, which the saved source's reparse derives again.
-fn rebuilt_body(baseline: &WorkflowSubgraph, mut rebuilt: WorkflowSubgraph) -> WorkflowSubgraph {
-    let unchanged = baseline
-        .nodes
-        .iter()
-        .map(|node| &node.id)
-        .eq(rebuilt.nodes.iter().map(|node| &node.id));
-    rebuilt.form = match &baseline.form {
-        form if unchanged => form.clone(),
-        WorkflowBodyForm::Statement if rebuilt.nodes.len() != 1 => WorkflowBodyForm::default(),
-        form => form.ungrouped(),
-    };
-    rebuilt
 }
 
 fn build_subgraph(
@@ -734,7 +655,11 @@ fn build_subgraph(
         })?;
         let (mut node, is_new) = match baseline_nodes.get(id).cloned() {
             Some(mut node) => {
-                apply_editable_data(&mut node, &flow.data, graph_scope)?;
+                // A node whose form the host did not touch keeps its typed
+                // IR exactly: nothing is read back through a text field.
+                if !same_form(&flow.data, &node_data(&node, Vec::new(), graph_scope)) {
+                    apply_editable_data(&mut node, &flow.data, graph_scope)?;
+                }
                 (node, false)
             }
             None => (node_from_flow_data(id, &flow.data, graph_scope)?, true),
@@ -795,7 +720,8 @@ fn rebuild_children(
     let node_id = node.id.to_string();
     let build = |slot: &str| -> Result<WorkflowSubgraph, RenderErrorResponse> {
         let Some(child) = children.iter().find(|child| child.slot == slot) else {
-            if allow_empty_default {
+            // A clause the form just switched on starts empty.
+            if allow_empty_default || matches!(slot, "catch" | "finally") {
                 return Ok(WorkflowSubgraph::default());
             }
             return Err(RenderErrorResponse::document(
@@ -812,12 +738,11 @@ fn rebuild_children(
             graph_scope,
         )
     };
-    if shown_as_text(&node.kind) {
-        return Ok(());
-    }
     if let WorkflowNodeKind::Container(container) = &mut node.kind {
         for (slot, graph) in container.child_subgraphs_mut() {
-            *graph = rebuilt_body(graph, build(slot)?);
+            let rebuilt = build(slot)?;
+            graph.nodes = rebuilt.nodes;
+            graph.edges = rebuilt.edges;
         }
     }
     Ok(())
@@ -922,11 +847,9 @@ fn node_from_flow_data(
                 expression,
             }
         }
-        NodeBody::Opaque { .. } => region_from_source(
-            id,
-            &required_text(id, data.source().as_ref(), "source")?,
-            &FragmentScope::of_data(data, graph_scope),
-        )?,
+        NodeBody::Throw { .. } => WorkflowNodeKind::Throw {
+            value: editable_expression(id, data, graph_scope)?,
+        },
         NodeBody::Container(container) => WorkflowNodeKind::Container(match container {
             NodeContainer::If { .. } => WorkflowContainer::If {
                 binding: editable_binding(
@@ -964,6 +887,31 @@ fn node_from_flow_data(
                     &FragmentScope::of_data(data, graph_scope),
                 )?,
                 bind: None,
+                body: Box::new(WorkflowSubgraph::default()),
+            },
+            NodeContainer::Try {
+                catch_binding,
+                finally,
+                ..
+            } => WorkflowContainer::Try {
+                binding: editable_binding(
+                    id,
+                    data.binding().as_ref(),
+                    &FragmentScope::of_data(data, graph_scope),
+                )?,
+                body: Box::new(WorkflowSubgraph::default()),
+                catch: catch_binding.as_ref().map(|binding| WorkflowCatch {
+                    binding: binding.clone(),
+                    body: Box::new(WorkflowSubgraph::default()),
+                }),
+                finally: finally.then(|| Box::new(WorkflowSubgraph::default())),
+            },
+            NodeContainer::Scope { .. } => WorkflowContainer::Scope {
+                binding: editable_binding(
+                    id,
+                    data.binding().as_ref(),
+                    &FragmentScope::of_data(data, graph_scope),
+                )?,
                 body: Box::new(WorkflowSubgraph::default()),
             },
         }),
@@ -1017,25 +965,26 @@ fn apply_editable_data(
         }
     }
     let scope = FragmentScope::of_node(node, graph_scope);
+    // Each field is read back only when the host changed it: a field left
+    // as it was shown keeps the typed IR it shows.
+    let shown = node_data(node, Vec::new(), graph_scope);
+    let rebound = data.binding() != shown.binding();
+    let reworded = data.expression() != shown.expression();
     node.name = data.name.title().to_string();
     node.description = data.name.description().map(str::to_string);
     node.name_source = data.name.name_source();
-    // A region shown as text is replaced only when its text was edited, so
-    // an untouched region keeps its typed IR exactly.
-    if shown_as_text(&node.kind)
-        && let Some(updated) = data.source()
-        && *updated != region_source(node)
-    {
-        node.kind = region_from_source(&node_id, updated, &scope)?;
-    }
     match &mut node.kind {
         WorkflowNodeKind::Data {
             binding,
             expression,
         } => {
-            *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
-            *expression =
-                canonical_editable_expression(&node_id, data.expression().as_ref(), &scope)?;
+            if rebound {
+                *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
+            }
+            if reworded {
+                *expression =
+                    canonical_editable_expression(&node_id, data.expression().as_ref(), &scope)?;
+            }
         }
         WorkflowNodeKind::Call {
             binding,
@@ -1044,7 +993,13 @@ fn apply_editable_data(
             arguments,
             result_steps,
         } => {
-            *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
+            if rebound {
+                *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
+            }
+            if !reworded && data.operation() == shown.operation() && data.fields() == shown.fields()
+            {
+                return Ok(());
+            }
             let mut parsed = workflow_call_to_ir(receiver, operation, arguments, result_steps);
             let edited_operation = required_text(&node_id, data.operation().as_ref(), "operation")?;
             // Switching an existing call to an operation of another receiver
@@ -1077,7 +1032,12 @@ fn apply_editable_data(
             arguments,
             result_steps,
         } => {
-            *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
+            if rebound {
+                *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
+            }
+            if !reworded && data.effect() == shown.effect() && data.fields() == shown.fields() {
+                return Ok(());
+            }
             let (_, parsed) = editable_effect_expression(&node_id, data, graph_scope)?;
             let (new_effect, new_arguments, new_result_steps) = workflow_effect_from_ir(&parsed)
                 .ok_or_else(|| {
@@ -1094,20 +1054,36 @@ fn apply_editable_data(
             binding,
             expression,
         } => {
-            *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
-            *expression =
-                required_expression(&node_id, data.expression().as_ref(), "expression", &scope)?;
+            if rebound {
+                *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
+            }
+            if reworded {
+                *expression = required_expression(
+                    &node_id,
+                    data.expression().as_ref(),
+                    "expression",
+                    &scope,
+                )?;
+            }
         }
         WorkflowNodeKind::StateUpdate {
             target, expression, ..
         } => {
-            *target = parse_assignment_target(
-                &node_id,
-                &required_text(&node_id, data.target().as_ref(), "target")?,
-                &scope,
-            )?;
-            *expression =
-                required_expression(&node_id, data.expression().as_ref(), "expression", &scope)?;
+            if data.target() != shown.target() {
+                *target = parse_assignment_target(
+                    &node_id,
+                    &required_text(&node_id, data.target().as_ref(), "target")?,
+                    &scope,
+                )?;
+            }
+            if reworded {
+                *expression = required_expression(
+                    &node_id,
+                    data.expression().as_ref(),
+                    "expression",
+                    &scope,
+                )?;
+            }
         }
         WorkflowNodeKind::Terminal {
             terminal,
@@ -1120,9 +1096,13 @@ fn apply_editable_data(
         WorkflowNodeKind::Container(WorkflowContainer::If {
             binding, condition, ..
         }) => {
-            *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
-            *condition =
-                required_expression(&node_id, data.condition().as_ref(), "condition", &scope)?;
+            if rebound {
+                *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
+            }
+            if data.condition() != shown.condition() {
+                *condition =
+                    required_expression(&node_id, data.condition().as_ref(), "condition", &scope)?;
+            }
         }
         WorkflowNodeKind::Container(container @ WorkflowContainer::For { .. }) => {
             // The document shows the loop as its TypeScript header: the name
@@ -1152,12 +1132,72 @@ fn apply_editable_data(
             }
         }
         WorkflowNodeKind::Container(WorkflowContainer::While { condition, .. }) => {
-            *condition =
-                required_expression(&node_id, data.condition().as_ref(), "condition", &scope)?;
+            if data.condition() != shown.condition() {
+                *condition =
+                    required_expression(&node_id, data.condition().as_ref(), "condition", &scope)?;
+            }
         }
-        _ => {}
+        WorkflowNodeKind::Throw { value } => {
+            if reworded {
+                *value = required_expression(
+                    &node_id,
+                    data.expression().as_ref(),
+                    "expression",
+                    &scope,
+                )?;
+            }
+        }
+        WorkflowNodeKind::Container(WorkflowContainer::Try {
+            binding,
+            catch,
+            finally,
+            ..
+        }) => {
+            if rebound {
+                *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
+            }
+            if let NodeBody::Container(NodeContainer::Try {
+                catch_binding,
+                finally: has_finally,
+                ..
+            }) = &data.body
+            {
+                let caught = catch.take().map(|catch| catch.body).unwrap_or_default();
+                *catch = catch_binding.as_ref().map(|binding| WorkflowCatch {
+                    binding: binding.clone(),
+                    body: caught,
+                });
+                let last = finally.take().unwrap_or_default();
+                *finally = has_finally.then_some(last);
+            }
+        }
+        WorkflowNodeKind::Container(WorkflowContainer::Scope { binding, .. }) => {
+            if rebound {
+                *binding = editable_binding(&node_id, data.binding().as_ref(), &scope)?;
+            }
+        }
     }
     Ok(())
+}
+
+/// Whether two forms of one node say the same thing. Child membership and
+/// the facets a client echoes back are not part of a node's own form.
+fn same_form(submitted: &NodeData, projected: &NodeData) -> bool {
+    let own = |data: &NodeData| {
+        let mut value = serde_json::to_value(data).unwrap_or_default();
+        if let Some(fields) = value.as_object_mut() {
+            for derived in [
+                "children",
+                "availableVars",
+                "expectedArgTypes",
+                "diagnostics",
+            ] {
+                fields.remove(derived);
+            }
+        }
+        value
+    };
+    own(submitted) == own(projected)
 }
 
 fn canonical_editable_expression(
@@ -1221,6 +1261,22 @@ fn node_ids(graph: &WorkflowSubgraph) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// The document a save of `document` over `baseline` leaves: the typed
+    /// edits the document means, applied to the baseline's draft.
+    fn saved(document: WorkflowDocument, baseline: &WorkflowGraph) -> WorkflowGraph {
+        let target = graph_from_document(document, baseline).expect("the document reads");
+        let draft = lash::workflow::WorkflowDraft::open(baseline).expect("the baseline opens");
+        let named = draft
+            .opened()
+            .map(|(handle, id)| (id.clone(), handle))
+            .collect();
+        crate::edits::apply_document(draft, &named, baseline, &target)
+            .unwrap_or_else(|error| panic!("the document's edits apply: {error}"))
+            .draft
+            .document()
+            .clone()
+    }
+
     /// FIG-3630: the editor saves an admitted workflow whose process is a
     /// lifted literal after the author adds a statement in front of it and
     /// edits the process body. The document carries the literal's reference
@@ -1235,7 +1291,7 @@ mod tests {
             Some(&environment),
         )
         .expect("the blank workflow admits");
-        let mut document = document_from_graph(1, source.to_string(), graph.clone());
+        let mut document = document_from_graph(1, Ok(source.to_string()), graph.clone());
 
         let binding = document
             .nodes
@@ -1259,7 +1315,7 @@ mod tests {
             .expect("expression node")
             .replace("7".to_string());
 
-        let rebuilt = graph_from_document(document, &graph).expect("rebuild the edited document");
+        let rebuilt = saved(document, &graph);
         let rendered = lash::typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
             .unwrap_or_else(|error| panic!("the edited workflow renders: {error}"));
         assert_eq!(
@@ -1290,7 +1346,7 @@ finish([state, introduced]);
             .expect("project promoted graph");
         let source = lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
             .expect("render promoted graph");
-        let document = document_from_graph(1, source.clone(), graph.clone());
+        let document = document_from_graph(1, Ok(source.clone()), graph.clone());
 
         for kind in [
             "data",
@@ -1329,7 +1385,7 @@ finish([state, introduced]);
                     )
         }));
 
-        let rebuilt = graph_from_document(document, &graph).expect("rebuild promoted graph");
+        let rebuilt = saved(document, &graph);
         assert_eq!(
             lash::typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
                 .expect("render rebuilt graph"),
@@ -1358,7 +1414,7 @@ finish(items);
             .expect("project container graph");
         let source = lash::typescript::workflow_graph::workflow_graph_to_source(&graph)
             .expect("render container graph");
-        let document = document_from_graph(1, source.clone(), graph.clone());
+        let document = document_from_graph(1, Ok(source.clone()), graph.clone());
 
         let transported_json =
             serde_json::to_string(&document).expect("serialize public workflow document");
@@ -1389,7 +1445,7 @@ finish(items);
                     .any(|child| child.slot == "body" && child.node_ids.is_empty())
         }));
 
-        let rebuilt = graph_from_document(transported, &graph).expect("rebuild transported graph");
+        let rebuilt = saved(transported, &graph);
         let rendered = lash::typescript::workflow_graph::workflow_graph_to_source(&rebuilt)
             .expect("render transported workflow graph");
         assert_eq!(rendered, source);

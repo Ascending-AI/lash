@@ -153,9 +153,11 @@ shutdown (`TraceSink::flush`); a flush cannot recover records never emitted.
 `WorkflowGraph` describes a module's static structure. Its `WorkflowNodeId`
 comes from the structural owner and AST path. Node ids are meaningful within
 one source identity, not as global identities across edits or modules.
-Use `lash_typescript::workflow_graph::workflow_graph_from_artifact` for the
-graph of the admitted artifact: it carries the artifact's `source_identity`,
-which language traces also carry in `TraceLanguageExecutionIdentity`.
+Read the graph of what a process runs from Lash
+(`core.processes().graph(&process_id)`, or
+`host_artifacts().execution_document(&reference)` for the document an
+execution names): it carries the artifact's `source_identity`, which
+language traces also carry in `TraceLanguageExecutionIdentity`.
 
 Join a node trace to the graph using that source identity and `node_id`
 (or `parent_node_id` for a child start). Join a durable effect occurrence's
@@ -164,18 +166,17 @@ in the graph of the artifact its process executes, and use `occurrence` and
 `context.loops` to distinguish repeated visits to the same site. Its
 call identity links the effect evidence with the tool-call trace. Preserve
 the process-to-artifact association with a recording; the occurrence alone
-does not carry a source identity. A source-only draft graph claims no runtime
-source identity and should not be used as an admitted execution overlay.
+does not carry a source identity. A draft claims no runtime source identity
+and should not be used as an admitted execution overlay.
 
-## Editing canonical TypeScript
+## Editing a workflow
 
-The graph is a semantic view. Comments and authored formatting are discarded.
-`lash_typescript::workflow_graph::workflow_graph_to_source` validates and
-renders canonical TypeScript, and a node's `source_span` addresses that
-canonical output. Hosts own graph edits, drafts, layout and versioning.
-Keep the original authored text separately if the editor needs to preserve
-comments or formatting. After an edit, admit the resulting program and use
-its own graph and source identity for subsequent execution records.
+A host edits the typed document through `lash::workflow::WorkflowDraft` and
+publishes the result as a new definition; no source language is involved.
+After an edit, a run reports against the new definition's own document and
+source identity. [Editing, publishing and showing workflows](workflow-hosts.md)
+covers the document, typed edits, node identity across edits, publication and
+TypeScript as an optional view.
 
 ## The process feed
 

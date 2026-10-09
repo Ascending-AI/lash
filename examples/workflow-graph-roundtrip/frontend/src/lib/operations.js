@@ -17,14 +17,13 @@ import { NODE_KINDS, CONTAINER_SUBKINDS, kindMeta } from './nodeKinds.js';
 // `kinds` include its nodeKind; unmatched kinds fall into "Other".
 const GROUPS = [
   { id: 'actions', label: 'Actions', kinds: ['call', 'effect'] },
-  { id: 'control', label: 'Control flow', kinds: ['container', 'terminal'] },
+  { id: 'control', label: 'Control flow', kinds: ['container', 'terminal', 'throw'] },
   { id: 'data', label: 'Data', kinds: ['data', 'computation', 'state_update'] },
   { id: 'process', label: 'Process', kinds: ['process'] },
-  { id: 'advanced', label: 'Advanced', kinds: ['opaque'] },
 ];
 
-// Kinds hidden from the Simplified palette (raw escape hatches).
-const POWER_KINDS = new Set(['opaque']);
+// Kinds hidden from the Simplified palette.
+const POWER_KINDS = new Set(['throw']);
 
 // Kinds that may only be inserted at the top level, not into a container slot.
 const TOP_LEVEL_KINDS = new Set(['process']);

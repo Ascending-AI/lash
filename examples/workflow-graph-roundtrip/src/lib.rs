@@ -4,11 +4,13 @@ use lash::sync::MutexExt;
 mod catalog;
 mod contract;
 mod display;
+mod edits;
 mod graph;
 mod operations;
 mod runtime;
 mod sample_tools;
 
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
@@ -26,21 +28,35 @@ use lash::typescript::workflow_graph::{
     GraphRenderError, WorkflowGraphBuildError, workflow_graph_from_source,
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
-use lash::workflow::WorkflowGraph;
+use lash::vm::ir::WorkflowNodeId;
+use lash::workflow::{
+    WorkflowDraft, WorkflowDraftHandle, WorkflowDraftOpenError, WorkflowGraph,
+    workflow_program_from_graph,
+};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
 pub use catalog::{SelectWorkflowRequest, WorkflowCatalogEntry};
 pub use contract::{
-    ChildGroup, DisplayDelta, DisplayState, EdgeData, EditableProcessField, EditableValue,
-    ErrorBody, ErrorDetail, ExpectedArgumentType, FlowEdge, FlowNode, GraphRoots, NodeBody,
-    NodeContainer, NodeData, NodeName, OperationCatalogEntry, OperationField,
-    ProjectWorkflowRequest, ProjectWorkflowResponse, RenderErrorResponse, RunEvent, RunStatus,
-    SaveWorkflowResponse, SourceProjectionErrorResponse, TypeDiagnostic, TypedVariable,
-    ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument,
+    ChildGroup, DisplayDelta, DisplayState, EdgeData, EditWorkflowRequest, EditableProcessField,
+    EditableValue, ErrorBody, ErrorDetail, ExpectedArgumentType, FlowEdge, FlowNode, GraphRoots,
+    NodeBody, NodeContainer, NodeData, NodeName, OpenWorkflowRequest, OperationCatalogEntry,
+    OperationField, ProjectWorkflowRequest, ProjectWorkflowResponse, RenderErrorResponse, RunEvent,
+    RunStatus, SaveWorkflowResponse, SourceProjectionErrorResponse, TypeDiagnostic, TypedVariable,
+    ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument, WorkflowIrResponse,
 };
+pub use edits::{BindingRef, BodyRef, EditOperation, IrSlot, NodeIr};
 pub use runtime::{WorkflowHost, core as workflow_core};
+
+/// Why the example could not start with its built-in workflow.
+#[derive(Debug, thiserror::Error)]
+pub enum StartupError {
+    #[error(transparent)]
+    Source(#[from] WorkflowGraphBuildError),
+    #[error(transparent)]
+    Document(#[from] WorkflowDraftOpenError),
+}
 
 /// Default deterministic workflow served as version 1.
 ///
@@ -83,49 +99,102 @@ const onboarding = async () => {
 #[derive(Clone)]
 pub struct AppState {
     store: Arc<Mutex<WorkflowStore>>,
+    /// Held across a save, and across a run's start: a save releases the pin
+    /// of the version it supersedes, which a start must not race.
+    publishing: Arc<tokio::sync::Mutex<()>>,
     core: lash::LashCore,
     commands: runtime::CommandClient,
     host: Arc<display::HostTools>,
 }
 
+#[derive(Default)]
 struct WorkflowStore {
     versions: Vec<SavedWorkflow>,
 }
 
+/// One saved version: host revision state. The workflow itself is the
+/// document; lash holds its definition.
 #[derive(Clone)]
 struct SavedWorkflow {
     version: u64,
-    source: String,
-    /// The canonical draft an edit is rebuilt on.
+    /// The workflow as the host edits it. The draft lives across saves, so
+    /// every node keeps its handle for as long as edits keep the node.
+    draft: WorkflowDraft,
+    /// The document clients are served: the admitted document when lash
+    /// admitted the version (a run reports against its ids), else the
+    /// draft's own.
     graph: WorkflowGraph,
-    /// The version's admission, when its source admits: what a run publishes
-    /// and starts.
-    admitted: Result<runtime::AdmittedWorkflow, Arc<runtime::RunError>>,
+    /// The id each node of the draft has in `graph`.
+    ids: BTreeMap<WorkflowDraftHandle, WorkflowNodeId>,
+    /// What a run starts, or why lash did not admit the version.
+    published: Result<runtime::Published, Arc<runtime::RunError>>,
+}
+
+impl SavedWorkflow {
+    /// The handle of each node, by the id clients know it under.
+    fn named(&self) -> BTreeMap<WorkflowNodeId, WorkflowDraftHandle> {
+        self.ids
+            .iter()
+            .map(|(handle, id)| (id.clone(), *handle))
+            .collect()
+    }
+
+    /// The TypeScript lens's view of the version, or why it has none. The
+    /// lens runs here, when a client asks to see source; saving printed
+    /// nothing.
+    fn source(&self) -> Result<String, String> {
+        workflow_graph_to_source(self.draft.document()).map_err(|error| error.to_string())
+    }
+
+    fn document(&self) -> WorkflowDocument {
+        let mut document =
+            graph::document_from_graph(self.version, self.source(), faceted(&self.graph));
+        document.not_admitted = self
+            .published
+            .as_ref()
+            .err()
+            .map(|refusal| refusal.to_string());
+        document
+    }
+}
+
+/// `graph` with the type facets of its program against this host's
+/// environment. Facets are derived hints for the forms: they are computed
+/// from the document's own IR and are never read back.
+fn faceted(graph: &WorkflowGraph) -> WorkflowGraph {
+    let Ok(program) = workflow_program_from_graph(graph) else {
+        return graph.clone();
+    };
+    let environment = runtime::host_environment();
+    let analysis = lash::vm::analyze_workflow_program(&program, &environment);
+    let mut projector =
+        lash::vm::ir::WorkflowGraphProjector::new(&program).with_analysis(&analysis);
+    if let Some(identity) = &graph.source_identity {
+        projector = projector.with_source_identity(identity.clone());
+    }
+    let projected = projector.project();
+    let same_nodes = projected
+        .nodes()
+        .map(|node| &node.id)
+        .eq(graph.nodes().map(|node| &node.id));
+    if same_nodes { projected } else { graph.clone() }
 }
 
 impl AppState {
-    #[expect(
-        clippy::expect_used,
-        reason = "the built-in workflow is rendered by the graph printer"
-    )]
-    pub fn new(runtime: WorkflowHost) -> Result<Self, WorkflowGraphBuildError> {
+    /// The example's state with the built-in workflow saved as version 1.
+    pub async fn new(runtime: WorkflowHost) -> Result<Self, StartupError> {
         let core = runtime.core;
-        let graph = workflow_graph_from_source(DEFAULT_WORKFLOW)?;
-        let source = workflow_graph_to_source(&graph)
-            .expect("the default workflow graph should render canonically");
-        Ok(Self {
-            store: Arc::new(Mutex::new(WorkflowStore {
-                versions: vec![SavedWorkflow {
-                    version: 1,
-                    admitted: runtime::AdmittedWorkflow::admit(&source).map_err(Arc::new),
-                    source,
-                    graph,
-                }],
-            })),
+        let state = Self {
+            store: Arc::new(Mutex::new(WorkflowStore::default())),
+            publishing: Arc::new(tokio::sync::Mutex::new(())),
             host: runtime.tools,
             commands: runtime::CommandClient::new(core.clone()),
             core,
-        })
+        };
+        let graph = workflow_graph_from_source(DEFAULT_WORKFLOW)?;
+        let draft = WorkflowDraft::open(&graph)?;
+        state.install(draft).await;
+        Ok(state)
     }
 
     #[expect(
@@ -141,16 +210,49 @@ impl AppState {
             .clone()
     }
 
-    fn save(&self, source: String, graph: WorkflowGraph) -> SavedWorkflow {
-        let mut store = self.store.lock_recover();
-        let version = store.versions.last().map_or(1, |saved| saved.version + 1);
-        let saved = SavedWorkflow {
-            version,
-            admitted: runtime::AdmittedWorkflow::admit(&source).map_err(Arc::new),
-            source,
-            graph,
+    /// Saves `draft` as the next version and publishes it: lash admits the
+    /// draft's document as a definition under a pin the version holds. A
+    /// draft lash refuses is still saved, as a version that cannot run.
+    async fn install(&self, draft: WorkflowDraft) -> SavedWorkflow {
+        let (graph, ids, published) = match runtime::publish(&self.core, &draft).await {
+            Ok(publication) => (
+                publication.graph,
+                publication.ids,
+                Ok(publication.published),
+            ),
+            Err(refusal) => (
+                draft.document().clone(),
+                runtime::surviving_ids(&draft.correspondence_since_open()),
+                Err(Arc::new(refusal)),
+            ),
         };
-        store.versions.push(saved.clone());
+        let (saved, superseded) = {
+            let mut store = self.store.lock_recover();
+            let version = store.versions.last().map_or(1, |saved| saved.version + 1);
+            let saved = SavedWorkflow {
+                version,
+                draft,
+                graph,
+                ids,
+                published,
+            };
+            let superseded = store.versions.last_mut().and_then(|previous| {
+                previous
+                    .published
+                    .as_mut()
+                    .ok()
+                    .map(|held| held.pin.clone())
+            });
+            store.versions.push(saved.clone());
+            (saved, superseded)
+        };
+        // Processes already started keep the definition they were admitted
+        // under; only the next start needs a pin, and that is the new one.
+        if let Some(pin) = superseded
+            && let Err(error) = self.core.host_artifacts().release(pin).await
+        {
+            eprintln!("warning: a superseded workflow version kept its pin: {error}");
+        }
         saved
     }
 }
@@ -163,6 +265,8 @@ pub fn app(state: AppState) -> Router {
         .route("/project", post(project_source))
         .route("/workflow", get(get_workflow).post(save_workflow))
         .route("/workflow/select", post(select_workflow))
+        .route("/workflow/ir", get(get_workflow_ir).post(open_workflow_ir))
+        .route("/workflow/edits", post(edit_workflow))
         .route("/run", post(run_workflow))
         .route("/approvals/{key}", post(resolve_approval))
         .route("/healthz", get(healthz))
@@ -184,6 +288,8 @@ async fn validate_fragment(Json(request): Json<ValidateRequest>) -> Json<Validat
     Json(graph::validate_fragment(request))
 }
 
+/// The TypeScript lens as an import: the document a source spells, without
+/// saving it.
 async fn project_source(
     State(state): State<AppState>,
     Json(request): Json<ProjectWorkflowRequest>,
@@ -195,7 +301,7 @@ async fn project_source(
     let source = workflow_graph_to_source(&graph)
         .map_err(|error| SourceProjectionErrorResponse::invalid_source(error.to_string()))?;
     Ok(Json(ProjectWorkflowResponse {
-        document: graph::document_from_graph(version, source, graph),
+        document: graph::document_from_graph(version, Ok(source), graph),
     }))
 }
 
@@ -206,16 +312,9 @@ async fn select_workflow(
     let source = catalog::source(&request.id)
         .ok_or_else(|| RenderErrorResponse::unknown_workflow(&request.id))?;
     let graph = workflow_graph_from_source(source).map_err(RenderErrorResponse::projection)?;
-    let source = workflow_graph_to_source(&graph).map_err(RenderErrorResponse::from)?;
-    let saved = state.save(source, graph);
-    let environment = runtime::host_environment();
-    let graph = workflow_graph_from_source_with_facets(&saved.source, Some(&environment))
-        .map_err(RenderErrorResponse::projection)?;
-    Ok(Json(graph::document_from_graph(
-        saved.version,
-        saved.source,
-        graph,
-    )))
+    let draft = WorkflowDraft::open(&graph).map_err(RenderErrorResponse::open)?;
+    let _publishing = state.publishing.lock().await;
+    Ok(Json(state.install(draft).await.document()))
 }
 
 pub async fn serve(listener: tokio::net::TcpListener, state: AppState) -> std::io::Result<()> {
@@ -227,114 +326,69 @@ pub async fn serve_addr(addr: SocketAddr, state: AppState) -> std::io::Result<()
     serve(listener, state).await
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "saved sources are produced by workflow_graph_to_source, so reprojecting them \
-              with type facets cannot fail"
-)]
 async fn get_workflow(State(state): State<AppState>) -> Json<WorkflowDocument> {
+    Json(state.current().document())
+}
+
+/// The saved workflow as the typed document it is, with each node's
+/// statement and the expressions of it a generic editor can replace.
+async fn get_workflow_ir(
+    State(state): State<AppState>,
+) -> Result<Json<WorkflowIrResponse>, RenderErrorResponse> {
     let saved = state.current();
-    let environment = runtime::host_environment();
-    let graph = workflow_graph_from_source_with_facets(&saved.source, Some(&environment))
-        .expect("saved workflow source should reproject with type facets");
-    Json(graph::document_from_graph(
-        saved.version,
-        saved.source,
-        graph,
-    ))
+    // The draft's own document is what an edit addresses: a slot path read
+    // here is the path a `replaceExpression` takes.
+    let nodes = saved
+        .ids
+        .iter()
+        .filter_map(|(handle, id)| Some((id, saved.draft.node(*handle)?)))
+        .map(|(id, node)| Ok((id.to_string(), edits::node_ir(node)?)))
+        .collect::<Result<_, edits::EditError>>()
+        .map_err(RenderErrorResponse::edit)?;
+    Ok(Json(WorkflowIrResponse {
+        version: saved.version,
+        graph: saved.draft.document().clone(),
+        nodes,
+    }))
 }
 
-/// Pairs each node of a submitted document with the node of its canonical
-/// reprojection at the same place, or names the submitted nodes with none.
-///
-/// This host saves by replacing the whole document through source, which
-/// carries no record of what was edited, so it matches the two documents
-/// itself and only where their shapes agree. An editor that applies typed
-/// edits through `lash::workflow::WorkflowDraft` reads continuity from the
-/// correspondence each transaction answers instead.
-fn pair_by_position(
-    submitted: &WorkflowGraph,
-    canonical: &WorkflowGraph,
-) -> Result<std::collections::BTreeMap<String, String>, Vec<String>> {
-    use lash::vm::ir::{WorkflowDeclaration, WorkflowNodeKind, WorkflowProcess, WorkflowSubgraph};
+/// Opens a workflow given as its typed document: no source is involved.
+async fn open_workflow_ir(
+    State(state): State<AppState>,
+    Json(request): Json<OpenWorkflowRequest>,
+) -> Result<Json<WorkflowDocument>, RenderErrorResponse> {
+    let graph =
+        WorkflowGraph::decode_json_value(request.graph).map_err(RenderErrorResponse::decode)?;
+    let draft = WorkflowDraft::open(&graph).map_err(RenderErrorResponse::open)?;
+    let _publishing = state.publishing.lock().await;
+    Ok(Json(state.install(draft).await.document()))
+}
 
-    fn lose(body: &WorkflowSubgraph, unmatched: &mut Vec<String>) {
-        for node in &body.nodes {
-            unmatched.push(node.id.to_string());
-            if let WorkflowNodeKind::Container(container) = &node.kind {
-                for (_, child) in container.child_subgraphs() {
-                    lose(child, unmatched);
-                }
-            }
-        }
-    }
-    fn pair(
-        submitted: &WorkflowSubgraph,
-        canonical: &WorkflowSubgraph,
-        pairs: &mut std::collections::BTreeMap<String, String>,
-        unmatched: &mut Vec<String>,
-    ) {
-        if submitted.nodes.len() != canonical.nodes.len() {
-            lose(submitted, unmatched);
-            return;
-        }
-        for (submitted, canonical) in submitted.nodes.iter().zip(&canonical.nodes) {
-            pairs.insert(submitted.id.to_string(), canonical.id.to_string());
-            let WorkflowNodeKind::Container(container) = &submitted.kind else {
-                continue;
-            };
-            for (slot, child) in container.child_subgraphs() {
-                let twin = match &canonical.kind {
-                    WorkflowNodeKind::Container(canonical) => canonical
-                        .child_subgraphs()
-                        .find_map(|(canonical, body)| (canonical == slot).then_some(body)),
-                    _ => None,
-                };
-                match twin {
-                    Some(twin) => pair(child, twin, pairs, unmatched),
-                    None => lose(child, unmatched),
-                }
-            }
-        }
-    }
-    fn processes(graph: &WorkflowGraph) -> Vec<&WorkflowProcess> {
-        graph
-            .declarations
-            .iter()
-            .filter_map(|declaration| match declaration {
-                WorkflowDeclaration::Process(process) => Some(process),
-                WorkflowDeclaration::Function(_) => None,
-            })
-            .collect()
-    }
-
-    let mut pairs = std::collections::BTreeMap::new();
-    let mut unmatched = Vec::new();
-    pair(&submitted.main, &canonical.main, &mut pairs, &mut unmatched);
-    let canonical = processes(canonical);
-    for (index, process) in processes(submitted).into_iter().enumerate() {
-        match canonical.get(index) {
-            Some(twin) => {
-                pairs.insert(process.id.to_string(), twin.id.to_string());
-                pair(&process.body, &twin.body, &mut pairs, &mut unmatched);
-            }
-            None => {
-                unmatched.push(process.id.to_string());
-                lose(&process.body, &mut unmatched);
-            }
-        }
-    }
-    if unmatched.is_empty() {
-        Ok(pairs)
-    } else {
-        Err(unmatched)
+/// The response to an edit: the new version, and where each node the
+/// client named is now. A node the edit removed has no entry.
+fn saved_response(
+    saved: &SavedWorkflow,
+    handles: impl IntoIterator<Item = (String, WorkflowDraftHandle)>,
+) -> SaveWorkflowResponse {
+    let id_map = handles
+        .into_iter()
+        .filter_map(|(submitted, handle)| Some((submitted, saved.ids.get(&handle)?.to_string())))
+        .collect();
+    SaveWorkflowResponse {
+        document: saved.document(),
+        id_map,
     }
 }
 
+/// Saves the document a form editor submits. The document is turned into
+/// typed edits of the draft it was read from, by node identity, and the
+/// edited draft is published; the response maps every id the document used
+/// to the id that node has now, read from lash's edit correspondence.
 async fn save_workflow(
     State(state): State<AppState>,
     Json(document): Json<WorkflowDocument>,
 ) -> Result<Json<SaveWorkflowResponse>, RenderErrorResponse> {
+    let _publishing = state.publishing.lock().await;
     let current = state.current();
     if document.version != current.version {
         return Err(RenderErrorResponse::version_conflict(
@@ -342,38 +396,62 @@ async fn save_workflow(
             current.version,
         ));
     }
-    // A document is an edit of the projection of its own source: a projected
-    // (not yet saved) workflow names the nodes and processes of that source,
-    // not of the saved one. Its baseline is re-derived from that source, so
-    // every underived fact — a lifted process's origin above all — comes from
-    // the lens, never from the client.
-    let reprojected_baseline;
-    let baseline = if document.source == current.source {
-        &current.graph
-    } else {
-        reprojected_baseline = workflow_graph_from_source(&document.source)
+    WorkflowGraph::admit_schema_version_for_fleet(
+        document.schema_version,
+        lash::persistence::FleetFormat::current(),
+    )
+    .map_err(|refusal| RenderErrorResponse::render(refusal.into()))?;
+    // A document names the nodes of the workflow it was read from. One that
+    // came from the source pane is a TypeScript import with no edit history:
+    // it is a new workflow, read again from its own source into a new draft.
+    let imported = !document.source.is_empty() && current.source().as_ref() != Ok(&document.source);
+    let (draft, named, base) = if imported {
+        let graph = workflow_graph_from_source(&document.source)
             .map_err(RenderErrorResponse::projection)?;
-        &reprojected_baseline
-    };
-    let graph = graph::graph_from_document(document.clone(), baseline)?;
-    let source = workflow_graph_to_source(&graph).map_err(RenderErrorResponse::from)?;
-    let canonical_graph =
-        workflow_graph_from_source(&source).map_err(RenderErrorResponse::projection)?;
-    let id_map = pair_by_position(&graph, &canonical_graph).map_err(|unmatched| {
-        RenderErrorResponse::document(
-            "submitted workflow does not correspond to its canonical reprojection",
-            serde_json::json!({ "unmatched": unmatched }),
+        let draft = WorkflowDraft::open(&graph).map_err(RenderErrorResponse::open)?;
+        let named = draft
+            .opened()
+            .map(|(handle, id)| (id.clone(), handle))
+            .collect();
+        (draft, named, graph)
+    } else {
+        (
+            current.draft.clone(),
+            current.named(),
+            current.graph.clone(),
         )
-    })?;
-    let saved = state.save(source, canonical_graph);
-    let environment = runtime::host_environment();
-    let faceted_graph = workflow_graph_from_source_with_facets(&saved.source, Some(&environment))
-        .map_err(RenderErrorResponse::projection)?;
-    let reprojected = graph::document_from_graph(saved.version, saved.source, faceted_graph);
-    Ok(Json(SaveWorkflowResponse {
-        document: reprojected,
-        id_map,
-    }))
+    };
+    let target = graph::graph_from_document(document, &base)?;
+    let applied =
+        edits::apply_document(draft, &named, &base, &target).map_err(RenderErrorResponse::edit)?;
+    let saved = state.install(applied.draft).await;
+    Ok(Json(saved_response(&saved, applied.handles)))
+}
+
+/// Applies the typed edits of the generic structured editor as one
+/// transaction and publishes the result.
+async fn edit_workflow(
+    State(state): State<AppState>,
+    Json(request): Json<EditWorkflowRequest>,
+) -> Result<Json<SaveWorkflowResponse>, RenderErrorResponse> {
+    let _publishing = state.publishing.lock().await;
+    let current = state.current();
+    if request.version != current.version {
+        return Err(RenderErrorResponse::version_conflict(
+            request.version,
+            current.version,
+        ));
+    }
+    let named = current.named();
+    let draft = edits::apply_operations(current.draft.clone(), &named, request.edits)
+        .map_err(RenderErrorResponse::edit)?;
+    let saved = state.install(draft).await;
+    Ok(Json(saved_response(
+        &saved,
+        named
+            .into_iter()
+            .map(|(id, handle)| (id.to_string(), handle)),
+    )))
 }
 
 #[expect(
@@ -383,33 +461,24 @@ async fn save_workflow(
 async fn run_workflow(
     State(state): State<AppState>,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, RenderErrorResponse> {
-    let saved = state.current();
-    let admitted = saved
-        .admitted
-        .as_ref()
-        .map_err(RenderErrorResponse::run_preparation)?;
-    let prepared = runtime::PreparedRun::new(admitted, saved.version)
-        .map_err(RenderErrorResponse::run_preparation)?;
     let (tx, rx) = mpsc::channel::<Result<RunEvent, runtime::RunError>>(64);
     let key = uuid::Uuid::new_v4().to_string();
-    let (request, pin) = prepared
-        .publish(&state.core, &key)
-        .await
-        .map_err(RenderErrorResponse::run_preparation)?;
-    let started = state.commands.start(request).await;
-    state
-        .core
-        .host_artifacts()
-        .release(pin)
-        .await
-        .map_err(RenderErrorResponse::run_preparation)?;
+    let (version, started) = {
+        let _publishing = state.publishing.lock().await;
+        let saved = state.current();
+        let published = saved
+            .published
+            .as_ref()
+            .map_err(RenderErrorResponse::run_preparation)?;
+        let started = state.commands.start(published.start_request(&key)).await;
+        (saved.version, started)
+    };
     let started = started.map_err(RenderErrorResponse::run_preparation)?;
     let core = state.core;
     let host = state.host;
     tokio::spawn(async move {
-        if let Err(error) = prepared
-            .observe(core, started.process_id, tx.clone(), host)
-            .await
+        if let Err(error) =
+            runtime::observe(core, started.process_id, version, tx.clone(), host).await
         {
             let _ = tx.send(Err(error)).await;
         }
@@ -576,7 +645,7 @@ mod save_tests {
             .build()
             .expect("the durable backend");
         let core = workflow_core(backend).expect("workflow core");
-        let state = AppState::new(core).expect("default workflow");
+        let state = AppState::new(core).await.expect("default workflow");
         let Json(projected) = project_source(
             State(state.clone()),
             Json(ProjectWorkflowRequest {

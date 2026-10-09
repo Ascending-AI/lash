@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
         .await
         .context("bind workflow graph listener")?;
     println!("workflow-graph-roundtrip listening on http://{addr}");
-    workflow_graph_roundtrip::serve(listener, AppState::new(core)?)
+    workflow_graph_roundtrip::serve(listener, AppState::new(core).await?)
         .await
         .context("serve workflow graph backend")
 }

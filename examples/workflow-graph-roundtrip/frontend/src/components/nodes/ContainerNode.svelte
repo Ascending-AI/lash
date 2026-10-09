@@ -50,6 +50,7 @@
   const isWhile = $derived(subkind === 'while');
   const isIf = $derived(subkind === 'if');
   const isFor = $derived(subkind === 'for');
+  const isTry = $derived(subkind === 'try');
   const isComprehension = $derived(subkind === 'comprehension');
   const isConditional = $derived(isWhile || isIf);
   const clauses = $derived(node.data.clauses ?? []);
@@ -57,6 +58,21 @@
 
   function commit() {
     data.onCommit?.();
+  }
+  // A `try` owns its clauses as child bodies: switching one on adds an empty
+  // body, switching it off removes the body with what it holds.
+  function setClause(slot, present) {
+    const groups = (node.data.children ??= []);
+    const at = groups.findIndex((g) => g.slot === slot);
+    if (present && at === -1) {
+      groups.push({ slot, scope: `container:${id}:${slot}`, nodeIds: [] });
+    } else if (!present && at !== -1) {
+      for (const child of groups[at].nodeIds) data.onDelete?.(child);
+      groups.splice(at, 1);
+    }
+    if (slot === 'finally') node.data.finally = present;
+    if (slot === 'catch' && !present) delete node.data.catchBinding;
+    relayout();
   }
   function relayout() {
     (data.onRebuild ?? data.onCommit)?.();
@@ -150,6 +166,40 @@
           onInput={(text) => (node.data.iterable = text)}
           onCommit={commit}
         />
+      </span>
+    {:else if isTry}
+      <span class="ct-for">
+        <label class="ct-kw nodrag">
+          <input
+            type="checkbox"
+            checked={node.data.catchBinding !== undefined}
+            onchange={(e) => {
+              if (e.currentTarget.checked) node.data.catchBinding = 'error';
+              setClause('catch', e.currentTarget.checked);
+            }}
+          />
+          catch
+        </label>
+        {#if node.data.catchBinding !== undefined}
+          <span class="ct-for-bind nodrag">
+            <IdentifierField
+              value={node.data.catchBinding ?? ''}
+              variant="box"
+              placeholder="error"
+              ariaLabel="Catch binding"
+              onInput={(v) => (node.data.catchBinding = v)}
+              onCommit={commit}
+            />
+          </span>
+        {/if}
+        <label class="ct-kw nodrag">
+          <input
+            type="checkbox"
+            checked={node.data.finally === true}
+            onchange={(e) => setClause('finally', e.currentTarget.checked)}
+          />
+          finally
+        </label>
       </span>
     {:else if isComprehension}
       <span class="ct-for">

@@ -22,7 +22,7 @@ pub async fn state_and_core() -> (AppState, lash::LashCore) {
         .expect("the durable backend");
     let host = workflow_graph_roundtrip::workflow_core(backend).expect("workflow core");
     let core = host.core().clone();
-    (AppState::new(host).expect("workflow state"), core)
+    (AppState::new(host).await.expect("workflow state"), core)
 }
 
 pub async fn run_workflow(

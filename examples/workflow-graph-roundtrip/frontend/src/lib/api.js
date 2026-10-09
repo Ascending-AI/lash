@@ -68,6 +68,38 @@ export async function saveWorkflow(/** @type {WorkflowDocument} */ document) {
   return { ok: false, status: res.status, error: body?.error ?? null };
 }
 
+// The saved workflow as Lash's typed document, for the generic structured
+// editor: `{ version, graph, nodes: { [id]: { statement, slots } } }`. Each slot
+// is `{ path, variant, expression }`; `path` is what a `replaceExpression` edit
+// takes as `slot`. No source text is involved.
+export async function fetchWorkflowIr() {
+  const res = await fetch('/workflow/ir', { headers: { accept: 'application/json' } });
+  if (!res.ok) throw new Error(`GET /workflow/ir failed: ${res.status}`);
+  return res.json();
+}
+
+// Apply typed edits to the saved workflow as one transaction and publish the
+// result. `edits` is a list of `{ op, ... }` operations whose content is Lash
+// IR as JSON. Resolves like `saveWorkflow`.
+export async function applyEdits(/** @type {number} */ version, /** @type {unknown[]} */ edits) {
+  const res = await fetch('/workflow/edits', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ version, edits }),
+  });
+  if (res.ok) {
+    const { idMap, ...document } = await res.json();
+    return { ok: true, document, idMap: idMap ?? null };
+  }
+  let error = null;
+  try {
+    error = (await res.json())?.error ?? null;
+  } catch {
+    error = { code: `http_${res.status}`, message: await res.text().catch(() => '') };
+  }
+  return { ok: false, status: res.status, error };
+}
+
 // Operation catalog — the sole data home for the "+ Add node" palette. Returns
 // an array of catalog entries `[{ id, label, nodeKind, subkind?, operation?,
 // effect?, terminalKind?, fields:[{name,type,default}] }]`, or `null` when the

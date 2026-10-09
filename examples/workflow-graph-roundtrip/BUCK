@@ -200,6 +200,32 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "generic_editing__test",
+    crate_features = [],
+    crate_name = "generic_editing",
+    crate_root = "tests/generic_editing.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("workflow-graph-roundtrip", "generic_editing", "//examples/workflow-graph-roundtrip:generic_editing__test"),
+    extra_compile_data = [
+        "//examples:shared_rust_sources",
+    ],
+    extra_data = [
+        "//crates/lash-vm-worker:lash-vm-worker__bin",
+    ],
+    test_env = {"LASH_VM_WORKER": "$(location //crates/lash-vm-worker:lash-vm-worker__bin)"},
+    library = ":workflow-graph-roundtrip",
+    library_crate_name = "workflow_graph_roundtrip",
+    manifest_dir = "examples/workflow-graph-roundtrip",
+    package_name = "workflow-graph-roundtrip",
+    rustc_env = {},
+    tags = [
+        "cargo-frontend-assets",
+        "manual",
+    ],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "roundtrip__test",
     crate_features = [],
     crate_name = "roundtrip",

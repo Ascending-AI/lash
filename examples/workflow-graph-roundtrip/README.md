@@ -1,21 +1,39 @@
 # Workflow graph round-trip backend
 
-This example is the Rust half of a visual Lash VM workflow editor. It exposes
-the source → graph → edited graph → canonical source seam over HTTP, then runs
-the saved version and streams node-correlated display events over SSE.
+This example is the Rust half of a visual Lash VM workflow editor. It reads,
+edits, publishes, runs and shows workflows through `lash::workflow` alone
+([Editing, publishing and showing workflows](../../docs/workflow-hosts.md)).
 
-The backend owns in-memory editor versions. Run publishes the saved artifact
-and process definition through `core.host_artifacts()`, then calls
-`core.processes().start()`. The durable engine executes the process over SQLite.
-The overlay reads one snapshot from `core.processes().observe()` and follows
-its recovering feed: committed facts settle effects, waits and the run's end,
-and provisional language observations supply transient node starts and waits.
-`core.processes().graph()` supplies the document whose nodes it validates
-identities against. Display events
-carry the stable tool-call ID used to correlate their deltas with observed nodes. Lash VM owns
-graph projection, validation/rendering, and execution-site correlation. Canvas
-layout is deliberately frontend-owned and never appears in source or API graph
-documents.
+The workflow is Lash's typed document. The backend keeps one
+`WorkflowDraft` per workflow and in-memory editor versions over it:
+
+- **Editing.** The canvas forms cover the common nodes: calls, effects,
+  values, `if`, `for`, `while`, `try`, blocks and `throw`. A save turns the
+  submitted document into typed edits of the draft, by node identity. The
+  structured editor reaches everything else: it lists any node's statement
+  and its expressions (a closure's body, a computed target) and replaces one
+  by its slot path, as typed IR.
+- **Publishing.** Every save publishes the draft with
+  `core.host_artifacts().publish_workflow()`. Lash admits the IR in its VM
+  workers and the version holds the new definition under a pin. Node ids
+  change across a save; the response maps old ids to new ones from Lash's
+  edit correspondence.
+- **Running.** Run calls `core.processes().start()` on the published
+  definition. The durable engine executes the process over SQLite.
+- **Showing.** The run view reads one snapshot from
+  `core.processes().observe()` and follows its recovering feed. It folds
+  the feed into Lash's execution overlay over the document the process
+  names (`core.host_artifacts().execution_document()`), and settles it with
+  the committed end.
+
+TypeScript is an optional lens. The built-in examples are imported from
+TypeScript, and the source pane shows the workflow's canonical TypeScript and
+imports edits of it. Nothing else prints or parses source, and a workflow
+with no TypeScript spelling is edited, published and run the same way.
+
+Display events carry the stable tool-call ID used to correlate their deltas
+with observed nodes. Canvas layout is frontend-owned and never appears in
+API documents.
 
 Run the frontend and backend from the repository root:
 
