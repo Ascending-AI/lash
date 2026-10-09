@@ -441,6 +441,7 @@ async fn a_reconciled_commit_cannot_overtake_an_accepted_language_observation() 
         source: crate::process_feed::ProcessFeedSource::new(
             process.clone(),
             registry.clone(),
+            lash_core::facade_support::ProcessWorkObserver::new(registry.clone()),
             lash_core::ProcessEngineRegistry::default(),
             replay.clone(),
             lash_trace::ObservationWorkLimits::standard(),

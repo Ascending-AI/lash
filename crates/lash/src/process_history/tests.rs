@@ -126,6 +126,8 @@ impl Fixture {
         crate::process_feed::ProcessFeedSource::new(
             self.process_id.clone(),
             Arc::clone(&self.registry),
+            lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(&self.registry))
+                .with_work_limits(limits),
             lash_core::ProcessEngineRegistry::default(),
             replay,
             limits,

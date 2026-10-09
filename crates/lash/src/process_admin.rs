@@ -60,6 +60,7 @@ impl Processes {
             source: crate::process_feed::ProcessFeedSource::new(
                 process_id.clone(),
                 self.registry(),
+                self.make_observer(),
                 self.core.host_process_engines.clone(),
                 Arc::clone(&self.core.process_replay_store),
                 self.core.env.core.observation_work_limits,
@@ -76,13 +77,11 @@ impl Processes {
         self.core.process_registry.clone()
     }
 
-    fn make_observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
-        Ok(
-            lash_core::facade_support::ProcessWorkObserver::new(self.registry())
-                .with_actor_parks(Arc::clone(self.core.backend.durable()))
-                .with_read_attempts(self.core.observer_pacing.snapshot_read_attempts)
-                .with_work_limits(self.core.env.core.observation_work_limits),
-        )
+    fn make_observer(&self) -> lash_core::facade_support::ProcessWorkObserver {
+        lash_core::facade_support::ProcessWorkObserver::new(self.registry())
+            .with_actor_parks(Arc::clone(self.core.backend.durable()))
+            .with_read_attempts(self.core.observer_pacing.snapshot_read_attempts)
+            .with_work_limits(self.core.env.core.observation_work_limits)
     }
 
     /// The listing filter [`prune`](Self::prune) surveys effect-journal
@@ -426,7 +425,7 @@ impl Processes {
         limit: std::num::NonZeroUsize,
         continuation: Option<lash_core::ProcessRosterCursor>,
     ) -> Result<lash_core::facade_support::ProcessRosterPage> {
-        self.make_observer()?
+        self.make_observer()
             .list(filter, limit, continuation)
             .await
             .map_err(Into::into)
@@ -441,7 +440,7 @@ impl Processes {
         session_scope: &lash_core::SessionScope,
         filter: &lash_core::ProcessListFilter,
     ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
-        self.make_observer()?
+        self.make_observer()
             .list_observed_by(session_scope, filter)
             .await
             .map_err(Into::into)
@@ -457,7 +456,7 @@ impl Processes {
         session_scope: &lash_core::SessionScope,
         filter: &lash_core::ProcessListFilter,
     ) -> Result<Vec<lash_core::facade_support::ObservedProcess>> {
-        self.make_observer()?
+        self.make_observer()
             .list_originated_by(session_scope, filter)
             .await
             .map_err(Into::into)
@@ -483,7 +482,7 @@ impl Processes {
     > {
         let bounds = self.registry().process_change_bounds().await?;
         let (changes, mut next) = self
-            .make_observer()?
+            .make_observer()
             .changed_since(
                 after,
                 limit.get().min(lash_core::MAX_PROCESS_ROSTER_PAGE_SIZE),
@@ -503,7 +502,7 @@ impl Processes {
         &self,
         process_id: &ProcessId,
     ) -> Result<Option<lash_core::facade_support::ObservedProcess>> {
-        self.make_observer()?
+        self.make_observer()
             .process(process_id)
             .await
             .map_err(Into::into)
@@ -613,14 +612,14 @@ impl Processes {
         &self,
         session_id: SessionId,
     ) -> Result<lash_core::facade_support::ProcessWorkSnapshot> {
-        self.make_observer()?
+        self.make_observer()
             .snapshot_for_session(session_id)
             .await
             .map_err(Into::into)
     }
 
     pub fn observer(&self) -> Result<lash_core::facade_support::ProcessWorkObserver> {
-        self.make_observer()
+        Ok(self.make_observer())
     }
 
     /// Cancel every live process: running, or waiting on a call, a key, a

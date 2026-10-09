@@ -177,6 +177,7 @@ pub(crate) struct ProcessFeedSource {
     work_limits: lash_trace::ObservationWorkLimits,
     process_id: ProcessId,
     registry: Arc<dyn ProcessRegistry>,
+    observer: lash_core::facade_support::ProcessWorkObserver,
     /// The engines whose document providers name a process's document.
     engines: lash_core::ProcessEngineRegistry,
     replay: Arc<dyn ProcessReplayStore>,
@@ -188,6 +189,7 @@ impl ProcessFeedSource {
     pub(crate) fn new(
         process_id: ProcessId,
         registry: Arc<dyn ProcessRegistry>,
+        observer: lash_core::facade_support::ProcessWorkObserver,
         engines: lash_core::ProcessEngineRegistry,
         replay: Arc<dyn ProcessReplayStore>,
         work_limits: lash_trace::ObservationWorkLimits,
@@ -197,6 +199,7 @@ impl ProcessFeedSource {
             work_limits,
             process_id,
             registry,
+            observer,
             engines,
             replay,
             effect_budget: EffectFoldBudget::of(work_limits),
@@ -220,9 +223,7 @@ impl ProcessFeedSource {
     /// The durable read view: the row at one sequence and the effect
     /// evidence folded through that sequence.
     async fn read_view(&self) -> Result<ProcessReadView> {
-        let observer =
-            lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(&self.registry));
-        let process = match observer.process(&self.process_id).await {
+        let process = match self.observer.process(&self.process_id).await {
             Ok(Some(process)) => process,
             Ok(None) | Err(PluginError::ProcessUnknown { .. }) => {
                 return Ok(ProcessReadView::Unknown);

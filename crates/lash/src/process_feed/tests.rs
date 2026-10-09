@@ -118,6 +118,7 @@ impl Fixture {
             source: ProcessFeedSource::new(
                 process_id.clone(),
                 Arc::clone(&self.registry),
+                lash_core::facade_support::ProcessWorkObserver::new(Arc::clone(&self.registry)),
                 lash_core::ProcessEngineRegistry::default(),
                 self.replay.clone(),
                 lash_trace::ObservationWorkLimits::standard(),
@@ -225,6 +226,120 @@ fn held(feed: &ProcessObservationStream) -> u64 {
         .expect("the feed's cursor parses")
         .sequence
         .as_u64()
+}
+
+/// FIG-5629: every process read carries the same durable actor park,
+/// including the replacement view after replay continuity is lost.
+#[tokio::test]
+async fn an_unknown_engine_park_is_shared_by_get_list_snapshot_and_gap() {
+    use crate::durable::{ActorKey, CommitLabel, NodeId, NodeSpec};
+
+    let stores = crate::tests::sqlite_memory_store_set().await;
+    let backend = crate::durable::DurableBackendBuilder::new(stores)
+        .build()
+        .expect("durable backend with no host engines");
+    let process_id = backend
+        .process_registry()
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::Engine {
+                    kind: "absent-feed-engine".into(),
+                    payload: serde_json::Value::Null,
+                },
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
+        )
+        .await
+        .expect("register the process")
+        .id;
+    // Seed the durable park through the actor's fenced transaction. This
+    // law tests observation; the actor laws own why an absent engine parks.
+    let actor = ActorKey::process(process_id.as_str()).expect("process actor key");
+    let durable = backend.durable();
+    let row = durable
+        .actor(&actor)
+        .await
+        .expect("read actor")
+        .expect("actor");
+    let node = durable
+        .register_node(&NodeSpec {
+            node: NodeId::new("feed-park-fixture"),
+            decodes: vec![row.formats],
+            ttl_millis: 15_000,
+        })
+        .await
+        .expect("register the actor owner");
+    let claims = durable.claim(&node, 1).await.expect("claim process");
+    assert_eq!(claims.len(), 1);
+    let mut tx = durable
+        .begin(&actor, claims[0].epoch)
+        .await
+        .expect("actor transaction");
+    let reason = lash_core::ProcessParkReason::UnknownEngine {
+        kind: "absent-feed-engine".into(),
+    };
+    tx.write(crate::durable::DomainWrite::ParkEvent(
+        crate::durable::domain::ParkEventWrite::Park {
+            reason_json: reason.encode(),
+        },
+    ));
+    tx.give_up(crate::durable::Release::Parked);
+    durable
+        .commit(tx, CommitLabel::PROCESS_ADVANCE)
+        .await
+        .expect("commit the park");
+
+    let core = crate::tests::explicit_ephemeral_facets(crate::LashCore::standard_builder(backend))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("build core");
+    let processes = core.processes();
+    let get = processes
+        .get(&process_id)
+        .await
+        .expect("get")
+        .expect("retained process");
+    assert_eq!(get.park, Some(reason));
+    let list = processes
+        .list(
+            &lash_core::ProcessListFilter::default(),
+            std::num::NonZeroUsize::MIN,
+            None,
+        )
+        .await
+        .expect("list");
+    assert_eq!(list.processes.len(), 1);
+    assert_eq!(list.processes[0].park, get.park);
+
+    let observed = processes.observe(&process_id);
+    let snapshot = observed.snapshot().await.expect("initial feed snapshot");
+    let ProcessReadView::Retained(initial) = &snapshot.read_view else {
+        panic!("the parked process is retained");
+    };
+    assert_eq!(
+        initial.process.park, get.park,
+        "initial feed snapshot retains the park"
+    );
+    core.process_replay_store
+        .invalidate_all()
+        .await
+        .expect("lose replay continuity");
+    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
+    let (replacement, _) = expect_gap(
+        next(&mut feed).await,
+        ProcessObservationGapCause::Replay {
+            reason: ProcessReplayGapReason::Unavailable,
+        },
+    );
+    let ProcessReadView::Retained(replacement) = replacement.read_view else {
+        panic!("the gap replacement retains the process");
+    };
+    assert_eq!(
+        replacement.process.park, get.park,
+        "gap replacement retains the park"
+    );
+    core.shutdown().await.expect("shutdown");
 }
 
 /// A late attach replays what the window retains: the provisional node
