@@ -37,7 +37,7 @@ async fn deferred_search_observation_enables_next_block_call() {
     let provider = inspecting_provider(|call, request| match call {
         0 => r#"<typescript>
 const matches = await tools.search({ query: "text checksum", limit: 1 });
-print(matches);
+console.log(JSON.stringify(matches));
 </typescript>"#
             .to_string(),
         1 => {

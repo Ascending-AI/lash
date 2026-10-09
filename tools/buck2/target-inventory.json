@@ -2433,7 +2433,7 @@
       "conformance"
     ],
     "//crates/lash-vm-worker:pool_laws__test__fv_4cf08d33": [
-      "synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake"
+      "workers_refuse_another_protocol_before_guest_admission"
     ]
   },
   "feature_lane_test_floors": {
@@ -46288,7 +46288,8 @@
     "//crates/lash-core:turn_event_schema__test__fv_171a8f92",
     "//crates/lash-core:turn_event_schema__test__fv_30b4ae55",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
-    "//crates/lash-dialect-typescript:test_batch",
+    "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
+    "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
@@ -47940,15 +47941,13 @@
           "clippy_label": "//crates/lash-dialect-typescript:test262_kernel__test__clippy[clippy.txt]",
           "kind": "test",
           "label": "//crates/lash-dialect-typescript:test262_kernel__test",
+          "shard_count": 40,
           "tags": []
         }
       ],
       "test_batch": {
-        "label": "//crates/lash-dialect-typescript:test_batch",
-        "members": [
-          "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
-          "//crates/lash-dialect-typescript:test262_kernel__test"
-        ]
+        "label": null,
+        "members": []
       }
     },
     {
@@ -49621,6 +49620,7 @@
         "lash-internal-sqlite-store",
         "lash-internal-store-sql",
         "lash-internal-vm-runtime",
+        "lash-kernel-doc",
         "lash-runtime",
         "rmp-serde",
         "serde",
@@ -50633,6 +50633,7 @@
         "lash-internal-sqlite-store",
         "lash-internal-store-sql",
         "lash-internal-vm-runtime",
+        "lash-kernel-doc",
         "lash-runtime",
         "rmp-serde",
         "rusqlite",
@@ -52180,7 +52181,6 @@
     "//crates/lash-dialect-python:lash-dialect-python__unit_test": 300,
     "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test": 300,
     "//crates/lash-dialect-typescript:test262_kernel__test": 300,
-    "//crates/lash-dialect-typescript:test_batch": 300,
     "//crates/lash-durable-test:after_turn_crash_laws__test": 300,
     "//crates/lash-durable-test:attachment_delivery_secret__test": 300,
     "//crates/lash-durable-test:attachment_ref_laws__test": 300,
@@ -54131,7 +54131,8 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
-    "//crates/lash-dialect-typescript:test_batch",
+    "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
+    "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
@@ -54292,7 +54293,8 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
-    "//crates/lash-dialect-typescript:test_batch",
+    "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
+    "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",
@@ -54802,10 +54804,6 @@
       "//crates/lash-core:tool_execution_grant_layout__test",
       "//crates/lash-core:turn_event_schema__test"
     ],
-    "//crates/lash-dialect-typescript:test_batch": [
-      "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
-      "//crates/lash-dialect-typescript:test262_kernel__test"
-    ],
     "//crates/lash-kernel-doc:test_batch": [
       "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test",
       "//crates/lash-kernel-doc:lash-kernel-doc__unit_test"
@@ -54869,7 +54867,8 @@
     "//crates/lash-core:runtime_turns__test",
     "//crates/lash-core:test_batch",
     "//crates/lash-dialect-python:lash-dialect-python__unit_test",
-    "//crates/lash-dialect-typescript:test_batch",
+    "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test",
+    "//crates/lash-dialect-typescript:test262_kernel__test",
     "//crates/lash-durable-test:after_turn_crash_laws__test",
     "//crates/lash-durable-test:attachment_delivery_secret__test",
     "//crates/lash-durable-test:attachment_ref_laws__test",

@@ -105,13 +105,17 @@ async fn module_artifact_surface_reads_the_persisted_json() {
     )
     .await
     .expect("open provisioned Postgres storage");
-    let artifact = lash_conformance::module_artifact_store::SampleArtifact::named("done");
+    let document =
+        lash_kernel_doc::parse_document("numbers by_spelling\nkernel 1\nmain { return \"done\" }")
+            .expect("kernel document");
+    let identity = document.identity().expect("document identity").to_string();
+    let json = document.to_json().expect("canonical document JSON");
     let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
         .expect("host pin is unguarded");
-    let bytes = artifact.to_store_bytes().expect("encode module artifact");
+    let bytes = json.as_bytes();
     storage
         .lash_vm_artifact_store()
-        .publish_module_artifact(&claim, artifact.module_ref().as_str(), &bytes)
+        .publish_module_artifact(&claim, identity.as_str(), bytes)
         .await
         .expect("persist module artifact");
     drop(storage);
@@ -122,12 +126,9 @@ async fn module_artifact_surface_reads_the_persisted_json() {
         .expect("walk module artifacts");
     assert_eq!(page.coverage, ScanCoverage::Scanned);
     assert_eq!(page.items.len(), 1, "{page:?}");
-    assert_eq!(page.items[0].cursor, artifact.module_ref().as_str());
+    assert_eq!(page.items[0].cursor, identity.as_str());
     match &page.items[0].payload {
-        DurablePayload::Json(json) => assert!(
-            json.contains("host_requirements_ref") && json.contains("\"ir\""),
-            "{json}"
-        ),
+        DurablePayload::Json(persisted) => assert_eq!(persisted, &json),
         other => panic!("expected module artifact JSON, got {other:?}"),
     }
 

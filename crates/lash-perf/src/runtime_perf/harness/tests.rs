@@ -144,12 +144,14 @@ async fn embed_core_lives_until_the_engine_answers_every_sent_turn() {
         RuntimePerfScenario::EmbedStandard,
         RuntimePerfScenario::EmbedRlm,
     ] {
-        tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            super::super::measurement::run_once_embed(scenario, 1),
-        )
-        .await
-        .expect("embed engine must remain alive")
-        .expect("embed fixture finishes");
+        // This pins engine ownership after setup, rather than the cold
+        // kernel's construction time. The send/export deadline stays fixed.
+        let run = super::super::measurement::prepare_embed(scenario, 1)
+            .await
+            .expect("prepare embed fixture");
+        tokio::time::timeout(std::time::Duration::from_secs(5), run.finish())
+            .await
+            .expect("embed engine must remain alive")
+            .expect("embed fixture finishes");
     }
 }

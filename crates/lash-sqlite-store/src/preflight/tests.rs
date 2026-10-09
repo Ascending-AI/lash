@@ -332,7 +332,12 @@ mod walk {
         let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
-        let artifact = lash_conformance::module_artifact_store::SampleArtifact::named("done");
+        let document = lash_kernel_doc::parse_document(
+            "numbers by_spelling\nkernel 1\nmain { return \"done\" }",
+        )
+        .expect("kernel document");
+        let identity = document.identity().expect("document identity").to_string();
+        let json = document.to_json().expect("canonical document JSON");
         lash_core_execution::ModuleArtifactStore::publish_module_artifact(
             &store,
             &lash_core_execution::ReferrerClaim::unguarded(
@@ -341,8 +346,8 @@ mod walk {
                 ),
             )
             .expect("host pin claim"),
-            artifact.module_ref().as_str(),
-            &artifact.to_store_bytes().expect("encode module"),
+            identity.as_str(),
+            json.as_bytes(),
         )
         .await
         .expect("persist module artifact");
@@ -353,12 +358,9 @@ mod walk {
             .expect("walk module artifacts");
         assert_eq!(page.coverage, ScanCoverage::Scanned);
         assert_eq!(page.items.len(), 1, "{page:?}");
-        assert_eq!(page.items[0].cursor, artifact.module_ref().as_str());
+        assert_eq!(page.items[0].cursor, identity.as_str());
         match &page.items[0].payload {
-            DurablePayload::Json(json) => assert!(
-                json.contains("host_requirements_ref") && json.contains("\"ir\""),
-                "{json}"
-            ),
+            DurablePayload::Json(persisted) => assert_eq!(persisted, &json),
             other => panic!("expected module artifact JSON, got {other:?}"),
         }
     }

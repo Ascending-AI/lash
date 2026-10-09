@@ -49,6 +49,7 @@ tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
+lash-kernel-doc = { workspace = true }
 lash-durable = { workspace = true, features = ["testing"] }
 lash-vm-runtime = { workspace = true, features = ["testing"] }
 lash = { workspace = true, features = ["postgres"] }

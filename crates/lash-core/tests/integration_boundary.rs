@@ -62,7 +62,7 @@ fn workspace_inventory_keeps_protocol_crates_out_of_lash_core_dependencies() {
     let forbidden_library_targets = [
         concat!("lash_protocol_", "r", "lm"),
         concat!("lash_", "vm_runtime"),
-        concat!("lash_", "vm"),
+        concat!("lash_", "vm_worker"),
         "lash_protocol_standard",
     ];
     let forbidden_package_names = packages

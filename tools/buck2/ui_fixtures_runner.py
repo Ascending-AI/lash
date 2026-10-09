@@ -35,6 +35,10 @@ def filter_diagnostics(text, fixture, package):
             continue
         if re.match(r'^= note: the full (type )?name has been written to', line):
             continue
+        # rustc may elide the standard Result path in async-trait method help
+        # depending on the feature closure. Keep the same signature in every pin.
+        if line.lstrip().startswith('= help: implement the missing item:'):
+            line = line.replace('Future<Output = Result<', 'Future<Output = std::result::Result<')
         line = re.sub(r'^(\s*and )\d+( others)$', r'\1$N\2', line)
         arrow = re.match(r'^(\s*(?:-->|:::) )(.*)$', line)
         if arrow:

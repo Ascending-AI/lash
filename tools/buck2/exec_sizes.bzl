@@ -748,7 +748,6 @@ TEST_RUN_REQUESTS = {
 BATCH_BUDGETS = {
     "//crates/lash-core-execution:test_batch": {"cpu_count": 5, "memory_kb": 1310720},
     "//crates/lash-core:test_batch": {"cpu_count": 3, "memory_kb": 262144},
-    "//crates/lash-dialect-typescript:test_batch": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-kernel-doc:test_batch": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-kernel-edit:test_batch": {"cpu_count": 4, "memory_kb": 1048576},
     "//crates/lash-kernel-state:test_batch": {"cpu_count": 4, "memory_kb": 1048576},

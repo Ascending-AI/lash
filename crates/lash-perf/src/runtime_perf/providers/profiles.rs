@@ -285,7 +285,7 @@ const payload = {
 };
 
 const result = await tools.benchmark_echo({ value: payload, ordinal: 1 });
-print(result);
+console.log(JSON.stringify(result));
 finish("runtime perf benchmark ok");"#,
             );
             text_profile(text)
@@ -436,13 +436,13 @@ const judged = await obliq.judge_candidates({
 });
 const subagent = await subagent_handle;
 
-print({
+console.log(JSON.stringify({
   first_pool: first_pool,
   second_pool: second_pool,
   handles: handles,
   judged: judged,
   subagent: subagent
-});
+}));
 
 finish("runtime perf benchmark ok");"#,
             );
@@ -453,7 +453,7 @@ finish("runtime perf benchmark ok");"#,
                 text_profile(typescript_block(r#"finish("runtime perf benchmark ok");"#))
             } else {
                 text_profile(typescript_block(
-                    r#"print("checkpoint before projection");"#,
+                    r#"console.log("checkpoint before projection");"#,
                 ))
             }
         }
@@ -476,7 +476,7 @@ const deepChild = async () => {
 
 const handle = await processes.start({ definition: deepChild });
 const result = await handle;
-print(result);"#,
+console.log(JSON.stringify(result));"#,
             );
             text_profile(text)
         }

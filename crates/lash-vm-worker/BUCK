@@ -925,7 +925,7 @@ lash_rust_feature_test(
 lash_rust_feature_test(
     name = "pool_laws__test__fv_4cf08d33",
     args = [
-        "synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake",
+        "workers_refuse_another_protocol_before_guest_admission",
     ],
     crate_features = [
         "synthetic-next",

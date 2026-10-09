@@ -36,6 +36,14 @@ class NormalizationTests(unittest.TestCase):
             with self.subTest(pin=pin.name):
                 self.assertEqual(ui.normalize(pin.read_text(), 'tests/ui/' + pin.stem + '.rs', 'crates/lash'), pin.read_text())
 
+    def test_missing_trait_item_help_has_one_result_path_spelling(self):
+        qualified = (ROOT / 'crates/lash/tests/ui/session_catalog_requires_lookup.stderr').read_text()
+        qualified = qualified.replace('Output = Result<', 'Output = std::result::Result<')
+        short = qualified.replace('Output = std::result::Result<', 'Output = Result<')
+        fixture = 'tests/ui/session_catalog_requires_lookup.rs'
+        self.assertEqual(ui.normalize(short, fixture, 'crates/lash'), qualified)
+        self.assertEqual(ui.normalize(qualified, fixture, 'crates/lash'), qualified)
+
     def test_registry_paths_and_external_snippet_lines_match_trybuild(self):
         raw = 'error[E0277]: trait bound\n  --> third-party/rust/serde_json-1.0.145.crate/src/ser.rs:12:4\n   |\n12 | pub fn to_string() {}\n   |    ^^^^^^^^^^^^^ required here\n\nerror: aborting due to 1 previous error\n\nFor more information about this error, try `rustc --explain E0277`.\n'
         result = ui.normalize(raw, 'tests/ui/fixture.rs', 'crates/lash')

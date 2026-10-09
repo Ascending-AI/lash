@@ -470,3 +470,26 @@ fn worker_crash_mid_run_leaves_the_parent_running() {
     assert_ne!(next.pid(), Some(pid));
     next.release().expect("pristine replacement");
 }
+
+/// The kernel worker's live protocol is admitted before any guest request.
+/// Synthetic-next keeps the same refusal as the plain parent.
+#[test]
+fn workers_refuse_another_protocol_before_guest_admission() {
+    for mode in ["protocol_below", "protocol_above", "opposite_generation"] {
+        let error = WorkerPool::new(config(mode))
+            .err()
+            .expect("incompatible worker");
+        let PoolError::ProtocolVersion(refusal) = error else {
+            panic!("typed protocol refusal: {error:?}");
+        };
+        assert_eq!(refusal.parent_version, WORKER_PROTOCOL_VERSION);
+        assert_eq!(
+            refusal.minimum_supported_version,
+            MIN_SUPPORTED_WORKER_PROTOCOL_VERSION
+        );
+        assert!(
+            refusal.worker_version < MIN_SUPPORTED_WORKER_PROTOCOL_VERSION
+                || refusal.worker_version > WORKER_PROTOCOL_VERSION
+        );
+    }
+}

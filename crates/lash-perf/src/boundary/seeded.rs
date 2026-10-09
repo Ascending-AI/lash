@@ -11,6 +11,25 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+// TypeScript numbers cross the kernel boundary as Float, including whole
+// indices and sizes. Accept only exactly whole, nonnegative values.
+fn whole_number(value: &serde_json::Value, field: &'static str) -> Result<u64> {
+    value
+        .as_u64()
+        .or_else(|| {
+            value
+                .as_f64()
+                .filter(|number| {
+                    number.is_finite()
+                        && *number >= 0.0
+                        && number.fract() == 0.0
+                        && *number < u64::MAX as f64
+                })
+                .map(|number| number as u64)
+        })
+        .context(field)
+}
+
 struct Tools {
     workload: Arc<Workload>,
     contracts: BTreeMap<String, lash_core::ToolDefinition>,
@@ -62,12 +81,9 @@ impl Tools {
                 let key = call.args["record"]["key"]
                     .as_str()
                     .context("synthetic key")?;
-                let bytes = call.args["record"]["result_bytes"]
-                    .as_u64()
-                    .context("result size")? as u32;
-                let delay = call.args["record"]["callback_ms"]
-                    .as_u64()
-                    .context("callback delay")?;
+                let bytes =
+                    whole_number(&call.args["record"]["result_bytes"], "result size")? as u32;
+                let delay = whole_number(&call.args["record"]["callback_ms"], "callback delay")?;
                 tokio::time::sleep(Duration::from_millis(delay)).await;
                 Ok(lash_core::ToolCallOutput::success(
                     generator.tool_result(key, bytes)?,
@@ -82,7 +98,7 @@ impl Tools {
                 let plan = generator.plan(id.actor, id.ordinal)?;
                 let attachment = generator.attachment(
                     &plan,
-                    call.args["index"].as_u64().context("blob index")? as usize,
+                    whole_number(&call.args["index"], "blob index")? as usize,
                 )?;
                 let reference = call
                     .context
@@ -285,7 +301,7 @@ async fn execute(
                 let start = Instant::now();
                 let output = tokio::time::timeout(Duration::from_secs(120), handle.output()).await??;
                 ensure!(matches!(&output.result.outcome, lash::TurnOutcome::Finished(lash::TurnFinish::FinalValue { value })
-                    if value["operation"] == plan.operation.key()), "seeded cell failed: {:?}; errors={:?}; calls={:?}", output.result.outcome, output.result.errors, output.result.llm_calls);
+                    if value["operation"] == plan.operation.key()), "seeded cell did not finish: {:?}", output.result.outcome);
                 meter.operation("seeded.send.settle", plan.operation.key(), "ok", start);
                 // Queued plans are separate keyed sends; the sequential recipe
                 // does not claim to model their active-turn scheduling share.

@@ -892,21 +892,19 @@ fn completed_checkpoint_tool(index: usize, call: PendingToolCall) -> CompletedTo
 
 fn checkpoint_exec_code(protocol_iteration: usize) -> String {
     format!(
-        r#"process benchmark_echo_process(tool: Tools, value: str, ordinal: int) {{
-  result = await tool.benchmark_echo({{ value: value, ordinal: ordinal }})?
-  finish result
-}}
+        r#"const benchmark_echo_process = async (value: string, ordinal: number) => {{
+  const result = await tools.benchmark_echo({{ value: value, ordinal: ordinal }});
+  return result;
+}};
 
-print("checkpoint turn {protocol_iteration}")
-first = start benchmark_echo_process(tool: tools, value: "runtime perf benchmark ok", ordinal: 1)
-second = start benchmark_echo_process(tool: tools, value: "runtime perf benchmark ok", ordinal: 2)
-third = start benchmark_echo_process(tool: tools, value: "runtime perf benchmark ok", ordinal: 3)
-fanout = await {{
-  a: first,
-  b: second,
-  c: third
-}}
-finish fanout.a?.value"#
+console.log("checkpoint turn {protocol_iteration}");
+const first = await processes.start({{ definition: benchmark_echo_process, args: {{ value: "runtime perf benchmark ok", ordinal: 1 }} }});
+const second = await processes.start({{ definition: benchmark_echo_process, args: {{ value: "runtime perf benchmark ok", ordinal: 2 }} }});
+const third = await processes.start({{ definition: benchmark_echo_process, args: {{ value: "runtime perf benchmark ok", ordinal: 3 }} }});
+const a = await first;
+await second;
+await third;
+finish(a.value);"#
     )
 }
 
@@ -976,12 +974,12 @@ fn next_checkpoint_effect(machine: &mut TurnMachine) -> Option<Effect> {
     }
 }
 
-pub(crate) async fn run_once_embed(
+pub(crate) async fn prepare_embed(
     scenario: RuntimePerfScenario,
     chat_turns: usize,
-) -> anyhow::Result<RuntimePerfRunResult> {
+) -> anyhow::Result<EmbedRun> {
     let mut run = RunRecorder::start(scenario, chat_turns);
-    let (_core, store, session, turn_entry) = run
+    let (core, store, session, turn_entry) = run
         .build(async {
             let (core, store_factory, turn_entry) = build_embed_core(scenario).await?;
             let session_id = SessionId::fixture(format!("runtime-perf-{}", scenario.name()));
@@ -1005,53 +1003,94 @@ pub(crate) async fn run_once_embed(
         .await?;
     run.seed(async { Ok(()) }).await?;
 
-    for turn_index in 0..chat_turns {
-        run.turn(
-            turn_index,
-            async {
-                let cancel = CancellationToken::new();
-                let turn_id = TurnId::fixture(format!("runtime-perf-embed-{}", turn_index + 1));
-                let turn = runtime_perf_timed(
-                    scenario,
-                    turn_index,
-                    "run_turn",
-                    Some(cancel.clone()),
-                    turn_entry.run(
-                        &session,
-                        lash_core::TurnInput::text(benchmark_prompt(scenario, turn_index)),
-                        Some(&turn_id),
-                        cancel,
-                    ),
-                )
-                .await
-                .with_context(|| {
-                    format!(
-                        "run embed runtime perf scenario {} turn {}",
-                        scenario.name(),
-                        turn_index + 1
+    Ok(EmbedRun {
+        run,
+        scenario,
+        chat_turns,
+        core,
+        store,
+        session,
+        turn_entry,
+    })
+}
+
+/// Owns the serving core through every send and the final export.
+pub(crate) struct EmbedRun {
+    run: RunRecorder,
+    scenario: RuntimePerfScenario,
+    chat_turns: usize,
+    core: super::super::harness::BenchmarkCore,
+    store: Arc<super::super::store::RuntimePerfStore>,
+    session: lash::LashSession,
+    turn_entry: TurnEntry,
+}
+
+impl EmbedRun {
+    pub(crate) async fn finish(self) -> anyhow::Result<RuntimePerfRunResult> {
+        let Self {
+            mut run,
+            scenario,
+            chat_turns,
+            core: _core,
+            store,
+            session,
+            turn_entry,
+        } = self;
+        for turn_index in 0..chat_turns {
+            run.turn(
+                turn_index,
+                async {
+                    let cancel = CancellationToken::new();
+                    let turn_id = TurnId::fixture(format!("runtime-perf-embed-{}", turn_index + 1));
+                    let turn = runtime_perf_timed(
+                        scenario,
+                        turn_index,
+                        "run_turn",
+                        Some(cancel.clone()),
+                        turn_entry.run(
+                            &session,
+                            lash_core::TurnInput::text(benchmark_prompt(scenario, turn_index)),
+                            Some(&turn_id),
+                            cancel,
+                        ),
                     )
-                })?;
-                validate_runtime_perf_turn(scenario, turn_index, &turn)?;
-                Ok(TurnRun {
-                    value: (),
-                    tail: TurnTail {
-                        turn_usage: turn.usage,
-                        ..TurnTail::default()
-                    },
-                })
-            },
-            async { Ok(()) },
-        )
-        .await?;
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "run embed runtime perf scenario {} turn {}",
+                            scenario.name(),
+                            turn_index + 1
+                        )
+                    })?;
+                    validate_runtime_perf_turn(scenario, turn_index, &turn)?;
+                    Ok(TurnRun {
+                        value: (),
+                        tail: TurnTail {
+                            turn_usage: turn.usage,
+                            ..TurnTail::default()
+                        },
+                    })
+                },
+                async { Ok(()) },
+            )
+            .await?;
+        }
+
+        let read_view = run.export(async { Ok(session.read_view()) }).await?;
+
+        Ok(run.finish(RunTail {
+            session_nodes: store.graph_node_count(),
+            active_path_messages: read_view.messages().len(),
+            ..RunTail::default()
+        }))
     }
+}
 
-    let read_view = run.export(async { Ok(session.read_view()) }).await?;
-
-    Ok(run.finish(RunTail {
-        session_nodes: store.graph_node_count(),
-        active_path_messages: read_view.messages().len(),
-        ..RunTail::default()
-    }))
+pub(crate) async fn run_once_embed(
+    scenario: RuntimePerfScenario,
+    chat_turns: usize,
+) -> anyhow::Result<RuntimePerfRunResult> {
+    prepare_embed(scenario, chat_turns).await?.finish().await
 }
 pub(crate) fn sum_phase_profiles<'a>(
     profiles: impl IntoIterator<Item = &'a BTreeMap<String, RuntimePerfPhaseRunResult>>,

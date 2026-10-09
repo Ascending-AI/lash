@@ -263,7 +263,7 @@ fn cell_source(plan: &TurnPlan, word: &str) -> Result<String> {
             batches.push(batch);
         }
         code.push_str(&format!(
-            "const w={};\nconst arg=(k,c)=>({{record:{{kind:\"synthetic\",key:k,result_bytes:c[1],callback_ms:c[2]}},payload:w.repeat(c[0])+w.slice(0,c[3])}});\nconst batches={};\n",
+            "const w={};\nconst arg=(key,c)=>({{record:{{kind:\"synthetic\",key:key,result_bytes:c[1],callback_ms:c[2]}},payload:w.repeat(c[0])+w.slice(0,c[3])}});\nconst batches={};\n",
             serde_json::to_string(word)?,
             serde_json::to_string(&batches)?
         ));

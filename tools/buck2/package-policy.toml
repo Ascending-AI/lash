@@ -311,6 +311,9 @@ packages = ["lash-dialect-typescript"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["test262_kernel"]
 data = ["//crates/lash-dialect-typescript:test262_corpus"]
+# Forty libtest laws partition the recorded corpus. Run each in its own
+# action so the full Test262 census cannot monopolize a package batch.
+shards = 40
 
 # These carry the relocated suites that assert over captured `tracing` events.
 # Capture installs a scoped default subscriber, so other cases in the same

@@ -846,7 +846,7 @@ FEATURE_LANE_TEST_ARGS = {
         "conformance"
     ],
     "//crates/lash-vm-worker:pool_laws__test__fv_4cf08d33": [
-        "synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake"
+        "workers_refuse_another_protocol_before_guest_admission"
     ]
 }
 

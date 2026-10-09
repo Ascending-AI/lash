@@ -897,16 +897,18 @@ pub(crate) async fn build_embed_core(
             .build(runtime_perf_owner())
             .map(BenchmarkCore::Standard)
             .map_err(anyhow::Error::from),
-        ExecutionMode::Rlm => benchmark_rlm_builder(
-            backend.clone(),
-            provider,
-            benchmark_rlm_protocol_factory(scenario),
-        )
-        .with_explicit_ephemeral_facets()
-        .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
-        .build(runtime_perf_owner())
-        .map(BenchmarkCore::Rlm)
-        .map_err(anyhow::Error::from),
+        ExecutionMode::Rlm => {
+            let factory = benchmark_rlm_protocol_factory(scenario);
+            // Worker startup belongs to the measured build phase, before
+            // any turn is sent to the embed's serving node.
+            factory.worker_service().pool()?;
+            benchmark_rlm_builder(backend.clone(), provider, factory)
+                .with_explicit_ephemeral_facets()
+                .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
+                .build(runtime_perf_owner())
+                .map(BenchmarkCore::Rlm)
+                .map_err(anyhow::Error::from)
+        }
     }?;
     Ok((core, stores, TurnEntry::Durable))
 }

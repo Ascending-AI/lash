@@ -526,14 +526,21 @@ impl<'embedding, const MEASURE: bool> Server<'embedding, MEASURE> {
         value: &T,
     ) -> Result<EncodedPayload, PoolError> {
         let payload = wire::encode(kind, value)?;
-        if payload.0.len() as u64 > self.bootstrap.effect {
-            return Err(InfrastructureOutcome::WorkerLimitExceeded {
-                limit: WorkerLimit::EffectValue {
-                    size: payload.0.len() as u64,
-                    bound: self.bootstrap.effect,
-                },
-            }
-            .into());
+        // A completed run carries every session binding along with its
+        // result. Its envelope is state, rather than one effect value.
+        let bound = if kind == PayloadKind::End {
+            self.bootstrap.state
+        } else {
+            self.bootstrap.effect
+        };
+        if payload.0.len() as u64 > bound {
+            let size = payload.0.len() as u64;
+            let limit = if kind == PayloadKind::End {
+                WorkerLimit::VmState { size, bound }
+            } else {
+                WorkerLimit::EffectValue { size, bound }
+            };
+            return Err(InfrastructureOutcome::WorkerLimitExceeded { limit }.into());
         }
         Ok(payload)
     }

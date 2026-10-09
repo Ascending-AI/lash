@@ -449,7 +449,7 @@ commands = [
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-worker", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-vm-protocol", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-vm-worker", "--test", "pool_laws", "--no-default-features", "--features", "testing,synthetic-next", "--locked", "synthetic_next_and_plain_workers_refuse_each_other_at_the_handshake"],
+  ["cargo", "test", "-p", "lash-internal-vm-worker", "--test", "pool_laws", "--no-default-features", "--features", "testing,synthetic-next", "--locked", "workers_refuse_another_protocol_before_guest_admission"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--locked"],

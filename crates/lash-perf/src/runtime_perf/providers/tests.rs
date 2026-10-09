@@ -166,7 +166,7 @@ fn ingress_admission_projection_profile_uses_latest_request_item_marker() {
     );
     assert_eq!(
         unmarked_profile.full_text,
-        typescript_block(r#"print("checkpoint before projection");"#)
+        typescript_block(r#"console.log("checkpoint before projection");"#)
     );
 
     let mut marked_request = empty_request();
@@ -200,7 +200,7 @@ fn ingress_admission_projection_profile_uses_latest_request_item_marker() {
     );
     assert_eq!(
         historical_marker_profile.full_text,
-        typescript_block(r#"print("checkpoint before projection");"#)
+        typescript_block(r#"console.log("checkpoint before projection");"#)
     );
 }
 

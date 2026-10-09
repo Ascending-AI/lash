@@ -1370,20 +1370,62 @@ async fn snapshot_subscribe_has_only_two_histories_across_a_frame_switch() -> Re
         PublicationBoundary::BeforePublish,
         PublicationBoundary::BeforeNotification,
     ] {
-        let replay_store = Arc::new(PausedCommitReplayStore::at(boundary));
-        let core =
-            explicit_ephemeral_facets(rlm_core_builder_over(sqlite_memory_store_backend().await))
-                .serve_test_llm_profile(
-                    queued_text_provider(vec![
-                        typescript_block(
-                            r#"await control.continue_as({ task: "finish in a fresh frame" });"#,
+        // Publication is a protocol-independent commit guarantee. Use a
+        // native tool so the publication deadline excludes kernel lowering.
+        struct SwitchFrame;
+        #[async_trait::async_trait]
+        impl crate::tools::StaticToolExecute for SwitchFrame {
+            async fn execute(
+                &self,
+                call: lash_core::ToolCall<'_>,
+            ) -> lash_core::ToolAttemptOutcome {
+                lash_core::ToolOutcome::ok(serde_json::json!({ "ok": true }))
+                    .with_control(lash_core::ToolControl::SwitchAgentFrame {
+                        frame_key: lash_core::FrameKey::from_call_site(
+                            call.context.session_id().expect("session"),
+                            call.context.agent_frame_id().expect("frame"),
+                            call.context.call_id(),
                         ),
-                        typescript_block(r#"finish("done after continue_as");"#),
-                    ]),
-                    mock_llm_profile_spec(),
-                )
-                .live_replay_store(replay_store.clone())
-                .build(crate::testing::runtime_lease_owner())?;
+                        initial_nodes: Vec::new(),
+                        task: Some("finish in a fresh frame".into()),
+                    })
+                    .into()
+            }
+        }
+        let definition = lash_core::ToolDefinition::raw(
+            "switch_frame", "switch_frame", "Switch frames",
+            serde_json::json!({ "type": "object", "properties": {}, "additionalProperties": false }),
+            serde_json::json!({ "type": "object" }),
+        ).expect("tool schemas").with_execution(std::time::Duration::from_secs(120));
+        let provider = crate::testing::TestProvider::builder()
+            .kind("snapshot-frame-switch")
+            .complete(|request| async move {
+                if last_user_text(&request).contains("finish in a fresh frame") {
+                    return Ok(text_response("done after frame switch"));
+                }
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::ToolCall {
+                        call_id: "snapshot-switch".into(),
+                        tool_name: "switch_frame".into(),
+                        input_json: "{}".into(),
+                        replay: None,
+                    }],
+                    ..LlmResponse::default()
+                })
+            })
+            .build()
+            .into_handle();
+        let replay_store = Arc::new(PausedCommitReplayStore::at(boundary));
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(
+            sqlite_memory_store_backend().await,
+        ))
+        .serve_test_llm_profile(provider, mock_llm_profile_spec())
+        .tools(Arc::new(crate::tools::StaticToolProvider::new(
+            vec![definition],
+            SwitchFrame,
+        )))
+        .live_replay_store(replay_store.clone())
+        .build(crate::testing::runtime_lease_owner())?;
         let session_id = SessionId::fixture(format!("two-histories-switch-{boundary:?}"));
         let session = core
             .session(session_id.clone())
