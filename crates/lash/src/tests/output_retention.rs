@@ -540,7 +540,7 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
             ..crate::DataRetention::standard()
         })
         .serve_test_llm_profile(queued_text_provider(vec![
-            typescript_block(r#"for (let i = 0; i < 200; i++) { print({index: i, text: "exact é🙂\nvalue", null: null, nested: [i, false]}); } finish(200);"#),
+            typescript_block(r#"for (let i = 0; i < 200; i++) { console.log({index: i, text: "exact é🙂\nvalue", null: null, nested: [i, false]}); } finish(200);"#),
         ]), mock_llm_profile_spec())
         .build(crate::testing::runtime_lease_owner())?;
     let session = core

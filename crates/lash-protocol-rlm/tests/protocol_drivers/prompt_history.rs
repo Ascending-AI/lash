@@ -29,16 +29,16 @@ const STREAMED_REASONING_TRAJECTORY: RlmPromptHistoryFocusedCheck = RlmPromptHis
 fn rlm_prompt_history_text_only_cell_records_code_without_reasoning_or_prose() {
     RlmProtocolScenario::new(TEXT_ONLY_CELL_TRAJECTORY.display_name)
         .termination(RlmTermination::FinishRequired { schema: None })
-        .llm_response(vec![text_part(&typescript_block("print(\"hi\");"))])
+        .llm_response(vec![text_part(&typescript_block("console.log(\"hi\");"))])
         .exec_result(exec_response(&["hi\n"], None, None))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["print(\"hi\");"],
+            exec_codes: vec!["console.log(\"hi\");"],
             checkpoints: vec![CheckpointKind::AfterWork],
             assistant_message_count: Some(0),
             assistant_reasoning_texts: Some(Vec::new()),
             assistant_visible_texts: Some(Vec::new()),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "print(\"hi\");",
+                code: "console.log(\"hi\");",
                 output: vec!["hi\n".to_string()],
                 outcome: lash_core::CellOutcome::Completed,
             }),
@@ -53,16 +53,16 @@ fn rlm_prompt_history_markdown_code_block_remains_visible_prose_before_real_lash
         .termination(RlmTermination::FinishRequired { schema: None })
         .llm_response(vec![text_part(&typescript_block_with_prose(
             "Example:\n```python\nprint('hi')\n```",
-            "print \"done\"",
+            "console.log(\"done\")",
         ))])
         .exec_result(exec_response(&["done\n"], None, None))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["print \"done\""],
+            exec_codes: vec!["console.log(\"done\")"],
             checkpoints: vec![CheckpointKind::AfterWork],
             assistant_reasoning_texts: Some(Vec::new()),
             assistant_visible_texts: Some(vec!["Example:\n```python\nprint('hi')\n```"]),
             trajectory_last: Some(RlmTrajectoryExpectation {
-                code: "print \"done\"",
+                code: "console.log(\"done\")",
                 output: vec!["done\n".to_string()],
                 outcome: lash_core::CellOutcome::Completed,
             }),

@@ -93,7 +93,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for TestDriv
         vec![lash_core::DriverAction::Start(
             lash_core::sansio::PendingWork::Exec {
                 language: "code".to_string(),
-                code: "print('effect seam')".to_string(),
+                code: "console.log('effect seam')".to_string(),
                 driver_state: lash_core::ProtocolDriverState::new(
                     PROTOCOL,
                     serde_json::Value::Null,

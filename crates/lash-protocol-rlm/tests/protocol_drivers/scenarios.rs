@@ -40,7 +40,7 @@ fn rlm_protocol_property_response_cell_classification_is_part_order_invariant() 
 
     let reasoning_text = "Plan first.";
     let prose = "Ready.";
-    let code = "print(\"hi\");";
+    let code = "console.log(\"hi\");";
     let cell_text = typescript_block_with_prose(prose, code);
     let cell_payload = serde_json::json!({
         "turn_id": "test-turn",
@@ -68,9 +68,9 @@ fn rlm_protocol_property_response_cell_classification_is_part_order_invariant() 
         vec![code],
     );
 
-    let split_open = "<typescript>\nprint(\"split\");";
+    let split_open = "<typescript>\nconsole.log(\"split\");";
     let split_close = "</typescript>";
-    let split_code = "print(\"split\");\n";
+    let split_code = "console.log(\"split\");\n";
     let split_full_text_chars = split_open.chars().count() + split_close.chars().count() + 2;
     assert_case(
         "response cell classification: split text parts",
@@ -96,7 +96,7 @@ fn rlm_protocol_unclosed_cell_retries_in_natural_mode_without_journaling_markup(
     RlmProtocolScenario::new("natural unclosed cell retry")
         .termination(RlmTermination::Natural { schema: None })
         .llm_response(vec![text_part(
-            "Visible plan.\n<typescript>\nprint(\"unfinished\");",
+            "Visible plan.\n<typescript>\nconsole.log(\"unfinished\");",
         )])
         .checkpoint()
         .expect(RlmProtocolExpectations {
@@ -131,10 +131,12 @@ fn rlm_protocol_scenario_natural_cell_at_budget_stops_without_another_provider_c
     RlmProtocolScenario::new(NATURAL_CELL_MAX_TURN.display_name)
         .user_message("run exactly one cell")
         .max_turns(1)
-        .llm_response(vec![text_part(&typescript_block("print \"allowed\""))])
+        .llm_response(vec![text_part(&typescript_block(
+            "console.log(\"allowed\")",
+        ))])
         .exec_result(exec_response(&["allowed"], None, None))
         .expect(RlmProtocolExpectations {
-            exec_codes: vec!["print \"allowed\""],
+            exec_codes: vec!["console.log(\"allowed\")"],
             llm_call_count: Some(1),
             done: Some(true),
             transcript_system_message_count: Some(0),

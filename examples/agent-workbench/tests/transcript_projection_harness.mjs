@@ -100,7 +100,7 @@ export function allKindRecords() {
     content: {text: kind === 'reasoning' || kind === 'code_block' ? '' : `content ${index}`,
       reasoning: kind === 'reasoning' ? ['reason one', 'reason two'] : [],
       attachments: kind === 'attachment' ? [{id:'sha256:one'}, {id:'sha256:two'}] : [],
-      language: kind === 'code_block' ? 'typescript' : null, code: kind === 'code_block' ? 'print(1)' : null,
+      language: kind === 'code_block' ? 'typescript' : null, code: kind === 'code_block' ? 'console.log(1)' : null,
       output: kind === 'code_block' ? '1' : null, success: kind === 'code_block' ? true : null, error: null,
       tools: kind === 'code_block' ? [{operation:'board.move', status:'ok'}] : [], tools_omitted: kind === 'code_block' ? 3 : 0},
   }));

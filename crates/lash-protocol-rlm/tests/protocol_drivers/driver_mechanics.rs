@@ -164,7 +164,7 @@ fn provider_stop_evidence_does_not_reconstruct_an_unclosed_cell() {
     );
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "Before\n<typescript>\nprint(\"hi\");";
+    let text = "Before\n<typescript>\nconsole.log(\"hi\");";
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
@@ -215,9 +215,9 @@ fn buffered_response_discards_trailing_content_after_the_first_complete_cell() {
     let llm_id = *find_llm_call(&effects).expect("llm call");
     let text = concat!(
         "<typescript>\n",
-        "print \"kept\"\n",
+        "console.log(\"kept\")\n",
         "</typescript>\n",
-        "print \"discarded\"\n",
+        "console.log(\"discarded\")\n",
         "finish \"also discarded\"",
     );
     machine.handle_response(Response::LlmComplete {
@@ -231,11 +231,9 @@ fn buffered_response_discards_trailing_content_after_the_first_complete_cell() {
     });
 
     let effects = drain_effects(&mut machine);
-    assert!(
-        effects.iter().any(
-            |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "print \"kept\"")
-        )
-    );
+    assert!(effects.iter().any(
+        |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "console.log(\"kept\")")
+    ));
     assert!(!effects.iter().any(|effect| {
         matches!(effect, Effect::ExecCode { code, .. } if code.contains("discarded"))
     }));
@@ -249,7 +247,7 @@ fn output_limit_unclosed_cell_retries_with_shorten_block_diagnostic() {
         TurnMachine::new(config, vec![user_message("respond")], Default::default(), 0);
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text = "<typescript>\nprint \"too long\"";
+    let text = "<typescript>\nconsole.log(\"too long\")";
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
@@ -301,8 +299,7 @@ fn multiple_cells_execute_only_the_first_without_emitting_raw_markup() {
     );
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call");
-    let text =
-        "Visible plan.\n<typescript>\nprint 1\n</typescript>\n<typescript>\nprint 2\n</typescript>";
+    let text = "Visible plan.\n<typescript>\nconsole.log(1)\n</typescript>\n<typescript>\nconsole.log(2)\n</typescript>";
     machine.handle_response(Response::LlmComplete {
         id: llm_id,
         text_streamed: false,
@@ -311,15 +308,13 @@ fn multiple_cells_execute_only_the_first_without_emitting_raw_markup() {
 
     let effects = drain_effects(&mut machine);
     assert!(
-        effects
-            .iter()
-            .any(|effect| matches!(effect, Effect::ExecCode { code, .. } if code == "print 1"))
-    );
-    assert!(
-        !effects.iter().any(
-            |effect| matches!(effect, Effect::ExecCode { code, .. } if code.contains("print 2"))
+        effects.iter().any(
+            |effect| matches!(effect, Effect::ExecCode { code, .. } if code == "console.log(1)")
         )
     );
+    assert!(!effects.iter().any(
+        |effect| matches!(effect, Effect::ExecCode { code, .. } if code.contains("console.log(2)"))
+    ));
     assert!(effects.iter().any(|effect| matches!(
         effect,
         Effect::Emit(SessionStreamEvent::LlmResponse { content, .. })
@@ -579,7 +574,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
         text_streamed: false,
         result: Ok(LlmResponse {
             parts: vec![LlmOutputPart::Text {
-                text: typescript_block_with_prose("Reason first.", "print(\"hi\");"),
+                text: typescript_block_with_prose("Reason first.", "console.log(\"hi\");"),
                 response_meta: None,
             }],
             response_metadata: Default::default(),
@@ -595,7 +590,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
             _ => None,
         })
         .expect("exec effect");
-    assert_eq!(code, "print(\"hi\");");
+    assert_eq!(code, "console.log(\"hi\");");
 
     let checkpoint = roundtrip_turn_checkpoint(machine.checkpoint());
     let mut restored = TurnMachine::restore_from_checkpoint(test_config(), checkpoint, None)
@@ -609,7 +604,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
         })
         .expect("restored exec effect");
     assert_eq!(restored_exec_id, exec_id);
-    assert_eq!(restored_code, "print(\"hi\");");
+    assert_eq!(restored_code, "console.log(\"hi\");");
 
     restored.handle_response(Response::ExecResult {
         id: restored_exec_id,
@@ -685,7 +680,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     );
     let trajectory = machine_trajectory(&restored);
     let entry = trajectory.last().expect("rlm trajectory entry");
-    assert_eq!(entry.code, "print(\"hi\");");
+    assert_eq!(entry.code, "console.log(\"hi\");");
     assert_eq!(assistant_visible_texts(&restored), vec!["Reason first."]);
     assert_eq!(entry.prints[0].text, "hi\n");
     assert_eq!(entry.prints[0].value, serde_json::json!("hi\n"));
@@ -1292,7 +1287,7 @@ fn an_error_free_execution_resets_the_no_progress_count() {
         id: llm_id,
         text_streamed: false,
         result: Ok(rlm_response(vec![text_part(&typescript_block(
-            "print \"working\"",
+            "console.log(\"working\")",
         ))])),
     });
     effects = drain_effects(&mut machine);
@@ -1800,7 +1795,7 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
     // A cell that printed something and then failed.
     run_cell(
         &mut machine,
-        "print \"partial\"",
+        "console.log(\"partial\")",
         exec_response(
             &["partial output before the failure"],
             Some("unknown binding `missing_name`"),
@@ -1810,7 +1805,7 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
     // The repair, which runs clean.
     run_cell(
         &mut machine,
-        "print \"repaired\"",
+        "console.log(\"repaired\")",
         exec_response(&["repaired output"], None, None),
     );
 
@@ -1831,7 +1826,7 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
         lash_core::CellOutcome::Completed,
         "a clean cell must not inherit the previous iteration's error"
     );
-    assert_eq!(repaired.code, "print \"repaired\"");
+    assert_eq!(repaired.code, "console.log(\"repaired\")");
 }
 
 /// FIG-3538: a crash before the iteration-2 LLM commit must redrive into a
@@ -2016,7 +2011,7 @@ fn an_exec_failure_reaches_the_trajectory_with_its_closed_reason() {
         (lash_core::ExecCodeFailureReason::Session, "session"),
     ] {
         let (machine, _) = answer_one_cell(
-            "print(\"hi\");",
+            "console.log(\"hi\");",
             Err(lash_core::ExecCodeFailure::new(
                 reason,
                 "the executor did not answer",

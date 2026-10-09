@@ -54,7 +54,7 @@ fn model(requests: Arc<Mutex<Vec<String>>>) -> lash_core::facade_support::Provid
                 seen.push(serde_json::to_string(&request).expect("the request renders"));
                 Ok(match call {
                     0 => cell("finish(\"pressure\");", 120),
-                    1 => cell("print(\"warning observed\");", 8),
+                    1 => cell("console.log(\"warning observed\");", 8),
                     2 => cell(
                         &format!(
                             "await control.continue_as({{ task: \"answer from the baton\", seed: {{ baton: \"{BATON}\" }} }});"
