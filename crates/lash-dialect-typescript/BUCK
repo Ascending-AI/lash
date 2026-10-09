@@ -47,7 +47,10 @@ lash_rust_unit_test(
     crate_root = "src/lib.rs",
     declared_features = [],
     exec_properties = sized_exec_properties("lash-dialect-typescript", "lash_dialect_typescript", "//crates/lash-dialect-typescript:lash-dialect-typescript__unit_test"),
-    extra_compile_data = [],
+    extra_compile_data = [
+        "//crates/lash-kernel-conformance:package_files",
+        "//crates/lash-kernel-lib:package_files",
+    ],
     manifest_dir = "crates/lash-dialect-typescript",
     package_name = "lash-dialect-typescript",
     tags = [],

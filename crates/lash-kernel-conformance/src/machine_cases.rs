@@ -55,6 +55,16 @@ fn k_clo_004() {
 }
 
 #[test]
+fn k_dialect_001() {
+    super::run_rule("K-DIALECT-001", include_str!("../corpus/dialect/K-DIALECT-001.json"));
+}
+
+#[test]
+fn k_dialect_002() {
+    super::run_rule("K-DIALECT-002", include_str!("../corpus/dialect/K-DIALECT-002.json"));
+}
+
+#[test]
 fn k_doc_006() {
     super::run_rule("K-DOC-006", include_str!("../corpus/doc/K-DOC-006.json"));
 }

@@ -102,6 +102,7 @@ PACKAGE_DEPS = {
         "build": {},
         "dev": {
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
+            "lash_kernel_conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
             "lash_kernel_lib": "//crates/lash-kernel-lib:lash-kernel-lib",
             "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm",

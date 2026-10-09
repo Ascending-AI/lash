@@ -1,0 +1,92 @@
+{
+  "rule": "K-DIALECT-001",
+  "cases": [
+    {
+      "name": "printed mutation aliases and effect statements keep their order",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\nmain {\n let xs = [1]\n let alias = xs\n print xs\n let first = perform echo(1) as Int\n set alias[0] = first\n print xs\n let second = perform echo(first) as Int\n finish (xs, second)\n}\n",
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "2"
+                }
+              }
+            }
+          ],
+          [
+            {
+              "request": 1,
+              "outcome": {
+                "completed": {
+                  "int": "3"
+                }
+              }
+            }
+          ]
+        ]
+      },
+      "expected": {
+        "prints": [
+          {
+            "list": [
+              {
+                "int": "1"
+              }
+            ]
+          },
+          {
+            "list": [
+              {
+                "int": "2"
+              }
+            ]
+          }
+        ],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "list": [
+                  {
+                    "int": "2"
+                  }
+                ]
+              },
+              {
+                "int": "3"
+              }
+            ]
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          },
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "2"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ],
+        "parks": 2
+      }
+    }
+  ]
+}

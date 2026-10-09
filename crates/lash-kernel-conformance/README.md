@@ -100,3 +100,14 @@ mutations and effect issue/delivery traces. Captures are checked in beside the
 source; Rust conformance tests need no runtime download or network.
 
 Embed this lane's own shard tree with `python3 crates/lash-kernel-conformance/index.py crates/lash-kernel-conformance/corpus crates/lash-kernel-conformance/src/corpus_files.rs --tests-output crates/lash-kernel-conformance/src/machine_cases.rs`. `--check` verifies membership after formatting. The test selection also mounts numeric library K-KEY-002, K-KEY-004 and K-VAL-026 from their owning crate. Its other five document cases run as supplements to already-owned rules. Add further owning library and parked-state shards to the composed selection and remove their pending rows; native-call supplements never count as kernel-text coverage.
+
+`corpus/dialect/K-DIALECT-001.json` and `K-DIALECT-002.json` are owned by
+`lash-dialect-typescript`'s
+`tests::printer_corpus::every_admitted_conformance_document_preserves_observations_when_printed_and_lowered`.
+That law loads every core shard plus the numeric and JSON document supplements,
+checks the original rule observations, prints and lowers in the original library
+and effect environment, then checks a clone with only its document replaced.
+It compares complete observations, including effect identities, charge and parks.
+Refusal fixtures remain under the core parsing/admission oracle.
+The printer law reuses the core embedding index, so adding a shard to the core
+selection also adds it to the printer selection.

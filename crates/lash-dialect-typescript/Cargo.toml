@@ -34,6 +34,7 @@ swc_ecma_parser = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+lash-kernel-conformance = { path = "../lash-kernel-conformance" }
 lash-kernel-check = { workspace = true }
 lash-kernel-edit = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }

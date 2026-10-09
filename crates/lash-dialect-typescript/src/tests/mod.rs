@@ -15,6 +15,7 @@ mod language;
 mod machine;
 mod package;
 mod printer;
+mod printer_corpus;
 mod typed;
 
 /// The real library and extension definitions, before the dialect helpers.

@@ -46130,6 +46130,7 @@
       "dependencies": [
         "lash-ext-regex-ecma",
         "lash-kernel-check",
+        "lash-kernel-conformance",
         "lash-kernel-dialect",
         "lash-kernel-doc",
         "lash-kernel-edit",

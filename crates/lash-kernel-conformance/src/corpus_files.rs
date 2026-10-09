@@ -11,6 +11,8 @@ const CORPUS_FILES: &[(&str, &str)] = &[
     ("K-CLO-002.json", include_str!("../corpus/clo/K-CLO-002.json")),
     ("K-CLO-003.json", include_str!("../corpus/clo/K-CLO-003.json")),
     ("K-CLO-004.json", include_str!("../corpus/clo/K-CLO-004.json")),
+    ("K-DIALECT-001.json", include_str!("../corpus/dialect/K-DIALECT-001.json")),
+    ("K-DIALECT-002.json", include_str!("../corpus/dialect/K-DIALECT-002.json")),
     ("K-DOC-006.json", include_str!("../corpus/doc/K-DOC-006.json")),
     ("K-EFF-001.json", include_str!("../corpus/eff/K-EFF-001.json")),
     ("K-EFF-002.json", include_str!("../corpus/eff/K-EFF-002.json")),

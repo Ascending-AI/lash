@@ -336,6 +336,12 @@ kinds = ["bin", "test", "example", "bench"]
 targets = ["integration_boundary"]
 data = ["//tools/buck2:target_inventory"]
 
+# The dialect printer law embeds the complete document corpus.
+[[rule]]
+packages = ["lash-dialect-typescript"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lash-kernel-conformance:package_files", "//crates/lash-kernel-lib:package_files"]
+
 # Test262 on the kernel reads the corpus where it is vendored.
 [[rule]]
 packages = ["lash-dialect-typescript"]

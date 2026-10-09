@@ -1,0 +1,55 @@
+{
+  "rule": "K-DIALECT-002",
+  "cases": [
+    {
+      "name": "printed temporary remains before a waiting call and a mutation",
+      "document": "kernel 1\nnumbers by_spelling\neffect echo(value: Int) -> Int\n\nmain {\nlet x = 1 let saved = x let fnc = fn() { do perform echo(1) as Int set x = 2 return 3 } let h = spawn apply fnc() let answer = join h finish (saved, x, answer)\n}\n",
+      "expected": {
+        "prints": [],
+        "end": {
+          "finished": {
+            "tuple": [
+              {
+                "int": "1"
+              },
+              {
+                "int": "2"
+              },
+              {
+                "int": "3"
+              }
+            ]
+          }
+        },
+        "trace": [
+          {
+            "effect": {
+              "effect": "echo",
+              "args": [
+                {
+                  "int": "1"
+                }
+              ],
+              "result": "int"
+            }
+          }
+        ]
+      },
+      "environment": {
+        "deliveries": [
+          [
+            {
+              "request": 0,
+              "outcome": {
+                "completed": {
+                  "int": "10"
+                }
+              }
+            }
+          ]
+        ],
+        "resume": false
+      }
+    }
+  ]
+}
