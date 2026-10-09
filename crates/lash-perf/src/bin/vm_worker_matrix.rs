@@ -14,6 +14,17 @@ fn main() -> anyhow::Result<()> {
         enforce_budgets || !args.iter().any(|arg| arg == "--enforce-budgets"),
         "--report-only and --enforce-budgets are mutually exclusive"
     );
+    if args.iter().any(|arg| arg == "--heap-smoke") {
+        let option = |name: &str| {
+            args.windows(2)
+                .find(|p| p[0] == name)
+                .map(|p| std::path::PathBuf::from(&p[1]))
+        };
+        let out = option("--out").ok_or_else(|| anyhow::anyhow!("--heap-smoke needs --out"))?;
+        let worker =
+            option("--worker").ok_or_else(|| anyhow::anyhow!("--heap-smoke needs --worker"))?;
+        return matrix::heap_smoke(&out, &worker, option("--heap-profile-dir").as_deref());
+    }
     if args.iter().any(|arg| arg == "--verify") {
         return matrix::verify();
     }

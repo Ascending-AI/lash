@@ -20,6 +20,7 @@ path = "src/main.rs"
 test = false
 
 [features]
+dhat-heap = ["dep:dhat"]
 synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-client/synthetic-next", "lash-vm/synthetic-next", "lash-core-execution/synthetic-next"]
 testing = ["lash-vm-client/testing"]
 
@@ -33,6 +34,7 @@ test = false
 workspace = true
 
 [dependencies]
+dhat = { version = "0.3", optional = true }
 blake3 = { workspace = true }
 lash-vm-client = { workspace = true }
 lash-core-execution = { workspace = true }

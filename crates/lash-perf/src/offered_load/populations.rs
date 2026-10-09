@@ -88,7 +88,8 @@ impl Opened {
             }
             Population::CrossWorker => {
                 let topology =
-                    CaseTopology::cross_worker(store_dir, FollowerMode::Standard).await?;
+                    CaseTopology::cross_worker(store_dir, FollowerMode::Standard, None, None)
+                        .await?;
                 for index in 0..sessions {
                     let session_id = SessionId::fixture(format!("offered-load-{index}"));
                     targets.push(Target {

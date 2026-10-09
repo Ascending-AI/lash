@@ -6,6 +6,8 @@
 //! Pool failures fence the checkout and never retry guest execution locally.
 
 mod frontend;
+#[cfg(feature = "dhat-heap")]
+mod heap_profile;
 pub use frontend::{Frontend, FrontendRefusal};
 
 #[cfg(unix)]

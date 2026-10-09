@@ -4,6 +4,10 @@ use std::future::Future;
 
 use tracing::Instrument as _;
 
+/// Opt-in, process-window receipts for concrete futures before type erasure.
+#[cfg(feature = "perf-witness")]
+pub mod sizes;
+
 /// The handle types a [`spawn`]ed task is executed through, re-exported so the
 /// shift names this guarded spawn's task surface rather than `tokio::task`.
 pub use tokio::task::{AbortHandle, JoinError, JoinHandle};
@@ -17,5 +21,7 @@ where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
+    #[cfg(feature = "perf-witness")]
+    sizes::record("task.spawn", &future);
     tokio::spawn(future.instrument(tracing::Span::current()))
 }

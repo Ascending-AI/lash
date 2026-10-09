@@ -5,6 +5,7 @@ mod facade;
 mod observation;
 mod seeded;
 mod tokens;
+mod waves;
 mod workers;
 
 use std::collections::BTreeMap;
@@ -29,6 +30,8 @@ pub enum Case {
     TypedHistory,
     ProcessLifecycle,
     SeededPlan,
+    /// One served node stays alive across operations waves of callers turns.
+    PersistentNodeWaves,
     ProcessDispatcher,
     ProcessFeeds,
     ProcessBurst,
@@ -65,6 +68,11 @@ pub struct Args {
     pub postgres_url: Option<String>,
     #[arg(long, default_value = "smoke-v1")]
     pub workload: String,
+    /// Write concrete future sizes collected before tracing and boxing.
+    #[arg(long)]
+    pub future_out: Option<PathBuf>,
+    #[arg(long, default_value_t = 20, requires = "future_out")]
+    pub future_top: usize,
     /// Write a dhat heap profile of the population; needs the dhat-heap build.
     #[arg(long, value_name = "OUT.json")]
     pub dhat_out: Option<PathBuf>,
@@ -276,6 +284,7 @@ pub async fn run(args: &Args) -> Result<Receipt> {
         }
         Case::SqliteProcesses => workers::run(args).await?,
         Case::SeededPlan => seeded::run(args).await?,
+        Case::PersistentNodeWaves => waves::run(args).await?,
         Case::RootRedrive
         | Case::ParkedTakeover
         | Case::PgFacade

@@ -86,6 +86,8 @@ pub(crate) struct CaseSpec {
 /// Shared run environment: the store root.
 pub(crate) struct LatencyEnv {
     store_dir: PathBuf,
+    pub(crate) dhat_out: Option<PathBuf>,
+    pub(crate) dhat_frames: Option<usize>,
 }
 
 impl LatencyEnv {
@@ -95,6 +97,8 @@ impl LatencyEnv {
             .with_context(|| format!("create {}", store_dir.display()))?;
         Ok(Self {
             store_dir: store_dir.to_path_buf(),
+            dhat_out: None,
+            dhat_frames: None,
         })
     }
 
@@ -103,6 +107,10 @@ impl LatencyEnv {
         serde_json::json!({
             "engine": "lash-durable",
             "store": "sqlite-file",
+            "heap_profile_parent": self.dhat_out,
+            "heap_profile_children": self.dhat_out.as_ref().map(|path|
+                "one sibling <parent-stem>.<case>.child.dhat.json per cross-worker case".to_owned() +
+                &format!(" beside {}", path.display())),
         })
     }
 }
@@ -260,8 +268,13 @@ pub(crate) struct CaseTopology {
 impl CaseTopology {
     /// A `lash-perf latency-worker` child serves `stores_dir`; the host core
     /// only sends and follows.
-    pub(crate) async fn cross_worker(stores_dir: &Path, follower: FollowerMode) -> Result<Self> {
-        let worker = start_worker(stores_dir).await?;
+    pub(crate) async fn cross_worker(
+        stores_dir: &Path,
+        follower: FollowerMode,
+        dhat_out: Option<&Path>,
+        dhat_frames: Option<usize>,
+    ) -> Result<Self> {
+        let worker = start_worker(stores_dir, dhat_out, dhat_frames).await?;
         let core = build_observer_with_mode(stores_dir, follower).await?;
         let observer = build_observer(stores_dir).await?;
         Ok(Self {
@@ -331,7 +344,20 @@ pub(crate) async fn run_case(
             }
         }
         Topology::CrossWorker => {
-            CaseTopology::cross_worker(&case_dir.join("worker"), spec.follower).await?
+            let child_profile = env.dhat_out.as_ref().map(|path| {
+                path.with_file_name(format!(
+                    "{}.{}.child.dhat.json",
+                    path.file_stem().unwrap_or_default().to_string_lossy(),
+                    spec.name
+                ))
+            });
+            CaseTopology::cross_worker(
+                &case_dir.join("worker"),
+                spec.follower,
+                child_profile.as_deref(),
+                env.dhat_frames,
+            )
+            .await?
         }
     };
 
@@ -1019,12 +1045,24 @@ pub(crate) fn build_report(
     }
 }
 
-async fn start_worker(stores_dir: &Path) -> Result<tokio::process::Child> {
+async fn start_worker(
+    stores_dir: &Path,
+    dhat_out: Option<&Path>,
+    dhat_frames: Option<usize>,
+) -> Result<tokio::process::Child> {
     use tokio::io::{AsyncBufReadExt, BufReader};
-    let mut child = tokio::process::Command::new(std::env::current_exe()?)
+    let mut command = tokio::process::Command::new(std::env::current_exe()?);
+    command
         .arg("latency-worker")
         .arg("--store-dir")
-        .arg(stores_dir)
+        .arg(stores_dir);
+    if let Some(path) = dhat_out {
+        command.arg("--dhat-out").arg(path);
+        if let Some(frames) = dhat_frames {
+            command.arg("--dhat-frames").arg(frames.to_string());
+        }
+    }
+    let mut child = command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())

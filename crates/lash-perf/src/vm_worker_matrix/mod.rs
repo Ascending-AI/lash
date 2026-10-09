@@ -26,6 +26,38 @@ fn config() -> Result<PoolConfig> {
     Ok(config)
 }
 
+/// One bounded, noncertifying worker run. The dedicated helper's profile
+/// flushes at its first reset before the parent can retire it.
+pub fn heap_smoke(out: &Path, executable: &Path, profile_dir: Option<&Path>) -> Result<()> {
+    std::fs::create_dir_all(out)?;
+    let mut entry = WorkerEntry::helper(executable);
+    entry.args.push("--lash-vm-measure".into());
+    if let Some(directory) = profile_dir {
+        std::fs::create_dir_all(directory)?;
+        entry.args.extend([
+            "--heap-profile-dir".into(),
+            directory.to_string_lossy().into_owned(),
+        ]);
+    }
+    let mut config = PoolConfig::standard(entry);
+    config.max_workers = 1;
+    let pool = WorkerPool::new(config)?;
+    let case = workload::cases().remove(0);
+    let start = Instant::now();
+    let observation = worker::run(&case, &pool, &VmOwner::new("heap-smoke"))?;
+    let elapsed = start.elapsed().as_nanos();
+    std::fs::write(
+        out.join("worker.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "kind": "lash.vm-worker-heap-smoke", "case": case.name,
+            "parent_process_id": std::process::id(), "worker_process_id": observation.pid,
+            "elapsed_ns": elapsed, "elapsed_statistic": "single_parent_start_through_clean_reset",
+            "profile_dir": profile_dir, "certifying": false,
+        }))?,
+    )?;
+    Ok(())
+}
+
 pub fn verify() -> Result<()> {
     let pool = WorkerPool::new(config()?)?;
     let reference = baseline::Reference::new()?;

@@ -405,10 +405,14 @@ command = ["cargo", "test", "-p", "lash-internal-core-store", "--no-default-feat
 [[lane]]
 name = "perf-dhat-heap"
 features = [
+  "lash-internal-vm-worker/dhat-heap:on",
+  "lash-internal-vm-worker/dhat-heap:off",
   "lash-perf/dhat-heap:on",
   "lash-perf/dhat-heap:off",
 ]
 commands = [
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-worker", "--all-targets", "--no-default-features", "--features", "dhat-heap", "--locked"],
   ["cargo", "check", "-p", "lash-perf", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-perf", "--all-targets", "--no-default-features", "--features", "dhat-heap", "--locked"],
 ]

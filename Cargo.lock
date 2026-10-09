@@ -2720,6 +2720,7 @@ version = "0.0.0-dev"
 dependencies = [
  "async-trait",
  "blake3",
+ "dhat",
  "lash-internal-core-execution",
  "lash-internal-durable",
  "lash-internal-sansio",

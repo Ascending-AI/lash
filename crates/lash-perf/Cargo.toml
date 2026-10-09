@@ -11,7 +11,7 @@ default = []
 # Use the dhat heap profiler as the global allocator so the harness can emit
 # dhat heap profiles. Without it the harness uses stats_alloc and reports
 # allocation counters instead.
-dhat-heap = ["dep:dhat"]
+dhat-heap = ["dep:dhat", "lash-vm-worker/dhat-heap"]
 
 [lib]
 name = "lash_perf"

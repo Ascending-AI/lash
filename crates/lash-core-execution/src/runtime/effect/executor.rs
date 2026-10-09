@@ -814,7 +814,10 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 + 'run,
         >,
     > {
-        Box::pin(self.run_body(envelope, None))
+        let future = self.run_body(envelope, None);
+        #[cfg(feature = "perf-witness")]
+        crate::task::sizes::record("effect.run_in_place", &future);
+        Box::pin(future)
     }
 
     async fn run_body(

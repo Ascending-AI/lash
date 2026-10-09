@@ -37,6 +37,14 @@ fn worker_entry_inner(
     if std::env::vars_os().next().is_some() {
         return Err(PoolError::breach(BootstrapFault::EnvironmentNotEmpty));
     }
+    #[cfg(feature = "dhat-heap")]
+    crate::heap_profile::start(&args).map_err(PoolError::io)?;
+    #[cfg(not(feature = "dhat-heap"))]
+    if args.iter().any(|arg| arg == "--heap-profile-dir") {
+        return Err(PoolError::io(std::io::Error::other(
+            "--heap-profile-dir requires a dhat-heap worker",
+        )));
+    }
     let fd = args
         .get(index + 1)
         .ok_or_else(|| PoolError::breach(BootstrapFault::MissingDescriptor))?

@@ -1,3 +1,7 @@
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOCATOR: dhat::Alloc = dhat::Alloc;
+
 #[expect(
     clippy::disallowed_methods,
     reason = "helper entry reports bootstrap failure through its process exit"

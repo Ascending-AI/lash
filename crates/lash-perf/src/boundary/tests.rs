@@ -38,6 +38,8 @@ fn args(case: Case, dir: &std::path::Path) -> Args {
         workload: "smoke-v1".into(),
         dhat_out: None,
         dhat_frames: None,
+        future_out: None,
+        future_top: 20,
         worker_stack_bytes: None,
     }
 }
@@ -70,6 +72,30 @@ async fn sustained_lifecycle_receipt_counts_distinct_processes_and_terminals() {
     let receipt = run(&args).await.unwrap();
     assert_eq!(receipt.evidence["terminal"], 3);
     eprintln!("{}", serde_json::to_string(&receipt).unwrap());
+}
+/// One node must survive the whole wave series; closing per wave would hide
+/// retained state and turn this into a population sweep.
+#[tokio::test]
+async fn persistent_waves_sample_a_live_node_after_every_settled_wave() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut args = args(Case::PersistentNodeWaves, dir.path());
+    args.operations = 2;
+    let receipt = run(&args).await.unwrap();
+    assert_eq!(receipt.evidence["node_boots"], 1);
+    assert_eq!(receipt.evidence["node_shutdowns"], 1);
+    assert_eq!(receipt.population, 4);
+    let samples: Vec<serde_json::Value> =
+        std::fs::read_to_string(args.out.with_extension("waves.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+    assert_eq!(samples.len(), 4);
+    assert_eq!(samples[1]["completed_turns"], 2);
+    assert_eq!(samples[2]["completed_turns"], 4);
+    assert_eq!(samples[2]["node_alive"], true);
+    assert_eq!(samples[3]["node_alive"], false);
+    assert!(receipt.evidence["growth_gate"].is_null());
 }
 #[tokio::test]
 async fn seeded_plan_receipt_runs_generated_cells_on_the_durable_node() {

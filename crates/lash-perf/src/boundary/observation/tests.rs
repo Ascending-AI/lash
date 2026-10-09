@@ -14,6 +14,8 @@ fn args(case: Case, dir: &std::path::Path, operations: usize, callers: usize) ->
         workload: "smoke-v1".into(),
         dhat_out: None,
         dhat_frames: None,
+        future_out: None,
+        future_top: 20,
         worker_stack_bytes: None,
     }
 }

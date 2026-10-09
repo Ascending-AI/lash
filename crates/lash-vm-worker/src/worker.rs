@@ -391,6 +391,8 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                     self.reissue = None;
                     self.wire = None;
                     self.owner = None;
+                    #[cfg(feature = "dhat-heap")]
+                    crate::heap_profile::finish().map_err(PoolError::io)?;
                     self.fences
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner)

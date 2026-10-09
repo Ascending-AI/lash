@@ -218,11 +218,18 @@ pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
         DHAT_FEATURE_ERROR
     );
     dhat::ensure_dhat_parent(run.dhat_out.as_ref())?;
-    let env = runner::LatencyEnv::open(&run.store_dir).await?;
-    // The parent-process profile covers the selected cases, including their
-    // teardown. Child-node allocations are outside this process's allocator.
-    let profiler =
-        dhat::start_dhat_profiler(run.dhat_out.clone(), run.dhat_frames, DHAT_FEATURE_ERROR)?;
+    let profiler = dhat::ProfileWindow::start(
+        "latency-parent",
+        "case_environment_setup_through_selected_cases_and_node_teardown",
+        &dhat::ProfileArgs {
+            dhat_out: run.dhat_out.clone(),
+            dhat_frames: run.dhat_frames,
+            ..Default::default()
+        },
+    )?;
+    let mut env = runner::LatencyEnv::open(&run.store_dir).await?;
+    env.dhat_out = run.dhat_out.clone();
+    env.dhat_frames = run.dhat_frames;
     let mut reports = Vec::new();
     let mut samples = Vec::new();
     for spec in &specs {
@@ -234,7 +241,7 @@ pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
         reports.push(report);
         samples.extend(case_samples);
     }
-    dhat::finish_dhat_profiler(profiler);
+    profiler.finish(true)?;
     let mut report = runner::build_report(env.describe(), reports);
     if let Some(parent) = run.out.parent() {
         std::fs::create_dir_all(parent)?;
