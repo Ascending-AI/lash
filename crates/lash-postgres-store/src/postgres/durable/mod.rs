@@ -1452,6 +1452,19 @@ mod wait_law_tests;
 #[path = "../process_law_tests.rs"]
 mod process_law_tests;
 
+/// The hot-set law's one-shot serialization failure, on the claim's epoch write.
+#[cfg(test)]
+const CONTEND_FIRST_CLAIM_SQL: &str = "CREATE SEQUENCE claim_attempts;
+CREATE FUNCTION contend_first_claim() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF nextval('claim_attempts') = 1 THEN
+        RAISE EXCEPTION 'contended claim' USING ERRCODE = '40001';
+    END IF;
+    RETURN NEW;
+END $$;
+CREATE TRIGGER contend_first_claim BEFORE UPDATE OF epoch ON lash_actors
+    FOR EACH ROW EXECUTE FUNCTION contend_first_claim();";
+
 #[cfg(test)]
 #[path = "../durable_concurrency_tests.rs"]
 mod concurrency_tests;

@@ -6,13 +6,14 @@
 // (the workspace clippy ban targets production library code).
 #![allow(clippy::disallowed_methods)]
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lash_core_execution::testing::TestClock;
 use lash_durable::{
     ActorKey, ActorState, CommitLabel, DurableError, DurableStore, Epoch, FormatSet, MailKind,
-    MailTx, NodeId, NodeLease, NodeSpec, Release,
+    MailTx, NodeId, NodeLease, NodeSpec, Release, StoreFailure, StoreFailureKind,
 };
 
 use super::PostgresDurableStore;
@@ -223,6 +224,29 @@ struct Contention {
     taken: Vec<(ActorKey, Epoch)>,
 }
 
+/// Contention wrote nothing. Retry the same request or immutable commit;
+/// every other refusal still fails the law, including an ownership fence.
+async fn retry_contended<T, F>(
+    mut attempt: impl FnMut() -> F,
+    retries: &AtomicUsize,
+) -> Result<T, DurableError>
+where
+    F: std::future::Future<Output = Result<T, DurableError>>,
+{
+    loop {
+        match attempt().await {
+            Err(DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Contended,
+                ..
+            })) => {
+                retries.fetch_add(1, Ordering::Relaxed);
+                tokio::task::yield_now().await;
+            }
+            answer => return answer,
+        }
+    }
+}
+
 /// Sixteen nodes claim from a hot set of sixteen actors, each releasing what
 /// it took and waking it again. Claims stay disjoint: no actor is taken twice
 /// at one epoch, and no owner commit is ever fenced, which it would be if two
@@ -245,7 +269,24 @@ async fn sixteen_claimers_on_a_hot_set_take_disjoint_actors() {
     for index in 0..16 {
         leases.push(node(&store, &format!("claimer-{index}")).await);
     }
+    // Sequences survive rollback: one claim is deterministically contended,
+    // then every retry can proceed through the real PostgreSQL claim path.
+    sqlx::raw_sql(super::CONTEND_FIRST_CLAIM_SQL)
+        .execute(storage.pool())
+        .await
+        .expect("make the first claim contended");
+    let mut workers = Vec::new();
+    for lease in leases {
+        // Each claimer is a node with a pool of its own, as in a deployment.
+        // Finish fallible setup before starting the lock-wait sampler.
+        let store = crate::testing::connect(database.url())
+            .await
+            .expect("open a claimer's store")
+            .durable_store();
+        workers.push((lease, store));
+    }
     let contention = Arc::new(Mutex::new(Contention::default()));
+    let retries = Arc::new(AtomicUsize::new(0));
     let running = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let observer = {
         let pool = storage.pool().clone();
@@ -268,17 +309,15 @@ async fn sixteen_claimers_on_a_hot_set_take_disjoint_actors() {
     };
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut claimers = tokio::task::JoinSet::new();
-    for lease in leases {
-        // Each claimer is a node with a pool of its own, as in a deployment.
-        let store = crate::testing::connect(database.url())
-            .await
-            .expect("open a claimer's store")
-            .durable_store();
+    for (lease, store) in workers {
         let contention = Arc::clone(&contention);
+        let retries = Arc::clone(&retries);
         claimers.spawn(async move {
             while Instant::now() < deadline {
                 let started = Instant::now();
-                let claimed = store.claim(&lease, 16).await.expect("a claim commits");
+                let claimed = retry_contended(|| store.claim(&lease, 16), &retries)
+                    .await
+                    .expect("a claim commits");
                 let took = started.elapsed();
                 {
                     let mut contention = contention.lock().expect("contention record");
@@ -292,28 +331,39 @@ async fn sixteen_claimers_on_a_hot_set_take_disjoint_actors() {
                         .extend(claimed.iter().map(|c| (c.actor.clone(), c.epoch)));
                 }
                 for claimed in claimed {
-                    let mut tx = store
-                        .begin(&claimed.actor, claimed.epoch)
-                        .await
-                        .expect("a claimer owns what it claimed");
+                    let mut tx =
+                        retry_contended(|| store.begin(&claimed.actor, claimed.epoch), &retries)
+                            .await
+                            .expect("a claimer owns what it claimed");
                     tx.ack_seen().give_up(Release::Idle);
-                    store
-                        .commit(tx, LABEL)
+                    retry_contended(|| store.commit(tx.clone(), LABEL), &retries)
                         .await
                         .expect("no overlapping claim fences an owner");
                     let mut wake = MailTx::new();
                     wake.wake(claimed.actor.clone());
-                    store
-                        .commit_mail(wake, CommitLabel::MAIL_SESSION)
-                        .await
-                        .expect("wake the released actor");
+                    retry_contended(
+                        || store.commit_mail(wake.clone(), CommitLabel::MAIL_SESSION),
+                        &retries,
+                    )
+                    .await
+                    .expect("wake the released actor");
                 }
             }
         });
     }
-    claimers.join_all().await;
+    // join_all propagates a worker panic immediately. Collect failures instead
+    // so the sampler always stops and joins before a panic drops the database.
+    let mut failures = Vec::new();
+    while let Some(result) = claimers.join_next().await {
+        if let Err(error) = result {
+            failures.push(error);
+        }
+    }
     running.store(false, std::sync::atomic::Ordering::Release);
     let (ticks, waits) = observer.await.expect("the lock-wait observer");
+    assert!(failures.is_empty(), "claimers failed: {failures:?}");
+    let retries = retries.load(Ordering::Relaxed);
+    assert!(retries > 0, "the law must retry the contended first claim");
 
     let mut contention = contention.lock().expect("contention record");
     let mut seen = std::collections::BTreeSet::new();
@@ -325,6 +375,15 @@ async fn sixteen_claimers_on_a_hot_set_take_disjoint_actors() {
         "only {} claims took an actor",
         contention.taken.len()
     );
+    assert_eq!(
+        contention
+            .taken
+            .iter()
+            .map(|(actor, _)| actor.clone())
+            .collect::<std::collections::BTreeSet<_>>(),
+        actors.into_iter().collect(),
+        "every actor in the hot set was claimed"
+    );
     contention.latencies.sort();
     let at = |percent: usize| {
         let index = (contention.latencies.len() - 1) * percent / 100;
@@ -332,7 +391,7 @@ async fn sixteen_claimers_on_a_hot_set_take_disjoint_actors() {
     };
     eprintln!(
         "contention: {} claims ({} empty), {} actors taken, claim p50 {:.3} ms p99 {:.3} ms, \
-         {waits} lock-wait observations in {ticks} ticks",
+         {retries} contention retries, {waits} lock-wait observations in {ticks} ticks",
         contention.claims,
         contention.empty,
         contention.taken.len(),
