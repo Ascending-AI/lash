@@ -303,7 +303,9 @@ pub async fn sqlite_file(
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let options = lash_sqlite_store::SqliteStoreSetOptions {
         inline_calls: true,
-        ..lash_sqlite_store::SqliteStoreSetOptions::default()
+        ..lash_sqlite_store::SqliteStoreSetOptions::standard(
+            lash_sqlite_store::SqliteSynchronous::Full,
+        )
     };
     let stores = lash_sqlite_store::SqliteStoreSet::open_with_options_and_clock(
         directory.path().join("lash.db"),

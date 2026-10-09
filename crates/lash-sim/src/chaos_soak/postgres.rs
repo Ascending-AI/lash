@@ -119,4 +119,49 @@ mod tests {
         world.stop_tasks();
         pool.close().await;
     }
+
+    /// A host that seeds a turn during a lock-timeout storm admits it once
+    /// the storm frees the writer fence: the store answers its writes
+    /// `Contended` meanwhile, and the host sends them again unchanged, as the
+    /// store asks. The long soak's first epoch died here (FIG-5193).
+    #[tokio::test]
+    #[ignore = "requires PostgreSQL; select inside a with-service.sh pg gate"]
+    async fn a_turn_seeded_during_a_lock_timeout_storm_is_admitted_once_the_fence_frees() {
+        let dialect = Dialect::postgres_from_env().expect("a PostgreSQL server");
+        let clock = SimClock::new();
+        let mut keep = Keep::new();
+        let (backend, _) = deployment::open(&dialect, Arc::clone(&clock), &mut keep)
+            .await
+            .expect("open the deployment");
+        let world = Arc::new(World::default());
+        world.set_parts(backend, Arc::clone(&clock));
+        let url = deployment::isolated_url(&keep).expect("the isolated database");
+        // Past the store's 10 s lock timeout for ordinary calls, as the
+        // soak's longest storms (12 s) are.
+        hold_writer_fence(&world, &url, Duration::from_secs(12))
+            .await
+            .expect("hold the writer fence");
+        let session = crate::crash_matrix::cases::admit_turn(
+            &world,
+            crate::crash_matrix::services::TurnScript::Plain,
+            "storm",
+        )
+        .await
+        .expect("the storm delays the seed, never fails it");
+        let catalog = world
+            .backend()
+            .expect("the backend")
+            .session_store_factory();
+        assert!(
+            matches!(
+                catalog
+                    .lookup_session(&session)
+                    .await
+                    .expect("look the session up"),
+                lash_core::SessionLookup::Live(_)
+            ),
+            "the seeded session is admitted"
+        );
+        world.stop_tasks();
+    }
 }

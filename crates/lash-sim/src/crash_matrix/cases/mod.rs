@@ -85,22 +85,49 @@ pub async fn admit_turn(
     } else {
         let catalog: Arc<dyn lash_core::store::RuntimeStore> =
             world.backend()?.session_store_factory();
-        lash_core_store::testing::store_fixtures::admit_conformance_session(&catalog, &session)
-            .await;
-        catalog
-            .enqueue_pending_turn_input(
-                PendingTurnInputDraft::new(
-                    session.clone(),
-                    TurnInputIngress::NextTurn,
-                    TurnInput::text("go"),
-                )
-                .with_source_key(run.as_str()),
-            )
+        let request = lash_core_store::testing::store_fixtures::root_session_request(&session);
+        through_contention(|| catalog.admit_session(&request))
+            .await
+            .map_err(|error| format!("admit the turn's session: {error}"))?;
+        let input = PendingTurnInputDraft::new(
+            session.clone(),
+            TurnInputIngress::NextTurn,
+            TurnInput::text("go"),
+        )
+        .with_source_key(run.as_str());
+        through_contention(|| catalog.enqueue_pending_turn_input(input.clone()))
             .await
             .map_err(|error| format!("send the turn's input: {error}"))?;
     }
     world.track(session_actor(&session)?);
     Ok(session)
+}
+
+/// How long a host keeps re-sending a write its store answers `Contended`:
+/// past the longest lock-timeout storm a soak holds the writer fence for.
+const CONTENDED_FOR: Duration = Duration::from_secs(60);
+/// The host's pause between two sends of a contended write.
+const CONTENDED_RETRY: Duration = Duration::from_millis(50);
+
+/// Run a host's store write as a host does: while another session holds
+/// the writer fence (a soak's lock-timeout storm), the store answers
+/// `Contended` and asks for the identical write again. The storm ends in
+/// wall time, and the seeding host blocks the driver that moves virtual
+/// time, so the host waits in wall time too.
+async fn through_contention<T, F, Fut>(mut write: F) -> Result<T, lash_core::StoreError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, lash_core::StoreError>>,
+{
+    let started = std::time::Instant::now();
+    loop {
+        match write().await {
+            Err(lash_core::StoreError::Contended) if started.elapsed() < CONTENDED_FOR => {
+                tokio::time::sleep(CONTENDED_RETRY).await;
+            }
+            answer => return answer,
+        }
+    }
 }
 
 /// Register a process of the simulator's engine starting from `payload`,
