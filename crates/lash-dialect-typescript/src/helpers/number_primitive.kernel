@@ -1,0 +1,290 @@
+# JavaScript number_primitive behavior, expressed in kernel code.
+use bool.not
+use eq
+use float.parse
+use float.to_int
+use int.div_trunc
+use int.parse
+use int.pow
+use int.rem_trunc
+use int.to_text
+use num.abs
+use num.add
+use num.floor
+use num.is_nan
+use num.le
+use num.lt
+use num.mul
+use num.neg
+use num.sub
+use num.to_float
+use num.to_text
+use same
+use text.concat
+use text.ends_with
+use text.len
+use text.repeat
+use text.slice
+use text.trim_u17_0_0
+use ts.number.digit
+use ts.number.layout
+use ts.number.parse
+use ts.number.parse_decimal
+use ts.number.parse_int
+use ts.number.parts
+use ts.number.ratio
+use ts.number.round_decimal
+use ts.number.to_string
+
+function ts.number.digit(character: Text, radix: Int) -> Int
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+  let i = 0
+  while num.lt(i, radix) {
+    if same(text.slice(digits, i, num.add(i, 1)), character) { return i }
+    set i = num.add(i, 1)
+  }
+  let upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  set i = 10
+  while num.lt(i, radix) {
+    if same(text.slice(upper, num.sub(i, 10), num.sub(i, 9)), character) { return i }
+    set i = num.add(i, 1)
+  }
+  return -1
+}
+
+function ts.number.parse_int(source: Text, radix: Int, whole: Bool) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge sum(12, product(size(source), size(source)))
+body {
+  let source = text.trim_u17_0_0(source)
+  let length = text.len(source)
+  let i = 0
+  let sign = 1.0
+  let first = text.slice(source, 0, 1)
+  if same(first, "-") { set sign = -1.0 set i = 1 }
+  if same(first, "+") { set i = 1 }
+  let base = radix
+  if eq(base, 0) { set base = 10 }
+  if num.lt(base, 2) { return nan }
+  if num.lt(36, base) { return nan }
+  if eq(radix, 0) {
+    let prefix = text.slice(source, i, num.add(i, 2))
+    if same(prefix, "0x") { set base = 16 }
+    if same(prefix, "0X") { set base = 16 }
+  }
+  if eq(base, 16) {
+    let prefix = text.slice(source, i, num.add(i, 2))
+    if same(prefix, "0x") { set i = num.add(i, 2) }
+    if same(prefix, "0X") { set i = num.add(i, 2) }
+  }
+  let start = i
+  let value = 0
+  while num.lt(i, length) {
+    let character = text.slice(source, i, num.add(i, 1))
+    let digit = invoke ts.number.digit(character, base)
+    if num.lt(digit, 0) { break }
+    set value = num.add(num.mul(value, base), digit)
+    set i = num.add(i, 1)
+  }
+  if eq(start, i) { return nan }
+  if whole { if eq(i, length) {} else { return nan } }
+  try { return num.mul(sign, num.to_float(value)) } catch overflow { return num.mul(sign, inf) }
+}
+
+function ts.number.parse_decimal(source: Text, whole: Bool) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge sum(16, product(size(source), 20))
+body {
+  let source = text.trim_u17_0_0(source)
+  let length = text.len(source)
+  let i = 0
+  let sign = 1.0
+  let first = text.slice(source, 0, 1)
+  if same(first, "-") { set sign = -1.0 set i = 1 }
+  if same(first, "+") { set i = 1 }
+  if same(text.slice(source, i, num.add(i, 8)), "Infinity") {
+    if whole { if eq(num.add(i, 8), length) {} else { return nan } }
+    return num.mul(sign, inf)
+  }
+  let digits = 0
+  while num.lt(i, length) {
+    let builtin_arg_0 = text.slice(source, i, num.add(i, 1))
+let d = invoke ts.number.digit(builtin_arg_0, 10)
+    if num.lt(d, 0) { break }
+    set digits = num.add(digits, 1)
+    set i = num.add(i, 1)
+  }
+  if same(text.slice(source, i, num.add(i, 1)), ".") {
+    set i = num.add(i, 1)
+    while num.lt(i, length) {
+      let builtin_arg_1 = text.slice(source, i, num.add(i, 1))
+let d = invoke ts.number.digit(builtin_arg_1, 10)
+      if num.lt(d, 0) { break }
+      set digits = num.add(digits, 1)
+      set i = num.add(i, 1)
+    }
+  }
+  if eq(digits, 0) { return nan }
+  let mantissa_end = i
+  let marker = text.slice(source, i, num.add(i, 1))
+  let exponential = same(marker, "e")
+  if exponential {} else { set exponential = same(marker, "E") }
+  if exponential {
+    set i = num.add(i, 1)
+    let next = text.slice(source, i, num.add(i, 1))
+    if same(next, "+") { set i = num.add(i, 1) }
+    if same(next, "-") { set i = num.add(i, 1) }
+    let start = i
+    while num.lt(i, length) {
+      let builtin_arg_2 = text.slice(source, i, num.add(i, 1))
+let d = invoke ts.number.digit(builtin_arg_2, 10)
+      if num.lt(d, 0) { break }
+      set i = num.add(i, 1)
+    }
+    if eq(start, i) { set i = mantissa_end }
+  }
+  if whole { if eq(i, length) {} else { return nan } }
+  let prefix = text.slice(source, 0, i)
+  try { return float.parse(prefix) } catch overflow { return num.mul(sign, inf) }
+}
+
+function ts.number.parse(source: Text) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge sum(24, product(size(source), size(source)))
+body {
+  let source = text.trim_u17_0_0(source)
+  if same(source, "") { return 0.0 }
+  let prefix = text.slice(source, 0, 2)
+  let base = 0
+  if same(prefix, "0x") { set base = 16 }
+  if same(prefix, "0X") { set base = 16 }
+  if same(prefix, "0b") { set base = 2 }
+  if same(prefix, "0B") { set base = 2 }
+  if same(prefix, "0o") { set base = 8 }
+  if same(prefix, "0O") { set base = 8 }
+  if num.lt(0, base) {
+    let number_body = text.slice(source, 2, text.len(source))
+    let first = text.slice(number_body, 0, 1)
+    if same(first, "+") { return nan }
+    if same(first, "-") { return nan }
+    let parsed = invoke ts.number.parse_int(number_body, base, true)
+    return parsed
+  }
+  let parsed = invoke ts.number.parse_decimal(source, true)
+  return parsed
+}
+
+function ts.number.parts(value: Number) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let raw = num.to_text(num.abs(value))
+  let digits = ""
+  let exponent = 0
+  let point = false
+  let i = 0
+  while num.lt(i, text.len(raw)) {
+    let ch = text.slice(raw, i, num.add(i, 1))
+    if same(ch, "e") {
+      let tail = text.slice(raw, num.add(i, 1), text.len(raw))
+      set exponent = num.add(exponent, int.parse(tail, 10))
+      break
+    }
+    if same(ch, ".") { set point = true } else {
+      set digits = text.concat(digits, ch)
+      if point { set exponent = num.sub(exponent, 1) }
+    }
+    set i = num.add(i, 1)
+  }
+  while num.lt(1, text.len(digits)) {
+    if same(text.slice(digits, 0, 1), "0") { set digits = text.slice(digits, 1, text.len(digits)) } else { break }
+  }
+  while num.lt(1, text.len(digits)) {
+    if text.ends_with(digits, "0") {
+      set digits = text.slice(digits, 0, num.sub(text.len(digits), 1))
+      set exponent = num.add(exponent, 1)
+    } else { break }
+  }
+  return (digits, exponent)
+}
+
+function ts.number.layout(digits: Text, point: Int, scientific: Bool) -> Text
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if scientific {
+    let exponent = num.sub(point, 1)
+    let mantissa = text.slice(digits, 0, 1)
+    if num.lt(1, text.len(digits)) { set mantissa = text.concat(mantissa, text.concat(".", text.slice(digits, 1, text.len(digits)))) }
+    let sign = ""
+    if num.le(0, exponent) { set sign = "+" }
+    return text.concat(mantissa, text.concat("e", text.concat(sign, int.to_text(exponent, 10))))
+  }
+  if num.le(point, 0) {
+    let zeros = text.repeat("0", num.neg(point))
+    return text.concat("0.", text.concat(zeros, digits))
+  }
+  if num.le(text.len(digits), point) {
+    return text.concat(digits, text.repeat("0", num.sub(point, text.len(digits))))
+  }
+  return text.concat(text.slice(digits, 0, point), text.concat(".", text.slice(digits, point, text.len(digits))))
+}
+
+function ts.number.to_string(value: Number) -> Text
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if num.is_nan(value) { return "NaN" }
+  if eq(value, inf) { return "Infinity" }
+  if eq(value, -inf) { return "-Infinity" }
+  if eq(value, 0) { return "0" }
+  let parts = invoke ts.number.parts(value)
+  let digits = parts[0]
+  let point = num.add(text.len(digits), parts[1])
+  let scientific = num.lt(point, -5)
+  if num.lt(21, point) { set scientific = true }
+  let output = invoke ts.number.layout(digits, point, scientific)
+  if num.lt(value, 0) { return text.concat("-", output) }
+  return output
+}
+
+function ts.number.ratio(value: Number) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge 2200
+body {
+  let numerator = num.abs(value)
+  let denominator = 1
+  while bool.not(eq(numerator, num.floor(numerator))) {
+    set numerator = num.mul(numerator, 2.0)
+    set denominator = num.mul(denominator, 2)
+  }
+  return (float.to_int(numerator), denominator)
+}
+
+function ts.number.round_decimal(value: Number, shift: Int) -> Text
+kernel 1
+errors "type_error", "RangeError"
+charge sum(2300, magnitude(shift))
+body {
+  let ratio = invoke ts.number.ratio(value)
+  let numerator = ratio[0]
+  let denominator = ratio[1]
+  if num.le(0, shift) { set numerator = num.mul(numerator, int.pow(10, shift)) } else {
+    set denominator = num.mul(denominator, int.pow(10, num.neg(shift)))
+  }
+  let rounded = int.div_trunc(numerator, denominator)
+  let remainder = int.rem_trunc(numerator, denominator)
+  if num.le(denominator, num.mul(remainder, 2)) { set rounded = num.add(rounded, 1) }
+  return int.to_text(rounded, 10)
+}

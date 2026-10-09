@@ -18,16 +18,29 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
 mod array;
+mod boolean;
 mod console;
+mod date;
+mod error;
+mod function;
+mod json;
+mod map;
+mod math;
+mod number;
+mod object;
 mod promise;
 mod regexp;
+mod set;
 mod string;
 mod uri;
+mod url;
+mod url_search_params;
 
 /// What a member's receiver is, as `ts.receiver` names it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Receiver {
     List,
+    Record,
     Text,
     Number,
     Bool,
@@ -44,6 +57,7 @@ impl Receiver {
     /// The text `ts.receiver` gives a value of this kind.
     pub(crate) fn tag(self) -> String {
         match self {
+            Self::Record => "record".into(),
             Self::List => "list".into(),
             Self::Text => "text".into(),
             Self::Number => "number".into(),
@@ -107,6 +121,18 @@ pub(crate) struct Object {
 /// may call the helpers of those before it.
 pub(crate) fn objects() -> Vec<Object> {
     vec![
+        function::object(),
+        map::object(),
+        set::object(),
+        boolean::object(),
+        object::object(),
+        math::object(),
+        number::object(),
+        date::object(),
+        error::object(),
+        url::object(),
+        url_search_params::object(),
+        json::object(),
         console::object(),
         array::object(),
         promise::object(),

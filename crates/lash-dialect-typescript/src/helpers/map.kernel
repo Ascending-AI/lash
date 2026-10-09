@@ -1,0 +1,240 @@
+# JavaScript map behavior, expressed in kernel code.
+use deref
+use eq
+use error.new
+use kind
+use list.len
+use map.contains
+use map.keys
+use map.len
+use num.add
+use num.to_float
+use ref
+use same
+use ts.get
+use ts.is_nullish
+use ts.iterate
+use ts.map.clear
+use ts.map.construct
+use ts.map.delete
+use ts.map.entries
+use ts.map.forEach
+use ts.map.get
+use ts.map.groupBy
+use ts.map.has
+use ts.map.is
+use ts.map.key
+use ts.map.keys
+use ts.map.set
+use ts.map.size
+use ts.map.value
+use ts.map.values
+use ts.pad
+
+function ts.map.key(value: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let k = kind(value)
+  if same(k, "absent") { return ("undefined", "key") }
+  for object in ["list", "map", "set", "record", "closure", "task"] {
+    if same(k, object) { return ref(value) }
+  }
+  if same(k, "error") { return ("error", ref(value.data), value.kind, value.message) }
+  if same(k, "float") { if eq(value, 0) { return 0.0 } }
+  return value
+}
+
+function ts.map.value(key: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(key), "ref") { return deref(key) }
+  if same(kind(key), "tuple") {
+    if same(key[0], "error") { return error.new(key[2], key[3], deref(key[1])) }
+    return absent
+  }
+  return key
+}
+
+function ts.map.construct(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let output = map{}
+  let source = args[0]
+  let empty = invoke ts.is_nullish(source)
+  if empty {} else {
+    let entries = invoke ts.iterate(source)
+    for pair_item in entries {
+      let entry_kind = kind(pair_item)
+    if same(entry_kind, "list") {} else {
+      if same(entry_kind, "record") {} else { throw error.new("type_error", "Iterator value is not an entry object", null) }
+    }
+    let key = invoke ts.get(pair_item, 0)
+      let value = invoke ts.get(pair_item, 1)
+      let key = invoke ts.map.key(key)
+      set output[key] = value
+    }
+  }
+  return output
+}
+
+function ts.map.is(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return same(kind(value), "map")
+}
+
+function ts.map.size(this: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return num.to_float(map.len(this))
+}
+
+function ts.map.set(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_0 = args[0]
+let key = invoke ts.map.key(builtin_arg_0)
+  set this[key] = args[1]
+  return this
+}
+
+function ts.map.get(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_1 = args[0]
+let key = invoke ts.map.key(builtin_arg_1)
+  if map.contains(this, key) { return this[key] }
+  return absent
+}
+
+function ts.map.has(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_2 = args[0]
+let key = invoke ts.map.key(builtin_arg_2)
+  return map.contains(this, key)
+}
+
+function ts.map.delete(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_3 = args[0]
+let key = invoke ts.map.key(builtin_arg_3)
+  let had = map.contains(this, key)
+  remove this[key]
+  return had
+}
+
+function ts.map.clear(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  for key in map.keys(this) { remove this[key] }
+  return absent
+}
+
+function ts.map.keys(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = []
+  for map_key in this {
+    let builtin_arg_4 = map_key
+let key = invoke ts.map.value(builtin_arg_4)
+    set output[list.len(output)] = key
+  }
+  return output
+}
+
+function ts.map.values(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = []
+  for map_key in this {
+    let builtin_arg_5 = map_key
+let key = invoke ts.map.value(builtin_arg_5)
+    set output[list.len(output)] = this[map_key]
+  }
+  return output
+}
+
+function ts.map.entries(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = []
+  for map_key in this {
+    let builtin_arg_6 = map_key
+let key = invoke ts.map.value(builtin_arg_6)
+    set output[list.len(output)] = [key, this[map_key]]
+  }
+  return output
+}
+
+function ts.map.forEach(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let callback = args[0]
+  let receiver = args[1]
+  for map_key in this {
+    let builtin_arg_7 = map_key
+let key = invoke ts.map.value(builtin_arg_7)
+    let passed = [this[map_key], key, this]
+    do apply callback(receiver, passed)
+  }
+  return absent
+}
+
+function ts.map.groupBy(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_8 = args[0]
+let source = invoke ts.iterate(builtin_arg_8)
+  let callback = args[1]
+  let output = map{}
+  let index = 0.0
+  for item in source {
+    let passed = [item, index]
+    let key = apply callback(absent, passed)
+    let key = invoke ts.map.key(key)
+    if map.contains(output, key) {} else { set output[key] = [] }
+    let group = output[key]
+    set group[list.len(group)] = item
+    set index = num.add(index, 1.0)
+  }
+  return output
+}

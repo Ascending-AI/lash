@@ -1,0 +1,83 @@
+# JavaScript url behavior, expressed in kernel code.
+use kind
+use record.keys
+use same
+use ts.pad
+use ts.to_string
+use ts.url.canParse
+use ts.url.commit
+use ts.url.construct
+use ts.url.is
+use ts.url.toJSON
+use ts.url.toString
+use ts.url.valueOf
+use url.whatwg.parse
+
+function ts.url.commit(target: Any, parsed: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  for key in record.keys(parsed.state) { set target.state[key] = parsed.state[key] }
+  set target.searchParams.pairs = parsed.searchParams.pairs
+  return target
+}
+
+function ts.url.construct(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_0 = args[0]
+let input = invoke ts.to_string(builtin_arg_0)
+  let base = args[1]
+  if same(kind(base), "absent") {} else { set base = invoke ts.to_string(base) }
+  return url.whatwg.parse(input, base)
+}
+
+function ts.url.is(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "record") { return same(value.brand, "url.whatwg") }
+  return false
+}
+
+function ts.url.canParse(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_1 = args[0]
+let input = invoke ts.to_string(builtin_arg_1)
+  let base = args[1]
+  if same(kind(base), "absent") {} else { set base = invoke ts.to_string(base) }
+  try { let parsed = url.whatwg.parse(input, base) return true } catch invalid { return false }
+}
+
+function ts.url.toString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return this.state.href
+}
+
+function ts.url.toJSON(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return this.state.href
+}
+
+function ts.url.valueOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return this
+}

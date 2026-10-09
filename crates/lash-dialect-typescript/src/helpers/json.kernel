@@ -1,0 +1,177 @@
+# JavaScript json behavior, expressed in kernel code.
+use date.ecma.format
+use eq
+use error.new
+use float.to_int
+use json.parse
+use json.stringify
+use kind
+use list.contains
+use list.len
+use num.add
+use num.is_finite
+use num.is_nan
+use num.lt
+use num.max
+use num.min
+use num.trunc
+use ref
+use same
+use set.contains
+use text.concat
+use text.repeat
+use text.utf16_len
+use text.utf16_slice
+use ts.delete
+use ts.get
+use ts.json.parse
+use ts.json.stringify
+use ts.keys
+use ts.number.to_string
+use ts.object.own_keys
+use ts.pad
+use ts.receiver
+use ts.set
+use ts.to_string
+
+function ts.json.parse(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_0 = args[0]
+let text = invoke ts.to_string(builtin_arg_0)
+  let value = absent
+  try { set value = json.parse(text, "float", "float") } catch invalid {
+    throw error.new("SyntaxError", "Invalid JSON", null)
+  }
+  let reviver = args[1]
+  if same(kind(reviver), "closure") {
+    let visit = absent
+    set visit = fn(holder, key) {
+      let value = invoke ts.get(holder, key)
+      let k = kind(value)
+      let object = same(k, "record")
+      if same(k, "list") { set object = true }
+      if object {
+        let keys = invoke ts.keys(value)
+        for child in keys {
+          let revived = apply visit(value, child)
+          if same(kind(revived), "absent") { do invoke ts.delete(value, child) } else { do invoke ts.set(value, child, revived) }
+        }
+      }
+      let passed = [key, value]
+      let output = apply reviver(holder, passed)
+      return output
+    }
+    let holder = {"": value}
+    let output = apply visit(holder, "")
+    return output
+  }
+  return value
+}
+
+function ts.json.stringify(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 3)
+  let replacer = args[1]
+  let allowed = absent
+  if same(kind(replacer), "list") {
+    set allowed = []
+    for item in replacer {
+      let k = invoke ts.receiver(item)
+      if same(k, "text") {
+        if list.contains(allowed, item) {} else { set allowed[list.len(allowed)] = item }
+      }
+      if same(k, "number") {
+        let item = invoke ts.to_string(item)
+        if list.contains(allowed, item) {} else { set allowed[list.len(allowed)] = item }
+      }
+    }
+  }
+  let gap = ""
+  let space = args[2]
+  let k = invoke ts.receiver(space)
+  if same(k, "number") {
+    let count = num.min(10.0, num.max(0.0, num.trunc(space)))
+    if num.is_nan(count) { set count = 0.0 }
+    set gap = text.repeat(" ", float.to_int(count))
+  }
+  if same(k, "text") { set gap = text.utf16_slice(space, 0, num.min(10, text.utf16_len(space))) }
+  let stack = set{}
+  let serialize = absent
+  set serialize = fn(holder, key, indent) {
+    let value = invoke ts.get(holder, key)
+    if same(value, ()) { set value = absent }
+    let k = kind(value)
+    if same(k, "record") {
+      let to_json = value.toJSON
+      if same(kind(to_json), "closure") { let passed = [key] set value = apply to_json(value, passed) }
+    }
+    if same(k, "record") {
+      let brand = value.brand
+      if same(brand, "date.invalid") { set value = null }
+      if same(brand, "url.whatwg") { set value = value.state.href }
+    }
+    if same(k, "timestamp") { set value = date.ecma.format(value, "iso") }
+    if same(kind(replacer), "closure") { let passed = [key, value] set value = apply replacer(holder, passed) }
+    let k = invoke ts.receiver(value)
+    if same(k, "absent") { return absent }
+    if same(k, "closure") { return absent }
+    if same(k, "number") {
+      if num.is_finite(value) { let rendered = invoke ts.number.to_string(value) return rendered }
+      return "null"
+    }
+    if same(k, "text") { return json.stringify(value) }
+    if same(k, "bool") { if value { return "true" } return "false" }
+    if same(k, "null") { return "null" }
+    let array = same(k, "list")
+    let object = same(k, "record")
+    if array {} else { if object {} else { return "{}" } }
+    let identity = ref(value)
+    if set.contains(stack, identity) { throw error.new("type_error", "Converting circular structure to JSON", null) }
+    set stack[identity] = true
+    let next_indent = text.concat(indent, gap)
+    let keys = []
+    if array {
+      let i = 0.0
+      while num.lt(i, list.len(value)) { let key = invoke ts.number.to_string(i) set keys[list.len(keys)] = key set i = num.add(i, 1.0) }
+    } else {
+      if same(kind(allowed), "absent") { set keys = invoke ts.object.own_keys(value) } else { set keys = allowed }
+    }
+    let pieces = []
+    for child in keys {
+      let piece = apply serialize(value, child, next_indent)
+      if same(kind(piece), "absent") { if array { set piece = "null" } }
+      if same(kind(piece), "absent") {} else {
+        if array {} else {
+          let colon = ":"
+          if same(gap, "") {} else { set colon = ": " }
+          set piece = text.concat(json.stringify(child), text.concat(colon, piece))
+        }
+        set pieces[list.len(pieces)] = piece
+      }
+    }
+    set stack[identity] = false
+    let begin = "{"
+    let end = "}"
+    if array { set begin = "[" set end = "]" }
+    if eq(list.len(pieces), 0) { return text.concat(begin, end) }
+    let joined = ""
+    let first = true
+    for piece in pieces {
+      if first { set first = false } else { set joined = text.concat(joined, ",") }
+      if same(gap, "") {} else { set joined = text.concat(joined, text.concat("\n", next_indent)) }
+      set joined = text.concat(joined, piece)
+    }
+    if same(gap, "") {} else { set joined = text.concat(joined, text.concat("\n", indent)) }
+    return text.concat(begin, text.concat(joined, end))
+  }
+  let holder = {"": args[0]}
+  let output = apply serialize(holder, "", "")
+  return output
+}

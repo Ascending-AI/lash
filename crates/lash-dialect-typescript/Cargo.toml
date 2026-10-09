@@ -38,6 +38,8 @@ lash-kernel-conformance = { path = "../lash-kernel-conformance" }
 lash-kernel-check = { workspace = true }
 lash-kernel-edit = { workspace = true }
 lash-kernel-lib = { path = "../lash-kernel-lib" }
+lash-ext-date-ecma = { workspace = true }
+lash-ext-url-whatwg = { workspace = true }
 lash-kernel-vm = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_yaml = "=0.9.34"

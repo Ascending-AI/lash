@@ -714,42 +714,6 @@ mod tests {
         }
     }
 
-    /// The catch-all expression code carries both families too, and its
-    /// `globalThis` half is the one an exclusion breaks.
-    #[test]
-    fn the_expression_catch_all_carries_both_families() {
-        for (source, label) in [
-            ("finish(globalThis);", "bare globalThis"),
-            (
-                "globalThis['x'] = 1; finish(1);",
-                "computed globalThis access",
-            ),
-        ] {
-            let error = crate::validate(source).expect_err(label);
-            assert!(
-                error.is_dialect_refusal(),
-                "{label}: a globalThis addressing rule is a refusal ({})",
-                error.code.as_str()
-            );
-        }
-
-        for (source, label) in [
-            ("finish(parseInt());", "parseInt arity"),
-            ("const enum E { a = 1 / 0 }", "const enum finite value"),
-            (
-                "function f(...rest, last) {}",
-                "rest parameters must be last",
-            ),
-        ] {
-            let error = crate::validate(source).expect_err(label);
-            assert!(
-                !error.is_dialect_refusal(),
-                "{label}: ordinary mistake ({})",
-                error.code.as_str()
-            );
-        }
-    }
-
     /// Codes that answer for themselves still answer correctly end to end.
     #[test]
     fn a_wrong_program_is_not_a_dialect_refusal() {

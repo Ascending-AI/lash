@@ -198,7 +198,12 @@ pub(crate) enum Ended {
 
 /// Lowers `source` as a first cell and runs it to its end without a park.
 pub(crate) fn end(source: &str) -> Ended {
-    let (mut machine, text) = start(source);
+    end_with_bindings(source, Bindings::default())
+}
+
+/// Runs a cell with kernel session data supplied by the law.
+pub(crate) fn end_with_bindings(source: &str, bindings: Bindings) -> Ended {
+    let (mut machine, text) = start_with_bindings(source, bindings);
     match machine.run(&mut Console::default(), u64::MAX) {
         Ok(Step::Ended(End::Finished(finished))) => Ended::Finished(finished.result),
         Ok(Step::Ended(End::Error(RunError::Uncaught(Datum::Error(error))))) => {
@@ -211,9 +216,13 @@ pub(crate) fn end(source: &str) -> Ended {
 /// Lowers `source` as a first cell and starts a machine on it. Gives the
 /// machine and the document's kernel text.
 fn start(source: &str) -> (KernelMachine, String) {
+    start_with_bindings(source, Bindings::default())
+}
+
+fn start_with_bindings(source: &str, values: Bindings) -> (KernelMachine, String) {
     let library = super::library();
     let effects = effects();
-    let bindings = BTreeSet::new();
+    let bindings = values.variables.keys().cloned().collect::<BTreeSet<_>>();
     let environment = Environment {
         library,
         effects: &effects,
@@ -231,7 +240,7 @@ fn start(source: &str) -> (KernelMachine, String) {
     let start = Start {
         target: Target::Main,
         args: Vec::new(),
-        bindings: Bindings::default(),
+        bindings: values,
     };
     let machine =
         KernelMachine::start(program, BOUNDS, start).unwrap_or_else(|error| panic!("{error}"));

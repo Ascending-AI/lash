@@ -17,6 +17,7 @@ mod machine;
 mod package;
 mod printer;
 mod printer_corpus;
+mod remaining_builtins;
 mod typed;
 
 /// The real library and extension definitions, before the dialect helpers.
@@ -32,6 +33,8 @@ pub(crate) fn kernel_registry() -> lash_kernel_doc::FunctionRegistry {
         &std::sync::Arc::new(lash_ext_regex_ecma::Engine::new(32)),
     )
     .expect("regex extension registration");
+    lash_ext_date_ecma::register(&mut registry).expect("date extension registration");
+    lash_ext_url_whatwg::register(&mut registry).expect("URL extension registration");
     registry
 }
 

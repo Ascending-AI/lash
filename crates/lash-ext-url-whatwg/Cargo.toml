@@ -1,0 +1,21 @@
+[package]
+name = "lash-ext-url-whatwg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Deterministic url-whatwg extension functions over kernel data"
+publish = false
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-doc = { workspace = true }
+url = { workspace = true }

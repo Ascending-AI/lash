@@ -22,6 +22,7 @@ use num.pow
 use num.neg
 use num.lt
 use num.le
+use num.trunc
 use num.floor
 use num.is_nan
 use num.is_finite
@@ -221,56 +222,6 @@ body {
     return "function"
   }
   return "object"
-}
-
-# Number::toString for radix 10. The spellings between 1e16 and 1e21 and
-# below 1e-4 are the kernel's until the Number built-in replaces this.
-function ts.number.to_string(value: Number) -> Text
-kernel 1
-charge sum(4, size(result))
-body {
-  if num.is_nan(value) {
-    return "NaN"
-  }
-  if eq(value, inf) {
-    return "Infinity"
-  }
-  if eq(value, -inf) {
-    return "-Infinity"
-  }
-  if eq(value, 0) {
-    return "0"
-  }
-  let spelled = num.to_text(value)
-  if text.ends_with(spelled, ".0") {
-    return text.utf16_slice(spelled, 0, num.sub(text.utf16_len(spelled), 2))
-  }
-  return spelled
-}
-
-# StringToNumber, as far as the kernel's own number syntax reaches.
-function ts.number.parse(source: Text) -> Number
-kernel 1
-charge sum(4, size(source))
-body {
-  let trimmed = text.trim_u17_0_0(source)
-  if same(trimmed, "") {
-    return 0.0
-  }
-  if same(trimmed, "Infinity") {
-    return inf
-  }
-  if same(trimmed, "+Infinity") {
-    return inf
-  }
-  if same(trimmed, "-Infinity") {
-    return -inf
-  }
-  try {
-    return num.to_float(float.parse(trimmed))
-  } catch unparsed {
-    return nan
-  }
 }
 
 # ToString of a primitive.
@@ -544,7 +495,7 @@ body {
   if num.is_finite(number) {} else {
     return 0
   }
-  let wrapped = int.rem_floor(float.to_int(number), 4294967296)
+  let wrapped = int.rem_floor(float.to_int(num.trunc(number)), 4294967296)
   if num.le(2147483648, wrapped) {
     return num.sub(wrapped, 4294967296)
   }
@@ -693,7 +644,7 @@ body {
     return eq(left, right)
   }
   if same(a, "error") {
-    return eq(left, right)
+    return same(left, right)
   }
   return same(left, right)
 }

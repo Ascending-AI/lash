@@ -1,0 +1,34 @@
+# JavaScript boolean behavior, expressed in kernel code.
+use ts.boolean.convert
+use ts.boolean.toString
+use ts.boolean.valueOf
+use ts.pad
+use ts.to_boolean
+
+function ts.boolean.convert(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_0 = args[0]
+let output = invoke ts.to_boolean(builtin_arg_0)
+  return output
+}
+
+function ts.boolean.valueOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return this
+}
+
+function ts.boolean.toString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if this { return "true" }
+  return "false"
+}

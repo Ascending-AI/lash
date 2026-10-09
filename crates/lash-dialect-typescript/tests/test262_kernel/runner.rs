@@ -90,6 +90,8 @@ fn registry() -> &'static Arc<FunctionRegistry> {
             &Arc::new(lash_ext_regex_ecma::Engine::new(32)),
         )
         .expect("regex extension registration");
+        lash_ext_date_ecma::register(&mut registry).expect("date extension registration");
+        lash_ext_url_whatwg::register(&mut registry).expect("URL extension registration");
         let mut library = NamedLibrary::from_registry(&registry).expect("unique library names");
         for definition in define_helpers(&mut library).expect("dialect library dependencies") {
             registry

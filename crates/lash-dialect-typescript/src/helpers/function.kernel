@@ -1,0 +1,80 @@
+# JavaScript function behavior, expressed in kernel code.
+use error.new
+use kind
+use list.len
+use num.add
+use num.lt
+use same
+use ts.function.apply
+use ts.function.bind
+use ts.function.call
+use ts.function.toString
+use ts.get
+use ts.is_nullish
+use ts.pad
+use ts.rest
+use ts.spread
+use ts.to_number
+
+function ts.function.call(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let receiver = args[0]
+  let passed = invoke ts.rest(args, 1)
+  let output = apply this(receiver, passed)
+  return output
+}
+
+function ts.function.apply(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let receiver = args[0]
+  let values = args[1]
+  let passed = []
+  let nullish = invoke ts.is_nullish(values)
+  if nullish {} else {
+    if same(kind(values), "list") { set passed = values } else {
+      let length = invoke ts.get(values, "length")
+      let length = invoke ts.to_number(length)
+      let i = 0
+      while num.lt(i, length) {
+        let value = invoke ts.get(values, i)
+        set passed[list.len(passed)] = value
+        set i = num.add(i, 1)
+      }
+    }
+  }
+  let output = apply this(receiver, passed)
+  return output
+}
+
+function ts.function.bind(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let receiver = args[0]
+  let prefix = invoke ts.rest(args, 1)
+  let original = this
+  return fn(ignored, tail) {
+    let builtin_arg_0 = [prefix, tail]
+let passed = invoke ts.spread(builtin_arg_0)
+    let output = apply original(receiver, passed)
+    return output
+  }
+}
+
+function ts.function.toString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_FUNCTION_STRING_COERCION", "Function source is unavailable", null)
+}

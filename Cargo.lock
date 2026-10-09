@@ -2142,6 +2142,8 @@ dependencies = [
 name = "lash-dialect-typescript"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-ext-date-ecma",
+ "lash-ext-url-whatwg",
  "lash-ext-regex-ecma",
  "lash-kernel-check",
  "lash-kernel-conformance",
@@ -2175,6 +2177,22 @@ dependencies = [
  "serde_json",
  "sha2",
  "tokio",
+]
+
+[[package]]
+name = "lash-ext-date-ecma"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-doc",
+ "num-traits",
+]
+
+[[package]]
+name = "lash-ext-url-whatwg"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-doc",
+ "url",
 ]
 
 [[package]]

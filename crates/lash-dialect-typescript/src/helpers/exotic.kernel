@@ -1,52 +1,154 @@
-# Where the built-in lanes say how a value that is neither a primitive, a
-# list, a plain record, an error nor a closure behaves under the language's
-# own operations: a map, a set, a timestamp, a branded record. The core
-# coercions and member operations call these; a built-in's own methods and
-# properties are rows in `builtins/`, not branches here.
-
-use error.new
-use kind
-use same
+# Exotic value operations before the core/helper DAG. Native functions read or
+# allocate only; every update of a URL, query or Error slot is a kernel form.
 use ts.regexp.spell
+use kind
+use error.new
+use same
+use eq
+use ref
+use deref
+use num.add
+use num.sub
+use num.lt
+use num.le
+use num.div
+use num.is_finite
+use list.len
+use record.keys
+use record.contains
+use text.concat
+use date.ecma.milliseconds
+use date.ecma.format
+use url.whatwg.update
+use ts.exotic.error_name
 
-# ToPrimitive of an exotic value. `hint` is "default", "number" or "string".
+function ts.exotic.error_name(value: Any) -> Text
+kernel 1
+charge 8
+body {
+  if same(kind(value.data), "record") {
+    if record.contains(value.data, "name") { return value.data.name }
+  }
+  let name = value.kind
+  if same(name, "type_error") { return "TypeError" }
+  if same(name, "number_range") { return "RangeError" }
+  if same(name, "index_out_of_range") { return "RangeError" }
+  if same(name, "unbound_variable") { return "ReferenceError" }
+  return name
+}
+
 function ts.exotic.to_primitive(value: Any, hint: Text) -> Any
 kernel 1
-charge 1
+charge 8
 body {
-  if same(kind(value), "record") {
+  let k = kind(value)
+  if same(k, "timestamp") {
+    if same(hint, "number") { return date.ecma.milliseconds(value) }
+    return date.ecma.format(value, "string")
+  }
+  if same(k, "record") {
     if same(value.brand, "regex.ecma") {
       let pattern = value.pattern
       let flags = value.flags
-      let text = invoke ts.regexp.spell(pattern, flags)
-      return text
+      let spelled = invoke ts.regexp.spell(pattern, flags)
+      return spelled
     }
+    if same(value.brand, "date.invalid") {
+      if same(hint, "number") { return nan }
+      return "Invalid Date"
+    }
+    if same(value.brand, "url.whatwg") { return value.state.href }
   }
+  if same(k, "map") { return "[object Map]" }
+  if same(k, "set") { return "[object Set]" }
   return "[object Object]"
 }
 
-# A property read no row answers.
 function ts.exotic.get(target: Any, key: Any) -> Any
 kernel 1
-charge 1
+charge 8
 body {
+  let k = kind(target)
+  if same(k, "error") {
+    if same(key, "name") {
+      let name = invoke ts.exotic.error_name(target)
+      return name
+    }
+    if same(kind(target.data), "record") {
+      if record.contains(target.data, key) { return target.data[key] }
+      if same(key, "message") { return "" }
+    } else { if same(key, "message") { return target.message } }
+    return absent
+  }
+  if same(k, "record") {
+    if same(target.brand, "url.whatwg") {
+      if same(key, "searchParams") { return target.searchParams }
+      return target.state[key]
+    }
+    if same(target.brand, "url.search_params") {
+      if same(key, "size") { return list.len(target.pairs) }
+    }
+  }
   return absent
 }
 
-# A property write.
 function ts.exotic.set(target: Any, key: Any, value: Any) -> Any
 kernel 1
-errors "type_error"
-charge 1
+errors "type_error", "TS_URL_PROPERTY_IMMUTABLE"
+charge sum(16, deep(value))
 body {
+  let k = kind(target)
+  if same(k, "error") {
+    if same(kind(target.data), "record") {} else { throw error.new("type_error", "This kernel error has no mutable slots", null) }
+    if same(key, "message") {
+      if same(kind(value), "text") {} else { throw error.new("type_error", "Error.message must remain text", null) }
+    }
+    set target.data[key] = value
+    return value
+  }
+  if same(k, "record") {
+    if same(target.brand, "url.whatwg") {
+      if same(kind(value), "text") {} else { throw error.new("type_error", "URL components must be text", null) }
+      let href = target.state.href
+      let parsed = url.whatwg.update(href, key, value)
+      for name in record.keys(parsed.state) { set target.state[name] = parsed.state[name] }
+      set target.searchParams.pairs = parsed.searchParams.pairs
+      return value
+    }
+  }
   throw error.new("type_error", "Cannot assign to a property of this value", null)
 }
 
-# The elements `for...of`, spread and array destructuring take, as a list.
 function ts.exotic.iterate(target: Any) -> List(Any)
 kernel 1
 errors "type_error"
-charge 1
+charge sum(8, size(target), deep(result))
 body {
+  let k = kind(target)
+  let items = []
+  if same(k, "map") {
+    for map_key in target {
+      let key = map_key
+      if same(kind(key), "ref") { set key = deref(key) }
+      if same(kind(key), "tuple") {
+        if same(key[0], "error") { set key = error.new(key[2], key[3], deref(key[1])) } else { set key = absent }
+      }
+      set items[list.len(items)] = [key, target[map_key]]
+    }
+    return items
+  }
+  if same(k, "set") {
+    for key in target {
+      if same(kind(key), "ref") { set key = deref(key) }
+      if same(kind(key), "tuple") {
+        if same(key[0], "error") { set key = error.new(key[2], key[3], deref(key[1])) } else { set key = absent }
+      }
+      set items[list.len(items)] = key
+    }
+    return items
+  }
+  if same(k, "record") {
+    if same(target.brand, "url.search_params") { return target.pairs }
+  }
   throw error.new("type_error", "value is not iterable", null)
 }

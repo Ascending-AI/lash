@@ -1,0 +1,407 @@
+# JavaScript object behavior, expressed in kernel code.
+use eq
+use text.concat
+use ts.receiver
+use error.new
+use list.len
+use num.add
+use num.div
+use num.floor
+use num.is_nan
+use num.le
+use num.lt
+use num.sub
+use record.contains
+use same
+use ts.assign
+use ts.get
+use ts.has
+use ts.is_nullish
+use ts.iterate
+use ts.keys
+use ts.number.parse
+use ts.number.to_string
+use ts.object.assign
+use ts.object.convert
+use ts.object.create
+use ts.object.defineProperties
+use ts.object.defineProperty
+use ts.object.entries
+use ts.object.freeze
+use ts.object.fromEntries
+use ts.object.getOwnPropertyDescriptor
+use ts.object.getOwnPropertyDescriptors
+use ts.object.getOwnPropertyNames
+use ts.object.getOwnPropertySymbols
+use ts.object.getPrototypeOf
+use ts.object.groupBy
+use ts.object.hasOwn
+use ts.object.is
+use ts.object.isExtensible
+use ts.object.isFrozen
+use ts.object.isSealed
+use ts.object.keys
+use ts.object.own_keys
+use ts.object.preventExtensions
+use ts.object.seal
+use ts.object.setPrototypeOf
+use ts.object.values
+use ts.pad
+use ts.require_object_coercible
+use ts.rest
+use ts.strict_equals
+use ts.to_property_key
+
+use kind
+
+function ts.object.own_keys(target: Any) -> List(Text)
+kernel 1
+charge sum(16, product(size(target), size(target)))
+body {
+  let keys = invoke ts.keys(target)
+  let indices = []
+  let others = []
+  for key in keys {
+    let number = invoke ts.number.parse(key)
+    let spelling = invoke ts.number.to_string(number)
+    let index = false
+    if same(spelling, key) {
+      if num.le(0, number) { if num.lt(number, 4294967295.0) { if eq(number, num.floor(number)) { set index = true } } }
+    }
+    if index {
+      let position = list.len(indices)
+      set indices[position] = key
+      while num.lt(0, position) {
+        let previous = num.sub(position, 1)
+        let builtin_arg_0 = indices[previous]
+let previous_number = invoke ts.number.parse(builtin_arg_0)
+        if num.lt(number, previous_number) {
+          set indices[position] = indices[previous]
+          set indices[previous] = key
+          set position = previous
+        } else { break }
+      }
+    } else { set others[list.len(others)] = key }
+  }
+  for key in others { set indices[list.len(indices)] = key }
+  return indices
+}
+
+function ts.object.convert(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let nullish = invoke ts.is_nullish(value)
+  if nullish { return {} }
+  return value
+}
+
+function ts.object.keys(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_1 = args[0]
+do invoke ts.require_object_coercible(builtin_arg_1)
+  let builtin_arg_2 = args[0]
+let output = invoke ts.object.own_keys(builtin_arg_2)
+  return output
+}
+
+function ts.object.values(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let target = args[0]
+  do invoke ts.require_object_coercible(target)
+  let keys = invoke ts.object.own_keys(target)
+  let output = []
+  for key in keys {
+    let value = invoke ts.get(target, key)
+    set output[list.len(output)] = value
+  }
+  return output
+}
+
+function ts.object.entries(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let target = args[0]
+  do invoke ts.require_object_coercible(target)
+  let keys = invoke ts.object.own_keys(target)
+  let output = []
+  for key in keys {
+    let value = invoke ts.get(target, key)
+    set output[list.len(output)] = [key, value]
+  }
+  return output
+}
+
+function ts.object.fromEntries(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_3 = args[0]
+let source = invoke ts.iterate(builtin_arg_3)
+  let output = {}
+  for pair_item in source {
+    let entry_kind = kind(pair_item)
+    if same(entry_kind, "list") {} else {
+      if same(entry_kind, "record") {} else { throw error.new("type_error", "Iterator value is not an entry object", null) }
+    }
+    let key = invoke ts.get(pair_item, 0)
+    let key = invoke ts.to_property_key(key)
+    let value = invoke ts.get(pair_item, 1)
+    set output[key] = value
+  }
+  return output
+}
+
+function ts.object.assign(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let target = args[0]
+  do invoke ts.require_object_coercible(target)
+  let receiver = invoke ts.receiver(target)
+  if same(receiver, "record") {} else { throw error.new("TS_METHOD_UNSUPPORTED", "Object.assign requires a plain record target", null) }
+  let sources = invoke ts.rest(args, 1)
+  for source in sources {
+    let receiver = invoke ts.receiver(source)
+    if same(receiver, "record") { do invoke ts.assign(target, source) }
+  }
+  return target
+}
+
+function ts.object.hasOwn(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_4 = args[0]
+do invoke ts.require_object_coercible(builtin_arg_4)
+  let builtin_arg_5 = args[0]
+let builtin_arg_6 = args[1]
+let output = invoke ts.has(builtin_arg_5, builtin_arg_6)
+  return output
+}
+
+function ts.object.is(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let a = args[0]
+  let b = args[1]
+  let ka = invoke ts.receiver(a)
+  let kb = invoke ts.receiver(b)
+  if same(ka, "number") {
+    if same(kb, "number") {
+      if num.is_nan(a) { return num.is_nan(b) }
+      if eq(a, 0) { if eq(b, 0) { return eq(num.div(1.0, a), num.div(1.0, b)) } }
+    }
+  }
+  let output = invoke ts.strict_equals(a, b)
+  return output
+}
+
+function ts.object.groupBy(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_7 = args[0]
+let source = invoke ts.iterate(builtin_arg_7)
+  let callback = args[1]
+  let output = {}
+  let index = 0.0
+  for item in source {
+    let passed = [item, index]
+    let key = apply callback(absent, passed)
+    let key = invoke ts.to_property_key(key)
+    if record.contains(output, key) {} else { set output[key] = [] }
+    let group = output[key]
+    set group[list.len(group)] = item
+    set index = num.add(index, 1.0)
+  }
+  return output
+}
+
+function ts.object.defineProperty(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.defineProperties(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.getOwnPropertyDescriptor(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.getOwnPropertyDescriptors(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.getOwnPropertyNames(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.getOwnPropertySymbols(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.create(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.getPrototypeOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.setPrototypeOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.freeze(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.seal(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.preventExtensions(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.isFrozen(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.isSealed(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.isExtensible(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Descriptors and prototype surgery are outside the dialect", null)
+}
+
+function ts.object.hasOwnProperty(this: Any, args: List(Any)) -> Bool
+kernel 1
+errors "type_error"
+charge sum(12, deep(this), deep(args))
+body {
+  do invoke ts.require_object_coercible(this)
+  let args = invoke ts.pad(args, 1)
+  let key = args[0]
+  let own = invoke ts.has(this, key)
+  return own
+}
+
+function ts.object.toString(this: Any, args: List(Any)) -> Text
+kernel 1
+charge 12
+body {
+  let k = invoke ts.receiver(this)
+  let tag = "Object"
+  if same(k, "absent") { set tag = "Undefined" }
+  if same(k, "null") { set tag = "Null" }
+  if same(k, "bool") { set tag = "Boolean" }
+  if same(k, "number") { set tag = "Number" }
+  if same(k, "text") { set tag = "String" }
+  if same(k, "list") { set tag = "Array" }
+  if same(k, "map") { set tag = "Map" }
+  if same(k, "set") { set tag = "Set" }
+  if same(k, "timestamp") { set tag = "Date" }
+  if same(k, "error") { set tag = "Error" }
+  if same(k, "closure") { set tag = "Function" }
+  if same(k, "brand:regex.ecma") { set tag = "RegExp" }
+  if same(k, "brand:date.invalid") { set tag = "Date" }
+  return text.concat("[object ", text.concat(tag, "]"))
+}
+
+function ts.object.valueOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error"
+charge 12
+body {
+  do invoke ts.require_object_coercible(this)
+  return this
+}

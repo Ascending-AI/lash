@@ -58,6 +58,8 @@ members = [
     "crates/lash-ext-regex-ecma",
     "crates/lash-kernel-conformance",
     "examples/kernel-embedder",
+    "crates/lash-ext-date-ecma",
+    "crates/lash-ext-url-whatwg",
     "examples/agent-workbench",
     "examples/toolbench",
     "examples/workflow-graph-roundtrip",
@@ -330,6 +332,8 @@ lash-kernel-doc = { path = "crates/lash-kernel-doc", version = "=0.0.0-dev" }
 lash-kernel-edit = { path = "crates/lash-kernel-edit", version = "=0.0.0-dev" }
 lash-kernel-state = { path = "crates/lash-kernel-state", version = "=0.0.0-dev" }
 lash-kernel-vm = { path = "crates/lash-kernel-vm", version = "=0.0.0-dev" }
+lash-ext-date-ecma = { path = "crates/lash-ext-date-ecma", version = "=0.0.0-dev" }
+lash-ext-url-whatwg = { path = "crates/lash-ext-url-whatwg", version = "=0.0.0-dev" }
 lash-ext-regex-ecma = { path = "crates/lash-ext-regex-ecma", version = "=0.0.0-dev" }
 lash-kernel-conformance = { path = "crates/lash-kernel-conformance", version = "=0.0.0-dev" }
 ruff_python_ast = "=0.0.11"

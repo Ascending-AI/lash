@@ -1,0 +1,306 @@
+# JavaScript url_search_params behavior, expressed in kernel code.
+use eq
+use error.new
+use kind
+use list.len
+use num.add
+use num.lt
+use num.sub
+use num.to_float
+use record.keys
+use same
+use text.utf16_compare
+use ts.iterate
+use ts.pad
+use ts.to_string
+use ts.url_search_params.append
+use ts.url_search_params.construct
+use ts.url_search_params.delete
+use ts.url_search_params.entries
+use ts.url_search_params.forEach
+use ts.url_search_params.get
+use ts.url_search_params.getAll
+use ts.url_search_params.has
+use ts.url_search_params.is
+use ts.url_search_params.keys
+use ts.url_search_params.refresh
+use ts.url_search_params.set
+use ts.url_search_params.size
+use ts.url_search_params.sort
+use ts.url_search_params.toString
+use ts.url_search_params.valueOf
+use ts.url_search_params.values
+use url.whatwg.query_parse
+use url.whatwg.query_stringify
+use url.whatwg.update
+
+function ts.url_search_params.refresh(params: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(params.owner), "record") {
+    let serialized = url.whatwg.query_stringify(params.pairs)
+    let parsed = url.whatwg.update(params.owner.href, "search", serialized)
+    for key in record.keys(parsed.state) { set params.owner[key] = parsed.state[key] }
+  }
+  return absent
+}
+
+function ts.url_search_params.construct(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let input = args[0]
+  let pairs = []
+  if same(kind(input), "absent") {} else {
+    if same(kind(input), "record") {
+      if same(input.brand, "url.search_params") {
+        for pair in input.pairs { set pairs[list.len(pairs)] = [pair[0], pair[1]] }
+      } else {
+        for key in record.keys(input) { let builtin_arg_0 = input[key]
+let value = invoke ts.to_string(builtin_arg_0) set pairs[list.len(pairs)] = [key, value] }
+      }
+    } else {
+      if same(kind(input), "list") {
+        for pair in input {
+          let values = invoke ts.iterate(pair)
+          if eq(list.len(values), 2) {} else { throw error.new("type_error", "Each query pair needs two items", null) }
+          let builtin_arg_1 = values[0]
+let name = invoke ts.to_string(builtin_arg_1)
+          let builtin_arg_2 = values[1]
+let value = invoke ts.to_string(builtin_arg_2)
+          set pairs[list.len(pairs)] = [name, value]
+        }
+      } else {
+        let text = invoke ts.to_string(input)
+        set pairs = url.whatwg.query_parse(text)
+      }
+    }
+  }
+  return {brand: "url.search_params", pairs: pairs, owner: absent}
+}
+
+function ts.url_search_params.is(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "record") { return same(value.brand, "url.search_params") }
+  return false
+}
+
+function ts.url_search_params.size(this: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return num.to_float(list.len(this.pairs))
+}
+
+function ts.url_search_params.toString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return url.whatwg.query_stringify(this.pairs)
+}
+
+function ts.url_search_params.valueOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return this
+}
+
+function ts.url_search_params.get(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_3 = args[0]
+let name = invoke ts.to_string(builtin_arg_3)
+  let output = []
+  let filter = args[1]
+  if same(kind(filter), "absent") {} else { set filter = invoke ts.to_string(filter) }
+  for pair in this.pairs {
+    if same(pair[0], name) {
+      return pair[1]
+    }
+  }
+  return null
+}
+
+function ts.url_search_params.getAll(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_4 = args[0]
+let name = invoke ts.to_string(builtin_arg_4)
+  let output = []
+  let filter = args[1]
+  if same(kind(filter), "absent") {} else { set filter = invoke ts.to_string(filter) }
+  for pair in this.pairs {
+    if same(pair[0], name) {
+      set output[list.len(output)] = pair[1]
+    }
+  }
+  return output
+}
+
+function ts.url_search_params.has(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_5 = args[0]
+let name = invoke ts.to_string(builtin_arg_5)
+  let output = []
+  let filter = args[1]
+  if same(kind(filter), "absent") {} else { set filter = invoke ts.to_string(filter) }
+  for pair in this.pairs {
+    if same(pair[0], name) {
+      if same(kind(filter), "absent") { return true }
+      if same(pair[1], filter) { return true }
+    }
+  }
+  return false
+}
+
+function ts.url_search_params.append(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_6 = args[0]
+let name = invoke ts.to_string(builtin_arg_6)
+  let builtin_arg_7 = args[1]
+let value = invoke ts.to_string(builtin_arg_7)
+  set this.pairs[list.len(this.pairs)] = [name, value]
+  do invoke ts.url_search_params.refresh(this)
+  return absent
+}
+
+function ts.url_search_params.set(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_8 = args[0]
+let name = invoke ts.to_string(builtin_arg_8)
+  let value = args[1]
+  set value = invoke ts.to_string(value)
+  let output = []
+  let found = false
+  for pair in this.pairs {
+    if same(pair[0], name) {
+      if found {} else { set output[list.len(output)] = [name, value] set found = true }
+    } else { set output[list.len(output)] = pair }
+  }
+  if found {} else { set output[list.len(output)] = [name, value] }
+  set this.pairs = output
+  do invoke ts.url_search_params.refresh(this)
+  return absent
+}
+
+function ts.url_search_params.delete(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_9 = args[0]
+let name = invoke ts.to_string(builtin_arg_9)
+  let value = args[1]
+  if same(kind(value), "absent") {} else { set value = invoke ts.to_string(value) }
+  let output = []
+  let found = false
+  for pair in this.pairs {
+    if same(pair[0], name) {
+      if same(kind(value), "absent") {} else { if same(pair[1], value) {} else { set output[list.len(output)] = pair } }
+    } else { set output[list.len(output)] = pair }
+  }
+  set this.pairs = output
+  do invoke ts.url_search_params.refresh(this)
+  return absent
+}
+
+function ts.url_search_params.sort(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let i = 1
+  while num.lt(i, list.len(this.pairs)) {
+    let item = this.pairs[i]
+    let j = i
+    while num.lt(0, j) {
+      let previous = num.sub(j, 1)
+      if num.lt(text.utf16_compare(item[0], this.pairs[previous][0]), 0) {
+        set this.pairs[j] = this.pairs[previous]
+        set this.pairs[previous] = item
+        set j = previous
+      } else { break }
+    }
+    set i = num.add(i, 1)
+  }
+  do invoke ts.url_search_params.refresh(this)
+  return absent
+}
+
+function ts.url_search_params.keys(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = []
+  for pair in this.pairs { set output[list.len(output)] = pair[0] }
+  return output
+}
+
+function ts.url_search_params.values(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = []
+  for pair in this.pairs { set output[list.len(output)] = pair[1] }
+  return output
+}
+
+function ts.url_search_params.entries(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = []
+  for pair in this.pairs { set output[list.len(output)] = [pair[0], pair[1]] }
+  return output
+}
+
+function ts.url_search_params.forEach(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let callback = args[0]
+  let receiver = args[1]
+  let i = 0
+  while num.lt(i, list.len(this.pairs)) {
+    let pair = this.pairs[i]
+    let passed = [pair[1], pair[0], this]
+    do apply callback(receiver, passed)
+    set i = num.add(i, 1)
+  }
+  return absent
+}

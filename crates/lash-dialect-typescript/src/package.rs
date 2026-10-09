@@ -13,7 +13,12 @@ use crate::builtins::{self, Receiver};
 /// then one generated dispatcher per method and property name the built-in
 /// rows mention.
 pub fn define_helpers(library: &mut NamedLibrary) -> Result<Vec<FunctionDefinition>, SourceError> {
-    let mut definitions = define_functions(include_str!("helpers/regexp_data.kernel"), library)?;
+    let mut definitions =
+        define_functions(include_str!("helpers/number_primitive.kernel"), library)?;
+    definitions.extend(define_functions(
+        include_str!("helpers/regexp_data.kernel"),
+        library,
+    )?);
     definitions.extend(define_functions(
         include_str!("helpers/exotic.kernel"),
         library,
@@ -56,6 +61,12 @@ pub(crate) fn dispatcher(
     fallback_args: &str,
 ) -> String {
     let mut source = String::from("use same\nuse ts.receiver\n");
+    let record_rows = rows
+        .iter()
+        .any(|(receiver, _)| *receiver == Receiver::Record);
+    if record_rows {
+        source.push_str("use record.contains\n");
+    }
     source.push_str(&format!("use {fallback}\n"));
     let mut named: Vec<&str> = rows.iter().map(|(_, function)| *function).collect();
     named.sort_unstable();
@@ -75,6 +86,10 @@ pub(crate) fn dispatcher(
          errors \"type_error\"\ncharge {}\nbody {{\n  let receiver = invoke ts.receiver(this)\n",
         4 + rows.len()
     ));
+    if record_rows {
+        let separator = if fallback_args.is_empty() { "" } else { ", " };
+        source.push_str(&format!("  if same(receiver, \"record\") {{\n    if record.contains(this, \"{name}\") {{\n      let outcome = invoke {fallback}(this, \"{name}\"{separator}{fallback_args})\n      return outcome\n    }}\n  }}\n"));
+    }
     for (receiver, function) in rows {
         source.push_str(&format!(
             "  if same(receiver, \"{}\") {{\n    let outcome = invoke {function}({passed})\n    \
@@ -107,10 +122,19 @@ pub(crate) fn dispatcher(
 /// field on a record is resolved through ts.get instead.
 fn method_reader(name: &str, rows: &[(Receiver, &'static str)]) -> String {
     let mut source = format!("use same\nuse ts.receiver\nuse ts.get\nuse ts.method.{name}\n");
+    let record_rows = rows
+        .iter()
+        .any(|(receiver, _)| *receiver == Receiver::Record);
+    if record_rows {
+        source.push_str("use record.contains\n");
+    }
     source.push_str(&format!(
         "function ts.member.{name}(this: Any) -> Any\nkernel 1\ncharge {}\nbody {{\n  let receiver = invoke ts.receiver(this)\n",
         4 + rows.len()
     ));
+    if record_rows {
+        source.push_str(&format!("  if same(receiver, \"record\") {{\n    if record.contains(this, \"{name}\") {{\n      let outcome = invoke ts.get(this, \"{name}\")\n      return outcome\n    }}\n  }}\n"));
+    }
     for (receiver, _) in rows {
         source.push_str(&format!(
             "  if same(receiver, \"{}\") {{\n    return fn(this, args) {{\n      let outcome = invoke ts.method.{name}(this, args)\n      return outcome\n    }}\n  }}\n",

@@ -118,6 +118,8 @@ PACKAGE_DEPS = {
     "lash-dialect-typescript": {
         "build": {},
         "dev": {
+            "lash_ext_date_ecma": "//crates/lash-ext-date-ecma:lash-ext-date-ecma",
+            "lash_ext_url_whatwg": "//crates/lash-ext-url-whatwg:lash-ext-url-whatwg",
             "lash_kernel_check": "//crates/lash-kernel-check:lash-kernel-check",
             "lash_kernel_conformance": "//crates/lash-kernel-conformance:lash-kernel-conformance",
             "lash_kernel_edit": "//crates/lash-kernel-edit:lash-kernel-edit",
@@ -159,6 +161,14 @@ PACKAGE_DEPS = {
             "tokio": "//third-party/rust:p0401"
         }
     },
+    "lash-ext-date-ecma": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "num_traits": "//third-party/rust:p0232"
+        }
+    },
     "lash-ext-regex-ecma": {
         "build": {},
         "dev": {},
@@ -167,6 +177,14 @@ PACKAGE_DEPS = {
             "lash_regress": "//crates/lash-regress:lash-regress",
             "num_traits": "//third-party/rust:p0232",
             "thiserror": "//third-party/rust:p0394"
+        }
+    },
+    "lash-ext-url-whatwg": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "url": "//third-party/rust:p0439"
         }
     },
     "lash-facade-failover": {

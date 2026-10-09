@@ -1,0 +1,268 @@
+# JavaScript error behavior, expressed in kernel code.
+use error.new
+use kind
+use list.contains
+use list.len
+use record.contains
+use same
+use text.concat
+use ts.error.construct
+use ts.error.is_AggregateError
+use ts.error.is_Error
+use ts.error.is_EvalError
+use ts.error.is_RangeError
+use ts.error.is_ReferenceError
+use ts.error.is_SyntaxError
+use ts.error.is_TypeError
+use ts.error.is_URIError
+use ts.error.name
+use ts.error.new_AggregateError
+use ts.error.new_Error
+use ts.error.new_EvalError
+use ts.error.new_RangeError
+use ts.error.new_ReferenceError
+use ts.error.new_SyntaxError
+use ts.error.new_TypeError
+use ts.error.new_URIError
+use ts.error.toString
+use ts.get
+use ts.iterate
+use ts.pad
+use ts.to_string
+
+function ts.error.name(value: Any) -> Text
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "record") {
+    let name = invoke ts.get(value, "name")
+    if same(kind(name), "absent") { return "Error" }
+    let name = invoke ts.to_string(name)
+    return name
+  }
+  if same(kind(value), "error") {} else { throw error.new("type_error", "Error receiver required", null) }
+  if same(kind(value.data), "record") {
+    if record.contains(value.data, "name") { return value.data.name }
+  }
+  let name = value.kind
+  if same(name, "type_error") { return "TypeError" }
+  if same(name, "number_range") { return "RangeError" }
+  if same(name, "index_out_of_range") { return "RangeError" }
+  if same(name, "unbound_variable") { return "ReferenceError" }
+  return name
+}
+
+function ts.error.construct(name: Text, args: List(Any), aggregate: Bool) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 3)
+  let message = args[0]
+  let options = args[1]
+  let error_items = absent
+  if aggregate {
+    let builtin_arg_0 = args[0]
+set error_items = invoke ts.iterate(builtin_arg_0)
+    let copied = []
+    for item in error_items { set copied[list.len(copied)] = item }
+    set error_items = copied
+    set message = args[1]
+    set options = args[2]
+  }
+  let text = ""
+  if same(kind(message), "absent") {} else { set text = invoke ts.to_string(message) }
+  let data = {name: name, classes: [name, "Error"]}
+  if same(kind(message), "absent") {} else { set data.message = text }
+  if same(kind(options), "record") {
+    if record.contains(options, "cause") { set data.cause = options.cause }
+  }
+  if aggregate { set data["errors"] = error_items }
+  return error.new(name, text, data)
+}
+
+function ts.error.new_Error(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = invoke ts.error.construct("Error", args, false)
+  return output
+}
+
+function ts.error.is_Error(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "error") {} else { return false }
+  return true
+}
+
+function ts.error.new_TypeError(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = invoke ts.error.construct("TypeError", args, false)
+  return output
+}
+
+function ts.error.is_TypeError(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "error") {} else { return false }
+  if same(kind(value.data), "record") {
+    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "TypeError") }
+  }
+  let name = invoke ts.error.name(value)
+  return same(name, "TypeError")
+}
+
+function ts.error.new_RangeError(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = invoke ts.error.construct("RangeError", args, false)
+  return output
+}
+
+function ts.error.is_RangeError(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "error") {} else { return false }
+  if same(kind(value.data), "record") {
+    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "RangeError") }
+  }
+  let name = invoke ts.error.name(value)
+  return same(name, "RangeError")
+}
+
+function ts.error.new_SyntaxError(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = invoke ts.error.construct("SyntaxError", args, false)
+  return output
+}
+
+function ts.error.is_SyntaxError(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "error") {} else { return false }
+  if same(kind(value.data), "record") {
+    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "SyntaxError") }
+  }
+  let name = invoke ts.error.name(value)
+  return same(name, "SyntaxError")
+}
+
+function ts.error.new_ReferenceError(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = invoke ts.error.construct("ReferenceError", args, false)
+  return output
+}
+
+function ts.error.is_ReferenceError(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "error") {} else { return false }
+  if same(kind(value.data), "record") {
+    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "ReferenceError") }
+  }
+  let name = invoke ts.error.name(value)
+  return same(name, "ReferenceError")
+}
+
+function ts.error.new_URIError(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = invoke ts.error.construct("URIError", args, false)
+  return output
+}
+
+function ts.error.is_URIError(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "error") {} else { return false }
+  if same(kind(value.data), "record") {
+    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "URIError") }
+  }
+  let name = invoke ts.error.name(value)
+  return same(name, "URIError")
+}
+
+function ts.error.new_EvalError(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = invoke ts.error.construct("EvalError", args, false)
+  return output
+}
+
+function ts.error.is_EvalError(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "error") {} else { return false }
+  if same(kind(value.data), "record") {
+    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "EvalError") }
+  }
+  let name = invoke ts.error.name(value)
+  return same(name, "EvalError")
+}
+
+function ts.error.new_AggregateError(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = invoke ts.error.construct("AggregateError", args, true)
+  return output
+}
+
+function ts.error.is_AggregateError(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "error") {} else { return false }
+  if same(kind(value.data), "record") {
+    if record.contains(value.data, "classes") { return list.contains(value.data.classes, "AggregateError") }
+  }
+  let name = invoke ts.error.name(value)
+  return same(name, "AggregateError")
+}
+
+function ts.error.toString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let name = invoke ts.error.name(this)
+  let message = invoke ts.get(this, "message")
+  if same(kind(message), "absent") { set message = "" } else { set message = invoke ts.to_string(message) }
+  if same(name, "") { return message }
+  if same(message, "") { return name }
+  return text.concat(name, text.concat(": ", message))
+}

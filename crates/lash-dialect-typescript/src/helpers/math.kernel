@@ -1,0 +1,585 @@
+# JavaScript math behavior, expressed in kernel code.
+use eq
+use int.rem_floor
+use int.div_floor
+use list.len
+use math.acos
+use math.acosh
+use math.asin
+use math.asinh
+use math.atan
+use math.atan2
+use math.atanh
+use math.cbrt
+use math.cos
+use math.cosh
+use math.exp
+use math.expm1
+use math.log
+use math.log10
+use math.log1p
+use math.log2
+use math.sin
+use math.sinh
+use math.sqrt
+use math.tan
+use math.tanh
+use num.abs
+use num.add
+use num.ceil
+use num.div
+use num.floor
+use num.is_finite
+use num.is_nan
+use num.le
+use num.lt
+use num.max
+use num.min
+use num.mul
+use num.round_even
+use num.round_up
+use num.sign
+use num.sub
+use num.to_float
+use num.trunc
+use ts.math.E
+use ts.math.LN10
+use ts.math.LN2
+use ts.math.LOG10E
+use ts.math.LOG2E
+use ts.math.PI
+use ts.math.SQRT1_2
+use ts.math.SQRT2
+use ts.math.abs
+use ts.math.acos
+use ts.math.acosh
+use ts.math.asin
+use ts.math.asinh
+use ts.math.atan
+use ts.math.atan2
+use ts.math.atanh
+use ts.math.cbrt
+use ts.math.ceil
+use ts.math.clz32
+use ts.math.cos
+use ts.math.cosh
+use ts.math.exp
+use ts.math.expm1
+use ts.math.floor
+use ts.math.fround
+use ts.math.hypot
+use ts.math.imul
+use ts.math.log
+use ts.math.log10
+use ts.math.log1p
+use ts.math.log2
+use ts.math.max
+use ts.math.min
+use ts.math.pow
+use ts.math.random
+use ts.math.round
+use ts.math.sign
+use ts.math.sin
+use ts.math.sinh
+use ts.math.sqrt
+use ts.math.tan
+use ts.math.tanh
+use ts.math.trunc
+use ts.pad
+use ts.pow
+use ts.to_int32
+use ts.to_number
+use ts.wrap_int32
+
+function ts.math.abs(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_0 = args[0]
+let value = invoke ts.to_number(builtin_arg_0)
+  return num.abs(value)
+}
+
+function ts.math.floor(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_1 = args[0]
+let value = invoke ts.to_number(builtin_arg_1)
+  return num.floor(value)
+}
+
+function ts.math.ceil(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_2 = args[0]
+let value = invoke ts.to_number(builtin_arg_2)
+  return num.ceil(value)
+}
+
+function ts.math.trunc(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_3 = args[0]
+let value = invoke ts.to_number(builtin_arg_3)
+  return num.trunc(value)
+}
+
+function ts.math.sign(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_4 = args[0]
+let value = invoke ts.to_number(builtin_arg_4)
+  return num.sign(value)
+}
+
+function ts.math.acos(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_5 = args[0]
+let value = invoke ts.to_number(builtin_arg_5)
+  return math.acos(value)
+}
+
+function ts.math.asin(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_6 = args[0]
+let value = invoke ts.to_number(builtin_arg_6)
+  return math.asin(value)
+}
+
+function ts.math.acosh(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_7 = args[0]
+let value = invoke ts.to_number(builtin_arg_7)
+  return math.acosh(value)
+}
+
+function ts.math.asinh(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_8 = args[0]
+let value = invoke ts.to_number(builtin_arg_8)
+  return math.asinh(value)
+}
+
+function ts.math.atan(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_9 = args[0]
+let value = invoke ts.to_number(builtin_arg_9)
+  return math.atan(value)
+}
+
+function ts.math.atanh(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_10 = args[0]
+let value = invoke ts.to_number(builtin_arg_10)
+  return math.atanh(value)
+}
+
+function ts.math.cbrt(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_11 = args[0]
+let value = invoke ts.to_number(builtin_arg_11)
+  return math.cbrt(value)
+}
+
+function ts.math.cos(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_12 = args[0]
+let value = invoke ts.to_number(builtin_arg_12)
+  return math.cos(value)
+}
+
+function ts.math.cosh(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_13 = args[0]
+let value = invoke ts.to_number(builtin_arg_13)
+  return math.cosh(value)
+}
+
+function ts.math.exp(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_14 = args[0]
+let value = invoke ts.to_number(builtin_arg_14)
+  return math.exp(value)
+}
+
+function ts.math.expm1(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_15 = args[0]
+let value = invoke ts.to_number(builtin_arg_15)
+  return math.expm1(value)
+}
+
+function ts.math.log(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_16 = args[0]
+let value = invoke ts.to_number(builtin_arg_16)
+  return math.log(value)
+}
+
+function ts.math.log1p(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_17 = args[0]
+let value = invoke ts.to_number(builtin_arg_17)
+  return math.log1p(value)
+}
+
+function ts.math.log10(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_18 = args[0]
+let value = invoke ts.to_number(builtin_arg_18)
+  return math.log10(value)
+}
+
+function ts.math.log2(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_19 = args[0]
+let value = invoke ts.to_number(builtin_arg_19)
+  return math.log2(value)
+}
+
+function ts.math.sin(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_20 = args[0]
+let value = invoke ts.to_number(builtin_arg_20)
+  return math.sin(value)
+}
+
+function ts.math.sinh(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_21 = args[0]
+let value = invoke ts.to_number(builtin_arg_21)
+  return math.sinh(value)
+}
+
+function ts.math.tan(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_22 = args[0]
+let value = invoke ts.to_number(builtin_arg_22)
+  return math.tan(value)
+}
+
+function ts.math.tanh(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_23 = args[0]
+let value = invoke ts.to_number(builtin_arg_23)
+  return math.tanh(value)
+}
+
+function ts.math.sqrt(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_24 = args[0]
+let value = invoke ts.to_number(builtin_arg_24)
+  return math.sqrt(value)
+}
+
+function ts.math.round(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_25 = args[0]
+let value = invoke ts.to_number(builtin_arg_25)
+  return num.round_up(value)
+}
+
+function ts.math.atan2(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_26 = args[0]
+let a = invoke ts.to_number(builtin_arg_26)
+  let builtin_arg_27 = args[1]
+let b = invoke ts.to_number(builtin_arg_27)
+  return math.atan2(a, b)
+}
+
+function ts.math.pow(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_28 = args[0]
+let builtin_arg_29 = args[1]
+let output = invoke ts.pow(builtin_arg_28, builtin_arg_29)
+  return output
+}
+
+function ts.math.max(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = -inf
+  for arg in args {
+    let value = invoke ts.to_number(arg)
+    set output = num.max(output, value)
+  }
+  return output
+}
+
+function ts.math.min(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = inf
+  for arg in args {
+    let value = invoke ts.to_number(arg)
+    set output = num.min(output, value)
+  }
+  return output
+}
+
+function ts.math.hypot(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let values = []
+  let infinite = false
+  let invalid = false
+  let scale = 0.0
+  for arg in args {
+    let value = invoke ts.to_number(arg)
+    set value = num.abs(value)
+    if eq(value, inf) { set infinite = true }
+    if num.is_nan(value) { set invalid = true }
+    set scale = num.max(scale, value)
+    set values[list.len(values)] = value
+  }
+  if infinite { return inf }
+  if invalid { return nan }
+  if eq(scale, 0) { return 0.0 }
+  let sum = 0.0
+  for value in values {
+    let scaled = num.div(value, scale)
+    set sum = num.add(sum, num.mul(scaled, scaled))
+  }
+  return num.mul(scale, math.sqrt(sum))
+}
+
+function ts.math.imul(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_30 = args[0]
+let a = invoke ts.to_int32(builtin_arg_30)
+  let builtin_arg_31 = args[1]
+let b = invoke ts.to_int32(builtin_arg_31)
+  let builtin_arg_32 = num.mul(a, b)
+let output = invoke ts.wrap_int32(builtin_arg_32)
+  return num.to_float(output)
+}
+
+function ts.math.clz32(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_33 = args[0]
+let value = invoke ts.to_int32(builtin_arg_33)
+  set value = int.rem_floor(value, 4294967296)
+  let count = 32.0
+  while num.lt(0, value) {
+    set count = num.sub(count, 1.0)
+    set value = int.div_floor(value, 2)
+  }
+  return count
+}
+
+function ts.math.fround(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_34 = args[0]
+let value = invoke ts.to_number(builtin_arg_34)
+  if num.is_finite(value) {} else { return value }
+  if eq(value, 0) { return value }
+  let sign = 1.0
+  if num.lt(value, 0) { set sign = -1.0 }
+  let magnitude = num.abs(value)
+  let quantum = 1.401298464324817e-45
+  let binade = 1.1754943508222875e-38
+  while num.le(num.mul(binade, 2.0), magnitude) {
+    set binade = num.mul(binade, 2.0)
+    set quantum = num.mul(quantum, 2.0)
+  }
+  let rounded = num.mul(num.round_even(num.div(magnitude, quantum)), quantum)
+  if num.le(3.4028235677973366e38, rounded) { return num.mul(sign, inf) }
+  return num.mul(sign, rounded)
+}
+
+function ts.math.random(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return num.div(num.to_float(random), 18446744073709551616.0)
+}
+
+function ts.math.E() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 2.718281828459045
+}
+
+function ts.math.LN10() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 2.302585092994046
+}
+
+function ts.math.LN2() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 0.6931471805599453
+}
+
+function ts.math.LOG10E() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 0.4342944819032518
+}
+
+function ts.math.LOG2E() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 1.4426950408889634
+}
+
+function ts.math.PI() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 3.141592653589793
+}
+
+function ts.math.SQRT1_2() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 0.7071067811865476
+}
+
+function ts.math.SQRT2() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 1.4142135623730951
+}

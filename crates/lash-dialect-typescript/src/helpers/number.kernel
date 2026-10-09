@@ -1,0 +1,372 @@
+# JavaScript number behavior, expressed in kernel code.
+use eq
+use error.new
+use float.to_int
+use format.pad
+use int.to_text
+use kind
+use list.len
+use num.abs
+use num.add
+use num.is_finite
+use num.is_integer
+use num.is_nan
+use num.le
+use num.lt
+use num.mul
+use num.sub
+use num.trunc
+use same
+use text.concat
+use text.len
+use text.slice
+use ts.number.EPSILON
+use ts.number.MAX_SAFE_INTEGER
+use ts.number.MAX_VALUE
+use ts.number.MIN_SAFE_INTEGER
+use ts.number.MIN_VALUE
+use ts.number.NEGATIVE_INFINITY
+use ts.number.NaN
+use ts.number.POSITIVE_INFINITY
+use ts.number.convert
+use ts.number.global_isFinite
+use ts.number.global_isNaN
+use ts.number.isFinite
+use ts.number.isInteger
+use ts.number.isNaN
+use ts.number.isSafeInteger
+use ts.number.layout
+use ts.number.parseFloat
+use ts.number.parseInt
+use ts.number.parse_decimal
+use ts.number.parse_int
+use ts.number.parts
+use ts.number.round_decimal
+use ts.number.toExponential
+use ts.number.toFixed
+use ts.number.toPrecision
+use ts.number.toString
+use ts.number.to_string
+use ts.number.valueOf
+use ts.pad
+use ts.receiver
+use ts.to_int32
+use ts.to_number
+use ts.to_string
+
+function ts.number.convert(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if eq(list.len(args), 0) { return 0.0 }
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_0 = args[0]
+let value = invoke ts.to_number(builtin_arg_0)
+  return value
+}
+
+function ts.number.isFinite(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let k = invoke ts.receiver(value)
+  if same(k, "number") {} else { return false }
+  return num.is_finite(value)
+}
+
+function ts.number.isNaN(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let k = invoke ts.receiver(value)
+  if same(k, "number") {} else { return false }
+  return num.is_nan(value)
+}
+
+function ts.number.isInteger(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let k = invoke ts.receiver(value)
+  if same(k, "number") {} else { return false }
+  return num.is_integer(value)
+}
+
+function ts.number.isSafeInteger(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let value = args[0]
+  let k = invoke ts.receiver(value)
+  if same(k, "number") {} else { return false }
+  if num.is_integer(value) { return num.le(num.abs(value), 9007199254740991.0) }
+  return false
+}
+
+function ts.number.parseFloat(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_1 = args[0]
+let text = invoke ts.to_string(builtin_arg_1)
+  let output = invoke ts.number.parse_decimal(text, false)
+  return output
+}
+
+function ts.number.parseInt(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let builtin_arg_2 = args[0]
+let text = invoke ts.to_string(builtin_arg_2)
+  let builtin_arg_3 = args[1]
+let base = invoke ts.to_int32(builtin_arg_3)
+  let output = invoke ts.number.parse_int(text, base, false)
+  return output
+}
+
+function ts.number.valueOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return this
+}
+
+function ts.number.toString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  if same(kind(args[0]), "absent") {
+    let output = invoke ts.number.to_string(this)
+    return output
+  }
+  let builtin_arg_4 = args[0]
+let base = invoke ts.to_number(builtin_arg_4)
+  set base = num.trunc(base)
+  if num.le(2, base) { if num.le(base, 36) {} else { throw error.new("RangeError", "Invalid radix", null) } } else { throw error.new("RangeError", "Invalid radix", null) }
+  if eq(base, 10) { let output = invoke ts.number.to_string(this) return output }
+  if num.is_finite(this) {} else { let output = invoke ts.number.to_string(this) return output }
+  let absolute = num.abs(this)
+  let radix = float.to_int(base)
+  let whole = float.to_int(num.trunc(absolute))
+  let fraction = num.sub(absolute, num.trunc(absolute))
+  let output = int.to_text(whole, radix)
+  if num.lt(0, fraction) {
+    set output = text.concat(output, ".")
+    let count = 0
+    while num.lt(0, fraction) {
+      if num.le(1100, count) { break }
+      set fraction = num.mul(fraction, base)
+      let digit = num.trunc(fraction)
+      set output = text.concat(output, int.to_text(float.to_int(digit), radix))
+      set fraction = num.sub(fraction, digit)
+      set count = num.add(count, 1)
+    }
+  }
+  if num.lt(this, 0) { return text.concat("-", output) }
+  return output
+}
+
+function ts.number.toFixed(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let precision = 0.0
+  if same(kind(args[0]), "absent") {} else { let builtin_arg_5 = args[0]
+set precision = invoke ts.to_number(builtin_arg_5) }
+  if num.is_nan(precision) { set precision = 0.0 }
+  set precision = num.trunc(precision)
+  if num.le(0, precision) { if num.le(precision, 100) {} else { throw error.new("RangeError", "Invalid precision", null) } } else { throw error.new("RangeError", "Invalid precision", null) }
+  if num.is_finite(this) {} else { let output = invoke ts.number.to_string(this) return output }
+  let precision = float.to_int(precision)
+  let absolute = num.abs(this)
+  let sign = ""
+  if num.lt(this, 0) { set sign = "-" }
+  if num.le(1e21, absolute) { let output = invoke ts.number.to_string(this) return output }
+  let digits = invoke ts.number.round_decimal(this, precision)
+  let width = num.add(precision, 1)
+  set digits = format.pad(digits, width, "0", "start")
+  let builtin_arg_6 = num.sub(text.len(digits), precision)
+let output = invoke ts.number.layout(digits, builtin_arg_6, false)
+  return text.concat(sign, output)
+}
+
+function ts.number.toExponential(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let precision = 0.0
+  if same(kind(args[0]), "absent") {} else { let builtin_arg_7 = args[0]
+set precision = invoke ts.to_number(builtin_arg_7) }
+  if num.is_nan(precision) { set precision = 0.0 }
+  set precision = num.trunc(precision)
+  if num.le(0, precision) { if num.le(precision, 100) {} else { throw error.new("RangeError", "Invalid precision", null) } } else { throw error.new("RangeError", "Invalid precision", null) }
+  if num.is_finite(this) {} else { let output = invoke ts.number.to_string(this) return output }
+  let precision = float.to_int(precision)
+  let absolute = num.abs(this)
+  let sign = ""
+  if num.lt(this, 0) { set sign = "-" }
+  let parts = invoke ts.number.parts(this)
+  let point = num.add(text.len(parts[0]), parts[1])
+  if eq(absolute, 0) { set point = 1 }
+  if same(kind(args[0]), "absent") {
+    let builtin_arg_8 = parts[0]
+let output = invoke ts.number.layout(builtin_arg_8, point, true)
+    return text.concat(sign, output)
+  }
+  let count = num.add(precision, 1)
+  let builtin_arg_9 = num.sub(count, point)
+let digits = invoke ts.number.round_decimal(this, builtin_arg_9)
+  if num.lt(count, text.len(digits)) {
+    set point = num.add(point, 1)
+    set digits = text.slice(digits, 0, count)
+  }
+  set digits = format.pad(digits, count, "0", "start")
+  let scientific = true
+  let output = invoke ts.number.layout(digits, point, scientific)
+  return text.concat(sign, output)
+}
+
+function ts.number.toPrecision(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  if same(kind(args[0]), "absent") { let output = invoke ts.number.to_string(this) return output }
+  let precision = 0.0
+  if same(kind(args[0]), "absent") {} else { let builtin_arg_10 = args[0]
+set precision = invoke ts.to_number(builtin_arg_10) }
+  if num.is_nan(precision) { set precision = 0.0 }
+  set precision = num.trunc(precision)
+  if num.le(1, precision) { if num.le(precision, 100) {} else { throw error.new("RangeError", "Invalid precision", null) } } else { throw error.new("RangeError", "Invalid precision", null) }
+  if num.is_finite(this) {} else { let output = invoke ts.number.to_string(this) return output }
+  let precision = float.to_int(precision)
+  let absolute = num.abs(this)
+  let sign = ""
+  if num.lt(this, 0) { set sign = "-" }
+  let parts = invoke ts.number.parts(this)
+  let point = num.add(text.len(parts[0]), parts[1])
+  if eq(absolute, 0) { set point = 1 }
+  let count = precision
+  let builtin_arg_11 = num.sub(count, point)
+let digits = invoke ts.number.round_decimal(this, builtin_arg_11)
+  if num.lt(count, text.len(digits)) {
+    set point = num.add(point, 1)
+    set digits = text.slice(digits, 0, count)
+  }
+  set digits = format.pad(digits, count, "0", "start")
+  let scientific = num.lt(count, point)
+  if num.lt(point, -5) { set scientific = true }
+  let output = invoke ts.number.layout(digits, point, scientific)
+  return text.concat(sign, output)
+}
+
+function ts.number.EPSILON() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 2.220446049250313e-16
+}
+
+function ts.number.MAX_SAFE_INTEGER() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 9007199254740991.0
+}
+
+function ts.number.MIN_SAFE_INTEGER() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return -9007199254740991.0
+}
+
+function ts.number.MAX_VALUE() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 1.7976931348623157e308
+}
+
+function ts.number.MIN_VALUE() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return 5e-324
+}
+
+function ts.number.NaN() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return nan
+}
+
+function ts.number.POSITIVE_INFINITY() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return inf
+}
+
+function ts.number.NEGATIVE_INFINITY() -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return -inf
+}
+
+function ts.number.global_isFinite(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_12 = args[0]
+let value = invoke ts.to_number(builtin_arg_12)
+  return num.is_finite(value)
+}
+
+function ts.number.global_isNaN(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_13 = args[0]
+let value = invoke ts.to_number(builtin_arg_13)
+  return num.is_nan(value)
+}

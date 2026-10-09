@@ -1,0 +1,506 @@
+# JavaScript date behavior, expressed in kernel code.
+use date.ecma.format
+use date.ecma.milliseconds
+use date.ecma.parse
+use date.ecma.timestamp
+use eq
+use error.new
+use kind
+use list.len
+use num.abs
+use num.add
+use num.div
+use num.floor
+use num.is_finite
+use num.le
+use num.lt
+use num.mul
+use num.rem_floor
+use num.sub
+use num.to_float
+use num.trunc
+use same
+use ts.date.UTC
+use ts.date.call
+use ts.date.construct
+use ts.date.day_from_year
+use ts.date.getDate
+use ts.date.getDay
+use ts.date.getFullYear
+use ts.date.getHours
+use ts.date.getMilliseconds
+use ts.date.getMinutes
+use ts.date.getMonth
+use ts.date.getSeconds
+use ts.date.getTime
+use ts.date.getUTCDate
+use ts.date.getUTCDay
+use ts.date.getUTCFullYear
+use ts.date.getUTCHours
+use ts.date.getUTCMilliseconds
+use ts.date.getUTCMinutes
+use ts.date.getUTCMonth
+use ts.date.getUTCSeconds
+use ts.date.is
+use ts.date.now
+use ts.date.parse
+use ts.date.parts
+use ts.date.setDate
+use ts.date.setFullYear
+use ts.date.setHours
+use ts.date.setMilliseconds
+use ts.date.setMinutes
+use ts.date.setMonth
+use ts.date.setSeconds
+use ts.date.setTime
+use ts.date.setUTCDate
+use ts.date.setUTCFullYear
+use ts.date.setUTCHours
+use ts.date.setUTCMilliseconds
+use ts.date.setUTCMinutes
+use ts.date.setUTCMonth
+use ts.date.setUTCSeconds
+use ts.date.toISOString
+use ts.date.toJSON
+use ts.date.toString
+use ts.date.toUTCString
+use ts.date.utc
+use ts.date.valueOf
+use ts.pad
+use ts.to_number
+use ts.to_primitive
+use ts.to_string
+
+function ts.date.day_from_year(year: Number) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return num.add(num.sub(num.add(num.mul(365.0, num.sub(year, 1970.0)), num.floor(num.div(num.sub(year, 1969.0), 4.0))), num.floor(num.div(num.sub(year, 1901.0), 100.0))), num.floor(num.div(num.sub(year, 1601.0), 400.0)))
+}
+
+function ts.date.utc(args: List(Any)) -> Number
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let defaults = [absent, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+  let components = []
+  let i = 0
+  while num.lt(i, 7) {
+    let value = defaults[i]
+    if num.lt(i, list.len(args)) { set value = args[i] }
+    let value = invoke ts.to_number(value)
+    if num.is_finite(value) {} else { return nan }
+    set components[i] = num.trunc(value)
+    set i = num.add(i, 1)
+  }
+  let year = components[0]
+  if num.le(0, year) { if num.le(year, 99) { set year = num.add(year, 1900.0) } }
+  let month = components[1]
+  set year = num.add(year, num.floor(num.div(month, 12.0)))
+  set month = num.rem_floor(month, 12.0)
+  let before = [0.0, 31.0, 59.0, 90.0, 120.0, 151.0, 181.0, 212.0, 243.0, 273.0, 304.0, 334.0]
+  let after_february = 0.0
+  if num.lt(1, month) { set after_february = 1.0 }
+  let builtin_arg_0 = num.add(year, after_february)
+let first = invoke ts.date.day_from_year(builtin_arg_0)
+  set first = num.add(num.sub(first, num.mul(365.0, after_february)), before[month])
+  let day = num.add(first, num.sub(components[2], 1.0))
+  let time = num.add(num.add(num.mul(components[3], 3600000.0), num.mul(components[4], 60000.0)), num.add(num.mul(components[5], 1000.0), components[6]))
+  let output = num.add(num.mul(day, 86400000.0), time)
+  if num.le(num.abs(output), 8640000000000000.0) { return num.add(num.trunc(output), 0.0) }
+  return nan
+}
+
+function ts.date.construct(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let time = absent
+  if eq(list.len(args), 0) { set time = date.ecma.milliseconds(clock) } else {
+    if eq(list.len(args), 1) {
+      let value = args[0]
+      if same(kind(value), "timestamp") { return value }
+      if same(kind(value), "record") { if same(value.brand, "date.invalid") { return date.ecma.timestamp(nan) } }
+      let value = invoke ts.to_primitive(value, "default")
+      if same(kind(value), "text") { set time = date.ecma.parse(value) } else { set time = invoke ts.to_number(value) }
+    } else { set time = invoke ts.date.utc(args) }
+  }
+  return date.ecma.timestamp(num.to_float(time))
+}
+
+function ts.date.is(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if same(kind(value), "timestamp") { return true }
+  if same(kind(value), "record") { return same(value.brand, "date.invalid") }
+  return false
+}
+
+function ts.date.call(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return date.ecma.format(clock, "string")
+}
+
+function ts.date.now(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return date.ecma.milliseconds(clock)
+}
+
+function ts.date.parse(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_1 = args[0]
+let text = invoke ts.to_string(builtin_arg_1)
+  return date.ecma.parse(text)
+}
+
+function ts.date.UTC(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = invoke ts.date.utc(args)
+  return output
+}
+
+function ts.date.parts(date: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let time = date.ecma.milliseconds(date)
+  if num.is_finite(time) {} else { return (nan, nan, nan, nan, nan, nan, nan, nan) }
+  let days = num.floor(num.div(time, 86400000.0))
+  let shifted = num.add(days, 719468.0)
+  let era = num.floor(num.div(shifted, 146097.0))
+  let day_of_era = num.sub(shifted, num.mul(era, 146097.0))
+  let year_of_era = num.floor(num.div(num.sub(num.add(num.sub(day_of_era, num.floor(num.div(day_of_era, 1460.0))), num.floor(num.div(day_of_era, 36524.0))), num.floor(num.div(day_of_era, 146096.0))), 365.0))
+  let year = num.add(year_of_era, num.mul(era, 400.0))
+  let day_of_year = num.sub(day_of_era, num.sub(num.add(num.mul(year_of_era, 365.0), num.floor(num.div(year_of_era, 4.0))), num.floor(num.div(year_of_era, 100.0))))
+  let month_prime = num.floor(num.div(num.add(num.mul(5.0, day_of_year), 2.0), 153.0))
+  let date = num.add(num.sub(day_of_year, num.floor(num.div(num.add(num.mul(153.0, month_prime), 2.0), 5.0))), 1.0)
+  let month = num.sub(month_prime, 9.0)
+  if num.lt(month_prime, 10.0) { set month = num.add(month_prime, 3.0) }
+  if num.le(month, 2.0) { set year = num.add(year, 1.0) }
+  let within = num.rem_floor(time, 86400000.0)
+  return (year, num.sub(month, 1.0), date, num.rem_floor(num.add(days, 4.0), 7.0), num.floor(num.div(within, 3600000.0)), num.floor(num.div(num.rem_floor(within, 3600000.0), 60000.0)), num.floor(num.div(num.rem_floor(within, 60000.0), 1000.0)), num.rem_floor(within, 1000.0))
+}
+
+function ts.date.getTime(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return date.ecma.milliseconds(this)
+}
+
+function ts.date.valueOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return date.ecma.milliseconds(this)
+}
+
+function ts.date.getUTCFullYear(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let parts = invoke ts.date.parts(this)
+  return parts[0]
+}
+
+function ts.date.getUTCMonth(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let parts = invoke ts.date.parts(this)
+  return parts[1]
+}
+
+function ts.date.getUTCDate(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let parts = invoke ts.date.parts(this)
+  return parts[2]
+}
+
+function ts.date.getUTCDay(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let parts = invoke ts.date.parts(this)
+  return parts[3]
+}
+
+function ts.date.getUTCHours(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let parts = invoke ts.date.parts(this)
+  return parts[4]
+}
+
+function ts.date.getUTCMinutes(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let parts = invoke ts.date.parts(this)
+  return parts[5]
+}
+
+function ts.date.getUTCSeconds(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let parts = invoke ts.date.parts(this)
+  return parts[6]
+}
+
+function ts.date.getUTCMilliseconds(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let parts = invoke ts.date.parts(this)
+  return parts[7]
+}
+
+function ts.date.toISOString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return date.ecma.format(this, "iso")
+}
+
+function ts.date.toUTCString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return date.ecma.format(this, "utc")
+}
+
+function ts.date.toString(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return date.ecma.format(this, "string")
+}
+
+function ts.date.toJSON(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  if num.is_finite(date.ecma.milliseconds(this)) {} else { return null }
+  return date.ecma.format(this, "iso")
+}
+
+function ts.date.getFullYear(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+}
+
+function ts.date.getMonth(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+}
+
+function ts.date.getDate(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+}
+
+function ts.date.getDay(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+}
+
+function ts.date.getHours(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+}
+
+function ts.date.getMinutes(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+}
+
+function ts.date.getSeconds(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+}
+
+function ts.date.getMilliseconds(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_LOCAL_TIME_UNSUPPORTED", "Use a UTC getter", null)
+}
+
+function ts.date.setTime(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
+}
+
+function ts.date.setFullYear(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
+}
+
+function ts.date.setMonth(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
+}
+
+function ts.date.setDate(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
+}
+
+function ts.date.setHours(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
+}
+
+function ts.date.setMinutes(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
+}
+
+function ts.date.setSeconds(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
+}
+
+function ts.date.setMilliseconds(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_METHOD_UNSUPPORTED", "Construct a new Date", null)
+}
+
+function ts.date.setUTCFullYear(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_IMMUTABLE", "Construct a new Date", null)
+}
+
+function ts.date.setUTCMonth(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_IMMUTABLE", "Construct a new Date", null)
+}
+
+function ts.date.setUTCDate(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_IMMUTABLE", "Construct a new Date", null)
+}
+
+function ts.date.setUTCHours(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_IMMUTABLE", "Construct a new Date", null)
+}
+
+function ts.date.setUTCMinutes(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_IMMUTABLE", "Construct a new Date", null)
+}
+
+function ts.date.setUTCSeconds(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_IMMUTABLE", "Construct a new Date", null)
+}
+
+function ts.date.setUTCMilliseconds(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  throw error.new("TS_DATE_IMMUTABLE", "Construct a new Date", null)
+}

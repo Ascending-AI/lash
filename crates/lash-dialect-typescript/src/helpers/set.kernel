@@ -1,0 +1,342 @@
+# JavaScript set behavior, expressed in kernel code.
+use error.new
+use kind
+use list.len
+use num.to_float
+use same
+use set.contains
+use set.len
+use set.values
+use ts.is_nullish
+use ts.iterate
+use ts.map.key
+use ts.map.value
+use ts.pad
+use ts.set.add
+use ts.set.clear
+use ts.set.construct
+use ts.set.delete
+use ts.set.difference
+use ts.set.entries
+use ts.set.forEach
+use ts.set.has
+use ts.set.intersection
+use ts.set.is
+use ts.set.isDisjointFrom
+use ts.set.isSubsetOf
+use ts.set.isSupersetOf
+use ts.set.keys
+use ts.set.size
+use ts.set.symmetricDifference
+use ts.set.union
+use ts.set.values
+
+use map.contains
+
+use map.len
+
+use num.is_nan
+
+use num.le
+
+use ts.get
+
+use ts.to_number
+
+use ts.set.other
+
+use ts.set.contains_other
+
+use ts.set.other_size
+
+function ts.set.construct(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let output = set{}
+  let source = args[0]
+  let empty = invoke ts.is_nullish(source)
+  if empty {} else {
+    let values = invoke ts.iterate(source)
+    for value in values {
+      let key = invoke ts.map.key(value)
+      set output[key] = true
+    }
+  }
+  return output
+}
+
+function ts.set.is(value: Any) -> Bool
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return same(kind(value), "set")
+}
+
+function ts.set.size(this: Any) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  return num.to_float(set.len(this))
+}
+
+function ts.set.add(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_0 = args[0]
+let key = invoke ts.map.key(builtin_arg_0)
+  set this[key] = true
+  return this
+}
+
+function ts.set.has(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_1 = args[0]
+let key = invoke ts.map.key(builtin_arg_1)
+  return set.contains(this, key)
+}
+
+function ts.set.delete(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let builtin_arg_2 = args[0]
+let key = invoke ts.map.key(builtin_arg_2)
+  let had = set.contains(this, key)
+  set this[key] = false
+  return had
+}
+
+function ts.set.clear(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  for key in set.values(this) { set this[key] = false }
+  return absent
+}
+
+function ts.set.keys(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = []
+  for key in this {
+    let value = invoke ts.map.value(key)
+    set output[list.len(output)] = value
+  }
+  return output
+}
+
+function ts.set.values(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = []
+  for key in this {
+    let value = invoke ts.map.value(key)
+    set output[list.len(output)] = value
+  }
+  return output
+}
+
+function ts.set.entries(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let output = []
+  for key in this {
+    let value = invoke ts.map.value(key)
+    set output[list.len(output)] = [value, value]
+  }
+  return output
+}
+
+function ts.set.forEach(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 2)
+  let callback = args[0]
+  let receiver = args[1]
+  for key in this {
+    let value = invoke ts.map.value(key)
+    let passed = [value, value, this]
+    do apply callback(receiver, passed)
+  }
+  return absent
+}
+
+function ts.set.other(other: Any) -> Any
+kernel 1
+errors "type_error", "TS_METHOD_UNSUPPORTED"
+charge sum(16, deep(other))
+body {
+  let k = kind(other)
+  if same(k, "set") { return other }
+  if same(k, "map") { return other }
+  let size = invoke ts.get(other, "size")
+  let size = invoke ts.to_number(size)
+  if num.is_nan(size) { throw error.new("type_error", "size property is not a number", null) }
+  let has = invoke ts.get(other, "has")
+  if same(kind(has), "closure") {} else { throw error.new("type_error", "has property is not callable", null) }
+  let keys = invoke ts.get(other, "keys")
+  if same(kind(keys), "closure") {} else { throw error.new("type_error", "keys property is not callable", null) }
+  throw error.new("TS_METHOD_UNSUPPORTED", "Set algebra accepts a Set or Map, not guest has/keys callbacks", null)
+}
+
+function ts.set.contains_other(other: Any, key: Any) -> Bool
+kernel 1
+charge 4
+body {
+  if same(kind(other), "map") { return map.contains(other, key) }
+  return set.contains(other, key)
+}
+
+function ts.set.other_size(other: Any) -> Number
+kernel 1
+charge 4
+body {
+  if same(kind(other), "map") { return num.to_float(map.len(other)) }
+  return num.to_float(set.len(other))
+}
+
+function ts.set.union(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let other = args[0]
+  let other = invoke ts.set.other(other)
+  let output = set{}
+  for key in this {
+    set output[key] = true
+  }
+  for key in other {
+    set output[key] = true
+  }
+  return output
+}
+
+function ts.set.intersection(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "TS_METHOD_UNSUPPORTED"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let other = args[0]
+  let other = invoke ts.set.other(other)
+  let output = set{}
+  let size = invoke ts.set.other_size(other)
+  if num.le(set.len(this), size) {
+    for key in this {
+      let present = invoke ts.set.contains_other(other, key)
+      if present { set output[key] = true }
+    }
+  } else {
+    for key in other {
+      if set.contains(this, key) { set output[key] = true }
+    }
+  }
+  return output
+}
+
+function ts.set.difference(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let other = args[0]
+  let other = invoke ts.set.other(other)
+  let output = set{}
+  for key in this {
+    let present = invoke ts.set.contains_other(other, key)
+    if present {} else { set output[key] = true }
+  }
+  return output
+}
+
+function ts.set.symmetricDifference(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let other = args[0]
+  let other = invoke ts.set.other(other)
+  let output = set{}
+  for key in this {
+    let present = invoke ts.set.contains_other(other, key)
+    if present {} else { set output[key] = true }
+  }
+  for key in other {
+    if set.contains(this, key) {} else { set output[key] = true }
+  }
+  return output
+}
+
+function ts.set.isSubsetOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let other = args[0]
+  let other = invoke ts.set.other(other)
+  let output = set{}
+  for key in this {
+    let present = invoke ts.set.contains_other(other, key)
+    if present {} else { return false }
+  }
+  return true
+}
+
+function ts.set.isSupersetOf(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let other = args[0]
+  let other = invoke ts.set.other(other)
+  let output = set{}
+  for key in other {
+    if set.contains(this, key) {} else { return false }
+  }
+  return true
+}
+
+function ts.set.isDisjointFrom(this: Any, args: List(Any)) -> Any
+kernel 1
+errors "type_error", "RangeError"
+charge sum(8, deep(result))
+body {
+  let args = invoke ts.pad(args, 1)
+  let other = args[0]
+  let other = invoke ts.set.other(other)
+  let output = set{}
+  for key in this {
+    let present = invoke ts.set.contains_other(other, key)
+    if present { return false }
+  }
+  return true
+}
