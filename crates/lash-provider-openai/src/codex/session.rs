@@ -185,7 +185,20 @@ impl CodexWebSocketAttemptError {
         self.progress
     }
 
+    pub(super) fn is_connection_limit_rejection(&self) -> bool {
+        self.has_provider_code("websocket_connection_limit_reached")
+    }
+
+    fn has_provider_code(&self, spelling: &str) -> bool {
+        self.error.code.as_ref().is_some_and(|code| {
+            code.namespace().as_str() == "provider" && code.spelling() == spelling
+        })
+    }
+
     pub(super) fn is_stale_previous_response(&self) -> bool {
+        if self.has_provider_code("previous_response_not_found") {
+            return true;
+        }
         let haystack = format!(
             "{}\n{}\n{}",
             self.error.message,

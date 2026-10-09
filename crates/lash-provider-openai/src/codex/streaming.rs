@@ -182,8 +182,8 @@ impl CodexProvider {
             {
                 Ok(response) => return Ok(response),
                 Err(err)
-                    if plan.context.is_continued()
-                        && err.is_stale_previous_response()
+                    if ((plan.context.is_continued() && err.is_stale_previous_response())
+                        || err.is_connection_limit_rejection())
                         && err.progress() < CodexAttemptProgress::OutputStarted
                         && !retry_state.after_stale_previous_response =>
                 {
@@ -411,13 +411,25 @@ impl CodexProvider {
                 );
                 partial.terminal_reason = LlmTerminalReason::Unknown;
                 partial.generation_disposition = Some(*receipt);
-                return Err(CodexWebSocketAttemptError::during_stream(
+                let error = CodexWebSocketAttemptError::during_stream(
                     error
                         .with_request_body(request_body.clone())
                         .with_partial_response(partial),
                     events_seen,
                     &state,
-                ));
+                );
+                if plan.context.is_continued()
+                    && error.is_stale_previous_response()
+                    && !error.is_connection_limit_rejection()
+                    && error.progress() < CodexAttemptProgress::OutputStarted
+                {
+                    // The response id was rejected, not the live connection.
+                    // Clear its continuation and retry full context on it. An
+                    // affirmative connection-limit rejection instead drops the
+                    // guard's lease and reconnects, only before output.
+                    attempt.finish(None);
+                }
+                return Err(error);
             }
             emit_stream_progress(
                 stream_events.as_ref(),

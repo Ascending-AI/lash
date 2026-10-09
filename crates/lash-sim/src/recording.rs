@@ -1,5 +1,5 @@
 use lash_sansio::sync::MutexExt;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -26,13 +26,19 @@ const REDACTED: &str = "[redacted]";
 /// Configuration for recording provider HTTP exchanges as Provider Wire Scripts.
 ///
 /// The recorder never persists the request body. Callers provide only stable,
-/// non-sensitive matchers that are useful during replay.
+/// non-sensitive matchers that are useful during replay. Response headers require
+/// a caller-owned allow-list; none are retained unless explicitly selected.
+/// Known credentials and user markers are redacted, including provenance notes.
+/// A final pattern scan refuses possible secrets before publication. Pattern
+/// scanning is a guard, not proof of absence: arbitrary secrets and encoded
+/// binary content may not match a recognizable pattern.
 #[derive(Clone, Debug)]
 pub struct ProviderRecordingConfig {
     output_dir: PathBuf,
     name_prefix: String,
     provider_kind: String,
     request_match: ProviderWireRequestMatch,
+    response_header_allow_list: Vec<String>,
     user_content_markers: Vec<String>,
     notes: Option<String>,
 }
@@ -48,6 +54,7 @@ impl ProviderRecordingConfig {
             name_prefix: name_prefix.into(),
             provider_kind: provider_kind.into(),
             request_match: ProviderWireRequestMatch::default(),
+            response_header_allow_list: Vec::new(),
             user_content_markers: Vec::new(),
             notes: None,
         }
@@ -63,6 +70,17 @@ impl ProviderRecordingConfig {
         markers: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         self.user_content_markers = markers.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Select response header names to persist (case-insensitive). Unselected
+    /// credential headers refuse the recording; other unselected headers are
+    /// omitted. Selected credential values are always redacted.
+    pub fn with_response_header_allow_list(
+        mut self,
+        names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.response_header_allow_list = names.into_iter().map(Into::into).collect();
         self
     }
 
@@ -210,7 +228,9 @@ impl RecordingExchange {
     ) -> Result<(), LlmTransportError> {
         let response_started_at = elapsed_millis(response_started_after);
         let response_finished_at = elapsed_millis(response_finished_after);
-        let headers = self.scrubber.redact_headers(headers);
+        let headers = self
+            .scrubber
+            .redact_headers(headers, &self.config.response_header_allow_list)?;
         let body = self.scrubber.redact_body(body)?;
         let timeline = if !(200..300).contains(&status) {
             vec![ProviderWireEvent::HttpError {
@@ -263,19 +283,12 @@ impl RecordingExchange {
     }
 
     fn write_script(&self, timeline: Vec<ProviderWireEvent>) -> Result<(), LlmTransportError> {
-        fs::create_dir_all(&self.config.output_dir).map_err(|error| {
-            recording_error(format!(
-                "could not create provider recording directory `{}`: {error}",
-                self.config.output_dir.display()
-            ))
-        })?;
+        fs::create_dir_all(&self.config.output_dir)
+            .map_err(|_| recording_error("could not create provider recording directory"))?;
         let name = format!("{}.{:03}", self.config.name_prefix, self.exchange_number);
         let path = self.config.output_dir.join(format!("{name}.json"));
         if path.exists() {
-            return Err(recording_error(format!(
-                "provider recording `{}` already exists",
-                path.display()
-            )));
+            return Err(recording_error("provider recording already exists"));
         }
         let mut script = ProviderWireScript::from_parts(
             PROVIDER_WIRE_SCRIPT_SCHEMA.to_string(),
@@ -289,12 +302,17 @@ impl RecordingExchange {
             kind: ProviderWireProvenanceKind::CapturedLive,
             source: self.endpoint.path.clone(),
             captured_at: Some(Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)),
-            notes: self.config.notes.clone(),
+            notes: self
+                .config
+                .notes
+                .as_deref()
+                .map(|notes| self.scrubber.redact_text(notes)),
         });
-        script.validate()?;
         let mut encoded = serde_json::to_vec_pretty(&script).map_err(|error| {
             recording_error(format!("could not serialize provider recording: {error}"))
         })?;
+        self.scrubber.check_serialized_artifact(&encoded)?;
+        script.validate()?;
         encoded.push(b'\n');
         write_new_file(&path, &encoded)?;
         self.recorded_paths.lock_recover().push(path);
@@ -388,14 +406,72 @@ impl CaptureScrubber {
         Self { literals }
     }
 
-    fn redact_headers(&self, headers: &[(String, String)]) -> Vec<ProviderWireHeader> {
-        headers
-            .iter()
-            .map(|(name, value)| ProviderWireHeader {
+    fn redact_headers(
+        &self,
+        headers: &[(String, String)],
+        allow_list: &[String],
+    ) -> Result<Vec<ProviderWireHeader>, LlmTransportError> {
+        let mut retained = Vec::new();
+        for (name, value) in headers {
+            let selected = allow_list
+                .iter()
+                .any(|allowed| allowed.eq_ignore_ascii_case(name));
+            let sensitive = sensitive_json_key(name);
+            if !selected {
+                if sensitive {
+                    return Err(recording_error(
+                        "refusing provider recording: credential response header outside caller allow-list",
+                    ));
+                }
+                continue;
+            }
+            retained.push(ProviderWireHeader {
                 name: name.clone(),
-                value: self.redact_text(value),
-            })
-            .collect()
+                value: if sensitive {
+                    REDACTED.to_string()
+                } else {
+                    self.redact_text(value)
+                },
+            });
+        }
+        Ok(retained)
+    }
+
+    fn check_serialized_artifact(&self, encoded: &[u8]) -> Result<(), LlmTransportError> {
+        // Inspect the exact artifact, decoding JSON escapes in both keys and
+        // values. Diagnostics contain only a static category, never a value or
+        // an artifact path (a key or filename can itself contain a secret).
+        let artifact: Value = serde_json::from_slice(encoded)
+            .map_err(|_| recording_error("could not inspect serialized provider recording"))?;
+        self.check_artifact_value(&artifact)
+    }
+
+    fn check_artifact_value(&self, value: &Value) -> Result<(), LlmTransportError> {
+        match value {
+            Value::String(text) => self.check_artifact_text(text),
+            Value::Array(items) => items
+                .iter()
+                .try_for_each(|item| self.check_artifact_value(item)),
+            Value::Object(fields) => fields.iter().try_for_each(|(key, value)| {
+                self.check_artifact_text(key)?;
+                self.check_artifact_value(value)
+            }),
+            _ => Ok(()),
+        }
+    }
+
+    fn check_artifact_text(&self, text: &str) -> Result<(), LlmTransportError> {
+        let finding = if self.literals.iter().any(|literal| text.contains(literal)) {
+            Some("known sensitive marker")
+        } else {
+            secret_pattern(text)
+        };
+        match finding {
+            Some(category) => Err(recording_error(format!(
+                "refusing provider recording: possible secret ({category})"
+            ))),
+            None => Ok(()),
+        }
     }
 
     fn redact_body(&self, body: &[u8]) -> Result<String, LlmTransportError> {
@@ -555,28 +631,82 @@ fn recorded_stream_error(
 }
 
 fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), LlmTransportError> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|error| {
-            recording_error(format!(
-                "could not create provider recording `{}`: {error}",
-                path.display()
-            ))
-        })?;
-    file.write_all(bytes).map_err(|error| {
-        recording_error(format!(
-            "could not write provider recording `{}`: {error}",
-            path.display()
-        ))
+    write_new_file_before_publish(path, bytes, || Ok(()))
+}
+
+fn write_new_file_before_publish(
+    path: &Path,
+    bytes: &[u8],
+    before_publish: impl FnOnce() -> std::io::Result<()>,
+) -> Result<(), LlmTransportError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut file = tempfile::Builder::new()
+        .prefix(".provider-recording-")
+        .tempfile_in(parent)
+        .map_err(|_| recording_error("could not create provider recording temporary file"))?;
+    file.write_all(bytes)
+        .map_err(|_| recording_error("could not write provider recording temporary file"))?;
+    file.as_file()
+        .sync_all()
+        .map_err(|_| recording_error("could not sync provider recording temporary file"))?;
+    before_publish().map_err(|_| recording_error("provider recording publication interrupted"))?;
+    // A hard link atomically claims the final name without replacing an
+    // existing recording. A crash before this point leaves only a randomly
+    // named sibling, so the final path is free for a retry.
+    fs::hard_link(file.path(), path).map_err(|_| {
+        recording_error("could not publish provider recording without replacing an existing file")
     })?;
-    file.sync_all().map_err(|error| {
-        recording_error(format!(
-            "could not sync provider recording `{}`: {error}",
-            path.display()
-        ))
-    })
+    file.close()
+        .map_err(|_| recording_error("could not clean up provider recording temporary file"))
+}
+
+/// Conservative recognizable credential patterns. No environment-derived or
+/// default header policy is consulted here.
+fn secret_pattern(text: &str) -> Option<&'static str> {
+    if text.contains("-----BEGIN ") && text.contains("PRIVATE KEY-----") {
+        return Some("private key");
+    }
+    let mut bearer_tokens = text
+        .split(|ch: char| {
+            !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '_' | '~' | '+' | '/' | '=' | '-')
+        })
+        .filter(|token| !token.is_empty());
+    while let Some(scheme) = bearer_tokens.next() {
+        if scheme.eq_ignore_ascii_case("bearer")
+            && bearer_tokens
+                .next()
+                .is_some_and(|credential| credential.len() >= 16)
+        {
+            return Some("bearer token");
+        }
+    }
+    for token in text.split(|ch: char| !ch.is_ascii_alphanumeric() && !matches!(ch, '_' | '-')) {
+        if token.starts_with("sk-") && token.len() >= 23 {
+            return Some("API key");
+        }
+        if token.starts_with("AIza") && token.len() >= 24 {
+            return Some("Google API key");
+        }
+        if (token.starts_with("AKIA") || token.starts_with("ASIA"))
+            && token.len() == 20
+            && token
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
+        {
+            return Some("AWS access key");
+        }
+        if ["ghp_", "gho_", "ghu_", "ghs_", "ghr_"]
+            .iter()
+            .any(|prefix| token.starts_with(prefix))
+            && token.len() >= 24
+        {
+            return Some("GitHub token");
+        }
+    }
+    None
 }
 
 fn validate_name_prefix(name: &str) -> Result<(), LlmTransportError> {
@@ -703,8 +833,11 @@ mod tests {
             inner,
             ProviderRecordingConfig::new(output.path(), "openai_rate_limit", "openai")
                 .with_request_match(request_match)
+                .with_response_header_allow_list(["set-cookie", "X-Request-ID"])
                 .with_user_content_markers([USER_MARKER])
-                .with_notes("capture-time redaction regression"),
+                .with_notes(format!(
+                    "capture-time redaction: {REQUEST_SECRET}; {USER_MARKER}"
+                )),
         );
         let request = LlmHttpRequest {
             method: LlmHttpMethod::Post,
@@ -830,5 +963,160 @@ mod tests {
                 .expect("recorded paths")
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn recorder_refuses_authorization_outside_caller_header_allow_list() {
+        let output = tempfile::tempdir().expect("recording directory");
+        let exchange = recording_exchange(ProviderRecordingConfig::new(
+            output.path(),
+            "secret",
+            "openai",
+        ));
+        let error = exchange
+            .write_response(
+                200,
+                &[(
+                    "Authorization".into(),
+                    "Bearer unlisted-response-credential".into(),
+                )],
+                b"safe",
+                Duration::ZERO,
+                Duration::ZERO,
+                None,
+            )
+            .expect_err("unlisted authorization must refuse publication");
+        assert!(!error.message.contains("unlisted-response-credential"));
+        assert!(!output.path().join("secret.001.json").exists());
+        assert!(exchange.recorded_paths.lock_recover().is_empty());
+    }
+
+    #[test]
+    fn interrupted_publication_leaves_final_absent_and_retry_succeeds() {
+        let output = tempfile::tempdir().expect("recording directory");
+        let path = output.path().join("recording.json");
+        write_new_file_before_publish(&path, b"complete", || {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "injected interruption after write",
+            ))
+        })
+        .expect_err("interrupted publication");
+        assert!(
+            !path.exists(),
+            "a failed write must not claim the final name"
+        );
+        write_new_file(&path, b"retry").expect("retry publication");
+        assert_eq!(fs::read(&path).expect("published bytes"), b"retry");
+        write_new_file(&path, b"replacement").expect_err("existing recording is never overwritten");
+        assert_eq!(fs::read(&path).expect("original bytes"), b"retry");
+        assert_eq!(fs::read_dir(output.path()).expect("directory").count(), 1);
+    }
+
+    fn recording_exchange(config: ProviderRecordingConfig) -> RecordingExchange {
+        RecordingExchange::new(
+            config,
+            1,
+            &LlmHttpRequest {
+                method: LlmHttpMethod::Post,
+                url: "https://api.example/v1/responses".into(),
+                headers: vec![(
+                    "authorization".into(),
+                    lash_llm_transport::HttpHeaderValue::sensitive(format!(
+                        "Bearer {REQUEST_SECRET}"
+                    )),
+                )],
+                body: Bytes::new(),
+                body_for_error: None,
+                response_start_timeout_message: None,
+            },
+            Arc::new(Mutex::new(Vec::new())),
+        )
+        .expect("exchange")
+    }
+
+    #[test]
+    fn recorder_keeps_only_selected_headers_and_sanitizes_provenance_notes() {
+        let output = tempfile::tempdir().expect("recording directory");
+        for (prefix, allow_list) in [
+            ("empty", vec![]),
+            ("selected", vec!["X-Request-ID", "Authorization"]),
+        ] {
+            let exchange = recording_exchange(
+                ProviderRecordingConfig::new(output.path(), prefix, "openai")
+                    .with_response_header_allow_list(allow_list)
+                    .with_notes(format!("capture {REQUEST_SECRET}")),
+            );
+            let mut headers = vec![
+                ("x-request-id".into(), "request-safe".into()),
+                ("content-type".into(), "text/plain".into()),
+            ];
+            if prefix == "selected" {
+                headers.push(("authorization".into(), "opaque-response-credential".into()));
+            }
+            exchange
+                .write_response(200, &headers, b"safe", Duration::ZERO, Duration::ZERO, None)
+                .expect("recording");
+            let encoded = fs::read_to_string(output.path().join(format!("{prefix}.001.json")))
+                .expect("artifact");
+            assert!(!encoded.contains(REQUEST_SECRET));
+            assert!(!encoded.contains("opaque-response-credential"));
+            assert!(!encoded.contains("content-type"));
+            assert_eq!(encoded.contains("request-safe"), prefix == "selected");
+            assert!(encoded.contains(REDACTED));
+        }
+    }
+
+    #[test]
+    fn recorder_refuses_secret_patterns_in_serialized_artifact_without_echoing_values() {
+        let output = tempfile::tempdir().expect("recording directory");
+        for secret in [
+            "Bearer unknownCredential123456789",
+            "Bearer   unknownCredential123456789",
+            r#"{"echo":"Bearer unknownCredential123456789"}"#,
+            "https://provider.test?key=sk-unknownCredential123456789",
+            "sk-unknownCredential123456789",
+            "sk-ant-unknownCredential123456789",
+            "AIzaUnknownCredential123456789",
+            "AKIA1234567890ABCDEF",
+            "ghp_unknownCredential123456789",
+            "-----BEGIN RSA PRIVATE KEY-----",
+        ] {
+            for surface in ["body", "notes", "matcher-key"] {
+                let mut config = ProviderRecordingConfig::new(output.path(), "secret", "openai");
+                if surface == "notes" {
+                    config = config.with_notes(secret);
+                }
+                if surface == "matcher-key" {
+                    config = config.with_request_match(ProviderWireRequestMatch {
+                        any: false,
+                        body: [(
+                            secret.into(),
+                            JsonMatcher {
+                                equals: Some(Value::Bool(true)),
+                                ..Default::default()
+                            },
+                        )]
+                        .into_iter()
+                        .collect(),
+                        ..Default::default()
+                    });
+                }
+                let exchange = recording_exchange(config);
+                let body = if surface == "body" {
+                    secret.as_bytes()
+                } else {
+                    b"safe"
+                };
+                let error = exchange
+                    .write_response(200, &[], body, Duration::ZERO, Duration::ZERO, None)
+                    .expect_err("secret must prevent publication");
+                assert!(error.message.contains("possible secret"));
+                assert!(!error.message.contains(secret));
+                assert!(error.raw.is_none());
+                assert!(!output.path().join("secret.001.json").exists());
+                assert!(exchange.recorded_paths.lock_recover().is_empty());
+            }
+        }
     }
 }

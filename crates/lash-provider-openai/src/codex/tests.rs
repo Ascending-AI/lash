@@ -22,6 +22,8 @@ use ws_testing::{
     InjectedAcceptFault, ScriptedWsAction, assistant_item, spawn_scripted_websocket,
     spawn_scripted_websocket_with_injected_accept_faults,
 };
+#[path = "continuation_rejection_tests.rs"]
+mod continuation_rejection_tests;
 #[path = "idle_timeout_tests.rs"]
 mod idle_timeout_tests;
 #[path = "response_error_tests.rs"]
