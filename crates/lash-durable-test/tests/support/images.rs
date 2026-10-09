@@ -31,16 +31,16 @@ pub const SESSION: Image = Image {
     wal: include_bytes!("../fixtures/formats/session/db-wal.gz"),
 };
 
-/// A lashlang process parked on its first sleep, released `ready` by a
+/// A lash_vm process parked on its first sleep, released `ready` by a
 /// draining node (`format_fixtures.rs`).
-pub const LASHLANG: Image = Image {
-    name: "lashlang",
-    db: include_bytes!("../fixtures/formats/lashlang/db.gz"),
-    wal: include_bytes!("../fixtures/formats/lashlang/db-wal.gz"),
+pub const LASH_VM: Image = Image {
+    name: "lashvm",
+    db: include_bytes!("../fixtures/formats/lashvm/db.gz"),
+    wal: include_bytes!("../fixtures/formats/lashvm/db-wal.gz"),
 };
 
 /// Every committed image.
-pub const ALL: [&Image; 2] = [&SESSION, &LASHLANG];
+pub const ALL: [&Image; 2] = [&SESSION, &LASH_VM];
 
 /// The database file a store set over a fresh directory opens at.
 pub fn database_path(dir: &Path) -> std::path::PathBuf {

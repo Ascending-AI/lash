@@ -19,7 +19,7 @@
       "samples": 37
     }
   },
-  "lash-internal-lashlang-runtime/lash_lashlang_runtime": {
+  "lash-internal-vm-runtime/lash_vm_runtime": {
     "target": {
       "cpu_count": 1,
       "memory_kb": 1572864,
@@ -29,7 +29,7 @@
       "samples": 31
     }
   },
-  "lash-internal-lashlang/lashlang": {
+  "lash-internal-vm/lash_vm": {
     "target": {
       "cpu_count": 1,
       "memory_kb": 2097152,

@@ -27,8 +27,8 @@ use lash_typescript::workflow_graph::{
     TypeScriptStatementText, workflow_graph_from_artifact, workflow_graph_from_source,
     workflow_graph_to_source,
 };
-use lashlang::testing::harness::test_environment;
-use lashlang::{
+use lash_vm::testing::harness::test_environment;
+use lash_vm::{
     Declaration, Expr, LinkedModule, ModuleArtifact, Program, WorkflowDeclaration, WorkflowGraph,
     WorkflowNodeKind,
 };
@@ -38,7 +38,7 @@ fn link(source: &str) -> LinkedModule {
         .unwrap_or_else(|error| panic!("corpus source links: {error}\n{source}"))
 }
 
-type NodeFacts = BTreeMap<String, (String, Vec<lashlang::WorkflowExecutionSite>)>;
+type NodeFacts = BTreeMap<String, (String, Vec<lash_vm::WorkflowExecutionSite>)>;
 
 /// Every node's kind and execution sites, by id, processes included.
 fn node_facts(graph: &WorkflowGraph) -> NodeFacts {
@@ -163,12 +163,12 @@ fn private_binders(program: &Program) -> BTreeSet<String> {
 
 /// Consistently renames every private binder of `program`.
 fn alpha_rename(program: &Program, private: &BTreeSet<String>) -> Program {
-    let rename = |name: &mut lashlang::AstString| {
+    let rename = |name: &mut lash_vm::AstString| {
         if private.contains(name.as_str()) {
             *name = format!("renamed_{}", name.as_str()).into();
         }
     };
-    fn walk(expr: &mut Expr, rename: &dyn Fn(&mut lashlang::AstString)) {
+    fn walk(expr: &mut Expr, rename: &dyn Fn(&mut lash_vm::AstString)) {
         match expr {
             Expr::Variable(name) => rename(name),
             Expr::Assign { target, .. } => rename(&mut target.root),
@@ -225,8 +225,8 @@ fn l3_alpha_renaming_private_binders_preserves_node_ids() {
         );
         let renamed = alpha_rename(&program, &private);
         assert_ne!(program, renamed, "the corpus source has private binders");
-        let original = lashlang::workflow_graph_from_program(&program, &TypeScriptStatementText);
-        let alpha = lashlang::workflow_graph_from_program(&renamed, &TypeScriptStatementText);
+        let original = lash_vm::workflow_graph_from_program(&program, &TypeScriptStatementText);
+        let alpha = lash_vm::workflow_graph_from_program(&renamed, &TypeScriptStatementText);
         let ids = |graph: &WorkflowGraph| {
             graph
                 .nodes()
@@ -282,9 +282,9 @@ fn lifted_owner(source: &str) -> LiftedOwner {
     )
     .expect("the stored artifact reloads");
     let name = lifted(&linked.artifact);
-    let compiled = lashlang::compile(
+    let compiled = lash_vm::compile(
         &linked.artifact,
-        lashlang::Entry::Process(
+        lash_vm::Entry::Process(
             linked
                 .artifact
                 .process_ref(&name)
@@ -297,7 +297,7 @@ fn lifted_owner(source: &str) -> LiftedOwner {
         lens,
         linked: name,
         reloaded: lifted(&reloaded),
-        runtime: lashlang::testing::harness::compiled_execution_sites(&compiled)
+        runtime: lash_vm::testing::harness::compiled_execution_sites(&compiled)
             .into_iter()
             .map(|site| site.workflow_site.owner.clone())
             .collect(),

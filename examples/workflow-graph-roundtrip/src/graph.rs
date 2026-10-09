@@ -1,14 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use lash::rlm::lang::{
-    Expr, ProcessParam, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
-    WorkflowGraph, WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowSubgraph,
-    format_type_expr, workflow_call_from_ir, workflow_call_to_ir, workflow_effect_from_ir,
-    workflow_effect_to_ir,
-};
 use lash::typescript::workflow_graph::{
     typescript_assign_target_source, typescript_expression_source,
 };
+use lash::vm::ir::{
+    Expr, ProcessParam, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
+    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowSubgraph, format_type_expr,
+    workflow_call_from_ir, workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
+};
+use lash::workflow::WorkflowGraph;
 use serde_json::json;
 
 use crate::{
@@ -292,9 +292,9 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
             id: workflow_node_id(&format!("process-binding:{name}")),
             name: "data".to_string(),
             description: None,
-            name_source: lash::rlm::lang::WorkflowNodeNameSource::Derived,
+            name_source: lash::vm::ir::WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Data {
-                binding: Some(lash::rlm::lang::AssignTarget::variable(name.clone().into())),
+                binding: Some(lash::vm::ir::AssignTarget::variable(name.clone().into())),
                 expression: Expr::ProcessRef {
                     process: name.into(),
                 },
@@ -422,7 +422,7 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
         }
         _ => None,
     };
-    let binding = |target: &Option<lash::rlm::lang::AssignTarget>| {
+    let binding = |target: &Option<lash::vm::ir::AssignTarget>| {
         target
             .as_ref()
             .and_then(|target| typescript_assign_target_source(target).ok())
@@ -1033,7 +1033,7 @@ fn editable_binding(
     node_id: &str,
     source: Option<&String>,
     scope: &FragmentScope,
-) -> Result<Option<lash::rlm::lang::AssignTarget>, RenderErrorResponse> {
+) -> Result<Option<lash::vm::ir::AssignTarget>, RenderErrorResponse> {
     source
         .map(|source| parse_assignment_target(node_id, source, scope))
         .transpose()
@@ -1052,7 +1052,7 @@ fn required_text(
     })
 }
 
-fn diagnostic_kind_text(kind: lash::rlm::lang::WorkflowDiagnosticKind) -> String {
+fn diagnostic_kind_text(kind: lash::vm::ir::WorkflowDiagnosticKind) -> String {
     serde_json::to_value(kind)
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))

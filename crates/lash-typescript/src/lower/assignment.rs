@@ -3,7 +3,7 @@
 //! access special cases (a session slot through `globalThis`, a built-in
 //! global's own surface, an async function's erased `constructor`) lower.
 
-use lashlang::{AssignPathStep, AssignTarget, Expr as LashExpr, is_javascript_builtin_global};
+use lash_vm::{AssignPathStep, AssignTarget, Expr as LashExpr, is_javascript_builtin_global};
 
 use crate::adapter::{AssignTarget as TsAssignTarget, Expr, MemberProperty};
 use crate::{Diagnostic, DiagnosticCode};
@@ -152,7 +152,7 @@ impl Lowerer {
                         self.read_bindings.insert(binding.id);
                     }
                     Ok(LashExpr::BuiltinCall {
-                        name: "__lashlang_global_get".into(),
+                        name: "__lash_vm_global_get".into(),
                         args: vec![LashExpr::String(field.as_str().into())],
                     })
                 }

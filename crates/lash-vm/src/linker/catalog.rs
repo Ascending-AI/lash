@@ -1,0 +1,909 @@
+use super::*;
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LashVmHostCatalog {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) module_instances: BTreeMap<String, ModuleInstanceCatalog>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) resource_types: BTreeMap<String, ResourceTypeCatalog>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) named_data_types: BTreeMap<String, NamedDataType>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(super) value_constructors: BTreeMap<String, ValueConstructorBinding>,
+}
+
+/// A host operation's types as JSON Schema, mirroring a tool contract.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OperationContract {
+    input_schema: serde_json::Value,
+    output: OperationOutputContract,
+}
+
+/// How a host operation's output type is determined.
+#[derive(Clone, Debug, PartialEq)]
+enum OperationOutputContract {
+    /// The output shape is fixed by the contract.
+    Static(serde_json::Value),
+    /// The output shape is the schema the caller passes in `input_field`,
+    /// falling back to `default_schema` when the call site says nothing.
+    FromInputField {
+        input_field: String,
+        default_schema: Option<serde_json::Value>,
+    },
+}
+
+impl OperationContract {
+    pub fn new(input_schema: serde_json::Value, output_schema: serde_json::Value) -> Self {
+        Self {
+            input_schema,
+            output: OperationOutputContract::Static(output_schema),
+        }
+    }
+
+    pub fn from_input_field(
+        input_schema: serde_json::Value,
+        input_field: impl Into<String>,
+        default_schema: Option<serde_json::Value>,
+    ) -> Self {
+        Self {
+            input_schema,
+            output: OperationOutputContract::FromInputField {
+                input_field: input_field.into(),
+                default_schema,
+            },
+        }
+    }
+
+    fn to_binding(&self) -> Result<ResourceOperationBinding, crate::json_schema::JsonSchemaError> {
+        let input_ty = crate::json_schema_to_type_expr(&self.input_schema)?;
+        let (output_ty, output_from_input) = match &self.output {
+            OperationOutputContract::Static(schema) => {
+                (crate::json_schema_to_type_expr(schema)?, None)
+            }
+            OperationOutputContract::FromInputField {
+                input_field,
+                default_schema,
+            } => (
+                TypeExpr::Any,
+                Some(OutputFromInputBinding {
+                    input_field: input_field.clone(),
+                    default_schema: default_schema
+                        .as_ref()
+                        .map(crate::json_schema_to_type_expr)
+                        .transpose()?,
+                }),
+            ),
+        };
+        Ok(ResourceOperationBinding {
+            input_ty,
+            output_ty,
+            output_from_input,
+        })
+    }
+}
+
+impl LashVmHostCatalog {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "each operation registration in this loop is the first for its name in a freshly built catalog, per the message"
+    )]
+    pub fn tool_default(operations: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        let mut catalog = Self::new();
+        for operation in operations {
+            let operation = operation.into();
+            catalog
+                .add_module_operation(
+                    ["tools"],
+                    "Tools",
+                    operation.clone(),
+                    operation,
+                    TypeExpr::Any,
+                    TypeExpr::Any,
+                )
+                .expect("tool-default operation names must be unique");
+        }
+        catalog
+    }
+
+    pub fn add_module_instance(
+        &mut self,
+        module_path: impl IntoIterator<Item = impl Into<String>>,
+        resource_type: impl Into<String>,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let path = module_path.into_iter().map(Into::into).collect::<Vec<_>>();
+        assert!(!path.is_empty(), "module path must not be empty");
+        let resource_type = resource_type.into();
+        let key = module_path_key(&path);
+        if let Some(existing) = self.module_instances.get(&key) {
+            return Err(LashVmHostCatalogError::ConflictingModuleInstance {
+                alias: key,
+                existing: existing.resource_type.clone(),
+                incoming: resource_type,
+            });
+        }
+        if let Some(operation) = self
+            .resource_types
+            .get(&resource_type)
+            .and_then(|resource| resource.operations.keys().next())
+        {
+            return Err(LashVmHostCatalogError::UnboundModuleOperation {
+                module: key,
+                resource_type,
+                operation: operation.clone(),
+            });
+        }
+        self.insert_module_instance(path, resource_type);
+        Ok(())
+    }
+
+    pub fn ensure_resource_type(&mut self, resource_type: impl Into<String>) {
+        self.resource_types.entry(resource_type.into()).or_default();
+    }
+
+    pub fn add_operation(
+        &mut self,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        input_ty: TypeExpr,
+        output_ty: TypeExpr,
+    ) -> Result<(), LashVmHostCatalogError> {
+        self.add_operation_binding(
+            resource_type,
+            operation,
+            ResourceOperationBinding {
+                input_ty,
+                output_ty,
+                output_from_input: None,
+            },
+        )
+    }
+
+    pub fn add_operation_binding(
+        &mut self,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        binding: ResourceOperationBinding,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let resource_type = resource_type.into();
+        let operation = operation.into();
+        if let Some(module) = self
+            .module_instances
+            .values()
+            .find(|module| module.resource_type == resource_type)
+        {
+            return Err(LashVmHostCatalogError::UnboundModuleOperation {
+                module: module.alias.clone(),
+                resource_type,
+                operation,
+            });
+        }
+        self.insert_resource_operation(resource_type, operation, binding)
+    }
+
+    pub fn add_module_operation(
+        &mut self,
+        module_path: impl IntoIterator<Item = impl Into<String>>,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        host_operation: impl Into<String>,
+        input_ty: TypeExpr,
+        output_ty: TypeExpr,
+    ) -> Result<(), LashVmHostCatalogError> {
+        self.insert_module_operation_binding(
+            module_path,
+            resource_type,
+            operation,
+            host_operation,
+            ResourceOperationBinding {
+                input_ty,
+                output_ty,
+                output_from_input: None,
+            },
+        )
+    }
+
+    /// Declares a module operation the way a tool contract declares one: in
+    /// JSON Schema.
+    ///
+    /// This is the only way a host installs an operation whose output is
+    /// derived from an input field, and it is the same path a catalog tool
+    /// travels, so a host-owned operation and a tool cannot drift apart in
+    /// what a contract is allowed to say.
+    pub fn add_module_operation_contract(
+        &mut self,
+        module_path: impl IntoIterator<Item = impl Into<String>>,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        host_operation: impl Into<String>,
+        contract: &OperationContract,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let host_operation = host_operation.into();
+        let binding = contract.to_binding().map_err(|source| {
+            LashVmHostCatalogError::UnreadableOperationSchema {
+                operation: host_operation.clone(),
+                source,
+            }
+        })?;
+        self.insert_module_operation_binding(
+            module_path,
+            resource_type,
+            operation,
+            host_operation,
+            binding,
+        )
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the module instance was inserted into the same map a few lines above under the same key"
+    )]
+    fn insert_module_operation_binding(
+        &mut self,
+        module_path: impl IntoIterator<Item = impl Into<String>>,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        host_operation: impl Into<String>,
+        binding: ResourceOperationBinding,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let path = module_path.into_iter().map(Into::into).collect::<Vec<_>>();
+        assert!(!path.is_empty(), "module path must not be empty");
+        let resource_type = resource_type.into();
+        let operation = operation.into();
+        let host_operation = host_operation.into();
+        let key = module_path_key(&path);
+        if let Some(existing_module) = self.module_instances.get(&key) {
+            if existing_module.path != path
+                || existing_module.resource_type != resource_type
+                || existing_module.alias != key
+            {
+                return Err(LashVmHostCatalogError::ConflictingModuleInstance {
+                    alias: key,
+                    existing: existing_module.resource_type.clone(),
+                    incoming: resource_type,
+                });
+            }
+            if let Some(existing) = existing_module.operations.get(&operation) {
+                return Err(LashVmHostCatalogError::ConflictingModuleOperation {
+                    module: key,
+                    operation,
+                    existing: existing.host_operation.clone(),
+                    incoming: host_operation,
+                });
+            }
+        }
+        if let Some(existing) = self
+            .resource_types
+            .get(&resource_type)
+            .and_then(|resource| resource.operations.get(&operation))
+            && existing != &binding
+        {
+            return Err(LashVmHostCatalogError::ConflictingResourceOperation {
+                resource_type,
+                operation,
+            });
+        }
+        if !self.module_instances.contains_key(&key) {
+            self.insert_module_instance(path, resource_type.clone());
+        }
+        self.resource_types
+            .entry(resource_type)
+            .or_default()
+            .operations
+            .entry(operation.clone())
+            .or_insert(binding);
+        let module = self
+            .module_instances
+            .get_mut(&key)
+            .expect("module instance was just inserted");
+        module
+            .operations
+            .insert(operation, ModuleOperationBinding { host_operation });
+        Ok(())
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "requirement modules were inserted before requiring their operations, per the message"
+    )]
+    pub(crate) fn require_module_operation_binding(
+        &mut self,
+        module_path: impl IntoIterator<Item = impl Into<String>>,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        host_operation: impl Into<String>,
+        binding: ResourceOperationBinding,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let path = module_path.into_iter().map(Into::into).collect::<Vec<_>>();
+        let resource_type = resource_type.into();
+        let operation = operation.into();
+        let host_operation = host_operation.into();
+        let alias = module_path_key(&path);
+        if let Some(existing) = self.resolve_module_operation(&resource_type, &alias, &operation) {
+            if existing.host_operation == host_operation && existing.binding == &binding {
+                return Ok(());
+            }
+            return Err(LashVmHostCatalogError::ConflictingModuleOperation {
+                module: alias,
+                operation,
+                existing: existing.host_operation.to_string(),
+                incoming: host_operation,
+            });
+        }
+        if let Some(existing) = self.module_instances.get(&alias)
+            && existing.resource_type != resource_type
+        {
+            return Err(LashVmHostCatalogError::ConflictingModuleInstance {
+                alias,
+                existing: existing.resource_type.clone(),
+                incoming: resource_type,
+            });
+        }
+        if let Some(existing) = self.resolve_operation(&resource_type, &operation)
+            && existing != &binding
+        {
+            return Err(LashVmHostCatalogError::ConflictingResourceOperation {
+                resource_type,
+                operation,
+            });
+        }
+        if !self.module_instances.contains_key(&alias) {
+            self.insert_module_instance(path, resource_type.clone());
+        }
+        self.resource_types
+            .entry(resource_type)
+            .or_default()
+            .operations
+            .entry(operation.clone())
+            .or_insert(binding);
+        self.module_instances
+            .get_mut(&alias)
+            .expect("requirement module was inserted")
+            .operations
+            .insert(operation, ModuleOperationBinding { host_operation });
+        Ok(())
+    }
+
+    pub(crate) fn require_module_instance(
+        &mut self,
+        module_path: impl IntoIterator<Item = impl Into<String>>,
+        resource_type: impl Into<String>,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let path = module_path.into_iter().map(Into::into).collect::<Vec<_>>();
+        let resource_type = resource_type.into();
+        let alias = module_path_key(&path);
+        if let Some(existing) = self.module_instances.get(&alias) {
+            if existing.path == path
+                && existing.resource_type == resource_type
+                && existing.alias == alias
+            {
+                return Ok(());
+            }
+            return Err(LashVmHostCatalogError::ConflictingModuleInstance {
+                alias,
+                existing: existing.resource_type.clone(),
+                incoming: resource_type,
+            });
+        }
+        self.insert_module_instance(path, resource_type);
+        Ok(())
+    }
+
+    pub(crate) fn require_operation_binding(
+        &mut self,
+        resource_type: impl Into<String>,
+        operation: impl Into<String>,
+        binding: ResourceOperationBinding,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let resource_type = resource_type.into();
+        let operation = operation.into();
+        if let Some(existing) = self.resolve_operation(&resource_type, &operation) {
+            if existing == &binding {
+                return Ok(());
+            }
+            return Err(LashVmHostCatalogError::ConflictingResourceOperation {
+                resource_type,
+                operation,
+            });
+        }
+        self.resource_types
+            .entry(resource_type)
+            .or_default()
+            .operations
+            .insert(operation, binding);
+        Ok(())
+    }
+
+    pub fn add_value_constructor(
+        &mut self,
+        path: impl IntoIterator<Item = impl Into<String>>,
+        input_ty: TypeExpr,
+        output_ty: TypeExpr,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let path = path.into_iter().map(Into::into).collect::<Vec<_>>();
+        assert!(!path.is_empty(), "constructor path must not be empty");
+        let key = module_path_key(&path);
+        self.insert_value_constructor(
+            key,
+            ValueConstructorBinding {
+                path,
+                type_name: format_type_expr(&output_ty),
+                input_ty,
+                output_ty,
+            },
+        )
+    }
+
+    pub fn add_named_data_type(
+        &mut self,
+        data_type: NamedDataType,
+    ) -> Result<(), LashVmHostCatalogError> {
+        self.merge_named_data_type(data_type)
+    }
+
+    pub(crate) fn require_named_data_type(
+        &mut self,
+        data_type: NamedDataType,
+    ) -> Result<(), LashVmHostCatalogError> {
+        if let Some(existing) = self.named_data_types.get(data_type.name()) {
+            if existing == &data_type {
+                return Ok(());
+            }
+            return Err(LashVmHostCatalogError::ConflictingNamedDataType {
+                name: data_type.name().to_string(),
+            });
+        }
+        self.named_data_types
+            .insert(data_type.name().to_string(), data_type);
+        Ok(())
+    }
+
+    pub(crate) fn require_value_constructor(
+        &mut self,
+        binding: ValueConstructorBinding,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let path = module_path_key(&binding.path);
+        if let Some(existing) = self.value_constructors.get(&path) {
+            if existing == &binding {
+                return Ok(());
+            }
+            return Err(LashVmHostCatalogError::ConflictingValueConstructor { path });
+        }
+        self.value_constructors.insert(path, binding);
+        Ok(())
+    }
+
+    pub fn try_extend(&mut self, other: Self) -> Result<(), LashVmHostCatalogError> {
+        *self = self.clone().try_merged(other)?;
+        Ok(())
+    }
+
+    /// [`Self::try_extend`] for a caller that discards the catalog on
+    /// refusal, so the merge need not copy it first.
+    pub fn try_merged(self, other: Self) -> Result<Self, LashVmHostCatalogError> {
+        let mut merged = self;
+        let LashVmHostCatalog {
+            module_instances,
+            resource_types,
+            named_data_types,
+            value_constructors,
+        } = other;
+        let mut linked_resource_operations = BTreeSet::new();
+        for incoming in module_instances.into_values() {
+            if incoming.operations.is_empty() {
+                merged.add_module_instance(incoming.path, incoming.resource_type)?;
+                continue;
+            }
+            let resource_type = incoming.resource_type;
+            for (operation, module_binding) in incoming.operations {
+                let Some(binding) = resource_types
+                    .get(&resource_type)
+                    .and_then(|resource| resource.operations.get(&operation))
+                    .cloned()
+                else {
+                    return Err(LashVmHostCatalogError::UnboundModuleOperation {
+                        module: incoming.alias,
+                        resource_type,
+                        operation,
+                    });
+                };
+                merged.insert_module_operation_binding(
+                    incoming.path.iter().map(String::as_str),
+                    resource_type.clone(),
+                    operation.clone(),
+                    module_binding.host_operation,
+                    binding,
+                )?;
+                linked_resource_operations.insert((resource_type.clone(), operation));
+            }
+        }
+        for (resource_type, incoming) in resource_types {
+            if incoming.operations.is_empty() {
+                if merged
+                    .resource_types
+                    .get(&resource_type)
+                    .is_some_and(|resource| !resource.operations.is_empty())
+                {
+                    return Err(LashVmHostCatalogError::ConflictingResourceType { resource_type });
+                }
+                merged.ensure_resource_type(resource_type);
+                continue;
+            }
+            for (operation, binding) in incoming.operations {
+                if linked_resource_operations.contains(&(resource_type.clone(), operation.clone()))
+                {
+                    continue;
+                }
+                merged.add_operation_binding(resource_type.clone(), operation, binding)?;
+            }
+        }
+
+        for (path, incoming) in value_constructors {
+            merged.insert_value_constructor(path, incoming)?;
+        }
+        for data_type in named_data_types.into_values() {
+            merged.merge_named_data_type(data_type)?;
+        }
+        Ok(merged)
+    }
+
+    pub fn satisfies(&self, required: &Self) -> bool {
+        for (path, required_module) in &required.module_instances {
+            let Some(module) = self.module_instances.get(path) else {
+                return false;
+            };
+            if module.path != required_module.path
+                || module.resource_type != required_module.resource_type
+                || module.alias != required_module.alias
+            {
+                return false;
+            }
+            for (operation, required_binding) in &required_module.operations {
+                if module.operations.get(operation) != Some(required_binding) {
+                    return false;
+                }
+            }
+        }
+        for (resource_type, required_catalog) in &required.resource_types {
+            let Some(catalog) = self.resource_types.get(resource_type) else {
+                return false;
+            };
+            for (operation, required_binding) in &required_catalog.operations {
+                if catalog.operations.get(operation) != Some(required_binding) {
+                    return false;
+                }
+            }
+        }
+        for (path, required_constructor) in &required.value_constructors {
+            if self.value_constructors.get(path) != Some(required_constructor) {
+                return false;
+            }
+        }
+        for (name, required_data_type) in &required.named_data_types {
+            if self.named_data_types.get(name) != Some(required_data_type) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn has_resource_type(&self, resource_type: &str) -> bool {
+        self.resource_types.contains_key(resource_type)
+    }
+
+    pub fn has_named_data_type(&self, name: &str) -> bool {
+        self.named_data_types.contains_key(name)
+    }
+
+    pub fn is_known_opaque_value_type(&self, name: &str) -> bool {
+        self.value_constructors.values().any(|constructor| {
+                matches!(&constructor.output_ty, TypeExpr::Ref(type_name) if type_name == name)
+            })
+    }
+
+    pub fn decode_host_descriptor_as<T: serde::de::DeserializeOwned>(
+        &self,
+        source_type: &str,
+        value: serde_json::Value,
+    ) -> Result<T, crate::HostDescriptorError> {
+        if !self.is_known_opaque_value_type(source_type) {
+            return Err(crate::HostDescriptorError::UnknownSourceType {
+                source_type: source_type.to_string(),
+            });
+        }
+        serde_json::from_value(value).map_err(|err| crate::HostDescriptorError::MalformedPayload {
+            source_type: source_type.to_string(),
+            message: err.to_string(),
+        })
+    }
+
+    pub fn module_instances(&self) -> impl Iterator<Item = (&str, &ModuleInstanceCatalog)> {
+        self.module_instances
+            .iter()
+            .map(|(path, module)| (path.as_str(), module))
+    }
+
+    pub fn resource_types(&self) -> impl Iterator<Item = (&str, &ResourceTypeCatalog)> {
+        self.resource_types
+            .iter()
+            .map(|(resource_type, catalog)| (resource_type.as_str(), catalog))
+    }
+
+    pub fn named_data_types(&self) -> impl Iterator<Item = (&str, &NamedDataType)> {
+        self.named_data_types
+            .iter()
+            .map(|(name, data_type)| (name.as_str(), data_type))
+    }
+
+    pub fn value_constructors(&self) -> impl Iterator<Item = (&str, &ValueConstructorBinding)> {
+        self.value_constructors
+            .iter()
+            .map(|(path, constructor)| (path.as_str(), constructor))
+    }
+
+    pub fn resolve_named_data_type(&self, name: &str) -> Option<&NamedDataType> {
+        self.named_data_types.get(name)
+    }
+
+    pub fn resolve_module_path(&self, path: &[impl AsRef<str>]) -> Option<ResourceRefExpr> {
+        let key = module_path_key(path);
+        let module = self.module_instances.get(&key)?;
+        Some(ResourceRefExpr::resolved(
+            module
+                .path
+                .iter()
+                .map(|segment| segment.as_str().into())
+                .collect(),
+            module.resource_type.clone(),
+            module.alias.clone(),
+        ))
+    }
+
+    pub fn resolve_alias(&self, resource: &ResourceRefExpr) -> Option<&ResourceTypeCatalog> {
+        if !resource.resource_type.is_empty() {
+            return self.resource_types.get(resource.resource_type.as_str());
+        }
+        let resolved = self.resolve_module_path(&resource.path)?;
+        self.resource_types.get(resolved.resource_type.as_str())
+    }
+
+    pub fn resolve_operation(
+        &self,
+        resource_type: &str,
+        operation: &str,
+    ) -> Option<&ResourceOperationBinding> {
+        self.resource_types
+            .get(resource_type)?
+            .operations
+            .get(operation)
+    }
+
+    pub fn has_operations(&self) -> bool {
+        self.resource_types
+            .values()
+            .any(|resource_type| !resource_type.operations.is_empty())
+    }
+
+    pub fn resolve_module_operation(
+        &self,
+        resource_type: &str,
+        alias: &str,
+        operation: &str,
+    ) -> Option<ResolvedOperation<'_>> {
+        let module = self.module_instances.get(alias)?;
+        (module.resource_type == resource_type).then_some(())?;
+        let module_binding = module.operations.get(operation)?;
+        let binding = self
+            .resource_types
+            .get(resource_type)?
+            .operations
+            .get(operation)?;
+        Some(ResolvedOperation {
+            host_operation: &module_binding.host_operation,
+            binding,
+        })
+    }
+
+    /// Whether this catalog already provides `operation` on the module at the
+    /// dotted `module_path` (e.g. `"web"`, `"web.fetch"`), regardless of the
+    /// backing resource type. Used by deferred resolution to skip call-paths
+    /// the link-time host environment already binds.
+    pub fn provides_module_operation(&self, module_path: &str, operation: &str) -> bool {
+        self.module_instances
+            .get(module_path)
+            .is_some_and(|module| module.operations.contains_key(operation))
+    }
+
+    /// Deferred-resolution replay uses this before applying its recorded
+    /// outcome, so a later ambient definition cannot shadow the authority
+    /// captured for the same call path. Resource-operation schema is removed
+    /// only when no remaining module binding uses it; otherwise the ordinary
+    /// catalog collision checks remain authoritative when the recorded
+    /// definition is folded back in.
+    pub fn mask_module_operation(&mut self, module_path: &str, operation: &str) {
+        let Some(module) = self.module_instances.get_mut(module_path) else {
+            return;
+        };
+        let resource_type = module.resource_type.clone();
+        if module.operations.remove(operation).is_none() {
+            return;
+        }
+        if module.operations.is_empty() {
+            self.module_instances.remove(module_path);
+        }
+        let still_used = self.module_instances.values().any(|module| {
+            module.resource_type == resource_type && module.operations.contains_key(operation)
+        });
+        if !still_used && let Some(resource) = self.resource_types.get_mut(&resource_type) {
+            resource.operations.remove(operation);
+            if resource.operations.is_empty()
+                && !self
+                    .module_instances
+                    .values()
+                    .any(|module| module.resource_type == resource_type)
+            {
+                self.resource_types.remove(&resource_type);
+            }
+        }
+    }
+
+    pub fn resolve_value_constructor(
+        &self,
+        path: &[impl AsRef<str>],
+    ) -> Option<&ValueConstructorBinding> {
+        self.value_constructors.get(&module_path_key(path))
+    }
+
+    /// Whether this catalog already provides the exact dotted constructor
+    /// path. Deferred definition resolvers use this to leave resident
+    /// constructors authoritative.
+    pub fn provides_value_constructor(&self, path: &str) -> bool {
+        self.value_constructors.contains_key(path)
+    }
+
+    pub fn operation_suggestions_for_host(&self, host_operation: &str) -> Vec<String> {
+        let mut suggestions = Vec::new();
+        for module in self.module_instances.values() {
+            for (operation, binding) in &module.operations {
+                if binding.host_operation == host_operation {
+                    suggestions.push(format!("{}.{}", module.alias, operation));
+                }
+            }
+        }
+        suggestions.sort();
+        suggestions.dedup();
+        suggestions
+    }
+
+    pub fn operation_suggestions_for_prefix(
+        &self,
+        prefix: &[impl AsRef<str>],
+        operation: &str,
+    ) -> Vec<String> {
+        let prefix = module_path_key(prefix);
+        let mut suggestions = Vec::new();
+        for module in self.module_instances.values() {
+            if module.alias == prefix || !module.alias.starts_with(&format!("{prefix}.")) {
+                continue;
+            }
+            if self
+                .resolve_operation(&module.resource_type, operation)
+                .is_some()
+            {
+                suggestions.push(format!("{}.{}", module.alias, operation));
+            }
+        }
+        suggestions.sort();
+        suggestions.dedup();
+        suggestions
+    }
+
+    pub(crate) fn operation_suggestions_for_operation(&self, operation: &str) -> Vec<String> {
+        let mut suggestions = self
+            .module_instances
+            .values()
+            .filter(|module| module.operations.contains_key(operation))
+            .map(|module| format!("{}.{}", module.alias, operation))
+            .collect::<Vec<_>>();
+        suggestions.sort();
+        suggestions.dedup();
+        suggestions
+    }
+
+    pub(crate) fn operation_suggestions_for_resource_type(
+        &self,
+        resource_type: &str,
+    ) -> Vec<String> {
+        let mut suggestions = self
+            .module_instances
+            .values()
+            .filter(|module| module.resource_type == resource_type)
+            .flat_map(|module| {
+                module
+                    .operations
+                    .keys()
+                    .map(move |operation| format!("{}.{}", module.alias, operation))
+            })
+            .collect::<Vec<_>>();
+        if suggestions.is_empty()
+            && let Some(resource) = self.resource_types.get(resource_type)
+        {
+            suggestions.extend(resource.operations.keys().cloned());
+        }
+        suggestions.sort();
+        suggestions.dedup();
+        suggestions
+    }
+
+    pub(super) fn refuse_named_data_type(
+        &self,
+        data_type: &NamedDataType,
+    ) -> Result<(), LashVmHostCatalogError> {
+        if self.named_data_types.contains_key(data_type.name()) {
+            return Err(LashVmHostCatalogError::ConflictingNamedDataType {
+                name: data_type.name().to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    pub(super) fn merge_named_data_type(
+        &mut self,
+        data_type: NamedDataType,
+    ) -> Result<(), LashVmHostCatalogError> {
+        self.refuse_named_data_type(&data_type)?;
+        self.named_data_types
+            .insert(data_type.name().to_string(), data_type);
+        Ok(())
+    }
+
+    pub(super) fn insert_module_instance(&mut self, path: Vec<String>, resource_type: String) {
+        let alias = module_path_key(&path);
+        self.module_instances.insert(
+            alias.clone(),
+            ModuleInstanceCatalog {
+                path,
+                resource_type: resource_type.clone(),
+                alias,
+                operations: BTreeMap::new(),
+            },
+        );
+        self.ensure_resource_type(resource_type);
+    }
+
+    pub(super) fn insert_resource_operation(
+        &mut self,
+        resource_type: String,
+        operation: String,
+        binding: ResourceOperationBinding,
+    ) -> Result<(), LashVmHostCatalogError> {
+        let resource = self
+            .resource_types
+            .entry(resource_type.clone())
+            .or_default();
+        if resource.operations.contains_key(&operation) {
+            return Err(LashVmHostCatalogError::ConflictingResourceOperation {
+                resource_type,
+                operation,
+            });
+        }
+        resource.operations.insert(operation, binding);
+        Ok(())
+    }
+
+    pub(super) fn insert_value_constructor(
+        &mut self,
+        path: String,
+        binding: ValueConstructorBinding,
+    ) -> Result<(), LashVmHostCatalogError> {
+        if self.value_constructors.contains_key(&path) {
+            return Err(LashVmHostCatalogError::ConflictingValueConstructor { path });
+        }
+        self.value_constructors.insert(path, binding);
+        Ok(())
+    }
+}

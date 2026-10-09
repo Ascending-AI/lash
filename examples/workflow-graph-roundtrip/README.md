@@ -1,6 +1,6 @@
 # Workflow graph round-trip backend
 
-This example is the Rust half of a visual Lashlang workflow editor. It exposes
+This example is the Rust half of a visual Lash VM workflow editor. It exposes
 the source → graph → edited graph → canonical source seam over HTTP, then runs
 the saved version and streams node-correlated display events over SSE.
 
@@ -10,7 +10,7 @@ and process definition through `core.host_artifacts()`, then calls
 The overlay folds `core.processes().events()` and uses
 `lash::process::trace_lashlang_process_map` to validate node identities.
 Live process observation supplies transient node starts and waits. Display events
-carry the stable tool-call ID used to correlate their deltas with observed nodes. Lashlang owns
+carry the stable tool-call ID used to correlate their deltas with observed nodes. Lash VM owns
 graph projection, validation/rendering, and execution-site correlation. Canvas
 layout is deliberately frontend-owned and never appears in source or API graph
 documents.

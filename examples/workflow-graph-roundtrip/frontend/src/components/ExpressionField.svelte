@@ -21,7 +21,7 @@
   import ScalarBuilder from './ScalarBuilder.svelte';
   import IdentifierField from './IdentifierField.svelte';
 
-  // A single editable Lashlang-text slot, rendered by mode:
+  // A single editable LashVm-text slot, rendered by mode:
   //  - Power: a raw multi-line code input (plus variable picker + validation).
   //  - Simplified: a lightweight visual builder so a non-expert can express the
   //    common cases without typing syntax — `builder="value"` a typed scalar,

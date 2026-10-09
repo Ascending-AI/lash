@@ -1,7 +1,7 @@
 //! FIG-3656: built-in objects are first-class values — member semantics, prototypes, expandos and lastIndex reads.
 
 use super::*;
-use lashlang::{DurableBaseline, DurableFragment, Vm, VmInstance, VmRunOutcome};
+use lash_vm::{DurableBaseline, DurableFragment, Vm, VmInstance, VmRunOutcome};
 use std::collections::BTreeSet;
 
 /// A built-in object is a first-class value: a missing member reads
@@ -59,8 +59,8 @@ fn run_cell(source: &str, state: &mut State) -> Value {
         .map(str::to_string)
         .collect::<BTreeSet<_>>();
     let program = lash_typescript::parse_with_globals(source, &globals).expect("parse cell");
-    let program = lashlang::testing::harness::try_compile_program(&program).expect("compile cell");
-    match futures::executor::block_on(lashlang::execute(&program, state, &Host))
+    let program = lash_vm::testing::harness::try_compile_program(&program).expect("compile cell");
+    match futures::executor::block_on(lash_vm::execute(&program, state, &Host))
         .expect("execute cell")
     {
         ExecutionOutcome::Finished(value) => value,

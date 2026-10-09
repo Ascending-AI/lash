@@ -12,7 +12,7 @@ use lash::SessionId;
 // ADR 0096: TypeScript is the sole RLM language, so the halves of these
 // fixtures that asserted a second dialect beside it are gone.
 
-// ADR 0096: the fixture that created a Lashlang session on a TypeScript
+// ADR 0096: the fixture that created a Lash VM session on a TypeScript
 // deployment is gone with the second dialect.
 
 /// A create request that still names a language does not decode.

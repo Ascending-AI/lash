@@ -1,10 +1,10 @@
 use super::workload::{Case, Host, environment};
 use anyhow::{Result, bail};
+use lash_vm::{ExecutionMode, ExecutionOutcome};
 use lash_vm_client::{
     ExecutionBudget, ParkOutcome, RunContext, WorkerPool, WorkerPoolRuntimeOps as _,
 };
 use lash_vm_protocol::*;
-use lashlang::{ExecutionMode, ExecutionOutcome};
 use std::time::Instant;
 
 #[derive(Default)]
@@ -12,7 +12,7 @@ pub struct Observation {
     pub queue_ns: u64,
     pub exchange_ns: Vec<u64>,
     pub exchange_phases: Vec<super::metrics::Phases>,
-    pub value_fixtures: Vec<(EffectRequest, lashlang::AbilityOutcome)>,
+    pub value_fixtures: Vec<(EffectRequest, lash_vm::AbilityOutcome)>,
     pub resets_ns: Vec<u64>,
     pub state_bytes: u64,
     pub pid: u32,

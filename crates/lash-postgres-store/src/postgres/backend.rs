@@ -9,9 +9,7 @@ use std::sync::Arc;
 
 use lash_core_execution::{AttachmentStore, Clock};
 
-use crate::{
-    PostgresLashlangArtifactStore, PostgresProcessRegistry, PostgresStorage, PostgresStore,
-};
+use crate::{PostgresLashVmArtifactStore, PostgresProcessRegistry, PostgresStorage, PostgresStore};
 
 /// Every persistence port of one PostgreSQL database: the
 /// [`StoreSet`](lash_core_execution::StoreSet) the durable engine persists
@@ -35,7 +33,7 @@ struct StoreParts {
     durable_clock: Option<Arc<dyn Clock>>,
     session_store_factory: Arc<PostgresStore>,
     process_registry: Arc<PostgresProcessRegistry>,
-    process_env_store: Arc<PostgresLashlangArtifactStore>,
+    process_env_store: Arc<PostgresLashVmArtifactStore>,
     attachment_store: Arc<dyn AttachmentStore>,
 }
 
@@ -109,9 +107,9 @@ impl PostgresStoreSet {
         Arc::clone(&self.inner.process_registry)
     }
 
-    /// The store that serves process execution environments and Lashlang
+    /// The store that serves process execution environments and Lash VM
     /// artifacts.
-    pub fn process_env_store(&self) -> Arc<PostgresLashlangArtifactStore> {
+    pub fn process_env_store(&self) -> Arc<PostgresLashVmArtifactStore> {
         Arc::clone(&self.inner.process_env_store)
     }
 
@@ -171,7 +169,7 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
     }
 
     /// The store that keeps the process execution environments keeps the
-    /// Lashlang module artifacts too.
+    /// Lash VM module artifacts too.
     fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
         PostgresStoreSet::process_env_store(self)
     }

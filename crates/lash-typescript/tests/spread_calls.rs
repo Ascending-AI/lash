@@ -1,7 +1,7 @@
 //! Spread arguments to builtin functions and methods (FIG-3627).
 
-use lashlang::testing::harness::test_environment;
-use lashlang::{
+use lash_vm::testing::harness::test_environment;
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
@@ -22,8 +22,8 @@ impl ExecutionHost for Host {
 fn run_typescript(source: &str) -> Value {
     let linked = lash_typescript::link(source, &test_environment())
         .unwrap_or_else(|error| panic!("link `{source}`: {error}"));
-    match futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    match futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &Host,
     ))

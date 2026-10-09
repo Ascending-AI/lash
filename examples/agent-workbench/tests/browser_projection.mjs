@@ -91,7 +91,7 @@ function snapshot(sessionId, cursor, eventIds = []) {
 }
 
 test("one running process is one row in the work rail", () => {
-  // `/api/work` names a process by incarnation and `/api/lashlang-graphs` names
+  // `/api/work` names a process by incarnation and `/api/lash-vm-graphs` names
   // the same process without one, so matching the two key strings de-duplicated
   // nothing: every running process rendered twice, and the duplicate carried the
   // engine's lift digest instead of the declared label and had no cancel control
@@ -1187,7 +1187,7 @@ test("a retiring session stops the probe storm and keeps the one probe that ends
     "/api/events?cursor=4",
     "/api/queued_work",
     "/api/triggers",
-    "/api/lashlang/graphs",
+    "/api/lash_vm/graphs",
     "/api/work",
   ]) {
     assert.equal(

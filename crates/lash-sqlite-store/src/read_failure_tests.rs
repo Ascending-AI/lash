@@ -173,8 +173,8 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
     );
 
     assert_artifact_storage_failure("publish_module_artifact", {
-        let module = lashlang::ModuleArtifact::from_program({
-            use lashlang::testing::ast_builders as b;
+        let module = lash_vm::ModuleArtifact::from_program({
+            use lash_vm::testing::ast_builders as b;
 
             b::program(vec![b::finish(b::bool_lit(true))])
         })

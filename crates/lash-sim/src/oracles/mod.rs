@@ -99,7 +99,7 @@ pub const SCENARIO_MINI_RLM_FINISH_REPAIR_ORACLE: crate::trace::OracleId<'static
 pub const SCENARIO_MINI_RLM_SCHEMA_REPAIR_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::model("sim.oracle.scenario-mini.rlm.schema-mismatch-repair.v1");
 pub const SCENARIO_MINI_RLM_CELL_EXEC_ORACLE: crate::trace::OracleId<'static> =
-    crate::trace::OracleId::model("sim.oracle.scenario-mini.rlm.lashlang-cell-exec-continues.v1");
+    crate::trace::OracleId::model("sim.oracle.scenario-mini.rlm.lash-vm-cell-exec-continues.v1");
 pub const SCENARIO_MINI_AGENT_DURABLE_INPUT_ORACLE: crate::trace::OracleId<'static> =
     crate::trace::OracleId::model("sim.oracle.scenario-mini.agent.durable-input-resolution.v1");
 pub const SCENARIO_MINI_AGENT_CHILD_FAILURE_ORACLE: crate::trace::OracleId<'static> =
@@ -416,7 +416,7 @@ pub fn walk_generated_trace_oracles<S, V>(
     );
     battery!(
         SCENARIO_MINI_RLM_CELL_EXEC_ORACLE,
-        mini_rlm_lashlang_cell_exec_continues(events)
+        mini_rlm_lash_vm_cell_exec_continues(events)
     );
     battery!(
         SCENARIO_MINI_AGENT_DURABLE_INPUT_ORACLE,

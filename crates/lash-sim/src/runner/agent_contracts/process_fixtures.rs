@@ -68,7 +68,7 @@ pub(super) async fn agent_started_process_child_spawn_execution()
     let result = facade_agent_process_execution_with_options(
         "lash_runtime agent started process subagent",
         &SessionId::from("sim-agent-started-process-subagent-contract"),
-        "Run a Lashlang process that spawns a subagent and returns its value.",
+        "Run a Lash VM process that spawns a subagent and returns its value.",
         vec![
             r#"<typescript>
 const spawnChild = await processes.create({ dialect: "typescript", source: `const spawnChild = async () => {

@@ -6,7 +6,7 @@ Accepted.
 
 ## Retained architecture
 
-A dialect owns its syntax and semantics and lowers into the shared Lashlang IR.
+A dialect owns its syntax and semantics and lowers into the shared Lash VM IR.
 One linker, compiler, heap VM, continuation family and durable runtime execute
 that IR. A dialect does not emulate another language.
 

@@ -156,7 +156,7 @@ impl DiagnosticCode {
 
     /// The accepted in-dialect idiom for a construct this code refuses.
     ///
-    /// Lashlang has carried a repair channel since it shipped: `parse_hint` and
+    /// Lash VM has carried a repair channel since it shipped: `parse_hint` and
     /// `runtime_hint` match on the *error variant* and return the rewrite, and
     /// `format_source_diagnostic` renders it on its own `hint:` line. The
     /// TypeScript dialect regressed that — its rejections are a code plus one
@@ -667,7 +667,7 @@ fn split_inline_repair(message: String) -> (String, Option<String>) {
 
 impl fmt::Display for Diagnostic {
     /// The model-facing one-liner: code, refusal, then each rewrite on its own
-    /// `hint:` line, exactly as Lashlang renders its own hint channel.
+    /// `hint:` line, exactly as Lash VM renders its own hint channel.
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}: {}", self.code.as_str(), self.message)?;
         for suggestion in &self.suggestions {
@@ -688,9 +688,9 @@ impl std::error::Error for Diagnostic {}
 /// The offsets are byte offsets into that same submitted source — the parser is
 /// handed the cell verbatim, with no wrapper, prelude, or preamble in front of
 /// it — so line 1 here is the model's line 1 and needs no remapping. The layout
-/// is Lashlang's `format_source_diagnostic`, deliberately: a session reads both
+/// is LashVm's `format_source_diagnostic`, deliberately: a session reads both
 /// dialects' failures with the same eyes. This is a thin caller — the snippet,
-/// caret, and hint rendering all live in lashlang.
+/// caret, and hint rendering all live in lash_vm.
 pub fn format_diagnostic(source: &str, diagnostic: &Diagnostic) -> String {
     let message = format!(
         "{}: {}",
@@ -702,11 +702,11 @@ pub fn format_diagnostic(source: &str, diagnostic: &Diagnostic) -> String {
         .iter()
         .map(String::as_str)
         .collect::<Vec<_>>();
-    let span = diagnostic.span.map(|span| lashlang::Span {
+    let span = diagnostic.span.map(|span| lash_vm::Span {
         start: span.start,
         end: span.end,
     });
-    lashlang::format_source_diagnostic(source, span, &message, &hints)
+    lash_vm::format_source_diagnostic(source, span, &message, &hints)
 }
 
 #[cfg(test)]

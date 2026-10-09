@@ -424,10 +424,7 @@ fn contract_app_lookup_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
-        ["tools"],
-        "app_lookup",
-    ))
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["tools"], "app_lookup"))
 }
 
 pub(super) struct ContractDurableInputTools {
@@ -521,7 +518,7 @@ fn contract_durable_input_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(
         ["tools"],
         "mock_input_request",
     ))

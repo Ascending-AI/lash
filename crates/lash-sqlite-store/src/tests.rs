@@ -8,16 +8,16 @@ use crate::session_listing::list_session_views;
 use std::collections::BTreeMap;
 
 /// `process <name>(<param>: str) -> str { finish <param> }`, the publishable
-/// one-process module these store fixtures need. ADR 0096 retired the Lashlang
+/// one-process module these store fixtures need. ADR 0096 retired the Lash VM
 /// front-end, so the fixture states its AST.
-fn one_process_module(process_name: &str, param: &str) -> lashlang::Program {
-    use lashlang::testing::ast_builders as b;
+fn one_process_module(process_name: &str, param: &str) -> lash_vm::Program {
+    use lash_vm::testing::ast_builders as b;
 
     b::module(
         vec![b::process_returning(
             process_name,
-            vec![b::param(param, lashlang::TypeExpr::Str)],
-            lashlang::TypeExpr::Str,
+            vec![b::param(param, lash_vm::TypeExpr::Str)],
+            lash_vm::TypeExpr::Str,
             b::finish(b::var(param)),
         )],
         Vec::new(),
@@ -696,16 +696,16 @@ async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
 }
 
 #[tokio::test]
-async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() {
+async fn sqlite_lash_vm_artifact_store_round_trips_verified_module_artifacts() {
     let store = crate::test_support::sqlite_memory_store()
         .await
         .expect("memory store");
-    let artifacts = lashlang::LashlangArtifacts::new(store.clone());
+    let artifacts = lash_vm::LashVmArtifacts::new(store.clone());
     // process scan(root: str) -> str { finish root }
     let module = one_process_module("scan", "root");
-    let linked = lashlang::LinkedModule::link(
+    let linked = lash_vm::LinkedModule::link(
         module,
-        lashlang::LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new()),
+        lash_vm::LashVmHostEnvironment::new(lash_vm::LashVmHostCatalog::new()),
     )
     .expect("link module");
 
@@ -746,14 +746,14 @@ async fn sqlite_artifact_view_does_not_resurrect_artifact_reclaimed_by_another_h
             .await
             .expect("open releasing store"),
     );
-    let artifacts = lashlang::LashlangArtifacts::new(Arc::new(
+    let artifacts = lash_vm::LashVmArtifacts::new(Arc::new(
         SqliteStore::open_file_for_testing(&path)
             .await
             .expect("open reading store"),
     ));
     // process liveness_probe(root: str) -> str { finish root }
     let module =
-        lashlang::ModuleArtifact::from_program(one_process_module("liveness_probe", "root"))
+        lash_vm::ModuleArtifact::from_program(one_process_module("liveness_probe", "root"))
             .expect("build module artifact");
     let referrer = lash_core_execution::ArtifactReferrer::HostPin(
         lash_core_execution::HostArtifactPin::mint(),

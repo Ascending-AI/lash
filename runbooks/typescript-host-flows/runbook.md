@@ -122,7 +122,7 @@ Require, from the executed cell and the trace:
 * the cell that created the process artifact is TypeScript: read
   `/api/state.transcript[].language`, which is the **only** observable language evidence.
   There is no dialect or language field on the process artifact itself — the `/api/work`
-  process record carries `input.kind = "lashlang"` (the engine kind) and a `process_name`
+  process record carries `input.kind = "lashvm"` (the engine kind) and a `process_name`
   lift hash, and no `trace.jsonl` record carries a `dialect`/`language` field — so the
   artifact is dialect-neutral IR, while the creating cell proves the source dialect;
 * a running handle and a visible waiting state.

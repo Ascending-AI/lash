@@ -9,7 +9,7 @@
 //! refusal is `StoredDataCorrupt`, never a skipped row.
 //!
 //! The foreign key names the backend's byte table: SQLite's `artifact_refs`,
-//! PostgreSQL's `lash_lashlang_artifacts`.
+//! PostgreSQL's `lash_lash_vm_artifacts`.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "artifact_referrer_edges";

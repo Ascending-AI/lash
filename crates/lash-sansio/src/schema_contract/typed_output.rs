@@ -93,8 +93,8 @@ pub enum OutputSchemaError {
 /// - a record of field-name to type-descriptor strings (`"str"`, `"int"`,
 ///   `"float"`, `"bool"`, `"record"`, or `"list[...]"` of those), compiled
 ///   into a strict object schema; or
-/// - a Lashlang `Type { ... }` literal, a single-field
-///   `{"$lash_type": <schema>}` wrapper as produced by the Lashlang
+/// - a Lash VM `Type { ... }` literal, a single-field
+///   `{"$lash_type": <schema>}` wrapper as produced by the Lash VM
 ///   compiler, whose inner schema is passed through after validation.
 ///
 /// Returns `Ok(None)` when `output` is absent or `null` (the tool falls back

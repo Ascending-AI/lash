@@ -5,7 +5,7 @@
 //! build script's dependency closure in the exec configuration as well as the
 //! target one, so a first-party dependency here duplicates the whole runtime
 //! tree beneath it at `opt-level=3` for artifacts no product consumes. The
-//! field orders that belong to `lash-sansio` and `lash-lashlang-runtime` types
+//! field orders that belong to `lash-sansio` and `lash-vm-runtime` types
 //! are therefore declared in `src/executor/state.rs` and proved against those
 //! types' live serialization by
 //! `generated_snapshot_field_schemas_match_all_fields_set_serialization`

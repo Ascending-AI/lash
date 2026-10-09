@@ -729,7 +729,7 @@ impl ReferrerClaim {
 #[serde(tag = "store", content = "kind", rename_all = "snake_case")]
 pub enum ArtifactStoreId {
     ProcessEnv,
-    LashlangModule,
+    VmModule,
     /// A process engine's own store, by engine kind.
     Engine(String),
     /// The immutable process-definition descriptors, keyed by their
@@ -748,7 +748,7 @@ impl ArtifactStoreId {
     /// The store behind the module artifact port.
     #[must_use]
     pub const fn module() -> Self {
-        Self::LashlangModule
+        Self::VmModule
     }
 }
 
@@ -1306,7 +1306,7 @@ mod tests {
             referrers[0].clone(),
             vec![ArtifactCarry {
                 artifact: ArtifactName {
-                    store: ArtifactStoreId::Engine("lashlang".into()),
+                    store: ArtifactStoreId::Engine("lashvm".into()),
                     artifact_ref: "mod-1".into(),
                 },
                 to: referrers[1].clone(),

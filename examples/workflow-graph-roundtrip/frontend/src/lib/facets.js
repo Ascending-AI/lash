@@ -1,6 +1,6 @@
 // Consume the derived, read-only TYPE FACETS the backend attaches to each node
 // (ADR 0073). These are host-supplied and non-authoritative: we NEVER re-parse
-// Lashlang client-side — we only read the facet shapes the lens already emitted.
+// LashVm client-side — we only read the facet shapes the lens already emitted.
 //
 // Serialized shapes (see examples/workflow-graph-roundtrip/src/contract.rs):
 //   node.data.availableVars     [{ name, type }]        (was names-only)
@@ -8,7 +8,7 @@
 //   node.data.diagnostics       [{ nodeId, kind, message, span? }]
 //   document.facetSchemaVersion number | undefined      (absent on older backends)
 //
-// Type strings come from lashlang's `format_type_expr`:
+// Type strings come from lash_vm's `format_type_expr`:
 //   any · str · int · float · bool · dict · null
 //   enum["a", "b"] · list[T] · { f: t, g: t? } · <RefName> · Process<in, out>
 //   unions as `a | b | null`
@@ -107,7 +107,7 @@ export function enumMembers(str) {
   return parsed.kind === 'enum' ? parsed.members : null;
 }
 
-// The canonical Lashlang text for a chosen enum member (a quoted string).
+// The canonical LashVm text for a chosen enum member (a quoted string).
 export function enumMemberToText(member) {
   return JSON.stringify(String(member ?? ''));
 }

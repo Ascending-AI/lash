@@ -1,7 +1,7 @@
 //! The VM's half of the context (ADR 0132 §8; S7 of I0, FIG-5194). Owned by
 //! V0 (FIG-5170), then L7 (FIG-5177).
 //!
-//! A VM execution (a code cell, or a lashlang process) is filed under its
+//! A VM execution (a code cell, or a lash_vm process) is filed under its
 //! [`ExecKey`]. Its snapshot store, `lash_vm_broker::DurableSnapshotStore`,
 //! is built over a context and a key (`DurableSnapshotStore::new(cx, exec)`):
 //! the broker sits above this crate, so the store lives there. The snapshot

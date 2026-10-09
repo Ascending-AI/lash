@@ -20,7 +20,7 @@ fn expect_build_error<T>(result: std::result::Result<T, EmbedError>, message: &s
     }
 }
 
-/// FIG-3633: the RLM protocol keeps its Lashlang artifacts in the backend it
+/// FIG-3633: the RLM protocol keeps its Lash VM artifacts in the backend it
 /// was built over, so a core over any other backend refuses it at build. A
 /// core's plugin set is the only one its sessions and workers run
 /// (FIG-4396). Otherwise a

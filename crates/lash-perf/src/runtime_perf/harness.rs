@@ -211,7 +211,7 @@ pub(crate) struct BenchmarkRuntime {
 
 pub(crate) struct RuntimePerfTraceConfig {
     pub(crate) trace_jsonl_path: Option<PathBuf>,
-    pub(crate) lashlang_execution_jsonl_path: Option<PathBuf>,
+    pub(crate) lash_vm_execution_jsonl_path: Option<PathBuf>,
     pub(crate) trace_level: lash::tracing::TraceLevel,
 }
 
@@ -970,7 +970,7 @@ pub(crate) async fn build_runtime(
             let mut tracing = lash_core::trace::TraceRuntime::new(backend.clock());
             if let Some(path) = trace_config
                 .as_ref()
-                .and_then(|config| config.lashlang_execution_jsonl_path.clone())
+                .and_then(|config| config.lash_vm_execution_jsonl_path.clone())
             {
                 tracing = tracing
                     .with_product_observer(Arc::new(lash::tracing::JsonlTraceSink::new(path)));

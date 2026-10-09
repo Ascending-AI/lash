@@ -7,8 +7,8 @@
 //! ledger holds the admissions, and never runs its earlier code again.
 
 use lash_core::RuntimeExecutionContext;
-use lash_lashlang_runtime::{LashlangHostIdentities, LashlangReplayRun};
 use lash_sansio::sync::MutexExt;
+use lash_vm_runtime::{LashVmHostIdentities, LashVmReplayRun};
 
 /// Why a cell has no logical opener to mint identities under.
 ///
@@ -22,8 +22,8 @@ use lash_sansio::sync::MutexExt;
 /// that used to stand here — the bare session id — minted one identity for the
 /// first call of every cell in a session.
 #[derive(Debug, thiserror::Error)]
-pub(super) enum LashlangCellOpener {
-    #[error("lashlang cell runs outside a code-execution effect, so it has no logical opener")]
+pub(super) enum LashVmCellOpener {
+    #[error("lash_vm cell runs outside a code-execution effect, so it has no logical opener")]
     NoEffect,
     /// The effect the cell runs under names a different scope than the
     /// controller was admitted under — a claim/opener disagreement, refused
@@ -43,8 +43,8 @@ pub(super) enum LashlangCellOpener {
 
 /// One cell's replay run.
 pub(super) struct CellRun {
-    identities: LashlangHostIdentities,
-    run: LashlangReplayRun,
+    identities: LashVmHostIdentities,
+    run: LashVmReplayRun,
     /// The linked module this cell ran, once compiled: the seal records it
     /// so a divergence can say whether the journal came from the same
     /// program.
@@ -57,22 +57,22 @@ impl CellRun {
     /// checked pair it already carries — not a pair re-paired here from a
     /// scope claim and a separately read pin. The address must name that same
     /// scope; a disagreement is refused rather than resolved.
-    pub(super) fn open(ctx: &RuntimeExecutionContext<'_>) -> Result<Self, LashlangCellOpener> {
+    pub(super) fn open(ctx: &RuntimeExecutionContext<'_>) -> Result<Self, LashVmCellOpener> {
         let admitted_scope = ctx.admitted_scope();
         let address = ctx
             .parent_invocation()
             .and_then(lash_core::RuntimeInvocation::effect_address)
-            .ok_or(LashlangCellOpener::NoEffect)?;
+            .ok_or(LashVmCellOpener::NoEffect)?;
         if address.execution_scope != *admitted_scope.scope() {
-            return Err(LashlangCellOpener::AddressScope {
+            return Err(LashVmCellOpener::AddressScope {
                 address: address.execution_scope.id().to_string(),
                 admitted: admitted_scope.scope().id().to_string(),
             });
         }
-        let opener = lash_core::EffectOpener::for_scope(&admitted_scope)
-            .map_err(LashlangCellOpener::Scope)?;
-        let identities = LashlangHostIdentities::cell(opener, address.replay_key.clone());
-        let run = LashlangReplayRun::new(identities.namespace());
+        let opener =
+            lash_core::EffectOpener::for_scope(&admitted_scope).map_err(LashVmCellOpener::Scope)?;
+        let identities = LashVmHostIdentities::cell(opener, address.replay_key.clone());
+        let run = LashVmReplayRun::new(identities.namespace());
         Ok(Self {
             identities,
             run,
@@ -80,7 +80,7 @@ impl CellRun {
         })
     }
 
-    pub(super) fn identities(&self) -> &LashlangHostIdentities {
+    pub(super) fn identities(&self) -> &LashVmHostIdentities {
         &self.identities
     }
 
@@ -93,8 +93,8 @@ impl CellRun {
     /// names. Attribution only; nothing compares it.
     pub(super) fn producer(&self) -> serde_json::Value {
         serde_json::json!({
-            "compiler": lashlang::LASHLANG_COMPILER_VERSION,
-            "vm_abi": lashlang::LASHLANG_VM_ABI_VERSION,
+            "compiler": lash_vm::LASH_VM_COMPILER_VERSION,
+            "vm_abi": lash_vm::LASH_VM_ABI_VERSION,
             "module_ref": self.module_ref.lock_recover().clone(),
         })
     }
@@ -103,9 +103,9 @@ impl CellRun {
     pub(super) fn commands<'a, 'run>(
         &'a self,
         ctx: &'a RuntimeExecutionContext<'run>,
-        cancellation: &'a lash_lashlang_runtime::ExecutionCancellation,
-    ) -> lash_lashlang_runtime::ReplayCommands<'a, 'run> {
-        lash_lashlang_runtime::ReplayCommands {
+        cancellation: &'a lash_vm_runtime::ExecutionCancellation,
+    ) -> lash_vm_runtime::ReplayCommands<'a, 'run> {
+        lash_vm_runtime::ReplayCommands {
             run: &self.run,
             ctx,
             cancellation,
@@ -120,11 +120,11 @@ impl CellRun {
 /// that wrote the journal, so it refuses with the run's typed code and
 /// attribution and the turn parks, like a mismatch at any command.
 pub(super) fn setup_effect_error(
-    cell: &Result<CellRun, LashlangCellOpener>,
+    cell: &Result<CellRun, LashVmCellOpener>,
     error: lash_core::RuntimeEffectControllerError,
 ) -> lash_core::RuntimeEffectControllerError {
     match cell {
-        Ok(cell) => lash_lashlang_runtime::retype_replay_mismatch(
+        Ok(cell) => lash_vm_runtime::retype_replay_mismatch(
             error,
             "the cell's deferred resolution",
             &cell.run.attribution(cell.producer().to_string()),
@@ -142,7 +142,7 @@ pub(super) fn setup_effect_error(
 /// An opener whose run names no valid turn identity.
 pub(super) fn cell_exec(
     ctx: &RuntimeExecutionContext<'_>,
-    cell: &Result<CellRun, LashlangCellOpener>,
+    cell: &Result<CellRun, LashVmCellOpener>,
 ) -> Result<lash_vm_broker::ExecKey, String> {
     let (opener, execution) = match cell {
         Ok(cell) => (

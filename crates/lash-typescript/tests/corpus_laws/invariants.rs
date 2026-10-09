@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lashlang::{
+use lash_vm::{
     Declaration, Entry, Expr, LinkedModule, ModuleArtifact, ProcessOrigin, WorkflowContainer,
     WorkflowNodeKind, WorkflowSubgraph,
 };
@@ -153,7 +153,7 @@ fn check(program: &CorpusProgram, session: Option<&SessionAnswer>) -> Vec<String
 
 /// A graph as JSON without its host-derived type facets: the one thing a
 /// host's view adds to the admitted view.
-fn without_facets(graph: &lashlang::WorkflowGraph) -> serde_json::Value {
+fn without_facets(graph: &lash_vm::WorkflowGraph) -> serde_json::Value {
     fn strip(value: &mut serde_json::Value) {
         match value {
             serde_json::Value::Object(fields) => {
@@ -201,7 +201,7 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
     }
 
     // 2. The compiled inventory is the trace map, entry by entry.
-    let graph = lashlang::workflow_graph_from_artifact(artifact, &lashlang::NoStatementText);
+    let graph = lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText);
     let mut entries = vec![("main".to_string(), Entry::Main, &graph.main)];
     for declaration in &ir.declarations {
         if let Declaration::Process(process) = declaration {
@@ -223,7 +223,7 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
         }
     }
     for (label, entry, subgraph) in entries {
-        let compiled = match lashlang::compile(artifact, entry, Some(linked.spans())) {
+        let compiled = match lash_vm::compile(artifact, entry, Some(linked.spans())) {
             Ok(compiled) => compiled,
             Err(error) => {
                 failures.push(format!("{label} does not compile: {error}"));
@@ -253,7 +253,7 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
                 && reloaded.source_identity() == artifact.source_identity()
                 && reloaded.to_store_bytes().ok() == stored.ok() =>
         {
-            if let Err(error) = lashlang::compile(&reloaded, Entry::Main, None) {
+            if let Err(error) = lash_vm::compile(&reloaded, Entry::Main, None) {
                 failures.push(format!("the reloaded artifact does not compile: {error}"));
             }
         }
@@ -269,13 +269,10 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
 /// can carry a `Branch` site of its own when an `if` lowers inside its
 /// condition or bind (the site then projects onto the container's path), so
 /// a `Branch` kind alone does not make a node an arm parent.
-fn compiled_sites(
-    compiled: &lashlang::CompiledProgram,
-    graph: &WorkflowSubgraph,
-) -> BTreeSet<Site> {
+fn compiled_sites(compiled: &lash_vm::CompiledProgram, graph: &WorkflowSubgraph) -> BTreeSet<Site> {
     let mut arm_parents = BTreeSet::new();
     if_container_ids(graph, &mut arm_parents);
-    let sites = lashlang::testing::harness::compiled_execution_sites(compiled);
+    let sites = lash_vm::testing::harness::compiled_execution_sites(compiled);
     let branches = sites
         .iter()
         .filter(|site| site.node_kind == lash_sansio::ExecutionNodeKind::Branch)
@@ -355,7 +352,7 @@ fn mapped_sites(graph: &WorkflowSubgraph) -> BTreeSet<Site> {
 
 /// The names `main` binds outside every function and process body, less the
 /// ones the program marks private: what a cell exports to its session.
-fn exported_names(ir: &lashlang::Program) -> BTreeSet<String> {
+fn exported_names(ir: &lash_vm::Program) -> BTreeSet<String> {
     fn walk(expr: &Expr, names: &mut BTreeSet<String>) {
         match expr {
             Expr::Function(_) | Expr::ProcessLiteral(_) => return,
@@ -381,7 +378,7 @@ fn exported_names(ir: &lashlang::Program) -> BTreeSet<String> {
     // name it spells from wherever it sits.
     fn walk_global_sets(expr: &Expr, names: &mut BTreeSet<String>) {
         if let Expr::BuiltinCall { name, args } = expr
-            && name.as_str() == "__lashlang_global_set"
+            && name.as_str() == "__lash_vm_global_set"
             && let Some(Expr::String(global)) = args.first()
         {
             names.insert(global.to_string());
@@ -403,7 +400,7 @@ fn exported_names(ir: &lashlang::Program) -> BTreeSet<String> {
 /// literal digests to the declaration's name and carries as many hidden
 /// arguments as the declaration has hidden parameters. TypeScript declares
 /// no process.
-fn origins_are_derived(ir: &lashlang::Program, draft: &lashlang::Program) -> Vec<String> {
+fn origins_are_derived(ir: &lash_vm::Program, draft: &lash_vm::Program) -> Vec<String> {
     let mut failures = Vec::new();
     for declaration in &ir.declarations {
         let Declaration::Process(process) = declaration else {
@@ -421,12 +418,12 @@ fn origins_are_derived(ir: &lashlang::Program, draft: &lashlang::Program) -> Vec
             ));
             continue;
         };
-        let literal = (site.root == lashlang::AstRoot::Main)
+        let literal = (site.root == lash_vm::AstRoot::Main)
             .then(|| expr_at(&draft.main, &site.steps))
             .flatten();
         match literal {
             Some(Expr::ProcessLiteral(literal))
-                if lashlang::lifted_process_identity(&literal.body, &site.steps)
+                if lash_vm::lifted_process_identity(&literal.body, &site.steps)
                     == process.name.as_str()
                     && literal.hidden_args.len() == *hidden_params as usize => {}
             _ => failures.push(format!(
@@ -501,7 +498,7 @@ fn session_bindings() -> BTreeMap<String, SessionAnswer> {
 
 /// A declared process whose body holds a literal: TypeScript lowered, then
 /// its outer literal made a declaration of the direct IR.
-fn declared_process_holding_a_literal() -> Result<LinkedModule, lashlang::LinkError> {
+fn declared_process_holding_a_literal() -> Result<LinkedModule, lash_vm::LinkError> {
     let authored = "const worker=async()=>{const inner=async()=>{await sleep(2);return 2;};await sleep(1);return 1;};";
     let mut program = lash_typescript::parse(authored).expect("the fixture parses");
     let Expr::Block(statements) = &mut program.main else {
@@ -520,7 +517,7 @@ fn declared_process_holding_a_literal() -> Result<LinkedModule, lashlang::LinkEr
     };
     program
         .declarations
-        .push(Declaration::Process(lashlang::ProcessDecl {
+        .push(Declaration::Process(lash_vm::ProcessDecl {
             name: "worker".into(),
             params: Vec::new(),
             return_ty: None,
@@ -528,5 +525,5 @@ fn declared_process_holding_a_literal() -> Result<LinkedModule, lashlang::LinkEr
             origin: ProcessOrigin::Declared,
             body: *literal.body,
         }));
-    LinkedModule::link(program, lashlang::testing::harness::test_environment())
+    LinkedModule::link(program, lash_vm::testing::harness::test_environment())
 }

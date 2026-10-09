@@ -1,0 +1,12 @@
+{
+  "schema": "lash.sim.failing-trace-fixture.v1",
+  "fixture_id": "rlm-lash-vm-cell-missing-continuation",
+  "seed": 29,
+  "profile": "fast-random",
+  "max_boundaries": 32,
+  "mutation": {
+    "remove_kind": "provider"
+  },
+  "expected_oracle_id": "sim.oracle.scenario-mini.rlm.lash-vm-cell-exec-continues.v1",
+  "expected_reason_contains": "did not continue after exec"
+}

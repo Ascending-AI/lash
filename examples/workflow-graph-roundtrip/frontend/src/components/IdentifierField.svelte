@@ -1,7 +1,7 @@
 <script>
   import { validateFragment } from '../lib/api.js';
 
-  // A name input that validates as a Lashlang `identifier` inline (via the same
+  // A name input that validates as a LashVm `identifier` inline (via the same
   // /validate path ExpressionField uses for expressions), so a bad process name,
   // parameter name, loop binding, or a brand-new assignment target fails at
   // the field with a red underline + message instead of only at Save. `variant`

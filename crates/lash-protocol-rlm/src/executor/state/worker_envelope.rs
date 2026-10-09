@@ -3,12 +3,12 @@
 //! The durable RLM root carries two kinds of state, and only one of them may
 //! reach the worker that runs model code:
 //!
-//! - **Guest state**, the worker's: the Lashlang durable header and one
+//! - **Guest state**, the worker's: the Lash VM durable header and one
 //!   fragment per binding — the guest heap and its roots. It crosses as
 //!   [`RlmWorkerEnvelope`] (parent to worker) and comes back as
 //!   [`RlmWorkerCapture`] (worker to parent).
 //! - **Authority**, the parent's: the deferred tool resolutions with their
-//!   [`ToolGrant`](lash_lashlang_runtime::ToolGrant)s and host-owned
+//!   [`ToolGrant`](lash_vm_runtime::ToolGrant)s and host-owned
 //!   `execution_binding`s, and the deferred tool resolutions with their
 //!   routes. They never cross, in either direction.
 //!

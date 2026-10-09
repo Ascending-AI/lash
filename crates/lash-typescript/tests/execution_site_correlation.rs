@@ -5,26 +5,26 @@
 //! that position. Every runtime event a host shows on a graph rides on those
 //! two sides agreeing. This file is that proof.
 //!
-//! It lived in `lashlang`'s unit tests until the lens moved to this crate
-//! (FIG-3033): a `[dev-dependencies]` edge from `lashlang` back on
+//! It lived in `lash_vm`'s unit tests until the lens moved to this crate
+//! (FIG-3033): a `[dev-dependencies]` edge from `lash_vm` back on
 //! `lash-typescript` does not reach a unit test, because the lib-test target
-//! compiles a second instance of `lashlang` and its `Program` is then a
+//! compiles a second instance of `lash_vm` and its `Program` is then a
 //! different type. The witnesses are re-authored over TypeScript, which is the
-//! only cell language; where a witness relied on a Lashlang-only form, the
+//! only cell language; where a witness relied on a LashVm-only form, the
 //! header comment on the test says what replaced it.
 
 use lash_typescript::parse;
-use lashlang::testing::ast_builders as b;
-use lashlang::testing::harness::{EchoHost, compiled_execution_sites, link_labeled};
-use lashlang::{
+use lash_vm::testing::ast_builders as b;
+use lash_vm::testing::harness::{EchoHost, compiled_execution_sites, link_labeled};
+use lash_vm::{
     AbilityOp, AbilityOutcome, AstRoot, Declaration, ExecutionHost, ExecutionHostError,
-    ExecutionOutcome, LashlangExecutionObservation, Program, State, Value, WorkflowEffectKind,
+    ExecutionOutcome, LashVmExecutionObservation, Program, State, Value, WorkflowEffectKind,
     WorkflowNodeKind,
 };
 
 /// The language-neutral IR projection, with TypeScript opaque-statement text.
-fn workflow_graph_from_program(program: &lashlang::Program) -> lashlang::WorkflowGraph {
-    lashlang::workflow_graph_from_program(
+fn workflow_graph_from_program(program: &lash_vm::Program) -> lash_vm::WorkflowGraph {
+    lash_vm::workflow_graph_from_program(
         program,
         &lash_typescript::workflow_graph::TypeScriptStatementText,
     )
@@ -33,7 +33,7 @@ fn workflow_graph_from_program(program: &lashlang::Program) -> lashlang::Workflo
 /// A `(kind, label, path)` triple for every execution site the compiler emitted,
 /// ordered by path so the compiler's and the graph's lists are comparable.
 fn compiled_site_descriptors(
-    compiled: &lashlang::CompiledProgram,
+    compiled: &lash_vm::CompiledProgram,
 ) -> Vec<(String, String, Vec<u32>)> {
     let mut sites = compiled_execution_sites(compiled)
         .into_iter()
@@ -80,19 +80,19 @@ async fn real_run_observations_use_projected_workflow_node_ids_directly() {
             EchoHost.perform(op).await
         }
 
-        fn observes_lashlang_execution(&self) -> bool {
+        fn observes_lash_vm_execution(&self) -> bool {
             true
         }
 
-        fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
+        fn observe_lash_vm_execution(&self, observation: LashVmExecutionObservation) {
             let site = match observation {
-                LashlangExecutionObservation::NodeStarted { site, .. }
-                | LashlangExecutionObservation::ChildProcessWaiting { site, .. }
-                | LashlangExecutionObservation::NodeResumed { site, .. }
-                | LashlangExecutionObservation::NodeCompleted { site, .. }
-                | LashlangExecutionObservation::NodeFailed { site, .. }
-                | LashlangExecutionObservation::BranchSelected { site, .. }
-                | LashlangExecutionObservation::ChildStarted { site, .. } => site,
+                LashVmExecutionObservation::NodeStarted { site, .. }
+                | LashVmExecutionObservation::ChildProcessWaiting { site, .. }
+                | LashVmExecutionObservation::NodeResumed { site, .. }
+                | LashVmExecutionObservation::NodeCompleted { site, .. }
+                | LashVmExecutionObservation::NodeFailed { site, .. }
+                | LashVmExecutionObservation::BranchSelected { site, .. }
+                | LashVmExecutionObservation::ChildStarted { site, .. } => site,
             };
             self.node_ids
                 .lock()
@@ -116,10 +116,10 @@ finish(first);
         .nodes()
         .map(|node| node.id.to_string())
         .collect::<std::collections::BTreeSet<_>>();
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
     let host = ObservationHost::default();
 
-    let outcome = lashlang::execute(&compiled, &mut State::new(), &host)
+    let outcome = lash_vm::execute(&compiled, &mut State::new(), &host)
         .await
         .expect("workflow invocation should run");
     assert_eq!(
@@ -145,14 +145,14 @@ finish(first);
 /// FIG-2999: a process literal's declaration is named by the linker's lift
 /// digest, so a fixture asks the linked module for the process it lifted rather
 /// than spelling a name the source no longer carries.
-fn only_lifted_process(linked: &lashlang::LinkedModule) -> String {
+fn only_lifted_process(linked: &lash_vm::LinkedModule) -> String {
     let mut names = linked
         .artifact
         .ir()
         .declarations
         .iter()
         .filter_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) => Some(process.name.to_string()),
+            lash_vm::Declaration::Process(process) => Some(process.name.to_string()),
             _ => None,
         });
     let name = names.next().expect("the module lifts one process");
@@ -216,7 +216,7 @@ finish(worker);
 async fn real_runs_correlate_every_execution_site_to_the_selected_workflow_path() {
     #[derive(Default)]
     struct CorrelationHost {
-        observations: std::sync::Mutex<Vec<LashlangExecutionObservation>>,
+        observations: std::sync::Mutex<Vec<LashVmExecutionObservation>>,
     }
 
     impl ExecutionHost for CorrelationHost {
@@ -224,11 +224,11 @@ async fn real_runs_correlate_every_execution_site_to_the_selected_workflow_path(
             EchoHost.perform(op).await
         }
 
-        fn observes_lashlang_execution(&self) -> bool {
+        fn observes_lash_vm_execution(&self) -> bool {
             true
         }
 
-        fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
+        fn observe_lash_vm_execution(&self, observation: LashVmExecutionObservation) {
             self.observations
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -247,12 +247,12 @@ finish(selected);
 "#;
     let linked = link_labeled(parse_program(source));
     let graph = workflow_graph_from_program(linked.artifact.ir());
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
 
     let mut invocation_paths = Vec::new();
     for _ in 0..2 {
         let host = CorrelationHost::default();
-        let outcome = lashlang::execute(&compiled, &mut State::new(), &host)
+        let outcome = lash_vm::execute(&compiled, &mut State::new(), &host)
             .await
             .expect("workflow invocation should run");
         assert_eq!(
@@ -268,23 +268,23 @@ finish(selected);
             .iter()
             .map(|observation| {
                 let (site, occurrence) = match observation {
-                    LashlangExecutionObservation::NodeStarted { site, occurrence }
-                    | LashlangExecutionObservation::ChildProcessWaiting {
+                    LashVmExecutionObservation::NodeStarted { site, occurrence }
+                    | LashVmExecutionObservation::ChildProcessWaiting {
                         site, occurrence, ..
                     }
-                    | LashlangExecutionObservation::NodeResumed { site, occurrence }
-                    | LashlangExecutionObservation::NodeCompleted { site, occurrence }
-                    | LashlangExecutionObservation::NodeFailed {
+                    | LashVmExecutionObservation::NodeResumed { site, occurrence }
+                    | LashVmExecutionObservation::NodeCompleted { site, occurrence }
+                    | LashVmExecutionObservation::NodeFailed {
                         site, occurrence, ..
                     }
-                    | LashlangExecutionObservation::BranchSelected {
+                    | LashVmExecutionObservation::BranchSelected {
                         site, occurrence, ..
                     }
-                    | LashlangExecutionObservation::ChildStarted {
+                    | LashVmExecutionObservation::ChildStarted {
                         site, occurrence, ..
                     } => (site, *occurrence),
                 };
-                let node_id = lashlang::WorkflowNodeId::new(site.node_id.clone());
+                let node_id = lash_vm::WorkflowNodeId::new(site.node_id.clone());
                 assert!(
                     graph.nodes().any(|node| node.id == node_id),
                     "correlated node id must belong to the projected graph"
@@ -298,8 +298,8 @@ finish(selected);
             .filter(|(observation, _, _)| {
                 matches!(
                     observation,
-                    LashlangExecutionObservation::NodeStarted { .. }
-                        | LashlangExecutionObservation::BranchSelected { .. }
+                    LashVmExecutionObservation::NodeStarted { .. }
+                        | LashVmExecutionObservation::BranchSelected { .. }
                 )
             })
             .map(|(_, node_id, occurrence)| {
@@ -373,7 +373,7 @@ let outer = (inner = await sleep(1));
 finish(outer);
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
     let compiler = compiled_site_descriptors(&compiled);
 
     assert!(
@@ -403,7 +403,7 @@ fn execution_site_function_call_is_projected_with_the_compiler_descriptor() {
 finish(identity(1));
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
     let expected = vec![
         ("call".to_string(), "function call".to_string(), vec![1]),
         ("terminal".to_string(), "result".to_string(), vec![1]),
@@ -447,7 +447,7 @@ while (false) {
 }
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
     let compiler = compiled_site_descriptors(&compiled)
         .into_iter()
         .filter(|(kind, _, _)| kind == "loop")
@@ -476,7 +476,7 @@ selected = true
 finish(selected);
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
     let graph = workflow_graph_from_program(linked.artifact.ir());
     let graph_ids = graph
         .nodes()
@@ -517,7 +517,7 @@ fn direct_ir_process_sites_are_children_of_the_process_root() {
         Vec::new(),
     );
     let linked = link_labeled(program);
-    let compiled = lashlang::testing::harness::compile_linked_process_named(&linked, "direct")
+    let compiled = lash_vm::testing::harness::compile_linked_process_named(&linked, "direct")
         .expect("direct IR process should compile");
     let graph = workflow_graph_from_program(linked.artifact.ir());
     let process = graph.process("direct").expect("projected process");
@@ -543,7 +543,7 @@ fn direct_ir_process_sites_are_children_of_the_process_root() {
     }
 }
 
-fn descriptor_pairs(compiled: &lashlang::CompiledProgram) -> Vec<(String, String)> {
+fn descriptor_pairs(compiled: &lash_vm::CompiledProgram) -> Vec<(String, String)> {
     compiled_execution_sites(compiled)
         .into_iter()
         .map(|site| (site.node_kind.to_string(), site.label.clone()))
@@ -570,7 +570,7 @@ fn process_resource_operation_site_correlates_to_workflow_node() {
 finish(1);
 "#;
     let linked = link_labeled(parse_program(source));
-    let compiled = lashlang::testing::harness::compile_linked_process_named(
+    let compiled = lash_vm::testing::harness::compile_linked_process_named(
         &linked,
         &only_lifted_process(&linked),
     )
@@ -597,7 +597,7 @@ finish(1);
     assert_eq!(graph_node.name, "Lookup app state");
     assert_eq!(
         graph_node.name_source,
-        lashlang::WorkflowNodeNameSource::Label
+        lash_vm::WorkflowNodeNameSource::Label
     );
     assert!(
         matches!(
@@ -622,7 +622,7 @@ finish(1);
 ///
 /// The fixture reaches every descriptor TypeScript can spell, `step` — an
 /// `@label` doc-comment title on a statement that bears no descriptor of its
-/// own — included (FIG-3047). Two the Lashlang version also covered have no
+/// own — included (FIG-3047). Two the Lash VM version also covered have no
 /// TypeScript form and are therefore not asserted here: `yield`
 /// and `sleep`/`sleep until`, neither of which the front end lowers to.
 #[test]
@@ -649,8 +649,8 @@ while (false) {
 finish(result);
 "#;
     let linked = link_labeled(parse_program(source));
-    let main = lashlang::testing::harness::compile_linked_main(&linked);
-    let process = lashlang::testing::harness::compile_linked_process_named(
+    let main = lash_vm::testing::harness::compile_linked_main(&linked);
+    let process = lash_vm::testing::harness::compile_linked_process_named(
         &linked,
         &only_lifted_process(&linked),
     )

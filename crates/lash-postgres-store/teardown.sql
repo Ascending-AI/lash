@@ -98,7 +98,7 @@ DROP TABLE IF EXISTS lash_tool_intent_submissions CASCADE;
 
 DROP TABLE IF EXISTS lash_tool_intent_retired_owners CASCADE;
 
-DROP TABLE IF EXISTS lash_lashlang_artifacts CASCADE;
+DROP TABLE IF EXISTS lash_lash_vm_artifacts CASCADE;
 
 DROP TABLE IF EXISTS lash_artifact_referrer_edges CASCADE;
 

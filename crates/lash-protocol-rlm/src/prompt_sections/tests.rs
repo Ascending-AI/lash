@@ -11,8 +11,8 @@ use lash_core::plugin::{PluginError, PluginRegistrar, SessionPlugin};
 use lash_core::prompt_sections::{
     PromptPlacement, PromptPlan, PromptSectionPlacement, PromptWrapKey,
 };
-use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
+use lash_vm_runtime::{LashVmSurface, ToolBinding, ToolDefinitionBindingExt};
 
 use super::testing::{Call, RlmSections, compose, compose_rlm};
 use super::*;
@@ -59,9 +59,9 @@ fn catalog() -> lash_core::ToolCatalog {
 fn sections(catalog: &lash_core::ToolCatalog) -> RlmSections {
     RlmSections::cell(SessionDialect::prompt_only(
         Arc::new(crate::dialect::TypescriptDialect),
-        LashlangSurface::new(
-            lashlang::LashlangLanguageFeatures::default(),
-            lashlang::LashlangHostCatalog::tool_default(
+        LashVmSurface::new(
+            lash_vm::LashVmLanguageFeatures::default(),
+            lash_vm::LashVmHostCatalog::tool_default(
                 catalog.tool_names().iter().map(String::as_str),
             ),
         ),

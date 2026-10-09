@@ -164,7 +164,7 @@ fn editable_ir_fields_survive_every_lens_direction() {
 #[test]
 fn workflow_projection_preserves_shadow_loop_label_spans() {
     let source = "const scoped = async () => {\n  const item = 'outer';\n  /** @label Loop read */\n  for (const item of [1,2]) {\n    /** @label Inner read */\n    console.log(item);\n  }\n  /** @label Outer read */\n  console.log(item);\n  return item;\n};\n";
-    let environment = lashlang::testing::harness::labeled_test_environment();
+    let environment = lash_vm::testing::harness::labeled_test_environment();
     let canonical = canonical(source);
     assert_lens_laws(&canonical);
     let graph = workflow_graph_from_source_with_facets(&canonical, Some(&environment))
@@ -219,7 +219,7 @@ fn workflow_projection_preserves_shadow_loop_label_spans() {
 #[test]
 fn facet_echo_changes_no_execution_or_canonical_diff() {
     let source = "const value = [1,2]; if (true) { console.log(value[0]); } finish(value.length);";
-    let environment = LashlangHostEnvironment::new(LashlangHostCatalog::new());
+    let environment = LashVmHostEnvironment::new(LashVmHostCatalog::new());
     let original =
         workflow_graph_from_source_with_facets(source, Some(&environment)).expect("facets");
     let mut wire = serde_json::to_value(&original).expect("wire");
@@ -273,7 +273,7 @@ fn facet_echo_changes_no_execution_or_canonical_diff() {
         );
         assert_eq!(
             super::super::agent_surface::finished(&rendered),
-            lashlang::Value::Number(2.0)
+            lash_vm::Value::Number(2.0)
         );
     }
 }
@@ -290,12 +290,12 @@ fn workflow_loop_shadowing_module_const_round_trips() {
     let source = "const item = 'outer'; for (const item of [1, 2]) { console.log(item); } console.log(item);";
     assert_lens_laws(source);
     assert!(canonical(source).contains("for (const item of"));
-    let admitted = lash_typescript::link(source, &lashlang::testing::harness::test_environment())
+    let admitted = lash_typescript::link(source, &lash_vm::testing::harness::test_environment())
         .expect("shadowed binding links")
         .artifact;
     let mut program = admitted.ir().clone();
-    fn rename_display(expression: &mut lashlang::Expr) -> bool {
-        if let lashlang::Expr::For {
+    fn rename_display(expression: &mut lash_vm::Expr) -> bool {
+        if let lash_vm::Expr::For {
             authored_binding: Some(authored),
             ..
         } = expression
@@ -311,10 +311,10 @@ fn workflow_loop_shadowing_module_const_round_trips() {
         "lowered binding retains provenance"
     );
     let renamed =
-        lashlang::ModuleArtifact::from_program(program).expect("display metadata is admitted");
+        lash_vm::ModuleArtifact::from_program(program).expect("display metadata is admitted");
     assert_eq!(renamed.module_ref(), admitted.module_ref());
     assert_eq!(renamed.source_identity(), admitted.source_identity());
-    let stored = lashlang::ModuleArtifact::from_store_bytes(
+    let stored = lash_vm::ModuleArtifact::from_store_bytes(
         &renamed.to_store_bytes().expect("encode artifact"),
     )
     .expect("decode artifact");
@@ -329,8 +329,8 @@ fn workflow_loop_shadowing_module_const_round_trips() {
 #[test]
 fn workflow_loop_authored_name_avoids_capture() {
     let mut program = parse("const item = 'outer'; const outside = 'other'; for (const item of [1]) { console.log(item, outside); }").expect("fixture parses");
-    fn reference_outer(expression: &mut lashlang::Expr) -> bool {
-        if let lashlang::Expr::Variable(name) = expression
+    fn reference_outer(expression: &mut lash_vm::Expr) -> bool {
+        if let lash_vm::Expr::Variable(name) = expression
             && name.as_str() == "outside"
         {
             *name = "item".into();

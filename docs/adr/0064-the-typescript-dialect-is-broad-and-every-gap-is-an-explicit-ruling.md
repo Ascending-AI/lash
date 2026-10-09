@@ -190,7 +190,7 @@ live in code. The dialect has no migration decoder for incompatible parked state
   [round-trip law](../../crates/lash-typescript/tests/corpus_laws/round_trip.rs#L1)
   and [artifact laws](../../crates/lash-typescript/tests/corpus_laws/invariants.rs#L1)
   cover more than isolated expressions.
-- [Number formatting](../../crates/lashlang/src/runtime/javascript.rs#L521),
-  [regex budget](../../crates/lashlang/src/runtime/vm/javascript_regexp.rs#L150)
-  and [array allocation bounds](../../crates/lashlang/src/runtime/vm/javascript.rs#L529)
+- [Number formatting](../../crates/lash-vm/src/runtime/javascript.rs#L521),
+  [regex budget](../../crates/lash-vm/src/runtime/vm/javascript_regexp.rs#L150)
+  and [array allocation bounds](../../crates/lash-vm/src/runtime/vm/javascript.rs#L529)
   implement runtime constraints.

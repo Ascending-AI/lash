@@ -215,15 +215,15 @@ pub(crate) fn workbench_rlm_channel() -> AnyhowResult<lash::rlm::RlmChannel> {
 /// Refuse a broken deployment before any session can admit a turn. Starting
 /// the real pool also checks the worker handshake, not just file existence.
 fn prewarm_workbench_worker(
-    workers: lash::rlm::WorkerService,
-) -> AnyhowResult<lash::rlm::WorkerService> {
+    workers: lash::vm::WorkerService,
+) -> AnyhowResult<lash::vm::WorkerService> {
     workers.pool().context(
         "agent-workbench VM worker deployment is unavailable; ship lash-vm-worker beside the host or set LASH_VM_WORKER",
     )?;
     Ok(workers)
 }
 
-pub(crate) fn workbench_rlm_workers() -> AnyhowResult<Option<lash::rlm::WorkerService>> {
+pub(crate) fn workbench_rlm_workers() -> AnyhowResult<Option<lash::vm::WorkerService>> {
     if matches!(
         crate::session_protocol::selected()?,
         crate::session_protocol::SessionProtocol::Standard
@@ -231,14 +231,14 @@ pub(crate) fn workbench_rlm_workers() -> AnyhowResult<Option<lash::rlm::WorkerSe
         return Ok(None);
     }
     let workers = std::env::var_os("LASH_VM_WORKER")
-        .map(lash::rlm::WorkerService::subprocess)
+        .map(lash::vm::WorkerService::subprocess)
         .unwrap_or_default();
     prewarm_workbench_worker(workers).map(Some)
 }
 
 /// Everything the workbench plugin stack is configured with.
 pub(crate) struct WorkbenchCorePlugins {
-    pub(crate) rlm_workers: Option<lash::rlm::WorkerService>,
+    pub(crate) rlm_workers: Option<lash::vm::WorkerService>,
     pub(crate) tool_provider: Option<Arc<dyn lash::tools::ToolProvider>>,
     pub(crate) mail_world: mail::MailWorld,
     /// The session config a delegated child is created with: the
@@ -373,11 +373,11 @@ pub(crate) fn workbench_session_defaults(
 }
 
 /// Where a workbench core reports: its trace sink, the sink its trace
-/// runtime's product observer feeds the Lashlang execution graphs through,
+/// runtime's product observer feeds the Lash VM execution graphs through,
 /// and the host's process event feed, when it keeps one.
 pub(crate) struct WorkbenchTracing {
     pub(crate) trace_sink: Arc<dyn TraceSink>,
-    pub(crate) lashlang_execution_sink: Arc<dyn TraceSink>,
+    pub(crate) lash_vm_execution_sink: Arc<dyn TraceSink>,
     pub(crate) process_events: Option<Arc<dyn lash::process::ProcessEventSink>>,
 }
 
@@ -397,7 +397,7 @@ pub(crate) async fn build_workbench_core(
         .build()
         .context("build the durable backend")?;
     let trace_runtime = lash::runtime::TraceRuntime::new(host_backend.clock())
-        .with_product_observer(tracing.lashlang_execution_sink);
+        .with_product_observer(tracing.lash_vm_execution_sink);
     let mut builder =
         workbench_core_builder(host_backend, rlm_channel, context_window_tokens, plugins).await?;
     if let Some(process_events) = tracing.process_events {
@@ -428,7 +428,7 @@ pub(crate) struct WorkbenchHost {
     pub(crate) host_triggers: host_triggers::HostTriggers,
     pub(crate) selected_llm_profile: LlmProfileSelection,
     pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
-    pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
+    pub(crate) lash_vm_execution: Arc<TraceLashlangGraphStore>,
 }
 
 /// The state every route serves from: `core` and the stores of the store set
@@ -453,7 +453,7 @@ pub(crate) fn workbench_app_state(
         messages: Arc::new(Mutex::new(Vec::new())),
         selected_llm_profile: Arc::new(Mutex::new(host.selected_llm_profile)),
         trace_sink: host.trace_sink,
-        lashlang_execution: host.lashlang_execution,
+        lash_vm_execution: host.lash_vm_execution,
         event_tx: host.event_tx,
         mail_world: host.mail_world,
         active_turns: host.active_turns,
@@ -531,17 +531,17 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         Arc::new(StderrTraceSink::default()) as Arc<dyn TraceSink>,
         Arc::new(JsonlTraceSink::new(trace_path)),
     ])) as Arc<dyn TraceSink>;
-    let lashlang_execution_path = std::env::var("AGENT_WORKBENCH_LASHLANG_EXECUTION_TRACE")
+    let lash_vm_execution_path = std::env::var("AGENT_WORKBENCH_LASH_VM_EXECUTION_TRACE")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| data_dir.join("lashlang-execution.jsonl"));
+        .unwrap_or_else(|_| data_dir.join("lash-vm-execution.jsonl"));
     eprintln!(
-        "agent-workbench Lashlang execution trace: {}",
-        lashlang_execution_path.display()
+        "agent-workbench Lash VM execution trace: {}",
+        lash_vm_execution_path.display()
     );
-    let lashlang_execution = Arc::new(TraceLashlangGraphStore::default());
-    let lashlang_execution_sink = Arc::new(TeeTraceSink::new([
-        Arc::clone(&lashlang_execution) as Arc<dyn TraceSink>,
-        Arc::new(JsonlTraceSink::new(lashlang_execution_path.clone())) as Arc<dyn TraceSink>,
+    let lash_vm_execution = Arc::new(TraceLashlangGraphStore::default());
+    let lash_vm_execution_sink = Arc::new(TeeTraceSink::new([
+        Arc::clone(&lash_vm_execution) as Arc<dyn TraceSink>,
+        Arc::new(JsonlTraceSink::new(lash_vm_execution_path.clone())) as Arc<dyn TraceSink>,
     ])) as Arc<dyn TraceSink>;
 
     let model = dev_provider_scenario
@@ -736,7 +736,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         plugins,
         WorkbenchTracing {
             trace_sink: Arc::clone(&trace_sink),
-            lashlang_execution_sink,
+            lash_vm_execution_sink,
             process_events: Some(process_event_sink),
         },
         provider.clone(),
@@ -816,7 +816,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                     model_variant: Some(model_variant),
                 },
                 trace_sink: Some(Arc::clone(&trace_sink)),
-                lashlang_execution,
+                lash_vm_execution,
             },
         )?;
         start_workbench(&state).await?;
@@ -828,7 +828,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                 "addr": addr.to_string(),
                 "data_dir": data_dir.display().to_string(),
                 "trace_path": trace_path_display,
-                "lashlang_execution_path": lashlang_execution_path.display().to_string(),
+                "lash_vm_execution_path": lash_vm_execution_path.display().to_string(),
                 // The served RLM language, read from the constant the session
                 // list, the settings panel and the rendered system prompt all
                 // select from, so the record cannot disagree with what the host
@@ -898,8 +898,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         )
         .route("/api/work/{process_id}/cancel", post(cancel_work))
         .route("/api/work/{process_id}/await", get(await_work))
-        .route("/api/lashlang-graphs", get(list_lashlang_graphs))
-        .route("/api/lashlang-graph/{graph_key}", get(lashlang_graph))
+        .route("/api/lash-vm-graphs", get(list_lash_vm_graphs))
+        .route("/api/lash-vm-graph/{graph_key}", get(lash_vm_graph))
         .with_state(state.clone())
         .merge(crate::mcp_host::router(Arc::clone(&mcp_search)));
         // The case's control routes; a case without a tool fixture runs the
@@ -979,17 +979,17 @@ mod worker_deployment_tests {
     fn missing_vm_worker_refuses_startup_with_typed_deployment_fault() {
         let directory = tempfile::tempdir().expect("worker fixture directory");
         let executable = directory.path().join("lash-vm-worker");
-        let result = prewarm_workbench_worker(lash::rlm::WorkerService::subprocess(&executable));
+        let result = prewarm_workbench_worker(lash::vm::WorkerService::subprocess(&executable));
         let error = result.err().expect("a missing worker must refuse startup");
         let cause = error
-            .downcast_ref::<lash::rlm::PoolError>()
+            .downcast_ref::<lash::vm::PoolError>()
             .expect("startup refusal retains the typed pool fault");
         assert!(matches!(
             cause,
-            lash::rlm::PoolError::Infrastructure(
-                lash::rlm::InfrastructureOutcome::WorkerDeployment {
+            lash::vm::PoolError::Infrastructure(
+                lash::vm::InfrastructureOutcome::WorkerDeployment {
                     executable: path,
-                    fault: lash::rlm::WorkerDeploymentFault::NotFound,
+                    fault: lash::vm::WorkerDeploymentFault::NotFound,
                 }
             ) if path == &executable
         ));

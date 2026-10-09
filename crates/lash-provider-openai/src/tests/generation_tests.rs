@@ -47,13 +47,13 @@ fn refusal_code(error: &LlmTransportError) -> Option<String> {
 fn stop_sequences_reach_chat_and_are_refused_by_responses_and_codex() {
     let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
     req.model.metadata_mut().wire_model = "anthropic/claude-sonnet-4.6".to_string();
-    req.generation.stop_sequences = vec!["</lashlang>".to_string()];
+    req.generation.stop_sequences = vec!["</lash_vm>".to_string()];
 
     let (chat, _) = openrouter_provider()
         .build_chat_request_body_with_diagnostics(&req, true)
         .expect("chat body");
     let chat = chat.redacted();
-    assert_eq!(chat.body["stop"], json!(["</lashlang>"]));
+    assert_eq!(chat.body["stop"], json!(["</lash_vm>"]));
     assert_eq!(
         chat.receipt.stop_sequences,
         lash_core::GenerationOptionOutcome::Applied

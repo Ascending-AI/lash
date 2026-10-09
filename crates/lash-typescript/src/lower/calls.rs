@@ -111,10 +111,10 @@ impl UriBuiltin {
 
     fn intrinsic(self) -> &'static str {
         match self {
-            Self::EncodeComponent => "__lashlang_encode_uri_component",
-            Self::DecodeComponent => "__lashlang_decode_uri_component",
-            Self::Encode => "__lashlang_encode_uri",
-            Self::Decode => "__lashlang_decode_uri",
+            Self::EncodeComponent => "__lash_vm_encode_uri_component",
+            Self::DecodeComponent => "__lash_vm_decode_uri_component",
+            Self::Encode => "__lash_vm_encode_uri",
+            Self::Decode => "__lash_vm_decode_uri",
         }
     }
 
@@ -273,7 +273,7 @@ impl Lowerer {
                     return Ok(Self::stdlib_call(
                         "Lash.DateString",
                         vec![LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
-                            lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
+                            lash_vm::LANGUAGE_RUNTIME_NOW_OPERATION,
                         )))],
                     ));
                 }
@@ -398,7 +398,7 @@ impl Lowerer {
                 .collect::<Result<Vec<_>, _>>()?,
         );
         Ok(LashExpr::BuiltinCall {
-            name: "__lashlang_stdlib".into(),
+            name: "__lash_vm_stdlib".into(),
             args: values,
         })
     }
@@ -420,7 +420,7 @@ impl Lowerer {
             NumberPredicate::Finite => "Number.isFinite",
         };
         Ok(LashExpr::BuiltinCall {
-            name: "__lashlang_stdlib".into(),
+            name: "__lash_vm_stdlib".into(),
             args: vec![
                 LashExpr::String(intrinsic.into()),
                 js_unary(CoercingUnaryOp::Plus, self.lower_expr(value)?),
@@ -442,7 +442,7 @@ impl Lowerer {
         };
         if builtin.rejects_lone_surrogate() && matches!(value, Expr::LoneSurrogateString) {
             return Ok(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                name: "__lashlang_heap_new".into(),
+                name: "__lash_vm_heap_new".into(),
                 args: vec![
                     LashExpr::String("URIError".into()),
                     LashExpr::String("URI malformed".into()),
@@ -494,7 +494,7 @@ impl Lowerer {
                 .collect::<Result<Vec<_>, _>>()?,
         );
         Ok(LashExpr::BuiltinCall {
-            name: "__lashlang_regexp".into(),
+            name: "__lash_vm_regexp".into(),
             args: values,
         })
     }
@@ -524,7 +524,7 @@ impl Lowerer {
             // pending tool call, settled by the aggregate that awaits it, whose
             // start point is that aggregate's admission (ADR 0099 §11).
             (AgentPrimitive::Sleep, [milliseconds]) => Ok(LashExpr::BuiltinCall {
-                name: "__lashlang_pending_timer".into(),
+                name: "__lash_vm_pending_timer".into(),
                 args: vec![self.lower_expr(milliseconds)?],
             }),
             _ => Err(Diagnostic::defect(
@@ -709,7 +709,7 @@ impl Lowerer {
                 }
                 if args.is_empty() {
                     return Ok(LashExpr::BuiltinCall {
-                        name: "__lashlang_stdlib".into(),
+                        name: "__lash_vm_stdlib".into(),
                         args: vec![LashExpr::String("JSON.stringify".into()), LashExpr::Absent],
                     });
                 }
@@ -840,7 +840,7 @@ impl Lowerer {
             && !self.has_binding("Date")
         {
             return Ok(LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
-                lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
+                lash_vm::LANGUAGE_RUNTIME_NOW_OPERATION,
             ))));
         }
         if matches!(object, Expr::Ident(name, _) if name == "Math")
@@ -849,7 +849,7 @@ impl Lowerer {
             && !self.has_binding("Math")
         {
             return Ok(LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
-                lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION,
+                lash_vm::LANGUAGE_RUNTIME_RANDOM_OPERATION,
             ))));
         }
         let module_root = module_path(object).and_then(|path| path.first().cloned());
@@ -901,14 +901,14 @@ impl Lowerer {
                         expr: Box::new(receiver_value),
                     },
                     LashExpr::BuiltinCall {
-                        name: "__lashlang_stdlib".into(),
+                        name: "__lash_vm_stdlib".into(),
                         args: vec![LashExpr::String(method.into()), variable()],
                     },
                 ]));
             }
             let array = match method {
                 "values" => LashExpr::BuiltinCall {
-                    name: "__lashlang_stdlib".into(),
+                    name: "__lash_vm_stdlib".into(),
                     args: vec![
                         LashExpr::String("Lash.ArrayFromIterable".into()),
                         variable(),
@@ -922,7 +922,7 @@ impl Lowerer {
                     };
                     LashExpr::Map {
                         items: Box::new(LashExpr::BuiltinCall {
-                            name: "__lashlang_stdlib".into(),
+                            name: "__lash_vm_stdlib".into(),
                             args: vec![LashExpr::String("__enumerate".into()), variable()],
                         }),
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
@@ -941,7 +941,7 @@ impl Lowerer {
                     let key = self.temporary("array_key");
                     LashExpr::Map {
                         items: Box::new(LashExpr::BuiltinCall {
-                            name: "__lashlang_stdlib".into(),
+                            name: "__lash_vm_stdlib".into(),
                             args: vec![LashExpr::String("__enumerate".into()), variable()],
                         }),
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
@@ -965,12 +965,12 @@ impl Lowerer {
             // read as an array answered its `keys()` as `[]` in silence.
             let iteration = LashExpr::If {
                 condition: Box::new(LashExpr::BuiltinCall {
-                    name: "__lashlang_stdlib".into(),
+                    name: "__lash_vm_stdlib".into(),
                     args: vec![LashExpr::String("Array.isArray".into()), variable()],
                 }),
                 then_block: Box::new(array),
                 else_block: Box::new(LashExpr::BuiltinCall {
-                    name: "__lashlang_stdlib".into(),
+                    name: "__lash_vm_stdlib".into(),
                     args: vec![LashExpr::String(method.into()), variable()],
                 }),
             };
@@ -1021,7 +1021,7 @@ impl Lowerer {
                 "Lash.ArrayIterationSource"
             };
             let array = LashExpr::BuiltinCall {
-                name: "__lashlang_stdlib".into(),
+                name: "__lash_vm_stdlib".into(),
                 args: vec![
                     LashExpr::String(source.into()),
                     self.lower_iterable_sink(value)?,
@@ -1045,7 +1045,7 @@ impl Lowerer {
                 ));
             };
             return Ok(LashExpr::BuiltinCall {
-                name: "__lashlang_stdlib".into(),
+                name: "__lash_vm_stdlib".into(),
                 args: vec![
                     LashExpr::String("Object.fromEntries".into()),
                     self.lower_iterable_sink(value)?,
@@ -1075,7 +1075,7 @@ impl Lowerer {
                     },
                     LashExpr::If {
                         condition: Box::new(LashExpr::BuiltinCall {
-                            name: "__lashlang_stdlib".into(),
+                            name: "__lash_vm_stdlib".into(),
                             args: vec![
                                 LashExpr::String("Lash.OwnMethod".into()),
                                 variable(&receiver),
@@ -1088,7 +1088,7 @@ impl Lowerer {
                             args: vec![self.lower_expr(key)?],
                         }),
                         else_block: Box::new(LashExpr::BuiltinCall {
-                            name: "__lashlang_stdlib".into(),
+                            name: "__lash_vm_stdlib".into(),
                             args: vec![
                                 LashExpr::String("Object.hasOwn".into()),
                                 variable(&receiver),
@@ -1099,7 +1099,7 @@ impl Lowerer {
                 ])
             } else {
                 LashExpr::BuiltinCall {
-                    name: "__lashlang_stdlib".into(),
+                    name: "__lash_vm_stdlib".into(),
                     args: vec![
                         LashExpr::String("Object.hasOwn".into()),
                         self.lower_expr(object)?,
@@ -1146,7 +1146,7 @@ impl Lowerer {
                     .collect::<Result<Vec<_>, _>>()?,
             );
             return Ok(LashExpr::BuiltinCall {
-                name: "__lashlang_stdlib".into(),
+                name: "__lash_vm_stdlib".into(),
                 args: builtin_args,
             });
         }
@@ -1222,7 +1222,7 @@ impl Lowerer {
                     .collect::<Result<Vec<_>, _>>()?,
             );
             return Ok(LashExpr::BuiltinCall {
-                name: "__lashlang_stdlib".into(),
+                name: "__lash_vm_stdlib".into(),
                 args: builtin_args,
             });
         }
@@ -1320,7 +1320,7 @@ impl Lowerer {
         };
         Ok(if self.position.await_depth == 0 {
             LashExpr::BuiltinCall {
-                name: "__lashlang_pending_tool".into(),
+                name: "__lash_vm_pending_tool".into(),
                 args: vec![call],
             }
         } else {
@@ -1343,7 +1343,7 @@ impl Lowerer {
 fn console_observation_text(mut arguments: Vec<LashExpr>) -> LashExpr {
     arguments.insert(0, LashExpr::String("__consoleObservationText".into()));
     LashExpr::BuiltinCall {
-        name: "__lashlang_stdlib".into(),
+        name: "__lash_vm_stdlib".into(),
         args: arguments,
     }
 }

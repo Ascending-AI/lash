@@ -13,7 +13,7 @@ import perfreport
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_KINDS = {
-    "lashlang-perf",
+    "lash-vm-perf",
     "runtime-perf",
     "runtime-stack",
 }

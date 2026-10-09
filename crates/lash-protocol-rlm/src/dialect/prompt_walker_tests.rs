@@ -3,19 +3,19 @@
 //! Two narrower walkers already exist and both passed while the product was
 //! broken: `every_diagnostic_code_named_in_the_prompt_exists` reads the
 //! execution section's `TS_` codes, and
-//! `no_diagnostic_from_a_prompt_primitive_names_a_lashlang_identifier` reads
+//! `no_diagnostic_from_a_prompt_primitive_names_a_lash_vm_identifier` reads
 //! the diagnostics its primitives emit. Neither looks at the *rest* of the
 //! prompt, and the rest of the prompt is where the leak was: a TypeScript
 //! session was told to write `<typescript>` cells by its execution section and,
 //! a few hundred tokens later, that its variables were "already bound in
-//! lashlang" and should be accessed "in `<lashlang>` blocks". The judged
+//! lash_vm" and should be accessed "in `<lash_vm>` blocks". The judged
 //! battery caught a model spending reasoning tokens trying to reconcile the
 //! two.
 //!
 //! TypeScript is now the only contract (ADR 0096), so this walks every fragment
 //! the crate contributes to an assembled prompt and fails on any word of the
 //! retired surface. The markers are not vestigial: the host-surface inventory
-//! is declared in Lashlang `TypeExpr`s and the tool examples are authored in
+//! is declared in Lash VM `TypeExpr`s and the tool examples are authored in
 //! the retired spelling, so both are still rendered through a translator that
 //! can regress.
 //!
@@ -31,18 +31,18 @@
 //! test on `spawn_agent_tool_definition` in `examples/delegation`).
 
 use super::*;
-use lash_lashlang_runtime::ToolDefinitionBindingExt as _;
+use lash_vm_runtime::ToolDefinitionBindingExt as _;
 
 /// Text that names the retired surface, with the reason each token is a defect.
 ///
 /// A TypeScript session must never see the retired cell tag, its language name
 /// in prose, or its statement syntax.
 const RETIRED_SURFACE_MARKERS: &[&str] = &[
-    "<lashlang>",
-    "</lashlang>",
-    "lashlang block",
-    "lashlang blocks",
-    "bound in lashlang",
+    "<lash_vm>",
+    "</lash_vm>",
+    "lash_vm block",
+    "lash_vm blocks",
+    "bound in lash_vm",
     "`print ",
     "re-print",
     "finish <value>",
@@ -69,8 +69,8 @@ const RETIRED_SURFACE_MARKERS: &[&str] = &[
 ///
 /// Exactly one qualifies, and it is a payload discriminant rather than prose:
 /// the model-visible `history` variable really does contain
-/// `kind: "lashlang_step"` in both dialects, because `RlmHistoryItem` is one
-/// serialized type and its event ids (`lashlang_step_<turn>_<iteration>`,
+/// `kind: "lash_vm_step"` in both dialects, because `RlmHistoryItem` is one
+/// serialized type and its event ids (`lash_vm_step_<turn>_<iteration>`,
 /// `protocol/driver.rs`) are durable session-graph identifiers. Teaching a
 /// TypeScript model to expect `typescript_step` would make the prompt
 /// *disagree with the data the model receives*, which is the defect class this
@@ -78,23 +78,23 @@ const RETIRED_SURFACE_MARKERS: &[&str] = &[
 /// change and is tracked separately; until then the honest prompt is the one
 /// that matches the wire.
 ///
-/// The `__lashlang_runtime` module the TypeScript lowerer resolves
+/// The `__lash_vm_runtime` module the TypeScript lowerer resolves
 /// `Date.now()`/`Math.random()` through is deliberately **not** here: nothing
 /// about it has to reach a model, so ADR 0063 hides it from the prompt instead
 /// of carving it out.
 /// The second carve-out is a durable process identity. A TypeScript session's
-/// processes are compiled against the Lashlang VM substrate and their ids are
-/// `process:lashlang:v3:blake3:…` — journal identity, visible to a host through
+/// processes are compiled against the Lash VM substrate and their ids are
+/// `process:lash_vm:v3:blake3:…` — journal identity, visible to a host through
 /// `/api/work`. Renaming them would move a durable id for a cosmetic gain, so
 /// the id stays and the *label* half of the same defect is what got fixed
 /// (transcript badges read the recorded dialect).
 const SUBSTRATE_CARVE_OUTS: &[&str] = &[
-    "lashlang_step",
-    "process:lashlang:",
-    // Effect ids are `lashlang:effect:<session>:<turn>:…` in every dialect:
+    "lash_vm_step",
+    "process:lash_vm:",
+    // Effect ids are `lash_vm:effect:<session>:<turn>:…` in every dialect:
     // the engine identity in a durable journal key. Same ruling as the process
     // id — durable, so carved out rather than renamed.
-    "lashlang:effect:",
+    "lash_vm:effect:",
 ];
 
 fn strip_carve_outs(text: &str) -> String {
@@ -224,14 +224,14 @@ fn the_marker_list_and_the_example_rewriter_are_not_vacuous() {
 
     // And the markers themselves must be present in the retired surface's real
     // copy, or the walker is looking for strings nothing ever emitted.
-    assert!(RETIRED_SURFACE_MARKERS.contains(&"<lashlang>"));
+    assert!(RETIRED_SURFACE_MARKERS.contains(&"<lash_vm>"));
     assert!(RETIRED_SURFACE_MARKERS.contains(&"finish <value>"));
     assert_ne!(
         crate::dialect::TypescriptDialect
             .prompt_vocabulary()
             .cell_tags
             .open,
-        "<lashlang>",
+        "<lash_vm>",
         "the sole vocabulary must not be the retired one"
     );
 }
@@ -282,13 +282,13 @@ async fn assembled_prompt_fragments_with_projection(
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
     .with_examples(vec![
-        // Authored as Lashlang, like every example in the resident catalog.
+        // Authored as LashVm, like every example in the resident catalog.
         // Six of seven in the shipped catalog carry the try-operator, which is
         // a syntax error in TypeScript.
         r#"await web.fetch({ url: "https://example.test/" })?"#.to_string(),
         "page = await web.fetch({ url: \"https://example.test/\" })?\nfinish page".to_string(),
     ])
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["web"], "fetch"));
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["web"], "fetch"));
     // A second member whose *shapes* are collections of records, like
     // `processes.list`. The first fixture's schema is one string field, so the
     // tool-docs fragment never rendered a collection or record type label and
@@ -330,10 +330,7 @@ async fn assembled_prompt_fragments_with_projection(
     .with_examples(vec![
         r#"await processes.list({ status: "any" })?"#.to_string(),
     ])
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
-        ["processes"],
-        "list",
-    ));
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["processes"], "list"));
     // A third member shaped like an MCP import (FIG-4544): no
     // `additionalProperties`, nested object and array properties, constraints
     // and a field without a description. Every fixture above is a closed
@@ -378,7 +375,7 @@ async fn assembled_prompt_fragments_with_projection(
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(
         ["tracker"],
         "issues_search",
     ));
@@ -406,19 +403,19 @@ async fn assembled_prompt_fragments_with_projection(
     ));
 
     // The deferred-tool advertisement, which is prose a *lower* crate composes
-    // (`lash_lashlang_runtime::catalogue_preview`) and a host states in its
+    // (`lash_vm_runtime::catalogue_preview`) and a host states in its
     // prompt config. It is model-facing on every turn of any session with a
     // deferred catalogue, it takes no vocabulary, and neither this walker nor
     // the tool-prose gate saw it: a judged TypeScript session was advertised
     // `await tools.search({ query: "..." })?`, try-operator included.
     fragments.push((
         "deferred-tool advertisement",
-        lash_lashlang_runtime::catalogue_preview(
-            [lash_lashlang_runtime::CataloguePreviewEntry {
+        lash_vm_runtime::catalogue_preview(
+            [lash_vm_runtime::CataloguePreviewEntry {
                 module_path: vec!["workbench_deferred".to_string()],
                 call: "stats".to_string(),
             }],
-            &lash_lashlang_runtime::CataloguePreviewOptions::default(),
+            &lash_vm_runtime::CataloguePreviewOptions::default(),
         )
         .expect("one catalogued entry renders an advertisement"),
     ));
@@ -427,7 +424,7 @@ async fn assembled_prompt_fragments_with_projection(
     // the path a served turn uses. Calling `render_bound_variables` directly
     // with the right vocabulary would only prove the plumbing compiles: the
     // first version of this walker did exactly that and stayed green when the
-    // TypeScript session was pointed back at Lashlang copy — the very bug it
+    // TypeScript session was pointed back at Lash VM copy — the very bug it
     // exists to catch.
     let mut session = dialect.create_session();
     session
@@ -595,7 +592,7 @@ async fn assembled_prompt_fragments_with_projection(
 
     // Copy the *driver* assembles around the dialect's own fragments. These
     // reach the model on ordinary turns — a truncated history entry and an
-    // output-limit retry are not edge cases — and were written when Lashlang
+    // output-limit retry are not edge cases — and were written when Lash VM
     // was the only dialect.
     fragments.push((
         "history preview notice",

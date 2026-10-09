@@ -2,7 +2,7 @@
 //!
 //! The RLM session model is that top-level bindings persist across cells: the
 //! prompt lists them under `=== BOUND VARIABLES ===` with their values, and the
-//! Lashlang dialect resolves them at *link*, where the live session globals are
+//! Lash VM dialect resolves them at *link*, where the live session globals are
 //! known. The TypeScript lowerer resolved every name against source-local
 //! scopes at parse instead, so `finish(findings)` in a second cell rejected
 //! with `TS_UNKNOWN_BINDING` while the same turn's prompt showed `findings` and
@@ -15,9 +15,8 @@
 
 use std::collections::BTreeSet;
 
-fn environment(globals: [&str; 1]) -> lashlang::LashlangHostEnvironment {
-    lashlang::LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new())
-        .with_globals(globals)
+fn environment(globals: [&str; 1]) -> lash_vm::LashVmHostEnvironment {
+    lash_vm::LashVmHostEnvironment::new(lash_vm::LashVmHostCatalog::new()).with_globals(globals)
 }
 
 #[test]

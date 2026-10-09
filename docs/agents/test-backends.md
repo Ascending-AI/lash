@@ -89,7 +89,7 @@ Each row names the deletion commit, not merely the ADR that proposed it.
 | --- | --- |
 | In-memory store conformance legs | Retired in `dd80a5e7cc`, which removed their registrations and moved unique engine laws to the engine's test host. The Rust stores were then retired in `60e0e86b2a`. Store laws now register on SQLite file/memory and PostgreSQL. |
 | Rust in-memory stores, `lash-core-memory`, local process registry, native effect host and store-delegated turn control | Retired in `60e0e86b2a`. The store set is SQL storage; the engine owns turn execution and replay. Process observation buffers and recording fixtures still exist, but do not constitute that retired persistence tier. |
-| In-memory Lashlang artifact store on the facade | Retired in `7f11e493a7` from the facade in favor of the backend's artifact store. Remaining Rust stores were retired in `60e0e86b2a`. |
+| In-memory Lash VM artifact store on the facade | Retired in `7f11e493a7` from the facade in favor of the backend's artifact store. Remaining Rust stores were retired in `60e0e86b2a`. |
 | PostgreSQL effect engine | Retired in `4f03596847`. PostgreSQL keeps storage, with no engine journal tables or await-event engine. |
 | SQLite effect engine and store-journal turn host | Retired in `476264fbea`. SQLite file and memory remain storage. |
 | SQL session-execution leases | Retired in `1ea8fcff75`. Writes use the sealed shift fence and session-head compare-and-set. |

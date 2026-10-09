@@ -75,7 +75,7 @@ The generated region below is checked against the live filenames and headings.
 | 0034 | [Harness evolution lives outside the runtime repository](0034-harness-evolution-lives-outside-the-runtime-repository.md) |
 | 0035 | [Frontends are independent host applications](0035-frontends-are-independent-host-applications.md) |
 | 0036 | [Stream termination is explicit dialect policy](0036-stream-termination-is-explicit-dialect-policy.md) |
-| 0037 | [Lashlang workflows use a code-graph-code lens](0037-lashlang-workflows-use-a-code-graph-code-lens.md) |
+| 0037 | [Lash VM workflows use a code-graph-code lens](0037-lash-vm-workflows-use-a-code-graph-code-lens.md) |
 | 0038 | [Response metadata is allowlisted host-supplied capture](0038-response-metadata-is-allowlisted-host-supplied-capture.md) |
 | 0039 | [Turn cancellation is a first-party work-driver primitive](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md) |
 | 0040 | [Retried model attempts retract live text by correlation](0040-retried-model-attempts-retract-live-text-by-correlation.md) |
@@ -91,12 +91,12 @@ The generated region below is checked against the live filenames and headings.
 | 0051 | [The facade is the host API; core exposes integrator seams](0051-the-facade-is-the-host-api-core-is-integrator-seams.md) |
 | 0052 | [The Postgres schema is a published artifact lash verifies at open](0052-the-postgres-schema-is-a-published-artifact-lash-verifies.md) |
 | 0054 | [Host panics are contained and standard-lock poison is recovered](0054-host-panics-are-contained-and-lock-poison-is-recovered.md) |
-| 0055 | [Lashlang execution bounds span durable process lifetimes](0055-lashlang-execution-bounds-span-durable-process-lifetimes.md) |
+| 0055 | [Lash VM execution bounds span durable process lifetimes](0055-lash-vm-execution-bounds-span-durable-process-lifetimes.md) |
 | 0056 | [Checkpoint components generalize to a keyed set](0056-checkpoint-components-generalize-to-a-keyed-set.md) |
 | 0057 | [History generations accelerate edge-authoritative reads](0057-history-generations-accelerate-edge-authoritative-reads.md) |
 | 0058 | [Runtime commit budgets are explicit host policy](0058-runtime-commit-budgets-are-explicit-host-policy.md) |
 | 0059 | [Tool-call directives compose monotonically](0059-before-tool-call-directives-compose-monotonically.md) |
-| 0060 | [The lashlang VM is a heap substrate with dialect-lowered value semantics](0060-the-lashlang-vm-is-a-heap-substrate-with-dialect-lowered-value-semantics.md) |
+| 0060 | [The Lash VM is a heap substrate with dialect-lowered value semantics](0060-the-lash-vm-is-a-heap-substrate-with-dialect-lowered-value-semantics.md) |
 | 0061 | [RLM dialects share one IR and VM](0061-two-first-class-rlm-dialects-with-full-parity-and-session-pinning.md) |
 | 0062 | [The TypeScript dialect is an exact ECMA-262 subset](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md) |
 | 0063 | [One RLM turn is prompted in its dialect](0063-one-rlm-turn-is-prompted-in-one-dialect.md) |
@@ -110,7 +110,7 @@ The generated region below is checked against the live filenames and headings.
 | 0071 | [Engines emit unified tool-call accounting outside model projection](0071-engines-emit-unified-tool-call-accounting.md) |
 | 0073 | [Gradual value types through to the workflow editor](0073-gradual-value-types-through-to-the-workflow-editor.md) |
 | 0074 | [Generation intent is session policy, and its fate on the wire is reported](0074-generation-intent-is-session-policy-and-its-fate-is-reported.md) |
-| 0076 | [Durable VM state preserves shared references and owns its roots](0076-lashlang-durable-stores-hold-exclusively-owned-copies.md) |
+| 0076 | [Durable VM state preserves shared references and owns its roots](0076-lash-vm-durable-stores-hold-exclusively-owned-copies.md) |
 | 0077 | [Session state admits one compatible continuation generation](0077-session-state-migrates-totally-at-admission.md) |
 | 0078 | [Plugin state is a lash-mediated per-plugin store](0078-plugin-state-is-a-lash-mediated-per-plugin-store.md) |
 | 0079 | [One promised package: the facade owns the API](0079-one-promised-package-facade-owns-the-api.md) |

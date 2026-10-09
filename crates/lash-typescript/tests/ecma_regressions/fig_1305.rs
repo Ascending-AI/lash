@@ -129,7 +129,7 @@ fn every_string_growth_path_is_bounded_before_allocation() {
         ExecutionBound::logical_bytes(16 * 1024 * 1024),
     ));
     assert!(matches!(
-        futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &environment)),
+        futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &environment)),
         Err(RuntimeError::MemoryLimitExceeded { .. })
     ));
 }

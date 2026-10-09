@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lashlang::is_javascript_builtin_global;
+use lash_vm::is_javascript_builtin_global;
 
 use super::captures::{BindingId, SlotKey};
 use super::{
@@ -299,7 +299,7 @@ impl super::Lowerer {
         &mut self,
         name: &str,
         parameter: &str,
-    ) -> Option<lashlang::Expr> {
+    ) -> Option<lash_vm::Expr> {
         if !self
             .functions
             .last()
@@ -318,8 +318,7 @@ impl super::Lowerer {
             owner_function,
             role: BindingRole::Plain,
         };
-        let value =
-            self.binding_initial_value(&binding, lashlang::Expr::Variable(parameter.into()));
+        let value = self.binding_initial_value(&binding, lash_vm::Expr::Variable(parameter.into()));
         #[expect(
             clippy::expect_used,
             reason = "the function body's scope declared the parameter being replaced"
@@ -329,8 +328,8 @@ impl super::Lowerer {
             .expect("a scope is always active")
             .bindings
             .insert(name.to_string(), binding);
-        Some(lashlang::Expr::Assign {
-            target: lashlang::AssignTarget::variable(internal.into()),
+        Some(lash_vm::Expr::Assign {
+            target: lash_vm::AssignTarget::variable(internal.into()),
             expr: Box::new(value),
         })
     }
@@ -409,14 +408,14 @@ impl super::Lowerer {
     }
 }
 
-pub(super) fn is_pending_tool(expression: &lashlang::Expr) -> bool {
-    matches!(super::spans::unmarked(expression), lashlang::Expr::BuiltinCall { name, .. }
-        if name.as_str() == "__lashlang_pending_tool")
+pub(super) fn is_pending_tool(expression: &lash_vm::Expr) -> bool {
+    matches!(super::spans::unmarked(expression), lash_vm::Expr::BuiltinCall { name, .. }
+        if name.as_str() == "__lash_vm_pending_tool")
 }
 
 pub(super) fn discarded_tool_span(
     expression: &Expr,
-    lowered: &lashlang::Expr,
+    lowered: &lash_vm::Expr,
 ) -> Option<crate::SourceSpan> {
     if is_pending_tool(lowered) {
         return super::spans::source_span(expression);
@@ -425,8 +424,8 @@ pub(super) fn discarded_tool_span(
         op: super::UnaryOp::Void,
         value,
     } = expression
-        && let lashlang::Expr::Block(expressions) = super::spans::unmarked(lowered)
-        && let [inner, lashlang::Expr::Absent] = expressions.as_slice()
+        && let lash_vm::Expr::Block(expressions) = super::spans::unmarked(lowered)
+        && let [inner, lash_vm::Expr::Absent] = expressions.as_slice()
     {
         return discarded_tool_span(value, inner);
     }

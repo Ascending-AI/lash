@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use lash::LashCore;
 use lash::process::*;
-use lash::rlm::lang::{LinkedModule, ProcessRef};
 use lash::tracing::{TraceEvent, TraceLanguageExecutionPayload};
+use lash::vm::{LinkedModule, ProcessRef};
 use lash::workflow::{WorkflowDocument, WorkflowRead};
 use tokio::sync::mpsc;
 
@@ -21,7 +21,7 @@ pub(crate) enum RunError {
     #[error(transparent)]
     Definition(#[from] ProcessDefinitionDraftError),
     #[error(transparent)]
-    Display(#[from] lash::rlm::lang::ExecutionHostError),
+    Display(#[from] lash::vm::ExecutionHostError),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error("{0}")]
@@ -46,7 +46,7 @@ impl AdmittedWorkflow {
             .declarations
             .iter()
             .find_map(|declaration| match declaration {
-                lash::rlm::lang::Declaration::Process(process) => {
+                lash::vm::ir::Declaration::Process(process) => {
                     linked.artifact.process_ref(process.name.as_str()).cloned()
                 }
                 _ => None,
@@ -148,7 +148,7 @@ impl PreparedRun {
         let result = async {
             let artifact = &self.admitted.linked.artifact;
             artifacts.publish_module(&pin, artifact).await?;
-            let identity = lash::rlm::lang::ProcessDefinitionIdentity::from_artifact_export(
+            let identity = lash::vm::ProcessDefinitionIdentity::from_artifact_export(
                 artifact,
                 &self.process_name,
             )
@@ -389,7 +389,7 @@ impl Overlay {
             let (_, delta) = crate::display::apply_tool(
                 &mut self.display,
                 &operation.operation,
-                &[lash::rlm::lang::from_json(operation.args)],
+                &[lash::vm::from_json(operation.args)],
             )?;
             events.push(self.event(node, RunStatus::Succeeded, delta, None));
         }
@@ -492,7 +492,7 @@ impl Overlay {
     }
 }
 
-pub(crate) fn host_environment() -> lash::rlm::lang::LashlangHostEnvironment {
+pub(crate) fn host_environment() -> lash::vm::LashVmHostEnvironment {
     crate::operations::host_environment()
 }
 
@@ -517,7 +517,7 @@ pub fn core(backend: lash::Backend) -> lash::Result<WorkflowHost> {
         .channel(lash::rlm::RlmChannel::Cell)
         .build();
 
-    config.lashlang_language_features = lash::rlm::lang::LashlangLanguageFeatures::default()
+    config.lash_vm_language_features = lash::vm::LashVmLanguageFeatures::default()
         .with_label_annotations()
         .into();
     let factory = lash::rlm::RlmProtocolPluginFactory::new(

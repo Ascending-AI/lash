@@ -1210,9 +1210,9 @@ mod tests {
     fn rlm_process_async_completion_requires_named_phase_metrics() {
         let phases = required_phases(RuntimePerfScenario::RlmProcessAsyncToolCompletion);
         for expected in [
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.store_module_artifact",
-            "rlm_lashlang.execute",
+            "rlm_lash_vm.compile_link",
+            "rlm_lash_vm.store_module_artifact",
+            "rlm_lash_vm.execute",
             // `rlm_process.prepare_start` and `rlm_process.start` are not
             // listed: #1529 deleted the `start_process` execution-host method
             // they named when the TypeScript process special forms gave way to
@@ -1258,9 +1258,9 @@ mod tests {
     fn rlm_large_print_requires_projector_phase_metrics() {
         let phases = required_phases(RuntimePerfScenario::RlmLargePrint);
         for expected in [
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.execute",
-            "rlm_lashlang.print_project",
+            "rlm_lash_vm.compile_link",
+            "rlm_lash_vm.execute",
+            "rlm_lash_vm.print_project",
         ] {
             assert!(
                 phases.contains(&expected),
@@ -1278,9 +1278,9 @@ mod tests {
     fn rlm_oblique_stack_mix_requires_stack_sensitive_phase_metrics() {
         let phases = required_phases(RuntimePerfScenario::RlmObliqueStackMix);
         for expected in [
-            "rlm_lashlang.compile_link",
-            "rlm_lashlang.execute",
-            "rlm_lashlang.print_project",
+            "rlm_lash_vm.compile_link",
+            "rlm_lash_vm.execute",
+            "rlm_lash_vm.print_project",
             // See the note above: #1529 retired the two process-start phases.
             "rlm_process.await_handle",
             "rlm_process.execute",
@@ -1302,22 +1302,20 @@ mod tests {
     }
 
     #[test]
-    fn streamed_paired_lashlang_requires_lashlang_phase_metrics() {
-        let phases = required_phases(RuntimePerfScenario::RlmStreamedPairedLashlang);
-        for expected in ["rlm_lashlang.compile_link", "rlm_lashlang.execute"] {
+    fn streamed_paired_lash_vm_requires_lash_vm_phase_metrics() {
+        let phases = required_phases(RuntimePerfScenario::RlmStreamedPairedLashVm);
+        for expected in ["rlm_lash_vm.compile_link", "rlm_lash_vm.execute"] {
             assert!(
                 phases.contains(&expected),
                 "missing required phase {expected}"
             );
         }
         assert!(
-            allocation_budget_bytes(RuntimePerfScenario::RlmStreamedPairedLashlang)
-                <= 150_000_000.0
+            allocation_budget_bytes(RuntimePerfScenario::RlmStreamedPairedLashVm) <= 150_000_000.0
         );
         assert!(
-            steady_state_turn_allocation_budget_bytes(
-                RuntimePerfScenario::RlmStreamedPairedLashlang
-            ) <= 64_000_000.0
+            steady_state_turn_allocation_budget_bytes(RuntimePerfScenario::RlmStreamedPairedLashVm)
+                <= 64_000_000.0
         );
     }
 

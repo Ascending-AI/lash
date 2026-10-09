@@ -318,7 +318,7 @@ pub async fn retired_process_shapes_refuse_before_registration_or_effects(
         .expect("registry before invalid requests")
         .len();
     for value in [
-        serde_json::json!({"type":"lashlang","module":"old-module","process":"old-process"}),
+        serde_json::json!({"type":"lashvm","module":"old-module","process":"old-process"}),
         serde_json::json!({"type":"external","metadata":{"job":"legacy"}}),
         serde_json::json!({"type":"subagent","task":"legacy"}),
         serde_json::json!({"type":"workflow","workflow_id":"old"}),

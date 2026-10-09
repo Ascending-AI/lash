@@ -122,7 +122,7 @@ its argv read and empty-environment probe; every other ambient read in the
 worker library remains refused.
 
 RLM and process hosts share `lash_vm_client::service::Service`. The facade names
-its configuration as `lash::rlm::WorkerService`, `WorkerPoolConfig`, `WorkerEntry`
+its configuration as `lash::vm::WorkerService`, `WorkerPoolConfig`, `WorkerEntry`
 and `WorkerDeadlines`. Pure artifact inspection and state restoration also run in
 workers. Source and VM entry points remain in `lash-vm-worker`; the parent's pool,
 framing, queue admission and opaque state client live in `lash-vm-client`.

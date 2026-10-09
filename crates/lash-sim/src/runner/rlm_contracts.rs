@@ -60,25 +60,25 @@ pub(super) const RLM_CONTRACT_ROWS: &[FixedContractRow<TurnMachineContractExecut
         execute: rlm_cell_diagnostic_counts_execution,
     },
     FixedContractRow {
-        semantic_oracle: "rlm.retired_marker_plain_lashlang_text",
+        semantic_oracle: "rlm.retired_marker_plain_lash_vm_text",
         source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        source_scenario: "rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lashlang_text",
+        source_scenario: "rlm_protocol_scenario_retired_percent_marker_inside_source_is_plain_lash_vm_text",
         anchor: FixedContractAnchor::ProviderActor,
-        execute: rlm_retired_marker_plain_lashlang_text_execution,
+        execute: rlm_retired_marker_plain_lash_vm_text_execution,
     },
     FixedContractRow {
-        semantic_oracle: "rlm.lashlang_cell_exec_continues",
+        semantic_oracle: "rlm.lash_vm_cell_exec_continues",
         source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        source_scenario: "rlm_protocol_scenario_lashlang_cell_runs_exec_and_continues",
+        source_scenario: "rlm_protocol_scenario_lash_vm_cell_runs_exec_and_continues",
         anchor: FixedContractAnchor::ProviderActor,
-        execute: rlm_lashlang_cell_exec_continues_execution,
+        execute: rlm_lash_vm_cell_exec_continues_execution,
     },
     FixedContractRow {
-        semantic_oracle: "rlm.streamed_lashlang_cell_exec_persists_trajectory",
+        semantic_oracle: "rlm.streamed_lash_vm_cell_exec_persists_trajectory",
         source_path: "crates/lash-protocol-rlm/tests/protocol_drivers/scenarios.rs",
-        source_scenario: "rlm_protocol_scenario_streamed_lashlang_cell_runs_exec_and_persists_trajectory",
+        source_scenario: "rlm_protocol_scenario_streamed_lash_vm_cell_runs_exec_and_persists_trajectory",
         anchor: FixedContractAnchor::ProviderActor,
-        execute: rlm_streamed_lashlang_cell_exec_persists_trajectory_execution,
+        execute: rlm_streamed_lash_vm_cell_exec_persists_trajectory_execution,
     },
     FixedContractRow {
         semantic_oracle: "rlm.empty_options_natural_default",
@@ -263,11 +263,11 @@ fn rlm_cell_diagnostic_counts_execution() -> Result<Value, FixedScriptRunnerErro
     )
 }
 
-fn rlm_retired_marker_plain_lashlang_text_execution() -> Result<Value, FixedScriptRunnerError> {
+fn rlm_retired_marker_plain_lash_vm_text_execution() -> Result<Value, FixedScriptRunnerError> {
     let assistant_prose = "First.";
-    let code = "const text = \"%%lashlang is just source here\";\nprint(text);";
+    let code = "const text = \"%%lash_vm is just source here\";\nprint(text);";
     run_rlm_protocol_contract(
-        "rlm retired marker plain LashLang text",
+        "rlm retired marker plain Lash VM text",
         "run some code",
         RlmTermination::Natural { schema: None },
         None,
@@ -278,9 +278,9 @@ fn rlm_retired_marker_plain_lashlang_text_execution() -> Result<Value, FixedScri
     )
 }
 
-fn rlm_lashlang_cell_exec_continues_execution() -> Result<Value, FixedScriptRunnerError> {
+fn rlm_lash_vm_cell_exec_continues_execution() -> Result<Value, FixedScriptRunnerError> {
     run_rlm_protocol_contract(
-        "rlm LashLang cell exec continues",
+        "rlm Lash VM cell exec continues",
         "run some code",
         RlmTermination::Natural { schema: None },
         None,
@@ -296,10 +296,10 @@ fn rlm_lashlang_cell_exec_continues_execution() -> Result<Value, FixedScriptRunn
     )
 }
 
-fn rlm_streamed_lashlang_cell_exec_persists_trajectory_execution()
+fn rlm_streamed_lash_vm_cell_exec_persists_trajectory_execution()
 -> Result<Value, FixedScriptRunnerError> {
     run_rlm_protocol_contract(
-        "rlm streamed LashLang cell exec persists trajectory",
+        "rlm streamed Lash VM cell exec persists trajectory",
         "stream and run some code",
         RlmTermination::Natural { schema: None },
         None,

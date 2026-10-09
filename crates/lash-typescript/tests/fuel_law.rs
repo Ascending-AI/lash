@@ -15,7 +15,7 @@
 use std::sync::mpsc;
 use std::time::Duration;
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionBound, ExecutionBounds, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, RuntimeError, State,
 };
@@ -43,7 +43,7 @@ impl ExecutionHost for BudgetHost {
     fn execution_bounds(&self) -> ExecutionBounds {
         ExecutionBounds::new(
             ExecutionBound::instructions(BUDGET),
-            ExecutionBound::Bounded(lashlang::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
+            ExecutionBound::Bounded(lash_vm::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
         )
     }
 }
@@ -51,7 +51,7 @@ impl ExecutionHost for BudgetHost {
 fn run(source: &'static str) -> Result<ExecutionOutcome, RuntimeError> {
     let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("`{source}` compiles: {error}"));
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &BudgetHost))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &BudgetHost))
 }
 
 /// The looping or recursive guest program for each charged path. Keep one row

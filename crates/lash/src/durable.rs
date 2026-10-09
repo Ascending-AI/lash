@@ -31,7 +31,7 @@ pub struct DurableBackendBuilder {
     overridden: bool,
     engines: Vec<Arc<dyn ProcessEngine>>,
     #[cfg(feature = "rlm")]
-    providers: Vec<Arc<dyn lashlang::ProjectionProvider>>,
+    providers: Vec<Arc<dyn lash_vm::ProjectionProvider>>,
 }
 
 impl DurableBackendBuilder {
@@ -88,7 +88,7 @@ impl DurableBackendBuilder {
     /// A projection provider; one per projection type.
     #[cfg(feature = "rlm")]
     #[must_use]
-    pub fn projection_provider(mut self, provider: Arc<dyn lashlang::ProjectionProvider>) -> Self {
+    pub fn projection_provider(mut self, provider: Arc<dyn lash_vm::ProjectionProvider>) -> Self {
         self.providers.push(provider);
         self
     }
@@ -118,12 +118,12 @@ impl DurableBackendBuilder {
 /// `history` itself, so a host provider of it is the second of its type.
 #[cfg(feature = "rlm")]
 fn projection_catalog(
-    providers: Vec<Arc<dyn lashlang::ProjectionProvider>>,
+    providers: Vec<Arc<dyn lash_vm::ProjectionProvider>>,
 ) -> Result<Arc<dyn lash_core::ProjectionProviders>, DurableBuildError> {
     if providers.is_empty() {
         return Ok(Arc::new(NoProjectionProviders));
     }
-    let mut catalog = lashlang::ProjectionCatalog::new();
+    let mut catalog = lash_vm::ProjectionCatalog::new();
     for provider in providers {
         let projection = provider.projection_type();
         let duplicate = || DurableBuildError::DuplicateProvider {

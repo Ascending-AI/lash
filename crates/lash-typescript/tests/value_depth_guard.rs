@@ -16,7 +16,7 @@
 //! Every case here runs on the 2 MiB product stack budget, because a guard that
 //! only holds on a test harness's larger stack is not the guarantee.
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError,
     State, Value,
 };
@@ -37,7 +37,7 @@ impl ExecutionHost for Host {
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
 }
 
 fn on_stack_budget<T: Send + 'static>(name: &str, test: impl FnOnce() -> T + Send + 'static) -> T {

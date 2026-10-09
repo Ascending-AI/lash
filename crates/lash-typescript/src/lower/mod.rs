@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use lashlang::{
+use lash_vm::{
     AssignPathStep, AssignTarget, CatchClause, CoercingBinaryOp, CoercingUnaryOp, Declaration,
     Expr as LashExpr, FunctionExpr, LabelMetadata, MethodKey, OperandLogicalOp, ProcessParam,
     ResourceRefExpr, StructuralRole, TryExpr, TypeExpr, is_javascript_builtin_global,
@@ -59,7 +59,7 @@ pub(crate) fn accepted_instance_methods() -> &'static [&'static str] {
 
 /// Every binding the lowerer generates carries this prefix, which the dialect
 /// reserves so a source identifier can never collide with one.
-pub(crate) const LOWERED_BINDING_PREFIX: &str = "__lashlang_";
+pub(crate) const LOWERED_BINDING_PREFIX: &str = "__lash_vm_";
 
 /// The scope key of a non-arrow function's receiver binding. `this` is a
 /// keyword, so no authored binding can take the key.
@@ -145,7 +145,7 @@ struct Lowerer {
     functions: Vec<FunctionContext>,
     next_binding: usize,
     /// The bindings the lowered program marks private
-    /// ([`lashlang::BindingVisibility::Private`]): every name this lowering
+    /// ([`lash_vm::BindingVisibility::Private`]): every name this lowering
     /// invented, and every authored `let`/`const` (loop binders included)
     /// declared in a block of the cell's top level, which ECMA-262 ends with
     /// its block. Only the cell's own top-level bindings (and hoisted `var`s)
@@ -998,7 +998,7 @@ impl Lowerer {
         }));
         if accepts_rest || has_defaults {
             Ok(LashExpr::BuiltinCall {
-                name: "__lashlang_closure".into(),
+                name: "__lash_vm_closure".into(),
                 args: vec![
                     function,
                     LashExpr::Number(required_count as f64),
@@ -1056,7 +1056,7 @@ impl Lowerer {
             Expr::Number(value) => LashExpr::Number(*value),
             Expr::String(value) => LashExpr::String(value.as_str().into()),
             Expr::RegExp { pattern, flags } => LashExpr::BuiltinCall {
-                name: "__lashlang_heap_new".into(),
+                name: "__lash_vm_heap_new".into(),
                 args: vec![
                     LashExpr::String("RegExp".into()),
                     LashExpr::String(pattern.as_str().into()),
@@ -1168,7 +1168,7 @@ impl Lowerer {
                     js_unary(
                         CoercingUnaryOp::TypeOf,
                         LashExpr::BuiltinCall {
-                            name: "__lashlang_global_get".into(),
+                            name: "__lash_vm_global_get".into(),
                             args: vec![LashExpr::String(name.as_str().into())],
                         },
                     )
@@ -1329,7 +1329,7 @@ impl Lowerer {
             .map(|name| LashExpr::Variable(name.clone()))
             .collect();
         Ok(LashExpr::ProcessLiteral(Box::new(
-            lashlang::ProcessLiteralExpr {
+            lash_vm::ProcessLiteralExpr {
                 params,
                 hidden_args,
                 return_ty: function

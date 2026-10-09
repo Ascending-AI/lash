@@ -8,7 +8,7 @@ AMD Ryzen 9 5950X, 32 logical CPUs, Linux 6.8.0-137-generic, rustc 1.98.1 (48a22
 
 Each warm baseline and worker population has 10,000 checked executions, alternating order; every cold worker population has 200 exec/prewarm/run observations. The baseline creates fresh VM state on every observation, including the warm control. Cold describes helper startup; it excludes pool teardown and allows warm page caches. There is no separate cold executable-start population for the in-process control. Runtime construction for the reference stays outside its timer. No provider, durable journal, store or real tool latency is included.
 
-The benchmark retains the canonical optimized workspace feature graph: worker/client/lashlang testing features are enabled, while no test frontend, hook or continuation probe is invoked. The packaged helper is separately built and verified with testing disabled. These timings describe the optimized developer matrix, not a separately sampled registry/release embedding.
+The benchmark retains the canonical optimized workspace feature graph: worker/client/lash_vm testing features are enabled, while no test frontend, hook or continuation probe is invoked. The packaged helper is separately built and verified with testing disabled. These timings describe the optimized developer matrix, not a separately sampled registry/release embedding.
 
 ## Service time
 

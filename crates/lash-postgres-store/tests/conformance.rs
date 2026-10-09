@@ -385,7 +385,7 @@ lash_conformance::artifact_store_reopenable_tests!({
                 .await
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
-                artifacts: Arc::new(open_storage.lashlang_artifact_store())
+                artifacts: Arc::new(open_storage.lash_vm_artifact_store())
                     as Arc<dyn lash_core::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store())
                     as Arc<dyn ProcessExecutionEnvStore>,
@@ -403,7 +403,7 @@ lash_conformance::artifact_store_reopenable_tests!({
                             .expect("construct post-write Postgres artifact pool")
                     });
                     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
-                        artifacts: Arc::new(reopened.lashlang_artifact_store())
+                        artifacts: Arc::new(reopened.lash_vm_artifact_store())
                             as Arc<dyn lash_core::ModuleArtifactStore>,
                         process_env: Arc::new(reopened.process_env_store())
                             as Arc<dyn ProcessExecutionEnvStore>,
@@ -968,7 +968,7 @@ async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms
         return;
     };
     reset(storage.pool()).await;
-    lash_lashlang_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(Arc::new(storage.lashlang_artifact_store())).await;
+    lash_vm_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(Arc::new(storage.lash_vm_artifact_store())).await;
 }
 
 lash_conformance::process_prune_start_staging_tests!({

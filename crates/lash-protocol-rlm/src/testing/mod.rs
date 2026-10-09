@@ -60,8 +60,8 @@ pub(crate) fn sqlite_recording_backend_blocking() -> lash_core::Backend {
     })
 }
 
-pub(crate) fn sqlite_memory_artifact_store_blocking() -> lashlang::LashlangArtifacts {
-    lashlang::LashlangArtifacts::of_backend(&sqlite_recording_backend_blocking())
+pub(crate) fn sqlite_memory_artifact_store_blocking() -> lash_vm::LashVmArtifacts {
+    lash_vm::LashVmArtifacts::of_backend(&sqlite_recording_backend_blocking())
 }
 
 /// The scope a context built with no parent invocation claims: the builder's
@@ -95,12 +95,12 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     state: &mut crate::executor::RlmExecutionState,
     ctx: lash_core::RuntimeExecutionContext<'_>,
     request: lash_core::ExecRequest,
-    artifact_store: lashlang::LashlangArtifacts,
-    lashlang_surface: lash_lashlang_runtime::LashlangSurface,
-    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    artifact_store: lash_vm::LashVmArtifacts,
+    lash_vm_surface: lash_vm_runtime::LashVmSurface,
+    deferred_tool_resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: crate::projection::RlmProjectedBindings,
     execution_trace: Option<lash_core::plugin::PluginExecutionTrace>,
-    execution_bounds: lashlang::ExecutionBounds,
+    execution_bounds: lash_vm::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
     code_renderer: crate::render::CodeRendererSlot,
 ) -> lash_core::ExecResponse {
@@ -114,7 +114,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
         ctx,
         request,
         artifact_store,
-        lashlang_surface,
+        lash_vm_surface,
         deferred_tool_resolver,
         session_projected_bindings,
         execution_bounds,
@@ -125,8 +125,8 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
 }
 
 #[cfg(test)]
-pub(crate) fn deferred_link() -> lash_lashlang_runtime::DeferredLink {
-    lash_lashlang_runtime::DeferredLink::new(lash_lashlang_runtime::DeferredResolutionLinkKey {
+pub(crate) fn deferred_link() -> lash_vm_runtime::DeferredLink {
+    lash_vm_runtime::DeferredLink::new(lash_vm_runtime::DeferredResolutionLinkKey {
         address: lash_core::EffectAddress::new(
             lash_core::ExecutionScope::turn("test-session", "turn-1"),
             "replay:effect-1",

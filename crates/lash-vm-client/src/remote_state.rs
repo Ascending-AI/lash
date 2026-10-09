@@ -2,7 +2,7 @@
 //! which open a snapshot run in a worker through the service.
 use crate::service::runtime_ops::ServiceRuntimeOps as _;
 use lash_core_execution::FleetFormat;
-use lashlang::{Record, Value};
+use lash_vm::{Record, Value};
 use std::collections::BTreeSet;
 
 use crate::service::{
@@ -48,7 +48,7 @@ impl RemoteState {
     /// Render opaque guest values in the worker with the host's presentation policy.
     pub async fn opaque_bindings_with(
         &self,
-        config: &lashlang::BindingSummaryConfig,
+        config: &lash_vm::BindingSummaryConfig,
     ) -> Result<Vec<(String, String)>, crate::PoolError> {
         let Some(snapshot) = self.bytes() else {
             return Ok(Vec::new());
@@ -78,7 +78,7 @@ impl RemoteState {
         &mut self,
         snapshot: &lash_vm_protocol::OpaqueVmState,
         value: &lash_vm_protocol::EncodedPayload,
-    ) -> Result<lashlang::ExecutionOutcome, crate::PoolError> {
+    ) -> Result<lash_vm::ExecutionOutcome, crate::PoolError> {
         let codec = lash_vm_protocol::FrameCodec::new(self.service.config().protocol.decode);
         codec.check_payload(&value.0)?;
         let completion: CellCompletion = rmp_serde::from_slice(&value.0).map_err(|error| {
@@ -261,7 +261,7 @@ impl RemoteVm {
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteRestoreError {
     #[error(transparent)]
-    Snapshot(lashlang::SnapshotDecodeError),
+    Snapshot(lash_vm::SnapshotDecodeError),
     #[error(transparent)]
     Worker(crate::PoolError),
 }
@@ -342,11 +342,11 @@ mod tests {
         let snapshot = OpaqueVmState::seal(
             VmStateKind::Snapshot,
             VmOwner::new("completed-cell"),
-            lashlang::vm_contract_versions(),
+            lash_vm::vm_contract_versions(),
             vec![4, 5, 6],
         );
         let mismatched = CellCompletion {
-            outcome: lashlang::ExecutionOutcome::Finished(Value::Number(42.0)),
+            outcome: lash_vm::ExecutionOutcome::Finished(Value::Number(42.0)),
             state: EncodedPayload(rmp_serde::to_vec_named(&StateMetadata {
                 definition_ids: [
                     lash_core_execution::ProcessDefinitionId::from_sha256_digest([7; 32]),

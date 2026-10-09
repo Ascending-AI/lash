@@ -1235,7 +1235,7 @@ fn import_tools_with_name_builder(
             .unwrap_or_default();
         let input_schema = Value::Object((*tool.input_schema).clone());
         let output_schema = mcp_result_schema(tool.output_schema.as_deref());
-        let (prefixed, lashlang_binding) = build_name(server_name, &original_name);
+        let (prefixed, lash_vm_binding) = build_name(server_name, &original_name);
         let tool_id = naming::durable_tool_id(server_name, &original_name);
 
         let mut definition = ToolDefinition::raw(
@@ -1246,7 +1246,7 @@ fn import_tools_with_name_builder(
             output_schema,
         )?
         .with_execution(execution)
-        .with_tool_binding(lashlang_binding);
+        .with_tool_binding(lash_vm_binding);
         definition.manifest.module = Some(Arc::clone(&module));
         let imported_tool = ImportedTool {
             original_name,
@@ -1534,6 +1534,6 @@ mod tests;
 mod catalog_peer_tests;
 
 #[cfg(test)]
-#[cfg(feature = "lashlang")]
+#[cfg(feature = "lash-vm")]
 #[path = "naming_cell_tests.rs"]
 mod naming_cell_tests;

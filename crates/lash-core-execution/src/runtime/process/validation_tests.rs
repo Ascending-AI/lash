@@ -45,7 +45,7 @@ fn effect_summary_request() -> crate::ProcessEventAppendRequest {
         "fixture.operation",
         ProcessEffectOutcomeClass::Failure,
         Some(crate::FailureCode::from_foreign_wire("fixture:failed")),
-        "lashlang:scope:resource:17:fixture.operation:23:resource_operation:node:1",
+        "lash_vm:scope:resource:17:fixture.operation:23:resource_operation:node:1",
         crate::FleetFormat::current(),
     )
     .append_request()

@@ -79,7 +79,7 @@ const PROCESS_DEFINITION_ID_FAMILY_VERSION: u8 = 1;
 
 /// Store tags in the preimage. Permanent: a retired store keeps its tag.
 const STORE_TAG_PROCESS_ENV: u8 = 1;
-const STORE_TAG_LASHLANG_MODULE: u8 = 2;
+const STORE_TAG_LASH_VM_MODULE: u8 = 2;
 const STORE_TAG_ENGINE: u8 = 3;
 const STORE_TAG_PROCESS_DEFINITION: u8 = 4;
 /// Never in a stored definition, which refuses tool material; tagged so the
@@ -204,7 +204,7 @@ impl ProcessDefinitionDraft {
     /// || len:u64 || canonical JSON of the value (identity_json::payload_leaf)
     /// || count:u64 || each artifact, sorted by its leaf bytes, deduplicated:
     ///      len:u64 || leaf, where leaf =
-    ///        tag:u8 (1 process_env, 2 lashlang_module, 3 engine,
+    ///        tag:u8 (1 process_env, 2 vm_module, 3 engine,
     ///                4 process_definition)
     ///        [|| len:u64 || engine kind (UTF-8), for tag 3]
     ///        || len:u64 || artifact reference (UTF-8)
@@ -302,7 +302,7 @@ fn artifact_preimage(artifact: &ArtifactName) -> Vec<u8> {
     let mut bytes = Vec::new();
     match &artifact.store {
         ArtifactStoreId::ProcessEnv => bytes.push(STORE_TAG_PROCESS_ENV),
-        ArtifactStoreId::LashlangModule => bytes.push(STORE_TAG_LASHLANG_MODULE),
+        ArtifactStoreId::VmModule => bytes.push(STORE_TAG_LASH_VM_MODULE),
         ArtifactStoreId::Engine(kind) => {
             bytes.push(STORE_TAG_ENGINE);
             push_framed(&mut bytes, kind.as_bytes());

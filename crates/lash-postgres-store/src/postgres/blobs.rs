@@ -60,7 +60,7 @@ lash_store_sql::statements! {
         ///
         /// Forks from SQLite's counterpart: this backend has no
         /// `artifact_refs` pointer table to rule out, because its artifact
-        /// bytes live inline in `lash_lashlang_artifacts`.
+        /// bytes live inline in `lash_lash_vm_artifacts`.
         reclaim_session_candidate = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
 

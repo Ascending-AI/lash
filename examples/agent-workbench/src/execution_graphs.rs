@@ -9,13 +9,13 @@ use serde_json::Value;
 use crate::{AppError, compact_payload};
 
 #[derive(Debug, Serialize)]
-pub(crate) struct LashlangGraphIndex {
-    pub(crate) graphs: Vec<LashlangGraphSummary>,
-    pub(crate) lineage_edges: Vec<LashlangGraphLineageEdge>,
+pub(crate) struct LashVmGraphIndex {
+    pub(crate) graphs: Vec<LashVmGraphSummary>,
+    pub(crate) lineage_edges: Vec<LashVmGraphLineageEdge>,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct LashlangGraphSummary {
+pub(crate) struct LashVmGraphSummary {
     pub(crate) graph_key: String,
     pub(crate) title: String,
     pub(crate) status: String,
@@ -29,11 +29,11 @@ pub(crate) struct LashlangGraphSummary {
     pub(crate) node_count: usize,
     pub(crate) edge_count: usize,
     pub(crate) child_count: usize,
-    pub(crate) process: Option<LashlangGraphProcessSummary>,
+    pub(crate) process: Option<LashVmGraphProcessSummary>,
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct LashlangGraphProcessSummary {
+pub(crate) struct LashVmGraphProcessSummary {
     pub(crate) process_id: ProcessId,
     pub(crate) status_label: String,
     pub(crate) lifecycle: lash::process::ProcessStatus,
@@ -47,7 +47,7 @@ pub(crate) struct LashlangGraphProcessSummary {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct LashlangGraphLineageEdge {
+pub(crate) struct LashVmGraphLineageEdge {
     pub(crate) parent_graph_key: String,
     pub(crate) parent_node_id: String,
     pub(crate) bridge_graph_key: String,
@@ -65,7 +65,7 @@ pub(crate) async fn index_for_session(
     process_observer: &lash::process::ProcessWorkObserver,
     current_session_id: &SessionId,
     graphs: Vec<TraceLashlangGraph>,
-) -> Result<LashlangGraphIndex, AppError> {
+) -> Result<LashVmGraphIndex, AppError> {
     let mut projection = GraphProjection::new(process_observer, current_session_id, graphs).await?;
     projection.compute_visibility().await;
     projection.index().await
@@ -82,7 +82,7 @@ pub(crate) async fn visible_graph_by_key(
     projection
         .graph_if_visible(graph_key)
         .cloned()
-        .ok_or_else(|| AppError::not_found(format!("no Lashlang graph for `{graph_key}`")))
+        .ok_or_else(|| AppError::not_found(format!("no Lash VM graph for `{graph_key}`")))
 }
 
 struct GraphProjection<'a> {
@@ -218,12 +218,12 @@ impl<'a> GraphProjection<'a> {
         }
     }
 
-    async fn index(&mut self) -> Result<LashlangGraphIndex, AppError> {
+    async fn index(&mut self) -> Result<LashVmGraphIndex, AppError> {
         let visible = self.visible_graphs_sorted();
         let mut graph_summaries = Vec::with_capacity(visible.len());
         for graph in visible {
             let process = self.graph_process_summary(&graph).await;
-            graph_summaries.push(LashlangGraphSummary {
+            graph_summaries.push(LashVmGraphSummary {
                 graph_key: graph.graph_key.clone(),
                 title: graph_title(&graph),
                 status: format!("{:?}", graph.status).to_ascii_lowercase(),
@@ -256,7 +256,7 @@ impl<'a> GraphProjection<'a> {
                 .then_with(|| left.child_graph_key.cmp(&right.child_graph_key))
         });
 
-        Ok(LashlangGraphIndex {
+        Ok(LashVmGraphIndex {
             graphs: graph_summaries,
             lineage_edges,
         })
@@ -289,7 +289,7 @@ impl<'a> GraphProjection<'a> {
     async fn graph_process_summary(
         &mut self,
         graph: &TraceLashlangGraph,
-    ) -> Option<LashlangGraphProcessSummary> {
+    ) -> Option<LashVmGraphProcessSummary> {
         let TraceRuntimeSubject::Process { process_id } = &graph.subject else {
             return None;
         };
@@ -301,7 +301,7 @@ impl<'a> GraphProjection<'a> {
     async fn append_lineage_edges(
         &mut self,
         child: &lash::tracing::TraceLashlangGraphChildLink,
-        out: &mut Vec<LashlangGraphLineageEdge>,
+        out: &mut Vec<LashVmGraphLineageEdge>,
     ) {
         let process_id = child.child_process_id.clone();
         let bridge_graph_key = child
@@ -314,7 +314,7 @@ impl<'a> GraphProjection<'a> {
         {
             let child_graphs = self.child_session_effect_graphs(&child_session_id);
             if child_graphs.is_empty() {
-                out.push(LashlangGraphLineageEdge {
+                out.push(LashVmGraphLineageEdge {
                     parent_graph_key: child.parent_graph_key.clone(),
                     parent_node_id: child.parent_node_id.clone(),
                     bridge_graph_key: bridge_graph_key.clone(),
@@ -329,7 +329,7 @@ impl<'a> GraphProjection<'a> {
                 });
             } else {
                 for graph in child_graphs {
-                    out.push(LashlangGraphLineageEdge {
+                    out.push(LashVmGraphLineageEdge {
                         parent_graph_key: child.parent_graph_key.clone(),
                         parent_node_id: child.parent_node_id.clone(),
                         bridge_graph_key: bridge_graph_key.clone(),
@@ -359,7 +359,7 @@ impl<'a> GraphProjection<'a> {
         };
         for child_graph_key in targets {
             let status_key = child_graph_key.as_deref().unwrap_or(&bridge_graph_key);
-            out.push(LashlangGraphLineageEdge {
+            out.push(LashVmGraphLineageEdge {
                 parent_graph_key: child.parent_graph_key.clone(),
                 parent_node_id: child.parent_node_id.clone(),
                 bridge_graph_key: bridge_graph_key.clone(),
@@ -464,8 +464,8 @@ pub(crate) fn process_error(process: &lash::process::ObservedProcess) -> Option<
 
 fn process_summary_from_observed(
     process: &lash::process::ObservedProcess,
-) -> LashlangGraphProcessSummary {
-    LashlangGraphProcessSummary {
+) -> LashVmGraphProcessSummary {
+    LashVmGraphProcessSummary {
         process_id: process.process_id.clone(),
         status_label: process.status().label().to_string(),
         lifecycle: process.status(),
@@ -587,7 +587,7 @@ mod tests {
             nodes: Vec::new(),
             edges: Vec::new(),
             children,
-            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            history_limit: lash::tracing::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
             node_retention: Vec::new(),
             conflicts: Vec::new(),
             history: Vec::new(),
@@ -663,7 +663,7 @@ mod tests {
                 child_entry_ref: None,
                 child_entry_name: Some("subagent".to_string()),
             }],
-            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            history_limit: lash::tracing::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
             node_retention: Vec::new(),
             conflicts: Vec::new(),
             history: Vec::new(),
@@ -697,7 +697,7 @@ mod tests {
             nodes: Vec::new(),
             edges: Vec::new(),
             children: Vec::new(),
-            history_limit: lash::tracing::DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+            history_limit: lash::tracing::DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
             node_retention: Vec::new(),
             conflicts: Vec::new(),
             history: Vec::new(),

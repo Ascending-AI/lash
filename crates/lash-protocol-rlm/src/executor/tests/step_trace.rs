@@ -18,12 +18,11 @@ impl TraceSink for StepSink {
             && matches!(
                 &record.event,
                 lash_trace::TraceEvent::LanguageExecution {
-                    event: lash_lashlang_runtime::TraceLanguageExecution {
-                        payload:
-                            lash_lashlang_runtime::TraceLanguageExecutionPayload::NodeWaiting {
-                                awaited: lash_lashlang_runtime::TraceNodeAwaited::Sleep { .. },
-                                ..
-                            },
+                    event: lash_vm_runtime::TraceLanguageExecution {
+                        payload: lash_vm_runtime::TraceLanguageExecutionPayload::NodeWaiting {
+                            awaited: lash_vm_runtime::TraceNodeAwaited::Sleep { .. },
+                            ..
+                        },
                         ..
                     },
                     ..
@@ -40,20 +39,20 @@ impl TraceSink for StepSink {
 struct InboxResolver;
 
 #[async_trait::async_trait]
-impl lash_lashlang_runtime::DeferredToolResolver for InboxResolver {
+impl lash_vm_runtime::DeferredToolResolver for InboxResolver {
     async fn resolve(
         &self,
-        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        _cx: &lash_vm_runtime::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    ) -> BTreeMap<String, lash_vm_runtime::Resolution> {
         assert_eq!(paths, &["inbox.send_item"]);
-        BTreeMap::from([("inbox.send_item".into(), lash_lashlang_runtime::Resolution::Resolved(Box::new(
-            lash_lashlang_runtime::ToolGrant::new(lash_core::ToolDefinition::raw(
+        BTreeMap::from([("inbox.send_item".into(), lash_vm_runtime::Resolution::Resolved(Box::new(
+            lash_vm_runtime::ToolGrant::new(lash_core::ToolDefinition::raw(
                 "tool:send_item", "send_item", "Send an item",
                 serde_json::json!({"type":"object","properties":{"body":{"type":"string"}},"required":["body"],"additionalProperties":false}),
                 serde_json::json!({"type":"string"}),
             ).expect("valid declared tool schemas")
-            .with_execution(std::time::Duration::from_secs(120)).with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["inbox"], "send_item")))
+            .with_execution(std::time::Duration::from_secs(120)).with_tool_binding(lash_vm_runtime::ToolBinding::new(["inbox"], "send_item")))
         )))])
     }
 }
@@ -102,7 +101,7 @@ async fn run_step_with_sink(
         ctx,
         ExecRequest { code: code.into() },
         handler.artifacts(),
-        LashlangSurface::default(),
+        LashVmSurface::default(),
         Some(Arc::new(InboxResolver)),
         RlmProjectedBindings::default(),
         Some(test_trace(sink.clone())),
@@ -117,14 +116,14 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
     block_on(async {
         let (response, records) = Box::pin(run_step("await sleep(0); finish(null);")).await;
         assert!(response.error().is_none(), "{:?}", response.error());
-        let store = lash_lashlang_runtime::TraceLashlangGraphStore::default();
+        let store = lash_vm_runtime::TraceLashlangGraphStore::default();
         let mut awaited_node = None;
         for record in &records {
             store.append(record).expect("reduce real foreground trace");
             if let lash_trace::TraceEvent::LanguageExecution { event, .. } = &record.event
-                && let lash_lashlang_runtime::TraceLanguageExecutionPayload::NodeWaiting {
+                && let lash_vm_runtime::TraceLanguageExecutionPayload::NodeWaiting {
                     node_id,
-                    awaited: lash_lashlang_runtime::TraceNodeAwaited::Sleep { deadline_ms: None },
+                    awaited: lash_vm_runtime::TraceNodeAwaited::Sleep { deadline_ms: None },
                     ..
                 } = &event.payload
             {
@@ -135,7 +134,7 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
                     node.id == *node_id
                         && matches!(
                             node.observation,
-                            lash_lashlang_runtime::TraceLashlangNodeObservation::Waiting { .. }
+                            lash_vm_runtime::TraceLashlangNodeObservation::Waiting { .. }
                         )
                 }));
                 awaited_node = Some((event.identity.graph_key(), node_id.clone()));
@@ -147,7 +146,7 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
             node.id == node_id
                 && matches!(
                     node.observation,
-                    lash_lashlang_runtime::TraceLashlangNodeObservation::Completed { .. }
+                    lash_vm_runtime::TraceLashlangNodeObservation::Completed { .. }
                 )
         }));
     });
@@ -155,8 +154,8 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
 
 fn reduce(
     records: &[lash_core::facade_support::TraceRecord],
-) -> lash_lashlang_runtime::TraceLashlangGraph {
-    let store = lash_lashlang_runtime::TraceLashlangGraphStore::default();
+) -> lash_vm_runtime::TraceLashlangGraph {
+    let store = lash_vm_runtime::TraceLashlangGraphStore::default();
     for record in records {
         store.append(record).expect("reduce foreground trace");
     }
@@ -164,9 +163,9 @@ fn reduce(
 }
 
 fn observations_of_kind(
-    graph: &lash_lashlang_runtime::TraceLashlangGraph,
+    graph: &lash_vm_runtime::TraceLashlangGraph,
     kind: lash_sansio::ExecutionNodeKind,
-) -> Vec<(String, lash_lashlang_runtime::TraceLashlangNodeObservation)> {
+) -> Vec<(String, lash_vm_runtime::TraceLashlangNodeObservation)> {
     graph
         .nodes
         .iter()
@@ -179,7 +178,7 @@ fn observations_of_kind(
 /// second is parked when the cell is cancelled, and the third never starts.
 #[test]
 fn real_foreground_cancel_after_partial_completion_keeps_each_occurrence_honest() {
-    use lash_lashlang_runtime::TraceLashlangNodeObservation as Observation;
+    use lash_vm_runtime::TraceLashlangNodeObservation as Observation;
     block_on(async {
         let cancellation = lash_core::CancellationToken::new();
         let sink = Arc::new(StepSink {
@@ -227,8 +226,8 @@ fn real_foreground_cancel_after_partial_completion_keeps_each_occurrence_honest(
             lash_trace::TraceEvent::LanguageExecution { event, .. }
                 if matches!(
                     event.payload,
-                    lash_lashlang_runtime::TraceLanguageExecutionPayload::NodeResumed {
-                        resolution: lash_lashlang_runtime::TraceNodeWaitResolution::Cancelled,
+                    lash_vm_runtime::TraceLanguageExecutionPayload::NodeResumed {
+                        resolution: lash_vm_runtime::TraceNodeWaitResolution::Cancelled,
                         ..
                     }
                 )
@@ -304,7 +303,7 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
             .expect("fixture artifact")
             .artifact;
     let live = context(runtime.unreplayed(Some(scope.clone())));
-    let trace = foreground_lashlang_execution_trace(&live, &artifact, "typescript")
+    let trace = foreground_lash_vm_execution_trace(&live, &artifact, "typescript")
         .expect("the runtime observes the language");
     assert_eq!(live.trace_scope(), Some(&scope));
     emit_foreground_execution_started(&trace, &artifact);
@@ -329,7 +328,7 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
     );
     graphs.clear();
     let replay = context(runtime.shift(Some(scope.clone()), &controller));
-    let trace = foreground_lashlang_execution_trace(&replay, &artifact, "typescript")
+    let trace = foreground_lash_vm_execution_trace(&replay, &artifact, "typescript")
         .expect("product observation stays enabled on replay");
     assert_eq!(replay.trace_scope(), Some(&scope));
     emit_foreground_execution_started(&trace, &artifact);

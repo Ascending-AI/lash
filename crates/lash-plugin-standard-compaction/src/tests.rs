@@ -492,7 +492,7 @@ fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
 async fn recovery_invocation_faults_preserve_their_typed_cause_without_spending_attempts() {
     for code in [
         lash_core::RuntimeErrorCode::RuntimeStore,
-        lash_core::RuntimeErrorCode::LashlangCellReplayDivergence,
+        lash_core::RuntimeErrorCode::LashVmCellReplayDivergence,
     ] {
         let direct = recovered_direct();
         let traces = Arc::new(RecordingTraces::default());

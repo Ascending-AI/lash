@@ -17,9 +17,9 @@ numbers describe current main.
   `from_value`, `Value`/`Map` clone, `json!` internals) vs `ser_bytes`
   (`to_vec`/`to_string` output buffers, not tree churn) — and *site* — the
   lash-crate channel on the stack (`commit_hash`, `compact_contract`,
-  `schema_docs` projection, `host_env` lashlang host-environment
+  `schema_docs` projection, `host_env` lash_vm host-environment
   reconstruction, `schema_render_ts` TypeScript signature rendering,
-  `lashlang_schema_import`, `catalog_build` registry/preamble plumbing).
+  `lash_vm_schema_import`, `catalog_build` registry/preamble plumbing).
 - Allocation bytes are the ticket's axis. No wall-clock claim is made; dhat
   runs are ~50x slower than a normal turn.
 - `rlm_tool_catalog_cold` calls `refresh_tool_catalog` (registry recompose +
@@ -30,7 +30,7 @@ numbers describe current main.
   `run_turn` (phase_probe.rs:623,814) — so cold and warm measured turns are
   byte-identical (~1.28 GB stats_alloc each) while cold's whole-run dhat
   total carries ~one extra artifact build (~50-60 MB) + ~16 MB extra
-  recompose. Both run one Lashlang `finish()` cell per turn against the
+  recompose. Both run one Lash VM `finish()` cell per turn against the
   73-manifest synthetic catalog.
 
 ## Where Value construction dominates
@@ -56,24 +56,24 @@ Value-tree bytes by site (whole run):
 | catalog_build | 1.67 MB | 1.69 MB | 2.05 MB | 1.69 MB | 16.4 MB | 29.2 MB | 41.4 MB |
 | schema_render_ts | – | 0.09 MB | – | 0.09 MB | 3.4 MB | 9.8 MB | 16.2 MB |
 | schema_docs (SchemaContract clone/projection) | 0.40 MB | 0.32 MB | 0.52 MB | 0.32 MB | 5.3 MB | 5.4 MB | 5.6 MB |
-| lashlang_schema_import (tree subset) | – | – | – | – | 1.1 MB | 1.6 MB | 2.2 MB |
+| lash_vm_schema_import (tree subset) | – | – | – | – | 1.1 MB | 1.6 MB | 2.2 MB |
 | commit_hash | 0.31 MB | 0.44 MB | 0.45 MB | 0.54 MB | 0.42 MB | 1.37 MB | 2.28 MB |
 | other | 0.13 MB | 1.48 MB | 1.57 MB | 1.50 MB | 2.8 MB | 4.1 MB | 5.4 MB |
 
 Adjacent non-`Value` churn on the same schema pipeline (kept separate from the
-tree numbers): `lashlang::json_schema::SchemaImporter` produces ~62/95/129 MB of
+tree numbers): `lash_vm::json_schema::SchemaImporter` produces ~62/95/129 MB of
 `format!`/`String` and `TypeExpr` allocations in large/warm/cold, and
 `lash_typescript::signatures::render_schema_type` another ~31/52/73 MB of
 signature strings — both executed by the same per-build/per-cell reconstruction.
 
 ### Site 1 — schema documents per catalog build: dominant, and not only per build
 
-The single largest channel is reconstructing the lashlang host environment from
+The single largest channel is reconstructing the lash_vm host environment from
 catalog schemas. Per call on the 73-tool catalog it costs ~10-15 MB of `Value`
-tree (`lashlang_tool_operation_contract` deep-clones each tool's
+tree (`lash_vm_tool_operation_contract` deep-clones each tool's
 input/output schema `Value`; `OperationContract::to_binding` re-clones into
 bindings; `filtered_tool_catalog` clones the whole catalog when masked paths
-exist; `LashlangHostCatalog` is cloned per `host_environment_masking` call),
+exist; `LashVmHostCatalog` is cloned per `host_environment_masking` call),
 plus ~12-17 MB of schema-importer string churn on top.
 
 It runs far more often than "per catalog build":
@@ -87,7 +87,7 @@ It runs far more often than "per catalog build":
   environment **twice per cell** with deferred resolutions (deferred.rs:394 for
   ambient classification, deferred.rs:408 for the final environment).
 
-Measured: `rlm_lashlang.deferred_resolve` allocates ~262 MB per turn
+Measured: `rlm_lash_vm.deferred_resolve` allocates ~262 MB per turn
 (stats_alloc counters, dhat mode) on the large catalog — identical in cold and
 warm measured turns, because the session catalog cache
 (`tool_catalog_cache_entry`, session.rs:389) only covers the preamble artifact
@@ -152,8 +152,8 @@ identity key already exists.
 
 ## Fix ticket scope (filed)
 
-- Memoize `lashlang_resources_from_tool_catalog` / the base
-  `LashlangHostEnvironment` keyed by tool-set identity; apply
+- Memoize `lash_vm_resources_from_tool_catalog` / the base
+  `LashVmHostEnvironment` keyed by tool-set identity; apply
   `masked_call_paths`, `with_globals`, and `with_process_handles` as cheap
   per-cell overlays.
 - `render_execution_section`: use one host environment for the host surface;

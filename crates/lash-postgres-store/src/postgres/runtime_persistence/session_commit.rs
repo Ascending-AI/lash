@@ -103,7 +103,7 @@ async fn carry_into_successor_tx(
         }
         let id = lash_core_execution::ProcessDefinitionId::parse(&carry.artifact_ref)
             .map_err(|e| StoreError::Backend(e.to_string()))?;
-        let bytes: Vec<u8> = sqlx::query_scalar(sql.lashlang_artifacts.select_bytes.sql())
+        let bytes: Vec<u8> = sqlx::query_scalar(sql.lash_vm_artifacts.select_bytes.sql())
             .bind("process_definition")
             .bind(&carry.artifact_ref)
             .fetch_one(crate::observed_sql::executor(&mut **tx))

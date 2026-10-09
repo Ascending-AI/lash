@@ -1,4 +1,4 @@
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError,
     State, Value,
 };
@@ -17,7 +17,7 @@ impl ExecutionHost for Host {
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
     let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
 }
 
 fn finished(source: &str) -> Value {
@@ -223,6 +223,6 @@ fn hostile_large_url_inputs_are_bounded_without_aborting() {
         execute(
             "const u = new URL('https://example.test/' + 'x'.repeat(8388608)); finish(u.href);",
         ),
-        Err(lashlang::RuntimeError::MemoryLimitExceeded { .. })
+        Err(lash_vm::RuntimeError::MemoryLimitExceeded { .. })
     ));
 }

@@ -142,8 +142,8 @@ frame_node_id, node_json, tombstoned`; the rendered pair lives in the `Conversat
 inside `node_json`, and the committed assistant content is the `parts[]` array of
 `node_json.event.Conversation` with `kind: "Text"` entries — not a flat `content` string.
 That shape is what makes the byte comparison below possible. Trace truth is the row's
-`data/trace.jsonl` and `data/lashlang-execution.jsonl`, filtered by the exact session id.
-The `lashlang-` filename names the IR and the VM that wrote the records, not an authoring
+`data/trace.jsonl` and `data/lash-vm-execution.jsonl`, filtered by the exact session id.
+The `lash-vm-` filename names the IR and the VM that wrote the records, not an authoring
 language.
 Compare assistant text without conflating Markdown bytes with visible text: API and durable
 message Markdown must agree byte-for-byte, while the DOM must equal that Markdown after the

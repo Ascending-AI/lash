@@ -11,7 +11,7 @@ use crate::{
 };
 
 /// Default number of occurrence histories retained for each graph node.
-pub const DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT: usize = 256;
+pub const DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT: usize = 256;
 
 /// Whether the static execution map was available to the fold.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -99,7 +99,7 @@ pub struct TraceLashlangGraphConflict {
     pub variants: Vec<String>,
 }
 
-/// Trace-derived Lashlang execution graph snapshot for hosts and debugging tools.
+/// Trace-derived Lash VM execution graph snapshot for hosts and debugging tools.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraph {
     pub schema_version: u32,
@@ -204,7 +204,7 @@ pub struct TraceLashlangNodeRetention {
     pub children: Vec<TraceLashlangGraphChildLink>,
 }
 
-/// One occurrence's observed Lashlang graph node state.
+/// One occurrence's observed Lash VM graph node state.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum TraceLashlangNodeObservation {
@@ -322,7 +322,7 @@ pub enum TraceLashlangEdgeSelection {
     Selected,
 }
 
-/// Trace-derived Lashlang graph node.
+/// Trace-derived Lash VM graph node.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraphNode {
     pub id: String,
@@ -359,7 +359,7 @@ impl TraceLashlangGraphNode {
     }
 }
 
-/// Trace-derived Lashlang graph edge.
+/// Trace-derived Lash VM graph edge.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraphEdge {
     pub id: String,
@@ -369,7 +369,7 @@ pub struct TraceLashlangGraphEdge {
     pub selection: TraceLashlangEdgeSelection,
 }
 
-/// Link from an observed parent Lashlang node to a child execution graph.
+/// Link from an observed parent Lash VM node to a child execution graph.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TraceLashlangGraphChildLink {
     pub parent_graph_key: String,

@@ -212,7 +212,7 @@ pub enum RlmHistoryItem {
         #[serde(skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<RlmAttachmentRef>,
     },
-    LashlangStep {
+    LashVmStep {
         id: String,
         protocol_iteration: usize,
         code: String,
@@ -235,7 +235,7 @@ impl RlmHistoryItem {
     /// values, the failure as its kind and message, and images as compact
     /// metadata instead of the attachment references the record holds.
     pub fn from_cell_record(record: &CellRecord) -> Self {
-        Self::LashlangStep {
+        Self::LashVmStep {
             id: record.id.clone(),
             protocol_iteration: record.protocol_iteration,
             code: record.code.clone(),
@@ -747,7 +747,7 @@ pub enum RlmProjectedSeedEntry {
 /// `(name, entry)` get re-projected as host bindings on the child session at
 /// creation time. This is the serializable form of
 /// `lash_protocol_rlm::RlmProjectedBindings`; lash-rlm-types stays free of any
-/// runtime dependency on lashlang itself.
+/// runtime dependency on lash_vm itself.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RlmProjectedSeedSnapshot {
     pub entries: Vec<(String, RlmProjectedSeedEntry)>,
@@ -782,8 +782,8 @@ impl RlmSeedPluginBody {
 }
 
 /// Reserved JSON key used as the canonical wire encoding for
-/// `lashlang::Value::Projected` across the lashlang→host bridge. When the
-/// model passes a projected source as a tool argument, lashlang serializes it
+/// `lash_vm::Value::Projected` across the lash_vm→host bridge. When the
+/// model passes a projected source as a tool argument, lash_vm serializes it
 /// as `{"__projected__": <tagged seed entry>}`.
 pub const PROJECTED_JSON_TAG: &str = "__projected__";
 

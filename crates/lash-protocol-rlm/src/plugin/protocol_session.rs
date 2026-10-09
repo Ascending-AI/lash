@@ -542,7 +542,7 @@ mod tests {
                 "an unknown termination kind",
                 serde_json::json!({"termination": {"kind": "python"}}),
             ),
-            ("an unknown key", serde_json::json!({"lashlang": true})),
+            ("an unknown key", serde_json::json!({"lashvm": true})),
             (
                 "a non-object termination",
                 serde_json::json!({"termination": 7}),

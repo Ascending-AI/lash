@@ -14,7 +14,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use lashlang::{CompiledProgram, ExecutionScratch, State, VmContinuation};
+use lash_vm::{CompiledProgram, ExecutionScratch, State, VmContinuation};
 use wire::{Message, Worker};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -145,9 +145,7 @@ fn reset_measurements(case: &corpus::Case, count: usize, samples: &mut Samples) 
         // Interleave A/B to reduce order drift; fixture construction is untimed.
         for strategy in [index % 2, 1 - index % 2] {
             let dirty = Instance {
-                state: State::from_snapshot(
-                    lashlang::VmInstance::pristine().open_snapshot(&bytes)?,
-                ),
+                state: State::from_snapshot(lash_vm::VmInstance::pristine().open_snapshot(&bytes)?),
                 scratch: ExecutionScratch::new(),
                 continuation: Some(case.continuation.clone()),
                 programs: vec![case.program.clone()],
@@ -184,7 +182,7 @@ fn reset_measurements(case: &corpus::Case, count: usize, samples: &mut Samples) 
 fn state_measurements(cases: &[corpus::Case], count: usize, samples: &mut Samples) -> Result<()> {
     // The worker-side decoders, reached through a pristine instance built
     // outside every measured decode.
-    let decoder = lashlang::VmInstance::pristine();
+    let decoder = lash_vm::VmInstance::pristine();
     for case in cases {
         let continuation_bytes = serde_json::to_vec(&case.continuation)?;
         let snapshot_bytes = case.snapshot.to_canonical_bytes()?;

@@ -1,4 +1,4 @@
-use lash::rlm::lang::{ExecutionHostError, Record, Value};
+use lash::vm::{ExecutionHostError, Record, Value};
 
 use crate::{DisplayDelta, DisplayState};
 
@@ -269,7 +269,7 @@ impl lash::tools::StaticToolExecute for HostTools {
         let Some(operation) = call.name().strip_prefix("display_") else {
             return match crate::sample_tools::apply_tool(
                 call.name(),
-                &[lash::rlm::lang::from_json(call.args.clone())],
+                &[lash::vm::from_json(call.args.clone())],
             ) {
                 Ok(value) => ToolOutcome::ok(value).into(),
                 Err(error) => ToolOutcome::err_fmt(error).into(),
@@ -278,7 +278,7 @@ impl lash::tools::StaticToolExecute for HostTools {
         if let Err(error) = apply_tool(
             &mut DisplayState::default(),
             operation,
-            &[lash::rlm::lang::from_json(call.args.clone())],
+            &[lash::vm::from_json(call.args.clone())],
         ) {
             return ToolOutcome::err_fmt(error).into();
         }

@@ -51,13 +51,12 @@ pub(super) fn register_native_plugin(
         }))?;
     // `processes.create` compiles in its attempt and declares the module;
     // realization publishes it (FIG-3116).
-    reg.tools().provider(Arc::new(
-        lash_lashlang_runtime::process_create_tool_provider(
+    reg.tools()
+        .provider(Arc::new(lash_vm_runtime::process_create_tool_provider(
             dialect.language_id(),
             dialect.surface(),
             dialect.worker_service(),
-        ),
-    ))?;
+        )))?;
     reg.tool_catalog().contribute(
         lash_core::hook_key!("rlm-catalog"),
         Arc::new(move |ctx| {

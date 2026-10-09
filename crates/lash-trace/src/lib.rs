@@ -3,7 +3,7 @@
 //!
 //! A [`TraceSink`] receives one [`TraceRecord`] per runtime event — turn
 //! lifecycle, prompt builds, compaction decisions, LLM calls,
-//! per-tool start/completion, per-call token usage, protocol steps, and Lashlang
+//! per-tool start/completion, per-call token usage, protocol steps, and Lash VM
 //! execution-graph updates. Each record
 //! carries a [`TraceContext`] (session / turn / graph-node identity) plus a
 //! tagged [`TraceEvent`] payload; [`TraceEventKind`] derives the kind vocabulary
@@ -70,7 +70,7 @@ pub use lash_sansio::{
     CellFailure, CellFailureKind, ExecCodeFailureReason, TextProjectionMetadata,
 };
 pub use lashlang_graph::{
-    DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT, TraceLashlangEdgeSelection, TraceLashlangEventIdentity,
+    DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT, TraceLashlangEdgeSelection, TraceLashlangEventIdentity,
     TraceLashlangEventTransition, TraceLashlangGraph, TraceLashlangGraphAccumulator,
     TraceLashlangGraphChildLink, TraceLashlangGraphCompleteness, TraceLashlangGraphConflict,
     TraceLashlangGraphConflictKind, TraceLashlangGraphEdge, TraceLashlangGraphFoldError,
@@ -108,9 +108,9 @@ pub use telemetry::{
 /// Version 5 adds the `composition_changed` event.
 /// Version 6 adds the `provider_replay_dropped` event with typed minting and
 /// serving LLM Provider routes.
-/// Version 7 renames the Lashlang execution records to language-tagged ones:
+/// Version 7 renames the Lash VM execution records to language-tagged ones:
 /// `language_execution` carries the language id, and the graph, identity, node
-/// and status payloads lose their Lashlang-specific names.
+/// and status payloads lose their LashVm-specific names.
 /// Version 8 types the remaining free-form outcome strings: the
 /// `journaled_effect_settled`, `durable_wait_resolved` and
 /// `durable_timer_resolved` statuses become closed enums, `turn_completed`

@@ -332,7 +332,7 @@ continuation, snapshot, accounting and ABI against component read ranges. An
 unsupported component refuses with its name and range before decoding VM
 bytes. Continuation and snapshot ranges follow their actual decoders
 (`crates/lash-vm-protocol/src/contract.rs`,
-`crates/lashlang/src/vm_contract.rs`). A snapshot outside a node's range is
+`crates/lash-vm/src/vm_contract.rs`). A snapshot outside a node's range is
 never claimed by it.
 
 Drain is by release (ADR 0106 §1). Finalize refuses while any live node lacks
@@ -377,7 +377,7 @@ narrow supported history or mutable reads at finalize
 | Immutable history | Preserve bytes and hashes; retain the lift chain to its permanent floor. History includes checkpoints, session nodes, snapshots and LashTurn outcomes (`fleet_format.rs`). |
 | Mutable rows | Write the fleet-selected format; keep reading old values during backfill (`fleet_format.rs`). |
 | Derived workflow graph | Admit newest or fleet-pinned projection; regenerate an unsupported older projection from the module. It has no lift (`fleet_format.rs`). |
-| Module artifacts | Store family and encoding in an envelope; verify under the stored supported family. Unknown family or encoding is `UnsupportedFamily`, rather than a hash mismatch (`crates/lashlang/src/artifact.rs`). |
+| Module artifacts | Store family and encoding in an envelope; verify under the stored supported family. Unknown family or encoding is `UnsupportedFamily`, rather than a hash mismatch (`crates/lash-vm/src/artifact.rs`). |
 | SQLite blobs | Store a versioned compression envelope. Unknown version or compression refuses without rewriting the bytes (`crates/lash-sqlite-store/src/codec.rs`). |
 | Artifact and attachment referrers | Preserve canonical identities. Unknown kind is `Incompatible(UnknownVocabulary)`; malformed known identity is corruption (`crates/lash-core-store/src/artifact_referrer.rs`, `crates/lash-core-store/src/store/attachment_referrers.rs`). |
 | Obligation vocabulary | Unknown state or kind is typed incompatibility. Delivery stalls undecodable work and keeps its row for inspection (`crates/lash-core-store/src/store/obligation.rs`). |
@@ -394,7 +394,7 @@ identity to the first attempt's epoch would require a retry to discover
 that epoch
 (`crates/lash-core-store/src/store/runtime_commit_plan.rs`,
 `crates/lash-core-store/src/store/runtime_commit.rs`,
-`crates/lashlang/src/runtime/heap.rs`).
+`crates/lash-vm/src/runtime/heap.rs`).
 
 There is no universal unknown-field policy. Observational optional data can
 be ignored where its decoder permits it; effect, ownership and identity

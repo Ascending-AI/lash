@@ -55,7 +55,7 @@ fn step_event(code: &str) -> SessionHistoryRecord {
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
-            id: "lashlang_step_0".to_string(),
+            id: "lash_vm_step_0".to_string(),
             protocol_iteration: 0,
             code: code.to_string(),
             prints: vec!["ok".to_string().into()],
@@ -85,7 +85,7 @@ fn observation_text(message: &lash_core::llm::types::LlmMessage) -> String {
 fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMessage> {
     let dialect = crate::dialect::SessionDialect::prompt_only(
         std::sync::Arc::new(crate::dialect::TypescriptDialect),
-        lash_lashlang_runtime::LashlangSurface::default(),
+        lash_vm_runtime::LashVmSurface::default(),
     );
     render_history_messages(&RlmHistoryRenderInput {
         dialect: &dialect,
@@ -101,12 +101,12 @@ fn render(events: &[SessionHistoryRecord]) -> Vec<lash_core::llm::types::LlmMess
 fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
     let dialect = crate::dialect::SessionDialect::prompt_only(
         std::sync::Arc::new(crate::dialect::TypescriptDialect),
-        lash_lashlang_runtime::LashlangSurface::default(),
+        lash_vm_runtime::LashVmSurface::default(),
     );
     let entry = lash_core::CellRecord {
         language: "typescript".to_string(),
         prints_retained: None,
-        id: "lashlang_step_image".to_string(),
+        id: "lash_vm_step_image".to_string(),
         protocol_iteration: 0,
         code: "print chart".to_string(),
         prints: Vec::new(),
@@ -207,7 +207,7 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
-            id: "lashlang_step_failed".to_string(),
+            id: "lash_vm_step_failed".to_string(),
             protocol_iteration: 0,
             code: "first = await module.ok({ secret: 1 })\nsecond = await module.fail({})"
                 .to_string(),
@@ -261,7 +261,7 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
         lash_rlm_types::RlmProtocolEvent::RlmTrajectoryEntry(Box::new(lash_core::CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
-            id: "lashlang_step_success".to_string(),
+            id: "lash_vm_step_success".to_string(),
             protocol_iteration: 0,
             code: "value = module.ok()".to_string(),
             prints: Vec::new(),
@@ -343,7 +343,7 @@ fn rendered_text(messages: &[lash_core::llm::types::LlmMessage]) -> String {
 #[test]
 fn a_failed_cell_stays_visible_for_the_repair_turn() {
     let transcript = rendered_text(&render(&[
-        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        failed_step_event("lash_vm_step_0", "print undefined_name", "unknown name"),
         protocol_feedback("s1", "That step failed; retry with a corrected program."),
     ]));
 
@@ -362,7 +362,7 @@ fn a_failed_cell_stays_visible_for_the_repair_turn() {
 fn a_repaired_failure_is_scrubbed_after_the_next_success() {
     let transcript = rendered_text(&render(&[
         assistant_reasoning_event(&[], "Trying the direct read."),
-        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        failed_step_event("lash_vm_step_0", "print undefined_name", "unknown name"),
         protocol_feedback("s1", "That step failed; retry with a corrected program."),
         step_event("print 1"),
     ]));
@@ -386,7 +386,7 @@ fn a_repaired_failure_is_scrubbed_after_the_next_success() {
 #[test]
 fn a_failure_before_a_user_turn_survives_a_later_success() {
     let transcript = rendered_text(&render(&[
-        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        failed_step_event("lash_vm_step_0", "print undefined_name", "unknown name"),
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: "u1".to_string(),
             role: MessageRole::User,
@@ -409,8 +409,8 @@ fn a_failure_before_a_user_turn_survives_a_later_success() {
 #[test]
 fn every_failure_in_the_repaired_run_is_scrubbed() {
     let transcript = rendered_text(&render(&[
-        failed_step_event("lashlang_step_0", "print first_bad", "unknown name"),
-        failed_step_event("lashlang_step_1", "print second_bad", "unknown name"),
+        failed_step_event("lash_vm_step_0", "print first_bad", "unknown name"),
+        failed_step_event("lash_vm_step_1", "print second_bad", "unknown name"),
         step_event("print 1"),
     ]));
 
@@ -426,7 +426,7 @@ fn every_failure_in_the_repaired_run_is_scrubbed() {
 #[test]
 fn a_refusal_and_a_runtime_failure_read_differently() {
     let refused = rendered_text(&render(&[step_failed_with(
-        "lashlang_step_0",
+        "lash_vm_step_0",
         "class A {}",
         lash_core::CellFailure::new(
             lash_core::CellFailureKind::Policy,
@@ -451,7 +451,7 @@ fn a_refusal_and_a_runtime_failure_read_differently() {
     );
 
     let threw = rendered_text(&render(&[step_failed_with(
-        "lashlang_step_0",
+        "lash_vm_step_0",
         "print rows[9]",
         lash_core::CellFailure::new(lash_core::CellFailureKind::Program, "index out of range"),
     )]));
@@ -471,7 +471,7 @@ fn a_refusal_and_a_runtime_failure_read_differently() {
 #[test]
 fn a_host_system_message_survives_the_scrub() {
     let transcript = rendered_text(&render(&[
-        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        failed_step_event("lash_vm_step_0", "print undefined_name", "unknown name"),
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: "h1".to_string(),
             role: MessageRole::System,
@@ -503,7 +503,7 @@ fn a_host_system_message_survives_the_scrub() {
 #[test]
 fn a_surviving_cells_prose_is_not_taken_by_the_scrub() {
     let transcript = rendered_text(&render(&[
-        failed_step_event("lashlang_step_0", "print undefined_name", "unknown name"),
+        failed_step_event("lash_vm_step_0", "print undefined_name", "unknown name"),
         assistant_reasoning_event(&[], "Second attempt, reading the bound value."),
         SessionHistoryRecord::Conversation(ConversationRecord {
             id: "h1".to_string(),

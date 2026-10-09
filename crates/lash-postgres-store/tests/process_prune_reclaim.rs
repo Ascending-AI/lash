@@ -49,9 +49,9 @@ lash_conformance::process_start_staging_tests!({
     };
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
-        Arc::new(storage.lashlang_artifact_store()),
+        Arc::new(storage.lash_vm_artifact_store()),
         Arc::new(storage.process_env_store()),
-        Arc::new(storage.lashlang_artifact_store()),
+        Arc::new(storage.lash_vm_artifact_store()),
         Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
         storage.artifact_cleanup(),
         Arc::new(lash_core_execution::facade_support::SystemClock),
@@ -88,9 +88,9 @@ lash_conformance::process_definition_tests!({
     };
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
     let ports = lash_core_execution::runtime::ArtifactReferrerPorts::new(
-        Arc::new(storage.lashlang_artifact_store()),
+        Arc::new(storage.lash_vm_artifact_store()),
         Arc::new(storage.process_env_store()),
-        Arc::new(storage.lashlang_artifact_store()),
+        Arc::new(storage.lash_vm_artifact_store()),
         Arc::new(storage.store()) as Arc<dyn lash_core_execution::AttachmentReferrers>,
         storage.artifact_cleanup(),
         Arc::new(lash_core_execution::facade_support::SystemClock),

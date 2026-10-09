@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use lash_core::facade_support::ChronologicalProjection;
-use lashlang::{
+use lash_vm::{
     ProjectedReadRequest, ProjectedReadResponse, ProjectionError, ProjectionProvider,
     ProjectionType, ResourceRef, Value as FlowValue,
 };
@@ -66,8 +66,8 @@ impl HistoryProvider {
     }
 
     /// The `history` value of [`Self::current`].
-    pub(crate) fn binding(&self) -> lashlang::ProjectedValue {
-        lashlang::ProjectedValue::resource(HISTORY_PROJECTION, HISTORY_TYPE_NAME, self.current())
+    pub(crate) fn binding(&self) -> lash_vm::ProjectedValue {
+        lash_vm::ProjectedValue::resource(HISTORY_PROJECTION, HISTORY_TYPE_NAME, self.current())
     }
 
     /// The history `resource` pins.
@@ -177,7 +177,7 @@ pub(crate) fn answer(
                 .map(ProjectedReadResponse::Value)
         }
         // `Empty`, `Truthy`, `Keys` and `Contains` below are reachable
-        // through the lashlang intrinsics (`empty`, truthiness, `keys`,
+        // through the lash_vm intrinsics (`empty`, truthiness, `keys`,
         // `contains`) and through any host that reads the provider directly.
         // TypeScript source reaches none of them: it has no `empty`, its
         // array methods lower to their own operations rather than these

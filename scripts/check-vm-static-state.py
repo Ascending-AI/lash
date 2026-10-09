@@ -38,9 +38,9 @@ ALLOWLIST = Path("scripts/vm-static-state-allowlist.txt")
 # The crates whose code runs inside a VM worker. The worker crate joins the
 # list the moment it exists, so its first static is reviewed like any other.
 VM_CRATES = (
-    "crates/lashlang",
+    "crates/lash-vm",
     "crates/lash-typescript",
-    "crates/lash-lashlang-runtime",
+    "crates/lash-vm-runtime",
 )
 WORKER_CRATE = "crates/lash-vm-worker"
 

@@ -27,21 +27,21 @@ owns its syntax-specific prompt fragments.
 
 The `__` namespace is reserved for internal runtime modules. Prompt inventories
 hide modules whose first path segment starts with `__`. The clock and random
-module is `__lashlang_runtime`, with resource type `lashlang.Runtime` and host
-operation `lashlang.runtime`, independent of the source dialect.
+module is `__lash_vm_runtime`, with resource type `lash_vm.Runtime` and host
+operation `lash_vm.runtime`, independent of the source dialect.
 
 Tool descriptions and schema prose render verbatim. A host contributing
 syntax-specific prose owns its consistency with the dialect it serves.
 
 ## Durable identifiers and traces
 
-`lashlang_step`, process identity families and `lashlang:effect:...` identify
+`lash_vm_step`, process identity families and `lash_vm:effect:...` identify
 IR and VM execution. IR module references and source identity use
-`lashlang-ir`. Source vocabulary does not rename durable identity preimages.
+`lash-vm-ir`. Source vocabulary does not rename durable identity preimages.
 
 Cell execution traces label the source dialect in `language`; compiled process
 bodies execute IR and keep the engine's language label. Event names, JSONL
-filenames and graph APIs that name Lashlang identify the shared machine.
+filenames and graph APIs that name Lash VM identify the shared machine.
 
 ## Alternatives considered
 
@@ -72,6 +72,6 @@ rule to their own contributions.
 - [Prompt walker](../../crates/lash-protocol-rlm/src/dialect/prompt_walker_tests.rs)
   checks source wording with explicit IR and VM exceptions.
 - [Cell trace](../../crates/lash-protocol-rlm/src/protocol/driver.rs),
-  [process trace](../../crates/lash-lashlang-runtime/src/process/trace_map.rs)
-  and [IR identity](../../crates/lashlang/src/artifact_identity.rs)
+  [process trace](../../crates/lash-vm-runtime/src/process/trace_map.rs)
+  and [IR identity](../../crates/lash-vm/src/artifact_identity.rs)
   keep source labels separate from machine identities.

@@ -64,7 +64,7 @@ class ClassifyTests(unittest.TestCase):
         cases = (
             ("crates/lash/tests/artifact_referrers_evidence.rs", "true", "false"),
             ("crates/lash/tests/artifact_referrers_evidence/fixture.rs", "true", "false"),
-            ("crates/lash-lashlang-runtime/src/lib.rs", "true", "false"),
+            ("crates/lash-vm-runtime/src/lib.rs", "true", "false"),
             ("crates/lash-plugin-process-controls/src/lib.rs", "true", "false"),
             ("crates/lash-protocol-rlm/src/lib.rs", "true", "false"),
             ("crates/lash-postgres-store/src/lib.rs", "true", "false"),
@@ -1338,8 +1338,8 @@ class PrTailLabelTests(unittest.TestCase):
         self.assertEqual(" ".join(self.TYPESCRIPT_TAIL), plan["pr_tail_labels"])
 
     def test_an_untouched_packages_labels_are_not_selected(self) -> None:
-        self.assertEqual([], ci_plan.pr_tail_labels(["crates/lashlang/src/lib.rs"]))
-        plan = ci_plan.classify([("M", "crates/lashlang/src/lib.rs")])
+        self.assertEqual([], ci_plan.pr_tail_labels(["crates/lash-vm/src/lib.rs"]))
+        plan = ci_plan.classify([("M", "crates/lash-vm/src/lib.rs")])
         self.assertNotIn("lash-typescript", plan["pr_tail_labels"])
 
     def test_a_docs_diff_selects_none(self) -> None:
@@ -1663,7 +1663,7 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
 GUARDED_SURFACE_FILES = (
     "crates/lash-postgres-store/schema.sql",
     "crates/lash-sqlite-store/src/schema_fragments.rs",
-    "crates/lashlang/src/runtime/compiler/expr.rs",
+    "crates/lash-vm/src/runtime/compiler/expr.rs",
     "crates/lash-postgres-store/src/postgres/migrate.rs",
 )
 
@@ -2414,14 +2414,14 @@ class DispatchOnlyJobTests(unittest.TestCase):
     """Deferred compile lanes live on workflow_dispatch alone.
 
     The queue runs the same minimal board as a pull request, so
-    `lashlang-git-consumer` and `unicode-tests` joined the other deferred
+    `lash-vm-git-consumer` and `unicode-tests` joined the other deferred
     jobs. `feature-lanes` left them again (FIG-3572; see FeatureLanesTests). The job IDs and conditions are spelled out by hand
     here rather than derived from ``ci_plan.DISPATCH_ONLY_JOBS``: a test that
     reads its expectation out of the set under test still passes after someone
     empties the set.
     """
 
-    JOBS = ("lashlang-git-consumer", "unicode-tests")
+    JOBS = ("lash-vm-git-consumer", "unicode-tests")
 
     def board(self, event: str, docs_only: bool = False) -> dict:
         needs = successful_needs()

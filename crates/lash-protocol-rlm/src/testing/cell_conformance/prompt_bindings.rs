@@ -52,7 +52,7 @@ fn the_bound_variables_section_lists_every_kind_of_binding() {
             .unwrap_or_else(|| panic!("{mode:?}: the large Map is listed:\n{prompt}"));
         assert!(
             big.trim_start_matches("- `big`: ").chars().count()
-                <= lashlang::BINDING_SUMMARY_MAX_CHARS,
+                <= lash_vm::BINDING_SUMMARY_MAX_CHARS,
             "{mode:?}: a summary is bounded however large its value: {big}"
         );
     }

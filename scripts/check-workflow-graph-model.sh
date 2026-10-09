@@ -9,7 +9,7 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-forbidden='static_graph_json|\bLashlangMap\b'
+forbidden='static_graph_json|\bLashVmMap\b'
 if grep -rnE --include='*.rs' "$forbidden" crates examples; then
   echo "workflow graph model check failed: retired definition-graph API still has consumers" >&2
   exit 1
@@ -21,13 +21,13 @@ if [ "$definition_count" != "1" ]; then
   exit 1
 fi
 
-if ! grep -qE 'lash_lashlang_runtime::trace_lashlang_main_map\(&artifact\.graph\)' \
+if ! grep -qE 'lash_vm_runtime::trace_lashlang_main_map\(&artifact\.graph\)' \
   crates/lash-protocol-rlm/src/executor/mod.rs; then
   echo "workflow graph model check failed: RLM no longer delegates its trace skeleton" >&2
   exit 1
 fi
 
-if ! grep -qE 'graph:[[:space:]]*lashlang::workflow_graph_from_artifact\(artifact,[[:space:]]*&lashlang::NoStatementText\)' \
+if ! grep -qE 'graph:[[:space:]]*lash_vm::workflow_graph_from_artifact\(artifact,[[:space:]]*&lash_vm::NoStatementText\)' \
   crates/lash-vm-worker/src/service.rs; then
   echo "workflow graph model check failed: worker no longer projects the admitted artifact's WorkflowGraph" >&2
   exit 1
@@ -50,8 +50,8 @@ from pathlib import Path
 # (language-neutral package, front-end package) -> why the dev-dependency is
 # admitted. A normal dependency is never exempt.
 DEV_DEPENDENCY_EXEMPTIONS = {
-    ("lash-internal-lashlang", "lash-internal-typescript"): (
-        "lashlang's integration tests and benches author their programs in "
+    ("lash-internal-vm", "lash-internal-typescript"): (
+        "lash_vm's integration tests and benches author their programs in "
         "TypeScript; the library and its unit tests never link a front end"
     ),
 }
@@ -195,11 +195,11 @@ ALLOWED = {
     "crates/lash-typescript/src/workflow_graph/mod.rs": (
         "graph validation refuses a process whose name contradicts its origin"
     ),
-    "crates/lashlang/src/ast_roles.rs": (
+    "crates/lash-vm/src/ast_roles.rs": (
         "defines the lifted-name prefix and validates names against origins"
     ),
-    "crates/lashlang/src/ast.rs": "re-exports the lifted-name prefix",
-    "crates/lashlang/src/lib.rs": "re-exports the lifted-name prefix",
+    "crates/lash-vm/src/ast.rs": "re-exports the lifted-name prefix",
+    "crates/lash-vm/src/lib.rs": "re-exports the lifted-name prefix",
     "crates/lash-protocol-rlm/src/protocol/prompt.rs": (
         "hides the reserved `__` tool and module namespace from the model "
         "(ADR 0096), not a binding"

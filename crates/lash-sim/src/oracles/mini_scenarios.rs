@@ -278,7 +278,7 @@ pub(super) fn mini_rlm_schema_mismatch_repair(events: &[DeliveredBoundary]) -> O
     )
 }
 
-pub(super) fn mini_rlm_lashlang_cell_exec_continues(events: &[DeliveredBoundary]) -> OracleVerdict {
+pub(super) fn mini_rlm_lash_vm_cell_exec_continues(events: &[DeliveredBoundary]) -> OracleVerdict {
     let Some(exec) = first_event(events, BoundaryKind::ExecCode) else {
         return OracleVerdict::failed(
             SCENARIO_MINI_RLM_CELL_EXEC_ORACLE,
@@ -293,8 +293,8 @@ pub(super) fn mini_rlm_lashlang_cell_exec_continues(events: &[DeliveredBoundary]
     verdict_from_bool(
         SCENARIO_MINI_RLM_CELL_EXEC_ORACLE,
         continued && exec_runtime_outcome_observed(events),
-        "lashlang cell exec mini-replay produced an exec outcome and continued to a later provider turn",
-        "lashlang cell exec mini-replay did not continue after exec",
+        "lash_vm cell exec mini-replay produced an exec outcome and continued to a later provider turn",
+        "lash_vm cell exec mini-replay did not continue after exec",
     )
 }
 

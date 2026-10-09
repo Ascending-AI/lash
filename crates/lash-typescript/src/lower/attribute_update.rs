@@ -5,7 +5,7 @@
 //! graph records only the target, the operator and the operand, so rendering
 //! it back rebuilds that role here; the printer reads it back as `op=`.
 
-use lashlang::{AssignPathStep, AssignTarget, Expr, StructuralRole, UpdateOperator};
+use lash_vm::{AssignPathStep, AssignTarget, Expr, StructuralRole, UpdateOperator};
 
 use super::LOWERED_BINDING_PREFIX;
 

@@ -124,7 +124,7 @@ async fn scan_module_artifacts(
 ) -> Result<DurableScanPage, StoreError> {
     let rows = sqlx::query_as::<_, (String, Vec<u8>)>(
         crate::artifact_store::artifact_sql()
-            .lashlang_artifacts
+            .lash_vm_artifacts
             .list_namespace_page
             .sql(),
     )

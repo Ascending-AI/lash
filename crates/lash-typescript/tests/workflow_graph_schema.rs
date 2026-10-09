@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use lash_typescript::workflow_graph::workflow_graph_from_source;
-use lashlang::{WorkflowContainer, WorkflowDeclaration, WorkflowNodeKind};
+use lash_vm::{WorkflowContainer, WorkflowDeclaration, WorkflowNodeKind};
 
 #[allow(clippy::disallowed_methods)]
 fn published_graph_schema() -> serde_json::Value {
@@ -119,7 +119,7 @@ finish(values);
 fn published_schema_requires_a_closed_workflow_diagnostic_classification() {
     let graph = workflow_graph_from_source("finish(1);").expect("fixture projects");
     let mut value = serde_json::to_value(graph).expect("graph encodes");
-    value["facet_schema_version"] = serde_json::json!(lashlang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION);
+    value["facet_schema_version"] = serde_json::json!(lash_vm::WORKFLOW_TYPE_FACET_SCHEMA_VERSION);
     value["main"]["nodes"][0]["type_facets"] = serde_json::json!({
         "diagnostics": [{
             "node_id": value["main"]["nodes"][0]["id"].clone(),

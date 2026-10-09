@@ -787,7 +787,7 @@ finish({ recovered: true });
     .await
 }
 
-/// A contract core, the Lashlang graph store its executions trace into, and
+/// A contract core, the Lash VM graph store its executions trace into, and
 /// the engine it serves its processes on.
 type ContractCore = (
     lash::LashCore,
@@ -1025,7 +1025,7 @@ struct AgentContractProcessObservation {
 async fn agent_contract_process_observations(
     core: &lash::LashCore,
 ) -> Result<Vec<AgentContractProcessObservation>, FixedScriptRunnerError> {
-    let artifacts = lash::persistence::LashlangArtifacts::of_backend(core.backend());
+    let artifacts = lash::persistence::LashVmArtifacts::of_backend(core.backend());
     let processes = core
         .processes()
         .list(&lash_core::ProcessListFilter {
@@ -1060,16 +1060,16 @@ async fn agent_contract_process_observations(
 }
 
 /// The structural origin an observed process's pinned definition resolves to
-/// in its module IR (`ProcessOrigin` on the Lashlang declaration), never the
+/// in its module IR (`ProcessOrigin` on the Lash VM declaration), never the
 /// display label the process row carries. `None` for a process that pins no
-/// Lashlang definition at all; an unresolvable pinned definition is a defect
+/// Lash VM definition at all; an unresolvable pinned definition is a defect
 /// the contract run reports rather than quietly uncounting.
 async fn agent_contract_process_origin(
     backend: &lash::Backend,
-    artifacts: &lash::persistence::LashlangArtifacts,
+    artifacts: &lash::persistence::LashVmArtifacts,
     process: &lash_core::facade_support::ObservedProcess,
 ) -> Result<Option<&'static str>, FixedScriptRunnerError> {
-    if process.identity.kind.as_str() != lash_lashlang_runtime::LASHLANG_ENGINE_KIND {
+    if process.identity.kind.as_str() != lash_vm_runtime::LASH_VM_ENGINE_KIND {
         return Ok(None);
     }
     let Some(id) = process.identity.definition_id.as_ref() else {
@@ -1088,21 +1088,20 @@ async fn agent_contract_process_origin(
         })?;
     let draft = lash_core::ProcessDefinitionDraft::from_store_bytes(id, &bytes)
         .map_err(|error| FixedScriptRunnerError::Runtime(error.to_string()))?;
-    let identity =
-        lash::rlm::lang::ProcessDefinitionIdentity::from_process_value(draft.value().as_json())
-            .map_err(|err| {
-                FixedScriptRunnerError::Runtime(format!(
-                    "lashlang process {} pins a definition that is not a process identity: {err}",
-                    process.process_id
-                ))
-            })?;
+    let identity = lash::vm::ProcessDefinitionIdentity::from_process_value(draft.value().as_json())
+        .map_err(|err| {
+            FixedScriptRunnerError::Runtime(format!(
+                "lash_vm process {} pins a definition that is not a process identity: {err}",
+                process.process_id
+            ))
+        })?;
     let artifact = lash_vm_client::service::Service::default()
         .inspect_artifact(artifacts, &identity.module_ref)
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
         .ok_or_else(|| {
             FixedScriptRunnerError::Runtime(format!(
-                "lashlang process {} pins module artifact `{}`, which the store no longer retains",
+                "lash_vm process {} pins module artifact `{}`, which the store no longer retains",
                 process.process_id, identity.module_ref
             ))
         })?;
@@ -1163,7 +1162,7 @@ fn hex_prefix(bytes: &[u8], len: usize) -> String {
 
 fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -> Value {
     let mut completed_entries = BTreeSet::new();
-    let mut completed_lashlang_process_refs = BTreeSet::new();
+    let mut completed_lash_vm_process_refs = BTreeSet::new();
     let mut completed_lifted_process_refs = BTreeSet::new();
     let mut statuses = BTreeMap::<String, usize>::new();
     let mut kinds = BTreeMap::<String, usize>::new();
@@ -1188,9 +1187,9 @@ fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -
                 .observed
                 .get("kind")
                 .and_then(Value::as_str)
-                .is_some_and(|kind| kind == lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
+                .is_some_and(|kind| kind == lash_vm_runtime::LASH_VM_ENGINE_KIND)
             {
-                completed_lashlang_process_refs.insert(process.process_ref.clone());
+                completed_lash_vm_process_refs.insert(process.process_ref.clone());
                 if process
                     .observed
                     .get("process_origin")
@@ -1209,9 +1208,9 @@ fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -
             .filter(|process| process.observed.get("terminal").and_then(Value::as_bool) == Some(true))
             .count(),
         "completed_entries": completed_entries.into_iter().collect::<Vec<_>>(),
-        "completed_lashlang_process_count": completed_lashlang_process_refs.len(),
+        "completed_lash_vm_process_count": completed_lash_vm_process_refs.len(),
         "completed_lifted_process_count": completed_lifted_process_refs.len(),
-        "completed_lashlang_process_refs": completed_lashlang_process_refs.into_iter().collect::<Vec<_>>(),
+        "completed_lash_vm_process_refs": completed_lash_vm_process_refs.into_iter().collect::<Vec<_>>(),
         "status_counts": statuses,
         "kind_counts": kinds,
         "all_terminal": processes
@@ -1365,7 +1364,7 @@ fn agent_contract_graph_facts(
     let mut child_session_exec_failed_count = 0usize;
     for graph in graphs {
         *graph_status_counts
-            .entry(trace_lashlang_status_label(graph.status).to_string())
+            .entry(trace_lash_vm_status_label(graph.status).to_string())
             .or_default() += 1;
         if graph.scope.session_id.as_ref() != Some(root_session_id)
             && matches!(
@@ -1478,9 +1477,7 @@ fn agent_failed_child_activity_facts(
     })
 }
 
-fn trace_lashlang_status_label(
-    status: lash::tracing::TraceLanguageExecutionStatus,
-) -> &'static str {
+fn trace_lash_vm_status_label(status: lash::tracing::TraceLanguageExecutionStatus) -> &'static str {
     match status {
         lash::tracing::TraceLanguageExecutionStatus::Running => "running",
         lash::tracing::TraceLanguageExecutionStatus::Completed => "completed",

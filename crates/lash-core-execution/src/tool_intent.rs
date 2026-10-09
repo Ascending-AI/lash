@@ -395,7 +395,7 @@ pub struct DeclaredModuleArtifact {
     /// The content-addressed reference the definition value names.
     pub module_ref: String,
     /// The module port's bytes for `module_ref`, exactly as its codec wrote
-    /// them. The lashlang module codec is JSON, so they travel as text and
+    /// them. The lash_vm module codec is JSON, so they travel as text and
     /// publish byte-for-byte.
     pub bytes: String,
 }

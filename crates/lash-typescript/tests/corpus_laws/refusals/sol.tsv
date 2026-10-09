@@ -3,8 +3,8 @@
 # whose program now round-trips, or whose refusal changed, fails the law
 # until it is deleted or corrected.
 # program id	refusal	reason
-differential:sol:112	generated binding `__lashlang_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
-differential:sol:113	generated binding `__lashlang_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
-differential:sol:114	generated binding `__lashlang_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
-differential:sol:115	generated binding `__lashlang_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
-differential:sol:8	generated binding `__lashlang_0_f` has no authored TypeScript spelling	a binding that shadows one in scope lowers to a generated slot, which has no authored spelling
+differential:sol:112	generated binding `__lash_vm_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
+differential:sol:113	generated binding `__lash_vm_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
+differential:sol:114	generated binding `__lash_vm_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
+differential:sol:115	generated binding `__lash_vm_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
+differential:sol:8	generated binding `__lash_vm_0_f` has no authored TypeScript spelling	a binding that shadows one in scope lowers to a generated slot, which has no authored spelling

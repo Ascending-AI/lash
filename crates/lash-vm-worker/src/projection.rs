@@ -5,14 +5,14 @@
 //! provider registered for its type. A batch of reads of one resource is one
 //! frame.
 use crate::worker::{Fences, cpu_nanos};
+use lash_vm::{
+    ProjectedReadRequest, ProjectedReadResponse, ProjectionReadError, ProjectionReader, ResourceRef,
+};
 use lash_vm_client::{
     PoolError, ProjectionAnswer, ProjectionRead,
     ipc::{FrameSource, write_frame},
 };
 use lash_vm_protocol::*;
-use lashlang::{
-    ProjectedReadRequest, ProjectedReadResponse, ProjectionReadError, ProjectionReader, ResourceRef,
-};
 use std::os::unix::net::UnixStream;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -190,8 +190,8 @@ impl ProjectionReader for RemoteProjection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lash_vm::ProjectionType;
     use lash_vm_client::ipc::read_frame;
-    use lashlang::ProjectionType;
 
     /// ADR 0132 §9: a `read_range` over N requests of one resource costs one
     /// projection frame, not N.

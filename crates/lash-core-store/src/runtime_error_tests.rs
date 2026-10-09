@@ -177,10 +177,10 @@ fn a_code_is_terminal_exactly_when_it_is_an_outcome() {
     assert_eq!(
         parked,
         [
-            RuntimeErrorCode::LashlangCellReplayDivergence,
+            RuntimeErrorCode::LashVmCellReplayDivergence,
             RuntimeErrorCode::RetiredGeneration,
             RuntimeErrorCode::PluginRevisionUnavailable,
-            RuntimeErrorCode::LashlangCellBindingDrift,
+            RuntimeErrorCode::LashVmCellBindingDrift,
             RuntimeErrorCode::EffectReplayDivergence,
             RuntimeErrorCode::VmWorkerUnavailable,
         ]
@@ -251,7 +251,7 @@ fn a_journaled_controller_error_is_an_outcome_whatever_its_code() {
     );
 }
 
-/// FIG-3586: a lashlang replay refusal parks its turn. It is neither an
+/// FIG-3586: a lash_vm replay refusal parks its turn. It is neither an
 /// outcome — nothing about the turn failed, and a redeploy of the build that
 /// wrote the journal serves it — nor a live fault a queued run may spend its
 /// retry budget on, since every redrive by this build refuses again. FIG-3587
@@ -262,9 +262,9 @@ fn replay_refusals_park_the_turn() {
     use crate::runtime_error::TurnFailureCause;
 
     for code in [
-        RuntimeErrorCode::LashlangCellReplayDivergence,
+        RuntimeErrorCode::LashVmCellReplayDivergence,
         RuntimeErrorCode::RetiredGeneration,
-        RuntimeErrorCode::LashlangCellBindingDrift,
+        RuntimeErrorCode::LashVmCellBindingDrift,
         RuntimeErrorCode::EffectReplayDivergence,
     ] {
         assert_eq!(
@@ -291,9 +291,9 @@ fn replay_refusals_park_the_turn() {
             code.parks_turn(),
             matches!(
                 code,
-                RuntimeErrorCode::LashlangCellReplayDivergence
+                RuntimeErrorCode::LashVmCellReplayDivergence
                     | RuntimeErrorCode::RetiredGeneration
-                    | RuntimeErrorCode::LashlangCellBindingDrift
+                    | RuntimeErrorCode::LashVmCellBindingDrift
                     | RuntimeErrorCode::PluginRevisionUnavailable
                     | RuntimeErrorCode::EffectReplayDivergence
                     | RuntimeErrorCode::VmWorkerUnavailable

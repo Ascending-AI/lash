@@ -41,7 +41,7 @@ A call has one durable home: the admitted execution that runs it.
   answered before it settled (a race's loser) stays in the snapshot's ledger
   and settles on its own. A cell resumed from its snapshot never asks again
   for a value its heap holds.
-- **A lashlang process**: its steps are admitted executions of the same
+- **A lash_vm process**: its steps are admitted executions of the same
   lifecycle (`runtime/actor/process`).
 
 `RuntimeExecutionContext::round_tools` gives a turn's drive its
@@ -82,7 +82,7 @@ presented. There is no separate realization invocation.
 A cell's aggregate is one operation: its calls are admitted together, and
 its timers are pinned with them. A consumer (`race`, `any`, `all`,
 `allSettled`, the list batch) answers from the order leaves settled
-(`lash_lashlang_runtime::aggregate_answer`): leaves settled when the
+(`lash_vm_runtime::aggregate_answer`): leaves settled when the
 aggregate formed (a refused call, a plain operand) come first, in source
 order; members follow in the order their outcomes committed, then timers
 that came due. `all` reports the first rejection; `any` the first

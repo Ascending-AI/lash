@@ -238,7 +238,7 @@ impl LashCore {
     /// tool resolvers, execution sink/jsonl path) before
     /// passing it in. The factory is built over this same `backend`
     /// ([`RlmProtocolPluginFactory::new`](crate::rlm::RlmProtocolPluginFactory::new)),
-    /// which supplies its Lashlang artifact store; a factory built over any
+    /// which supplies its Lash VM artifact store; a factory built over any
     /// other backend is refused when the core is built.
     #[cfg(feature = "rlm")]
     pub fn rlm_builder(

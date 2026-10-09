@@ -61,7 +61,7 @@ pub(super) fn is_ecma_global_namespace(name: &str) -> bool {
         // functions — are global values, never tool-module roots, so a
         // member access like `eval.hasOwnProperty` reads the built-in's
         // own surface rather than linking a module named `eval`.
-        || lashlang::is_javascript_builtin_global(name)
+        || lash_vm::is_javascript_builtin_global(name)
         || matches!(
             name,
             "Error"
@@ -168,8 +168,8 @@ pub(super) fn has_literal_stdlib_receiver(expr: &Expr) -> bool {
 pub(super) fn journaled_runtime_call(operation: &str) -> LashExpr {
     LashExpr::ReceiverCall {
         receiver: Box::new(LashExpr::ResourceRef(ResourceRefExpr::resolved(
-            vec![lashlang::LANGUAGE_RUNTIME_MODULE_PATH.into()],
-            lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE,
+            vec![lash_vm::LANGUAGE_RUNTIME_MODULE_PATH.into()],
+            lash_vm::LANGUAGE_RUNTIME_RESOURCE_TYPE,
             "builtin",
         ))),
         operation: operation.into(),
@@ -209,7 +209,7 @@ pub(super) fn all_settled_results(items: LashExpr) -> LashExpr {
                     (
                         "reason".into(),
                         LashExpr::BuiltinCall {
-                            name: "__lashlang_heap_new".into(),
+                            name: "__lash_vm_heap_new".into(),
                             args: vec![
                                 LashExpr::String("EffectError".into()),
                                 field("error"),
@@ -257,7 +257,7 @@ impl Lowerer {
                 expr: Box::new(self.lower_expr(value)?),
             },
             LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                name: "__lashlang_heap_new".into(),
+                name: "__lash_vm_heap_new".into(),
                 args: vec![
                     LashExpr::String("TypeError".into()),
                     LashExpr::String(
@@ -291,7 +291,7 @@ impl Lowerer {
                 expr: Box::new(self.lower_expr(value)?),
             },
             LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                name: "__lashlang_heap_new".into(),
+                name: "__lash_vm_heap_new".into(),
                 args: vec![
                     LashExpr::String("TypeError".into()),
                     LashExpr::String(
@@ -359,7 +359,7 @@ pub(super) fn require_object_coercible(input: &str) -> LashExpr {
             right: Box::new(is(LashExpr::Absent)),
         }),
         then_block: Box::new(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-            name: "__lashlang_heap_new".into(),
+            name: "__lash_vm_heap_new".into(),
             args: vec![LashExpr::String("TypeError".into()), message],
         }))),
         else_block: Box::new(LashExpr::Absent),

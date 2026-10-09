@@ -2,8 +2,8 @@
 //! body (FIG-3625): the loop binding, typed by its iterable, and only there.
 
 use lash_typescript::workflow_graph::workflow_graph_from_source_with_facets;
-use lashlang::testing::harness::test_environment;
-use lashlang::{TypeExpr, WorkflowNode};
+use lash_vm::testing::harness::test_environment;
+use lash_vm::{TypeExpr, WorkflowNode};
 
 /// The binding a node writes, by its root name.
 fn node_binding_root(node: &WorkflowNode) -> Option<String> {

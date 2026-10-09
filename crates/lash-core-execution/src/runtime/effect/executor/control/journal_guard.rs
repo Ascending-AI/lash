@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::RuntimeEffectControllerError;
 
 ///
-/// A re-executed lashlang run knows, from one read of its key namespace,
+/// A re-executed lash_vm run knows, from one read of its key namespace,
 /// whether the journal holds anything at a command's ordinal and anything
 /// beyond it. It cannot know before the command runs whether the command will
 /// write — a tool call can settle during preparation, an aggregate's leaves

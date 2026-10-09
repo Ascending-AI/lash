@@ -1,6 +1,6 @@
 use lash_core::plugin::{PluginError, ToolCatalogContext};
 use lash_core::{ToolCatalog, facade_support::ToolCatalogContribution};
-use lash_lashlang_runtime::required_tool_executable;
+use lash_vm_runtime::required_tool_executable;
 
 use crate::dialect::SessionDialect;
 
@@ -60,7 +60,7 @@ pub(crate) fn rlm_prompt_tool_docs(
                 sections.push(format!("{title}:\n{}", rows.join("\n")));
             }
         }
-        // Authored examples are Lashlang source; the dialect spells them,
+        // Authored examples are Lash VM source; the dialect spells them,
         // and leaves out the ones it cannot.
         let examples = contract
             .compact_examples_with(&dialect.presentation().tools)
@@ -118,8 +118,8 @@ mod tests {
         ToolContract, ToolDefinition, facade_support::build_tool_catalog,
         test_support::ToolCatalogBuildInput,
     };
-    use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
     use lash_sansio::SessionId;
+    use lash_vm_runtime::{LashVmSurface, ToolBinding, ToolDefinitionBindingExt};
     use serde_json::json;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -193,13 +193,13 @@ mod tests {
             crate::protocol::RlmPromptFeatures::default(),
         );
         assert!(docs.contains("pinned"), "{docs}");
-        let resources = lash_lashlang_runtime::lashlang_resources_from_tool_catalog(&catalog)
+        let resources = lash_vm_runtime::lash_vm_resources_from_tool_catalog(&catalog)
             .expect("pinned contract imports into RLM bindings");
         let operation = resources
             .resolve_operation("Authority", "pinned")
             .expect("resident operation");
         assert!(
-            matches!(operation.input_ty, lashlang::TypeExpr::Object(ref fields)
+            matches!(operation.input_ty, lash_vm::TypeExpr::Object(ref fields)
             if fields.iter().any(|field| field.name == "pinned")
                 && fields.iter().all(|field| field.name != "drifted"))
         );
@@ -252,7 +252,7 @@ mod tests {
         );
     }
 
-    /// The retired `lashlang.tool` key is not a reader alias: a manifest that
+    /// The retired `lash_vm.tool` key is not a reader alias: a manifest that
     /// carries only it has no binding at all, and registration must say so
     /// rather than silently accepting the dead key (FIG-3273).
     #[test]
@@ -270,12 +270,12 @@ mod tests {
         let binding = retired_only
             .manifest
             .bindings
-            .remove(lash_lashlang_runtime::TOOL_BINDING_KEY)
+            .remove(lash_vm_runtime::TOOL_BINDING_KEY)
             .expect("with_tool_binding wrote the canonical key");
         retired_only
             .manifest
             .bindings
-            .insert("lashlang.tool".to_string(), binding);
+            .insert("lash_vm.tool".to_string(), binding);
 
         let err = rlm_tool_catalog(
             ToolCatalogContext {
@@ -287,7 +287,7 @@ mod tests {
             },
             &typescript_test_dialect(),
         )
-        .expect_err("a manifest carrying only `lashlang.tool` must fail RLM registration");
+        .expect_err("a manifest carrying only `lash_vm.tool` must fail RLM registration");
 
         assert!(
             err.to_string()
@@ -367,14 +367,14 @@ mod tests {
         );
         assert!(!docs.contains("update_plan("), "{docs}");
 
-        let host_environment = LashlangSurface::default()
+        let host_environment = LashVmSurface::default()
             .host_environment(&catalog)
             .expect("explicit binding builds host environment");
         let program = lash_typescript::parse(
             r#"await plan.update({ plan: [{ step: "Patch", status: "pending" }] });"#,
         )
         .expect("module call lowers");
-        lashlang::LinkedModule::link(program, host_environment).expect("module call links");
+        lash_vm::LinkedModule::link(program, host_environment).expect("module call links");
     }
 
     /// FIG-4544. An MCP server hands its schemas through as written, and
@@ -527,7 +527,7 @@ pub(crate) fn validate_discovery(
 #[cfg(test)]
 mod discovery_tests {
     use super::*;
-    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+    use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
     #[test]
     fn discovery_filters_each_dialect_and_channel_and_requires_an_inline_operation() {
         let tool = |name: &str, inline| {

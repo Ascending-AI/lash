@@ -8,7 +8,7 @@ use std::{collections::BTreeSet, path::Path, sync::Arc, time::Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use lash_protocol_rlm::{RlmHistoryProjection, rlm_history_projection};
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionBounds, ExecutionMode, ExecutionOutcome, ProjectedBindings,
     ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, ProjectionReadError,
     ProjectionReader, ProjectionType, ResourceRef, Value, VmExecutionStart, VmInstance, VmRequest,
@@ -85,7 +85,7 @@ impl History {
                 .0
                 .item(0)
                 .and_then(|item| serde_json::to_value(item).ok())
-                .map(lashlang::from_json)
+                .map(lash_vm::from_json)
                 .map(ProjectedReadResponse::Value),
             _ => None,
         }
@@ -251,8 +251,8 @@ fn verify_completion(instance: &mut VmInstance, case: &Case) -> Result<bool> {
                 ensure!(
                     matches!(
                         error.failure.error,
-                        lashlang::RuntimeError::ProjectionRefused {
-                            refusal: lashlang::ProjectionRefusal::NoProvider { .. },
+                        lash_vm::RuntimeError::ProjectionRefused {
+                            refusal: lash_vm::ProjectionRefusal::NoProvider { .. },
                             ..
                         }
                     ),
@@ -283,8 +283,8 @@ fn elapsed(start: Instant) -> u64 {
     start.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64
 }
 
-fn deep_program() -> lashlang::Program {
-    use lashlang::{AssignTarget, CoercingBinaryOp as Op, Expr, FunctionExpr, Program};
+fn deep_program() -> lash_vm::Program {
+    use lash_vm::{AssignTarget, CoercingBinaryOp as Op, Expr, FunctionExpr, Program};
     let var = |name: &str| Expr::Variable(name.into());
     let assign = |name: &str, value| Expr::Assign {
         target: AssignTarget::variable(name.into()),
@@ -350,10 +350,10 @@ fn measure(mut case: Case, samples: usize) -> Result<Measurement> {
             .map_err(|error| anyhow::anyhow!("parse {}: {error}", case.name))?
     };
     let spans = parsed.spans.clone();
-    let artifact = lashlang::ModuleArtifact::from_program(parsed)?;
-    let program = Arc::new(lashlang::compile(
+    let artifact = lash_vm::ModuleArtifact::from_program(parsed)?;
+    let program = Arc::new(lash_vm::compile(
         &artifact,
-        lashlang::Entry::Main,
+        lash_vm::Entry::Main,
         Some(&spans),
     )?);
     let mode = if case.process {
@@ -487,7 +487,7 @@ pub fn run(out: &Path, samples: usize, selected: &[String]) -> Result<()> {
         architecture: std::env::consts::ARCH,
         os: std::env::consts::OS,
         debug_assertions: cfg!(debug_assertions),
-        format_version: lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        format_version: lash_vm::VM_CONTINUATION_FORMAT_VERSION,
         warmups: 1,
         samples_per_case: samples,
         clock: "Instant wall time; nearest-rank percentiles",

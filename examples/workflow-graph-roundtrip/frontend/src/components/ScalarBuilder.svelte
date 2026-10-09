@@ -2,7 +2,7 @@
   import { parseLiteral, encodeLiteral, operandType } from '../lib/fields.js';
 
   // A typed operand editor: [var | number | text | true·false] + a value input,
-  // emitting canonical Lashlang (`count`, `3`, `"done"`, `true`). Reused by the
+  // emitting canonical LashVm (`count`, `3`, `"done"`, `true`). Reused by the
   // value builder, both comparison operands, and each list item, so string
   // values pick up their quotes automatically and an in-scope variable can be
   // picked instead of a literal. The `var` option only appears when the parent

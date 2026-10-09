@@ -1,12 +1,12 @@
 use crate::projection::{flow_record_to_tool_args, flow_to_json_value, projected_index};
-use lash_lashlang_runtime::ToolDefinitionBindingExt;
 use lash_rlm_types::PROJECTED_JSON_TAG;
 use lash_sansio::sync::MutexExt;
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse,
     ProjectedValue, Record as FlowRecord, Value as FlowValue,
 };
+use lash_vm_runtime::ToolDefinitionBindingExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 mod step_trace;
 use super::*;
@@ -31,12 +31,12 @@ async fn execute_code_with_test_render(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
-    artifact_store: lashlang::LashlangArtifacts,
-    lashlang_surface: LashlangSurface,
-    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    artifact_store: lash_vm::LashVmArtifacts,
+    lash_vm_surface: LashVmSurface,
+    deferred_tool_resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
     execution_trace: Option<lash_core::plugin::PluginExecutionTrace>,
-    execution_bounds: lashlang::ExecutionBounds,
+    execution_bounds: lash_vm::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
 ) -> ExecResponse {
     crate::testing::execute_code_with_channel_and_bounds(
@@ -44,7 +44,7 @@ async fn execute_code_with_test_render(
         test_render_context(ctx),
         request,
         artifact_store,
-        lashlang_surface,
+        lash_vm_surface,
         deferred_tool_resolver,
         session_projected_bindings,
         execution_trace,
@@ -62,9 +62,9 @@ async fn execute_code_unbounded_with_test_render(
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
-    artifact_store: lashlang::LashlangArtifacts,
-    lashlang_surface: LashlangSurface,
-    deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+    artifact_store: lash_vm::LashVmArtifacts,
+    lash_vm_surface: LashVmSurface,
+    deferred_tool_resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
     execution_trace: Option<lash_core::plugin::PluginExecutionTrace>,
 ) -> ExecResponse {
@@ -73,11 +73,11 @@ async fn execute_code_unbounded_with_test_render(
         ctx,
         request,
         artifact_store,
-        lashlang_surface,
+        lash_vm_surface,
         deferred_tool_resolver,
         session_projected_bindings,
         execution_trace,
-        lashlang::ExecutionBounds::unbounded(),
+        lash_vm::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
     .await

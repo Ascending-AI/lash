@@ -8,7 +8,7 @@ use lash_core::llm::types::{LlmOutputPart, LlmResponse};
 use lash_sansio::SessionId;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// The RLM factory's plugin-owned `lashlang` engine is installed for a
+/// The RLM factory's plugin-owned `lash_vm` engine is installed for a
 /// root and for a child session alike, and again by a cold core; each
 /// session's RLM options are exactly its create request's (FIG-5296: a
 /// child inherits no default of its parent); a second engine of one
@@ -55,15 +55,15 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             .open()
             .await?;
         assert_eq!(
-            session.runtime.process_engines.require("lashlang")?.kind(),
-            "lashlang"
+            session.runtime.process_engines.require("lashvm")?.kind(),
+            "lashvm"
         );
     }
     core.shutdown().await?;
     let cold = build()?;
     assert_eq!(
-        cold.host_process_engines.require("lashlang")?.kind(),
-        "lashlang"
+        cold.host_process_engines.require("lashvm")?.kind(),
+        "lashvm"
     );
     for id in ["materialize-run", "materialize-child"] {
         let session = cold
@@ -71,8 +71,8 @@ async fn root_and_child_materialization_install_the_same_plugin_owned_engines() 
             .open()
             .await?;
         assert_eq!(
-            session.runtime.process_engines.require("lashlang")?.kind(),
-            "lashlang"
+            session.runtime.process_engines.require("lashvm")?.kind(),
+            "lashvm"
         );
     }
     let duplicate = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))

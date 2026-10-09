@@ -5,7 +5,7 @@
 //! parser exactly as written.
 
 use lash_typescript::DiagnosticCode as Code;
-use lashlang::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
+use lash_vm::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
 
 struct Host;
 
@@ -26,8 +26,8 @@ fn finished(source: &str) -> Value {
     let source = js(source);
     let program = lash_typescript::testing::compile(&source)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host)) {
-        Ok(lashlang::ExecutionOutcome::Finished(value)) => value,
+    match futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host)) {
+        Ok(lash_vm::ExecutionOutcome::Finished(value)) => value,
         other => panic!("`{source}`: expected finish, got {other:?}"),
     }
 }

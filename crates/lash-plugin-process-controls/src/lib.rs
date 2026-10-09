@@ -210,7 +210,7 @@ fn process_list_tool_definition() -> ToolDefinition {
                 },
                 // Deliberately untyped: the value is whatever definition
                 // encoding the engine that started the run stores, and a
-                // Lashlang cell passes the process itself (`on_button`), whose
+                // Lash VM cell passes the process itself (`on_button`), whose
                 // `Process<...>` type is not assignable to a record.
                 "definition_id": declarations::definition_id_schema()
             },
@@ -467,7 +467,7 @@ mod tests {
             lash_core::ProcessId::fixture("process-1"),
             {
                 let mut identity =
-                    lash_core::ProcessIdentity::labelled("lashlang", Some("on_button"));
+                    lash_core::ProcessIdentity::labelled("lashvm", Some("on_button"));
                 identity.definition_id =
                     Some(lash_core::ProcessDefinitionId::from_sha256_digest([1; 32]));
                 identity

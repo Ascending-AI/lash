@@ -791,7 +791,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         ("runtime", "operational-coverage-missing-cancellation"),
         ("runtime", "queued-input-operational-missing"),
         ("standard", "standard-provider-error-missing-parser-matrix"),
-        ("rlm", "rlm-lashlang-cell-missing-continuation"),
+        ("rlm", "rlm-lash-vm-cell-missing-continuation"),
         ("agent", "agent-parallel-join-missing-provider-session"),
     ] {
         assert!(
@@ -811,7 +811,7 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         "duplicate-replayed-inputs",
         "backend-retry",
         "provider-failure",
-        "rlm-lashlang-exec",
+        "rlm-lash-vm-exec",
         "tool-loop",
         "durable-effect",
     ] {

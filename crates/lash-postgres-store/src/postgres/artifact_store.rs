@@ -14,7 +14,7 @@ use crate::*;
 
 lash_store_sql::statements! {
     pub(crate) struct ReferrerPostgresStatements @ "artifact_referrer_edge" {
-        delete_unreferenced = "DELETE FROM lashlang_artifacts AS artifact
+        delete_unreferenced = "DELETE FROM lash_vm_artifacts AS artifact
              WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2
                AND NOT EXISTS (SELECT 1 FROM artifact_referrer_edges AS edge
                    WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)";
@@ -22,14 +22,14 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    pub(crate) struct LashlangArtifactStatements @ "lashlang_artifact" {
-        insert_bytes = "INSERT INTO lashlang_artifacts (namespace, artifact_ref, artifact_bytes)
+    pub(crate) struct LashVmArtifactStatements @ "lash_vm_artifact" {
+        insert_bytes = "INSERT INTO lash_vm_artifacts (namespace, artifact_ref, artifact_bytes)
              VALUES (?1, ?2, ?3) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
-        select_bytes = "SELECT artifact_bytes FROM lashlang_artifacts
+        select_bytes = "SELECT artifact_bytes FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2";
-        exists = "SELECT EXISTS (SELECT 1 FROM lashlang_artifacts
+        exists = "SELECT EXISTS (SELECT 1 FROM lash_vm_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2)";
-        list_namespace_page = "SELECT artifact_ref, artifact_bytes FROM lashlang_artifacts
+        list_namespace_page = "SELECT artifact_ref, artifact_bytes FROM lash_vm_artifacts
              WHERE namespace = ?1 AND (?2::text IS NULL OR artifact_ref > ?2::text)
              ORDER BY artifact_ref LIMIT ?3";
     }
@@ -39,7 +39,7 @@ pub(crate) struct ArtifactSql {
     pub(crate) edges: ReferrerEdgeStatements,
     pub(crate) fences: ReferrerFenceStatements,
     pub(crate) postgres: ReferrerPostgresStatements,
-    pub(crate) lashlang_artifacts: LashlangArtifactStatements,
+    pub(crate) lash_vm_artifacts: LashVmArtifactStatements,
 }
 
 static ARTIFACT_SQL: LazyLock<ArtifactSql> = LazyLock::new(|| {
@@ -48,7 +48,7 @@ static ARTIFACT_SQL: LazyLock<ArtifactSql> = LazyLock::new(|| {
         edges: ReferrerEdgeStatements::render(dialect),
         fences: ReferrerFenceStatements::render(dialect),
         postgres: ReferrerPostgresStatements::render(dialect),
-        lashlang_artifacts: LashlangArtifactStatements::render(dialect),
+        lash_vm_artifacts: LashVmArtifactStatements::render(dialect),
     }
 });
 
@@ -56,7 +56,7 @@ pub(crate) fn artifact_sql() -> &'static ArtifactSql {
     &ARTIFACT_SQL
 }
 
-pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
+pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "vm_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
@@ -72,7 +72,7 @@ pub(crate) fn store_namespace(
 ) -> Option<&'static str> {
     use lash_core_execution::ArtifactStoreId;
     match store {
-        ArtifactStoreId::LashlangModule => Some(MODULE_ARTIFACT_NAMESPACE),
+        ArtifactStoreId::VmModule => Some(MODULE_ARTIFACT_NAMESPACE),
         ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
         ArtifactStoreId::ProcessDefinition => Some(PROCESS_DEFINITION_NAMESPACE),
         ArtifactStoreId::ToolMaterial => Some(TOOL_MATERIAL_NAMESPACE),
@@ -91,7 +91,7 @@ fn definition_manifest(
         .iter()
         .map(|artifact| {
             let namespace = match &artifact.store {
-                ArtifactStoreId::LashlangModule => MODULE_ARTIFACT_NAMESPACE,
+                ArtifactStoreId::VmModule => MODULE_ARTIFACT_NAMESPACE,
                 ArtifactStoreId::ProcessEnv => PROCESS_ENV_NAMESPACE,
                 other => {
                     return Err(ArtifactStoreError::Backend(format!(
@@ -147,7 +147,7 @@ pub(crate) async fn acquire_process_env_tx(
         return Err(ArtifactStoreError::ReferrerEnded { referrer }.into());
     }
     lock_artifact_tx(tx, PROCESS_ENV_NAMESPACE, env.as_str()).await?;
-    let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+    let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
         .bind(PROCESS_ENV_NAMESPACE)
         .bind(env.as_str())
         .fetch_one(&mut ***tx)
@@ -221,7 +221,7 @@ fn decode_edge_referrer(row: &PgRow) -> Result<ArtifactReferrer, ArtifactStoreEr
     })
 }
 
-impl PostgresLashlangArtifactStore {
+impl PostgresLashVmArtifactStore {
     async fn write_namespaced(
         &self,
         namespace: &str,
@@ -265,7 +265,7 @@ impl PostgresLashlangArtifactStore {
                 .map_err(ArtifactStoreError::from)?;
         }
         if let Some(bytes) = bytes {
-            sqlx::query(artifact_sql().lashlang_artifacts.insert_bytes.sql())
+            sqlx::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
                 .bind(bytes)
@@ -273,7 +273,7 @@ impl PostgresLashlangArtifactStore {
                 .await
                 .map_err(backend)?;
             let stored: Vec<u8> =
-                sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+                sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                     .bind(namespace)
                     .bind(artifact_ref)
                     .fetch_one(&mut **tx)
@@ -285,7 +285,7 @@ impl PostgresLashlangArtifactStore {
                 });
             }
         } else {
-            let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+            let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
                 .fetch_one(&mut **tx)
@@ -349,7 +349,7 @@ impl PostgresLashlangArtifactStore {
             lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
         }
         for (namespace, artifact_ref) in manifest {
-            let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+            let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
                 .bind(*namespace)
                 .bind(artifact_ref)
                 .fetch_one(&mut **tx)
@@ -363,7 +363,7 @@ impl PostgresLashlangArtifactStore {
         }
         match descriptor {
             Some(bytes) => {
-                sqlx::query(artifact_sql().lashlang_artifacts.insert_bytes.sql())
+                sqlx::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
                     .bind(PROCESS_DEFINITION_NAMESPACE)
                     .bind(id)
                     .bind(bytes)
@@ -371,7 +371,7 @@ impl PostgresLashlangArtifactStore {
                     .await
                     .map_err(backend)?;
                 let stored: Vec<u8> =
-                    sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+                    sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                         .bind(PROCESS_DEFINITION_NAMESPACE)
                         .bind(id)
                         .fetch_one(&mut **tx)
@@ -385,7 +385,7 @@ impl PostgresLashlangArtifactStore {
             }
             None => {
                 let exists: bool =
-                    sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+                    sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
                         .bind(PROCESS_DEFINITION_NAMESPACE)
                         .bind(id)
                         .fetch_one(&mut **tx)
@@ -502,7 +502,7 @@ impl PostgresLashlangArtifactStore {
                 continue;
             }
             let artifact_ref = &carry.artifact.artifact_ref;
-            let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+            let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
                 .fetch_one(&mut **tx)
@@ -605,7 +605,7 @@ impl PostgresLashlangArtifactStore {
         for row in &edges {
             decode_edge_referrer(row)?;
         }
-        sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+        sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
             .bind(namespace)
             .bind(artifact_ref)
             .fetch_optional(&self.pool)
@@ -615,7 +615,7 @@ impl PostgresLashlangArtifactStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ModuleArtifactStore for PostgresLashlangArtifactStore {
+impl lash_core_execution::ModuleArtifactStore for PostgresLashVmArtifactStore {
     fn durability_tier(&self) -> lash_core_execution::DurabilityTier {
         lash_core_execution::DurabilityTier::Durable
     }
@@ -672,7 +672,7 @@ impl lash_core_execution::ModuleArtifactStore for PostgresLashlangArtifactStore 
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
+impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashVmArtifactStore {
     async fn publish_process_execution_env(
         &self,
         claim: &ReferrerClaim,
@@ -729,7 +729,7 @@ impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashlangArtifactS
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::TurnPreludeStore for PostgresLashlangArtifactStore {
+impl lash_core_execution::TurnPreludeStore for PostgresLashVmArtifactStore {
     async fn publish_turn_prelude(
         &self,
         claim: &ReferrerClaim,
@@ -772,7 +772,7 @@ impl lash_core_execution::TurnPreludeStore for PostgresLashlangArtifactStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessDefinitionStore for PostgresLashlangArtifactStore {
+impl lash_core_execution::ProcessDefinitionStore for PostgresLashVmArtifactStore {
     async fn publish_process_definition(
         &self,
         claim: &ReferrerClaim,

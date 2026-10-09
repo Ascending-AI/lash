@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 use serde_json::Value as JsonValue;
@@ -34,7 +34,7 @@ impl ExecutionHost for Host {
 
 fn run(source: &str) -> Result<Value, String> {
     let program = lash_typescript::testing::compile(source).map_err(|error| error.to_string())?;
-    match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    match futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
         .map_err(|error| error.to_string())?
     {
         ExecutionOutcome::Finished(value) => Ok(value),

@@ -40,7 +40,7 @@ fn record_at(event: TraceLanguageExecution, ms: i64) -> TraceRecord {
     fixture_record_at(
         TraceContext::default().for_session("session-1"),
         TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
+            language: "lashvm".to_string(),
             event,
         },
         Utc.timestamp_millis_opt(ms).single().expect("timestamp"),
@@ -50,7 +50,7 @@ fn record_at(event: TraceLanguageExecution, ms: i64) -> TraceRecord {
 fn append_at(store: &TraceLashlangGraphStore, event: TraceLanguageExecution, ms: i64) {
     store
         .append(&record_at(event, ms))
-        .expect("append lashlang execution event");
+        .expect("append lash_vm execution event");
 }
 
 fn observe_at(
@@ -178,7 +178,7 @@ fn durable_settlement_dominates_provisional_graph_evidence() {
     let partitioned = fold_lashlang_graph(
         Some(&cancelled),
         &[delayed],
-        DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT,
+        DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT,
     )
     .unwrap();
     assert_eq!(incremental, partitioned);
@@ -1000,7 +1000,7 @@ fn per_node_retention_preserves_evicted_terminal_and_smaller_node_progress() {
 #[test]
 fn default_per_node_limit_retains_the_latest_occurrence_and_summary() {
     for with_seed in [false, true] {
-        let mut records = (1..=DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT as u64 + 1)
+        let mut records = (1..=DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT as u64 + 1)
             .map(|occurrence| {
                 record_at(
                     node_started_for("start", "a", "call", occurrence),
@@ -1015,12 +1015,12 @@ fn default_per_node_limit_retains_the_latest_occurrence_and_summary() {
         let node = graph.nodes.iter().find(|node| node.id == "a").expect("a");
         assert_eq!(
             node.summary.retained_occurrences,
-            DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT as u64 + 1
+            DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT as u64 + 1
         );
         assert!(matches!(
             node.observation,
             TraceLashlangNodeObservation::Running { occurrence, .. }
-                if occurrence == DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT as u64 + 1
+                if occurrence == DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT as u64 + 1
         ));
         assert_eq!(graph.node_retention[0].truncation_watermark, 1);
     }

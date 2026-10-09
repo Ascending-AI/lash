@@ -10,4 +10,4 @@ Submission admits immutable process identity and the closed recorded-input shape
 
 Permanent reconstruction refusals produce logical process failure or the typed resume refusal appropriate to an incompatible stored format. Infrastructure failures remain worker/runtime failures; the process actor resumes from its committed state ([ADR 0132](0132-durability-is-state-first-over-the-lash-store.md) §3). Mutable product metadata in the environment is rejected because resume must reconstruct the captured contract rather than the creator's current state.
 
-[Environment specifications](../../crates/lash-core-store/src/process_identity.rs), [preparation and recorded-input admission](../../crates/lash-lashlang-runtime/src/lib.rs) and [worker validation](../../crates/lash-lashlang-runtime/src/process.rs) implement the boundaries.
+[Environment specifications](../../crates/lash-core-store/src/process_identity.rs), [preparation and recorded-input admission](../../crates/lash-vm-runtime/src/lib.rs) and [worker validation](../../crates/lash-vm-runtime/src/process.rs) implement the boundaries.

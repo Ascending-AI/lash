@@ -278,8 +278,8 @@ mapping survive resume.
 `{status:"cancelled"}` smuggled into an `allSettled` array, no placeholder for a
 call that did not settle.
 
-**L7 — a Lashlang-native aggregate reports its first written rejection.** Every
-Lashlang-native aggregate, the standalone list-batch included, asks for every
+**L7 — a Lash VM-native aggregate reports its first written rejection.** Every
+Lash VM-native aggregate, the standalone list-batch included, asks for every
 result (`AllSettled` at the boundary) and reports its first *written* unwrapped
 rejection. Only the TypeScript `Promise.*` aggregates carry an ECMA consumer
 mode. ADR 0086's comprehension rules are untouched.
@@ -326,14 +326,14 @@ it too.
    raised by the VM as the uncatchable `AggregateAwaitUnsettled` terminal.
 6. **`Promise.any([])` rejects with an `AggregateError` whose `errors` is
    empty**, as ECMA-262 specifies, and admits nothing.
-   `crates/lashlang/src/runtime/heap/validation.rs` refuses a non-aggregate error
+   `crates/lash-vm/src/runtime/heap/validation.rs` refuses a non-aggregate error
    that carries `AggregateError` errors.
 7. **`Promise.all([])` and `Promise.allSettled([])` return `[]`.**
 8. **`AggregateError.errors` is input-ordered**, not settlement-ordered. Settlement
    order decides *which* rejection an unwrapping aggregate reports (§10 L2); it
    never reorders the collected errors.
 9. **A raw process handle at an element position stays refused**, with the repair
-   naming the tool: `crates/lashlang/src/runtime/vm/pending_tools.rs` carries
+   naming the tool: `crates/lash-vm/src/runtime/vm/pending_tools.rs` carries
    `PROCESS_HANDLE_LEAF`, which tells the program to call
    `processes.await(handle)` and await that call.
 10. **Async-map operands are aggregate operands.** The v1 async array driver runs

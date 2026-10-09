@@ -2,7 +2,7 @@
 //! list, the `while` it lowers to, and the statement positions a body's
 //! completion wrapper marks.
 
-use lashlang::{AssignTarget, Expr, StructuralRole};
+use lash_vm::{AssignTarget, Expr, StructuralRole};
 
 /// The `var name = init` shape: a completion list whose one visible statement
 /// assigns `name` and whose completion value reads `name` back.

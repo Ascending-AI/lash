@@ -601,7 +601,7 @@ impl RuntimeOwner {
     }
 }
 
-/// `session:<session id>` or `process:<process id>`. A lashlang VM's owner
+/// `session:<session id>` or `process:<process id>`. A Lash VM's owner
 /// stamp for a process is the same `process:<process id>` text, so the two
 /// must stay equal.
 impl std::fmt::Display for RuntimeOwner {

@@ -7,7 +7,7 @@
 //! node of this build, which claims the actor, decodes its state and
 //! reaches the expected next commit:
 //!
-//! - `lashlang` (here): a lashlang process `worker() -> str { sleep(5);
+//! - `lash_vm` (here): a lash_vm process `worker() -> str { sleep(5);
 //!   sleep(7); finish "done" }`, parked on its first sleep and released
 //!   `ready` by a draining node. Its state is the engine's segment state
 //!   around the VM's continuation.
@@ -42,20 +42,20 @@ use lash_core_execution::{
 use lash_durable::runner::{Activation, Stopped};
 use lash_durable::{ActorKey, ActorKind, ActorState, CommitLabel, DurableStore, LeaseConfig};
 use lash_durable_test::{Script, SimClock, SimNodes, SimNodesConfig, Tripwire};
-use lash_lashlang_runtime::{
-    LASHLANG_ENGINE_KIND, LashlangEngineSteps, LashlangProcessEngine, LashlangProcessInput,
-    LashlangRecordedSettings, LashlangSurface,
-};
 use lash_sansio::sync::MutexExt as _;
 use lash_sansio::{ExecutionLimit, ExecutionPolicy};
-use lashlang::testing::ast_builders as b;
+use lash_vm::testing::ast_builders as b;
+use lash_vm_runtime::{
+    LASH_VM_ENGINE_KIND, LashVmEngineSteps, LashVmProcessEngine, LashVmProcessInput,
+    LashVmRecordedSettings, LashVmSurface,
+};
 
 use images::Image;
 
 /// The horizon a fixture's run must finish within, in virtual time.
 const HORIZON_MS: u64 = 600_000;
 
-/// The lashlang process: a sequential mint makes it the first registered.
+/// The lash_vm process: a sequential mint makes it the first registered.
 fn process() -> ProcessId {
     ProcessIdMint::sequential_id_for_testing(1)
 }
@@ -66,10 +66,10 @@ fn actor() -> ActorKey {
 
 /// The shipped build over `stores`: lash's durable backend with the one
 /// process engine lash ships.
-fn build(stores: Arc<dyn StoreSet>) -> (Backend, Arc<LashlangProcessEngine>) {
-    let engine = Arc::new(LashlangProcessEngine::new(
-        lashlang::LashlangArtifacts::new(stores.module_artifacts()),
-        LashlangSurface::default(),
+fn build(stores: Arc<dyn StoreSet>) -> (Backend, Arc<LashVmProcessEngine>) {
+    let engine = Arc::new(LashVmProcessEngine::new(
+        lash_vm::LashVmArtifacts::new(stores.module_artifacts()),
+        LashVmSurface::default(),
     ));
     let backend = lash::durable::DurableBackendBuilder::new(stores)
         .process_engine(Arc::clone(&engine) as _)
@@ -86,19 +86,19 @@ fn config(backend: &Backend) -> SimNodesConfig {
     }
 }
 
-/// The settings a lashlang process records at creation.
+/// The settings a lash_vm process records at creation.
 fn settings() -> serde_json::Value {
-    serde_json::to_value(LashlangRecordedSettings::new(
-        LashlangSurface::default(),
-        lashlang::ExecutionBounds::unbounded(),
+    serde_json::to_value(LashVmRecordedSettings::new(
+        LashVmSurface::default(),
+        lash_vm::ExecutionBounds::unbounded(),
     ))
     .expect("the settings encode")
 }
 
 /// The host's half of the process's steps: the engine's own bodies, under
 /// their pinned `Repeatable` policy. The worker program runs no tool.
-struct LashlangSteps {
-    steps: LashlangEngineSteps,
+struct LashVmSteps {
+    steps: LashVmEngineSteps,
     clock: Arc<SimClock>,
     backend: Backend,
     /// Every engine body entered: its kind, and whether it ran from a
@@ -107,7 +107,7 @@ struct LashlangSteps {
 }
 
 #[async_trait::async_trait]
-impl ProcessSteps for LashlangSteps {
+impl ProcessSteps for LashVmSteps {
     fn stop_grace(&self) -> std::time::Duration {
         std::time::Duration::from_secs(2)
     }
@@ -206,8 +206,8 @@ fn deployment(
     let entered = Arc::default();
     let activation: Arc<dyn Activation> = Arc::new(ProcessActivation::new(
         backend.clone(),
-        Arc::new(LashlangSteps {
-            steps: LashlangEngineSteps::new(engine),
+        Arc::new(LashVmSteps {
+            steps: LashVmEngineSteps::new(engine),
             clock: Arc::clone(clock),
             backend: backend.clone(),
             entered: Arc::clone(&entered),
@@ -226,16 +226,16 @@ fn deployment(
 
 /// Publish the worker module and register its process.
 async fn seed(backend: &Backend) {
-    let environment = LashlangSurface::default()
+    let environment = LashVmSurface::default()
         .host_environment(&lash_core_execution::ToolCatalog::default())
         .expect("the host environment");
-    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+    let output = lash_vm::compile_module(lash_vm::ModuleCompileRequest {
         source: "process worker() -> str { sleep(5); sleep(7); finish \"done\" }",
         program: b::module(
             vec![b::process_returning(
                 "worker",
                 Vec::new(),
-                lashlang::TypeExpr::Str,
+                lash_vm::TypeExpr::Str,
                 b::block(vec![
                     b::sleep_for(b::num(5.0)),
                     b::sleep_for(b::num(7.0)),
@@ -247,7 +247,7 @@ async fn seed(backend: &Backend) {
         environment: &environment,
     })
     .expect("the worker module compiles");
-    lashlang::LashlangArtifacts::of_backend(backend)
+    lash_vm::LashVmArtifacts::of_backend(backend)
         .publish_module_artifact(
             &lash_core_execution::ReferrerClaim::unguarded(
                 lash_core_execution::ArtifactReferrer::HostPin(
@@ -259,7 +259,7 @@ async fn seed(backend: &Backend) {
         )
         .await
         .expect("the worker module publishes");
-    let input = LashlangProcessInput {
+    let input = LashVmProcessInput {
         module_ref: output.module_ref.clone(),
         process_ref: output
             .artifact
@@ -272,7 +272,7 @@ async fn seed(backend: &Backend) {
     };
     let mut registration = ProcessRegistration::new(
         ProcessInput::Engine {
-            kind: LASHLANG_ENGINE_KIND.to_owned(),
+            kind: LASH_VM_ENGINE_KIND.to_owned(),
             payload: serde_json::to_value(&input).expect("the input encodes"),
         },
         ProcessProvenance::host(),
@@ -325,11 +325,11 @@ async fn state(database: &dyn DurableStore, actor: &ActorKey) -> Option<ActorSta
         .map(|snapshot| snapshot.state)
 }
 
-/// Re-record the lashlang image: the process runs on node A to its first
+/// Re-record the lash_vm image: the process runs on node A to its first
 /// sleep, A drains, and the store A leaves is the fixture.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "regenerates crates/lash-durable-test/tests/fixtures/formats/lashlang"]
-async fn regenerate_lashlang_format_fixture() {
+#[ignore = "regenerates crates/lash-durable-test/tests/fixtures/formats/lashvm"]
+async fn regenerate_lash_vm_format_fixture() {
     let clock = SimClock::new();
     let dir = tempfile::tempdir().expect("a temporary directory");
     let path = images::database_path(dir.path());
@@ -363,17 +363,17 @@ async fn regenerate_lashlang_format_fixture() {
     })
     .await;
     assert_eq!(state(&*database, &actor()).await, Some(ActorState::Ready));
-    images::regenerate(&path, images::LASHLANG.name);
+    images::regenerate(&path, images::LASH_VM.name);
 }
 
-/// The lashlang image resumes on a fresh node of this build: it claims the
+/// The lash_vm image resumes on a fresh node of this build: it claims the
 /// process in the engine's set, decodes the VM's continuation, wakes from
 /// the sleep the VM parked on and runs the program on from there to its
 /// end, never from its entry.
 #[tokio::test(flavor = "current_thread")]
-async fn a_lashlang_process_decodes_and_resumes_from_its_1_0_image() {
+async fn a_lash_vm_process_decodes_and_resumes_from_its_1_0_image() {
     let clock = SimClock::new();
-    let (stores, _dir) = images::open(&images::LASHLANG, Arc::clone(&clock)).await;
+    let (stores, _dir) = images::open(&images::LASH_VM, Arc::clone(&clock)).await;
     let stores = Arc::new(stores);
     let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
     let (nodes, backend, entered) = deployment(stores, Arc::clone(&database), &clock);
@@ -385,7 +385,7 @@ async fn a_lashlang_process_decodes_and_resumes_from_its_1_0_image() {
     assert_eq!(snapshot.state, ActorState::Ready);
     assert_eq!(
         Some(&snapshot.formats),
-        backend.formats().process(LASHLANG_ENGINE_KIND),
+        backend.formats().process(LASH_VM_ENGINE_KIND),
         "the image is in another build's set"
     );
     nodes.start("b");
@@ -443,8 +443,8 @@ async fn every_format_set_the_build_writes_has_a_decode_and_resume_fixture() {
     written.push(
         backend
             .formats()
-            .process(LASHLANG_ENGINE_KIND)
-            .expect("the build has the lashlang engine")
+            .process(LASH_VM_ENGINE_KIND)
+            .expect("the build has the lash_vm engine")
             .clone(),
     );
     let actors: [(&Image, ActorKey); 2] = [
@@ -452,7 +452,7 @@ async fn every_format_set_the_build_writes_has_a_decode_and_resume_fixture() {
             &images::SESSION,
             ActorKey::session("v0-session").expect("a session actor key"),
         ),
-        (&images::LASHLANG, actor()),
+        (&images::LASH_VM, actor()),
     ];
     assert_eq!(
         actors.len(),
@@ -506,8 +506,8 @@ fn actor_format_id(format: lash::formats::DurableFormat) -> Option<String> {
             Some(lash_core_execution::formats::OUTCOME_MATERIAL_FORMAT_ID)
         }
         DurableFormat::VmContinuation => Some("vm-continuation"),
-        DurableFormat::LashlangSegmentHandover => {
-            return Some(format!("engine/{LASHLANG_ENGINE_KIND}"));
+        DurableFormat::LashVmSegmentHandover => {
+            return Some(format!("engine/{LASH_VM_ENGINE_KIND}"));
         }
         _ => None,
     }
@@ -532,8 +532,8 @@ async fn every_drain_format_is_in_an_actor_format_set() {
         backend.formats().session().clone(),
         backend
             .formats()
-            .process(LASHLANG_ENGINE_KIND)
-            .expect("the build has the lashlang engine")
+            .process(LASH_VM_ENGINE_KIND)
+            .expect("the build has the lash_vm engine")
             .clone(),
     ];
     let members: Vec<&str> = sets

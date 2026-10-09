@@ -59,7 +59,7 @@ pub(crate) fn history_binding(
         },
     );
     if history.history().iter().any(|item| match item {
-        lash_rlm_types::RlmHistoryItem::LashlangStep { .. } => true,
+        lash_rlm_types::RlmHistoryItem::LashVmStep { .. } => true,
         lash_rlm_types::RlmHistoryItem::Message { attachments, .. } => !attachments.is_empty(),
     }) {
         binding.push_str("\n\nSchema:\n");

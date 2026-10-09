@@ -1,4 +1,4 @@
-//! The lashlang module-artifact store and the process-execution-env store.
+//! The lash_vm module-artifact store and the process-execution-env store.
 //!
 //! The SQLite owner of the artifact family: `artifact_refs` (this backend's
 //! pointer from a namespaced reference to its bytes), `artifact_referrer_edges` (the
@@ -27,7 +27,7 @@ lash_store_sql::statements! {
     /// `artifact_refs` statements only SQLite issues.
     ///
     /// Every one of them: PostgreSQL keeps artifact bytes inline in
-    /// `lash_lashlang_artifacts` and has no pointer table, so this whole set
+    /// `lash_lash_vm_artifacts` and has no pointer table, so this whole set
     /// exists on one backend only.
     pub(crate) struct RefSqliteStatements @ "artifact_ref" {
         /// Point `?1`/`?2` at blob `?3`. An artifact is immutable, so a
@@ -97,7 +97,7 @@ pub(crate) fn artifact_sql() -> &'static ArtifactSql {
 /// with a process-execution-env ref would rewrite the same pointer row under
 /// `INSERT OR REPLACE`, so content-addressing alone does not keep the namespaces
 /// disjoint. The composite key does.
-pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
+pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "vm_module";
 pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 pub(crate) const PROCESS_DEFINITION_NAMESPACE: &str = "process_definition";
 pub(crate) const TOOL_MATERIAL_NAMESPACE: &str = "tool_material";
@@ -109,7 +109,7 @@ mod tool_material;
 /// none here.
 pub(crate) fn store_namespace(store: &ArtifactStoreId) -> Option<&'static str> {
     match store {
-        ArtifactStoreId::LashlangModule => Some(MODULE_ARTIFACT_NAMESPACE),
+        ArtifactStoreId::VmModule => Some(MODULE_ARTIFACT_NAMESPACE),
         ArtifactStoreId::ProcessEnv => Some(PROCESS_ENV_NAMESPACE),
         ArtifactStoreId::ProcessDefinition => Some(PROCESS_DEFINITION_NAMESPACE),
         ArtifactStoreId::ToolMaterial => Some(TOOL_MATERIAL_NAMESPACE),
@@ -126,7 +126,7 @@ pub(crate) fn artifact_namespace_kind(
     namespace: &str,
 ) -> Result<PersistedArtifactKind, StoreError> {
     match namespace {
-        MODULE_ARTIFACT_NAMESPACE => Ok(PersistedArtifactKind::LashlangModule),
+        MODULE_ARTIFACT_NAMESPACE => Ok(PersistedArtifactKind::VmModule),
         PROCESS_ENV_NAMESPACE => Ok(PersistedArtifactKind::ProcessExecutionEnv),
         PROCESS_DEFINITION_NAMESPACE => Ok(PersistedArtifactKind::ProcessDefinition),
         TOOL_MATERIAL_NAMESPACE => Ok(PersistedArtifactKind::ToolMaterial),
@@ -428,7 +428,7 @@ impl SqliteStore {
         }
         let now_ms = self.clock.timestamp_ms();
         let expected_store = match namespace {
-            MODULE_ARTIFACT_NAMESPACE => ArtifactStoreId::LashlangModule,
+            MODULE_ARTIFACT_NAMESPACE => ArtifactStoreId::VmModule,
             PROCESS_ENV_NAMESPACE => ArtifactStoreId::ProcessEnv,
             PROCESS_DEFINITION_NAMESPACE => ArtifactStoreId::ProcessDefinition,
             TURN_PRELUDE_NAMESPACE => ArtifactStoreId::TurnPrelude,
@@ -654,7 +654,7 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
         self.publish_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
             module_ref.to_owned(),
-            BlobArtifactDescriptor::lashlang_module(),
+            BlobArtifactDescriptor::lash_vm_module(),
             bytes.to_vec(),
             claim.clone(),
             Default::default(),
@@ -703,7 +703,7 @@ impl lash_core_execution::ModuleArtifactStore for SqliteStore {
         self.get_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
             module_ref.to_owned(),
-            format!("lashlang module artifact `{module_ref}`"),
+            format!("lash_vm module artifact `{module_ref}`"),
         )
         .await
         .map_err(Into::into)
@@ -857,7 +857,7 @@ fn definition_manifest(
         .iter()
         .map(|artifact| {
             let namespace = match &artifact.store {
-                ArtifactStoreId::LashlangModule => MODULE_ARTIFACT_NAMESPACE,
+                ArtifactStoreId::VmModule => MODULE_ARTIFACT_NAMESPACE,
                 ArtifactStoreId::ProcessEnv => PROCESS_ENV_NAMESPACE,
                 other => {
                     return Err(ArtifactStoreError::Backend(format!(
@@ -956,7 +956,7 @@ mod tests {
     async fn edge_count(store: &SqliteStore, artifact_ref: &str) -> i64 {
         let artifact_ref = artifact_ref.to_owned();
         store.conn.call(move |conn| {
-            conn.query_row("SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace = 'lashlang_module' AND artifact_ref = ?1",
+            conn.query_row("SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace = 'vm_module' AND artifact_ref = ?1",
                 params![artifact_ref], |row| row.get(0))
         }).await.expect("edge count")
     }
@@ -1117,7 +1117,7 @@ mod tests {
             referrer: source.clone(),
             carries: vec![ArtifactCarry {
                 artifact: ArtifactName {
-                    store: ArtifactStoreId::LashlangModule,
+                    store: ArtifactStoreId::VmModule,
                     artifact_ref: "module-2".into(),
                 },
                 to: destination.clone(),
@@ -1175,7 +1175,7 @@ mod tests {
             referrer: source.clone(),
             carries: vec![ArtifactCarry {
                 artifact: ArtifactName {
-                    store: ArtifactStoreId::LashlangModule,
+                    store: ArtifactStoreId::VmModule,
                     artifact_ref: "missing".into(),
                 },
                 to: destination,
@@ -1209,11 +1209,11 @@ mod tests {
         conn.execute_batch(crate::schema::SCHEMA)
             .expect("create durable core");
         conn.execute(
-            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES ('lashlang_module', 'm', 'b')",
+            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES ('vm_module', 'm', 'b')",
             [],
         ).expect("insert artifact pointer");
         assert!(conn.execute(
-            "INSERT INTO artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id) VALUES ('lashlang_module', 'm', 'host_pin', '')",
+            "INSERT INTO artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id) VALUES ('vm_module', 'm', 'host_pin', '')",
             [],
         ).is_err());
         assert!(conn.execute(

@@ -63,7 +63,7 @@ impl RlmDriver {
         Self {
             dialect: Arc::new(crate::dialect::SessionDialect::prompt_only(
                 dialect,
-                lash_lashlang_runtime::LashlangSurface::default(),
+                lash_vm_runtime::LashVmSurface::default(),
             )),
         }
     }

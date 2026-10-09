@@ -138,96 +138,6 @@
       "p99_anon_peak_bytes": 74412032,
       "samples": 4
     },
-    "lash-internal-lashlang-runtime/lash_lashlang_runtime": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 335880192,
-      "samples": 29
-    },
-    "lash-internal-lashlang/append_cost": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 24633344,
-      "samples": 1
-    },
-    "lash-internal-lashlang/benchmark": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 100171776,
-      "samples": 8
-    },
-    "lash-internal-lashlang/benchmark_contract": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 98967552,
-      "samples": 9
-    },
-    "lash-internal-lashlang/diagnostic_locations": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 44363776,
-      "samples": 5
-    },
-    "lash-internal-lashlang/dialect_cost": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 105709568,
-      "samples": 10
-    },
-    "lash-internal-lashlang/function_perf": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 97931264,
-      "samples": 10
-    },
-    "lash-internal-lashlang/integration": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 141824000,
-      "samples": 13
-    },
-    "lash-internal-lashlang/lashlang": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 1116995584,
-      "samples": 24
-    },
-    "lash-internal-lashlang/observation_cost": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 63651840,
-      "samples": 3
-    },
-    "lash-internal-lashlang/perf": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 99262464,
-      "samples": 11
-    },
-    "lash-internal-lashlang/profile": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 91758592,
-      "samples": 10
-    },
-    "lash-internal-lashlang/property": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 77463552,
-      "samples": 8
-    },
-    "lash-internal-lashlang/stack_budget": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 56709120,
-      "samples": 5
-    },
-    "lash-internal-lashlang/workflow_schema_generator": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 49631232,
-      "samples": 4
-    },
     "lash-internal-llm-tools/lash_llm_tools": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -576,6 +486,12 @@
       "p99_anon_peak_bytes": 139386880,
       "samples": 6
     },
+    "lash-internal-vm-runtime/lash_vm_runtime": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 335880192,
+      "samples": 29
+    },
     "lash-internal-vm-worker/lash_vm_worker": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -593,6 +509,90 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 103923712,
       "samples": 12
+    },
+    "lash-internal-vm/append_cost": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 24633344,
+      "samples": 1
+    },
+    "lash-internal-vm/benchmark": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 100171776,
+      "samples": 8
+    },
+    "lash-internal-vm/benchmark_contract": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 98967552,
+      "samples": 9
+    },
+    "lash-internal-vm/diagnostic_locations": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 44363776,
+      "samples": 5
+    },
+    "lash-internal-vm/dialect_cost": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 105709568,
+      "samples": 10
+    },
+    "lash-internal-vm/function_perf": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 97931264,
+      "samples": 10
+    },
+    "lash-internal-vm/integration": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 141824000,
+      "samples": 13
+    },
+    "lash-internal-vm/lash_vm": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 1116995584,
+      "samples": 24
+    },
+    "lash-internal-vm/observation_cost": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 63651840,
+      "samples": 3
+    },
+    "lash-internal-vm/perf": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 99262464,
+      "samples": 11
+    },
+    "lash-internal-vm/profile": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 91758592,
+      "samples": 10
+    },
+    "lash-internal-vm/property": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 77463552,
+      "samples": 8
+    },
+    "lash-internal-vm/stack_budget": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 56709120,
+      "samples": 5
+    },
+    "lash-internal-vm/workflow_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 49631232,
+      "samples": 4
     },
     "lash-perf/lash_perf": {
       "legacy_peak_bytes": 0,
@@ -865,96 +865,6 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 263327744,
       "samples": 19
-    },
-    "lash-internal-lashlang-runtime/lash_lashlang_runtime": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 1298223104,
-      "samples": 227
-    },
-    "lash-internal-lashlang/append_cost": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 396222464,
-      "samples": 14
-    },
-    "lash-internal-lashlang/benchmark": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 474304512,
-      "samples": 7
-    },
-    "lash-internal-lashlang/benchmark_contract": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 468058112,
-      "samples": 13
-    },
-    "lash-internal-lashlang/diagnostic_locations": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 425959424,
-      "samples": 14
-    },
-    "lash-internal-lashlang/dialect_cost": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 459808768,
-      "samples": 14
-    },
-    "lash-internal-lashlang/function_perf": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 453832704,
-      "samples": 8
-    },
-    "lash-internal-lashlang/integration": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 617500672,
-      "samples": 14
-    },
-    "lash-internal-lashlang/lashlang": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 3228221440,
-      "samples": 224
-    },
-    "lash-internal-lashlang/observation_cost": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 415928320,
-      "samples": 13
-    },
-    "lash-internal-lashlang/perf": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 437125120,
-      "samples": 11
-    },
-    "lash-internal-lashlang/profile": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 419049472,
-      "samples": 6
-    },
-    "lash-internal-lashlang/property": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 483823616,
-      "samples": 15
-    },
-    "lash-internal-lashlang/stack_budget": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 411656192,
-      "samples": 11
-    },
-    "lash-internal-lashlang/workflow_schema_generator": {
-      "legacy_peak_bytes": 0,
-      "oom_kills": 0,
-      "p99_anon_peak_bytes": 321966080,
-      "samples": 31
     },
     "lash-internal-llm-tools/lash_llm_tools": {
       "legacy_peak_bytes": 0,
@@ -1304,6 +1214,12 @@
       "p99_anon_peak_bytes": 285147136,
       "samples": 21
     },
+    "lash-internal-vm-runtime/lash_vm_runtime": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 1298223104,
+      "samples": 227
+    },
     "lash-internal-vm-worker/lash_vm_worker": {
       "legacy_peak_bytes": 0,
       "oom_kills": 0,
@@ -1321,6 +1237,90 @@
       "oom_kills": 0,
       "p99_anon_peak_bytes": 677883904,
       "samples": 23
+    },
+    "lash-internal-vm/append_cost": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 396222464,
+      "samples": 14
+    },
+    "lash-internal-vm/benchmark": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 474304512,
+      "samples": 7
+    },
+    "lash-internal-vm/benchmark_contract": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 468058112,
+      "samples": 13
+    },
+    "lash-internal-vm/diagnostic_locations": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 425959424,
+      "samples": 14
+    },
+    "lash-internal-vm/dialect_cost": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 459808768,
+      "samples": 14
+    },
+    "lash-internal-vm/function_perf": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 453832704,
+      "samples": 8
+    },
+    "lash-internal-vm/integration": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 617500672,
+      "samples": 14
+    },
+    "lash-internal-vm/lash_vm": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 3228221440,
+      "samples": 224
+    },
+    "lash-internal-vm/observation_cost": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 415928320,
+      "samples": 13
+    },
+    "lash-internal-vm/perf": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 437125120,
+      "samples": 11
+    },
+    "lash-internal-vm/profile": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 419049472,
+      "samples": 6
+    },
+    "lash-internal-vm/property": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 483823616,
+      "samples": 15
+    },
+    "lash-internal-vm/stack_budget": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 411656192,
+      "samples": 11
+    },
+    "lash-internal-vm/workflow_schema_generator": {
+      "legacy_peak_bytes": 0,
+      "oom_kills": 0,
+      "p99_anon_peak_bytes": 321966080,
+      "samples": 31
     },
     "lash-perf/lash_perf": {
       "legacy_peak_bytes": 0,

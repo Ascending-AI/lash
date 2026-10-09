@@ -407,7 +407,7 @@ A serving `LashCore` runs both session and process actors on its node. Its
 production process worker dispatches catalog tool steps through the tool
 execution path and engine steps through the registered `EngineSteps`.
 A `SessionTurn` process submits its turn to its child session; the node's
-session actor drives that turn. The RLM plugin contributes the Lashlang
+session actor drives that turn. The RLM plugin contributes the Lash VM
 engine and its VM step bodies through the same registration path.
 
 Hosts start processes through
@@ -647,10 +647,10 @@ Each crash case reads from committed state:
 - **CI never answers:** at 45 minutes `ExternalTimedOut` arrives and the
   process fails, saying the job may still be running.
 
-Lash's own lashlang engine follows the same contract: its `advance` answers
+Lash's own lash_vm engine follows the same contract: its `advance` answers
 `Steps([vm_run])`, and the VM runs only inside that engine step. A host does
 not register it: the RLM protocol plugin factory contributes it, with a
-`LashlangRunSettingsRecorder` that records each process's surface at creation.
+`LashVmRunSettingsRecorder` that records each process's surface at creation.
 
 ## 5. Completion keys
 
@@ -771,8 +771,8 @@ key. Nothing is promoted at runtime: the declaration decides.
 ## 7. Projection providers
 
 A VM never holds a live host object. A projection value is plain data:
-`lashlang::ProjectedValue::resource(name, type_name, ResourceRef)` (in the
-facade, `lash::rlm::lang`). It snapshots with the heap and pins no node.
+`lash_vm::ProjectedValue::resource(name, type_name, ResourceRef)` (in the
+facade, `lash::vm::ir`). It snapshots with the heap and pins no node.
 
 - **`ResourceRef { projection, id, revision }`** names the provider's type,
   the resource, and optionally a revision or snapshot id. A provider that must

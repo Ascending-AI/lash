@@ -95,7 +95,7 @@ pub use render::{
 pub const TABLES: &[&str] = &[
     artifact::blobs::TABLE,
     artifact::cleanup_obligations::TABLE,
-    artifact::lashlang_artifacts::TABLE,
+    artifact::lash_vm_artifacts::TABLE,
     artifact::referrer_edges::TABLE,
     artifact::referrer_fences::TABLE,
     artifact::refs::TABLE,

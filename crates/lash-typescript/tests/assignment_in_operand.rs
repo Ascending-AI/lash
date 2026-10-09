@@ -1,6 +1,6 @@
 //! An assignment nested inside a live operand (FIG-3075).
 //!
-//! The retired Lashlang parser refused assignment in expression position, and
+//! The retired Lash VM parser refused assignment in expression position, and
 //! ADR 0076 leaned on that refusal: with value semantics and an isolation copy
 //! at every durable store, `f(x = [1], x)` would put a store between two live
 //! operands and leave the operand stack borrowing an object a slot had just
@@ -14,7 +14,7 @@
 //! the witnesses for that, so the shape stays executable rather than resting on
 //! a parser that no longer exists.
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
     RuntimeError, State, Value, Vm, VmContinuation, VmRunOutcome,
 };
@@ -38,16 +38,12 @@ impl ExecutionHost for Host {
     }
 }
 
-fn compile(source: &str) -> lashlang::CompiledProgram {
+fn compile(source: &str) -> lash_vm::CompiledProgram {
     lash_typescript::testing::compile(source).unwrap_or_else(|error| panic!("`{source}`: {error}"))
 }
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
-    futures::executor::block_on(lashlang::execute(
-        &compile(source),
-        &mut State::new(),
-        &Host,
-    ))
+    futures::executor::block_on(lash_vm::execute(&compile(source), &mut State::new(), &Host))
 }
 
 fn finished(source: &str) -> Value {
@@ -139,7 +135,7 @@ async fn an_assignment_inside_a_pending_operand_survives_a_park_and_resume() {
     drop(vm);
 
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation = lashlang::VmInstance::pristine()
+    let restored: VmContinuation = lash_vm::VmInstance::pristine()
         .open_continuation(&bytes)
         .expect("continuation should deserialize");
 

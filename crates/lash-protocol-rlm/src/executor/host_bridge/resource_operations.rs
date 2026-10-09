@@ -3,15 +3,15 @@
 //! outcome of the member its admission made of it (ADR 0132 §5, §8).
 
 use lash_core::tool_dispatch::{CellCall, CellMember};
-use lash_lashlang_runtime::{AggregateAnswer, LeafStanding};
 use lash_vm_broker::{Decide, MemberEnd, SettledMember};
+use lash_vm_runtime::{AggregateAnswer, LeafStanding};
 
 use super::*;
 
 /// Where a resolved call stands in its cell, for its trace and its ledger.
 struct LeafCall {
     source_operation: String,
-    call_site: lashlang::LashlangExecutionCallSite,
+    call_site: lash_vm::LashVmExecutionCallSite,
     logical_call_id: lash_core::ToolCallId,
 }
 
@@ -69,27 +69,27 @@ impl HostBridge<'_> {
     /// admission and every perform resolve it alike.
     async fn resolve_leaf(
         &self,
-        operation: lashlang::ResourceOperation,
+        operation: lash_vm::ResourceOperation,
         ordinal: u64,
         operand_index: Option<usize>,
     ) -> Result<ResolvedLeaf, ExecutionHostError> {
-        let lashlang::ResourceOperation {
+        let lash_vm::ResourceOperation {
             operation,
             receiver,
             args,
             call_site,
         } = operation;
         if let Some(checked) =
-            lash_lashlang_runtime::language_runtime_operation(&receiver, &operation, &args)
+            lash_vm_runtime::language_runtime_operation(&receiver, &operation, &args)
         {
             return checked.map(|operation| ResolvedLeaf::Runtime(operation.to_owned()));
         }
         let FlowValue::Resource(receiver) = &receiver else {
             return Err(ExecutionHostError::from(
-                lash_lashlang_runtime::LashlangHostError::ModuleAuthorityRequired { operation },
+                lash_vm_runtime::LashVmHostError::ModuleAuthorityRequired { operation },
             ));
         };
-        let host_operation = lash_lashlang_runtime::resolve_lashlang_module_operation(
+        let host_operation = lash_vm_runtime::resolve_lash_vm_module_operation(
             &self.host_environment,
             receiver,
             &operation,
@@ -134,7 +134,7 @@ impl HostBridge<'_> {
     pub(super) async fn admit_members(
         &self,
         ordinal: u64,
-        request: &lashlang::AbilityOp,
+        request: &lash_vm::AbilityOp,
     ) -> Result<Vec<lash_vm_broker::MemberDraft>, String> {
         let operations = match request {
             AbilityOp::ResourceOperation(operation) => vec![(None, (**operation).clone())],
@@ -143,10 +143,10 @@ impl HostBridge<'_> {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, leaf)| match leaf {
-                    lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
+                    lash_vm::ResourceOperationBatchLeaf::Operation(operation) => {
                         Some((Some(index), operation.clone()))
                     }
-                    lashlang::ResourceOperationBatchLeaf::Timer(_) => None,
+                    lash_vm::ResourceOperationBatchLeaf::Timer(_) => None,
                 })
                 .collect(),
             _ => return Ok(Vec::new()),
@@ -225,7 +225,7 @@ impl HostBridge<'_> {
     /// A resolved call performed in this pass: its place in the cell's call
     /// ledger, and its node on the trace.
     fn dispatch(&self, call: LeafCall) -> DispatchedCall {
-        if let Some(trace) = &self.lashlang_execution_trace {
+        if let Some(trace) = &self.lash_vm_execution_trace {
             trace.record_resource_call(&call.call_site, &call.logical_call_id);
             self.ctx.record_language_call_attribution(
                 call.logical_call_id.clone(),
@@ -246,7 +246,7 @@ impl HostBridge<'_> {
     /// left to wait on: the cell suspends on its committed quiet point.
     pub(super) async fn drive_members<T>(
         &self,
-        commands: &lash_lashlang_runtime::ReplayCommands<'_, '_>,
+        commands: &lash_vm_runtime::ReplayCommands<'_, '_>,
         ordinal: u64,
         decide: &mut (dyn FnMut(&[MemberEnd], lash_vm_broker::DurableInstant) -> Decide<T> + Send),
     ) -> Result<Option<T>, ExecutionHostError> {
@@ -315,14 +315,14 @@ impl HostBridge<'_> {
         operation: String,
         receiver: FlowValue,
         args: Vec<FlowValue>,
-        call_site: Option<lashlang::LashlangExecutionCallSite>,
+        call_site: Option<lash_vm::LashVmExecutionCallSite>,
     ) -> Result<AbilityOutcome, ExecutionHostError> {
         let commands = self.commands()?;
         let performing = self.performing()?;
         let command = commands.issue(performing.ordinal)?;
         let resolved = self
             .resolve_leaf(
-                lashlang::ResourceOperation {
+                lash_vm::ResourceOperation {
                     operation,
                     receiver,
                     args,
@@ -335,7 +335,7 @@ impl HostBridge<'_> {
         let (call, member, drift) = match resolved {
             ResolvedLeaf::Runtime(operation) => {
                 let in_flight = commands.enter(command, CommandShape::Value).await?;
-                let result = lash_lashlang_runtime::journaled_language_runtime_value(
+                let result = lash_vm_runtime::journaled_language_runtime_value(
                     &in_flight.ctx,
                     in_flight.command.key.to_string(),
                     &operation,
@@ -368,7 +368,7 @@ impl HostBridge<'_> {
             let exceeded = self.tool_call_limit(1);
             commands.finish(&in_flight)?;
             let reply = ToolInvocationReply::from_output(lash_core::ToolCallOutput::failure(
-                lash_lashlang_runtime::tool_call_limit_failure(exceeded),
+                lash_vm_runtime::tool_call_limit_failure(exceeded),
             ));
             return self.consume_reply(reply, &key).0.map(AbilityOutcome::Value);
         }
@@ -391,9 +391,9 @@ impl HostBridge<'_> {
 
     pub(super) async fn resource_operation_batch(
         &self,
-        batch: lashlang::ResourceOperationBatch,
+        batch: lash_vm::ResourceOperationBatch,
     ) -> Result<AbilityOutcome, ExecutionHostError> {
-        let lashlang::ResourceOperationBatch {
+        let lash_vm::ResourceOperationBatch {
             leaves,
             consumer,
             settled_value_after,
@@ -414,9 +414,9 @@ impl HostBridge<'_> {
         let mut tool_calls = 0;
         for (index, leaf) in leaves.into_iter().enumerate() {
             let operation = match leaf {
-                lashlang::ResourceOperationBatchLeaf::Operation(operation) => operation,
-                lashlang::ResourceOperationBatchLeaf::Timer(sleep) => {
-                    slots.push(match lash_lashlang_runtime::timer_duration_ms(&sleep) {
+                lash_vm::ResourceOperationBatchLeaf::Operation(operation) => operation,
+                lash_vm::ResourceOperationBatchLeaf::Timer(sleep) => {
+                    slots.push(match lash_vm_runtime::timer_duration_ms(&sleep) {
                         Ok(_) => {
                             let timer = timers.next().ok_or_else(|| {
                                 ExecutionHostError::new(
@@ -446,7 +446,7 @@ impl HostBridge<'_> {
                 .await
             {
                 Ok(ResolvedLeaf::Runtime(operation)) => {
-                    let result = match lash_lashlang_runtime::journaled_language_runtime_value(
+                    let result = match lash_vm_runtime::journaled_language_runtime_value(
                         &in_flight.ctx,
                         leaf_key(index),
                         &operation,
@@ -480,7 +480,7 @@ impl HostBridge<'_> {
             let exceeded = self.tool_call_limit(tool_calls);
             commands.finish(&in_flight)?;
             return Err(ExecutionHostError::from_tool_failure(
-                &lash_lashlang_runtime::tool_call_limit_failure(exceeded),
+                &lash_vm_runtime::tool_call_limit_failure(exceeded),
                 in_flight.command.key.to_string(),
             ));
         }
@@ -491,13 +491,13 @@ impl HostBridge<'_> {
                 _ => None,
             })
             .collect::<Vec<_>>();
-        if let Some(trace) = &self.lashlang_execution_trace
+        if let Some(trace) = &self.lash_vm_execution_trace
             && trace_calls.len() > 1
         {
             for (position, call_site) in trace_calls.iter().enumerate() {
                 trace.emit_waiting(
                     call_site,
-                    lash_lashlang_runtime::TraceNodeAwaited::ToolBatch {
+                    lash_vm_runtime::TraceNodeAwaited::ToolBatch {
                         batch_id: in_flight.command.key.to_string(),
                         position,
                     },
@@ -534,11 +534,7 @@ impl HostBridge<'_> {
                         },
                     })
                     .collect::<Vec<_>>();
-                match lash_lashlang_runtime::aggregate_answer(
-                    consumer,
-                    settled_value_after,
-                    &standings,
-                ) {
+                match lash_vm_runtime::aggregate_answer(consumer, settled_value_after, &standings) {
                     Some(answer) => Decide::Answer((answer, ends.to_vec())),
                     None => Decide::Wait {
                         until: slots
@@ -580,14 +576,14 @@ impl HostBridge<'_> {
             }
         };
         let outcome = match answer {
-            AggregateAnswer::Leaf(leaf) => lashlang::ResourceOperationBatchOutcome::Selected {
+            AggregateAnswer::Leaf(leaf) => lash_vm::ResourceOperationBatchOutcome::Selected {
                 leaf,
-                result: lashlang::ResourceOperationOutcome::from_result(result_of(leaf)),
+                result: lash_vm::ResourceOperationOutcome::from_result(result_of(leaf)),
             },
-            AggregateAnswer::SettledValue => lashlang::ResourceOperationBatchOutcome::SettledValue,
-            AggregateAnswer::All => lashlang::ResourceOperationBatchOutcome::AllResults(
+            AggregateAnswer::SettledValue => lash_vm::ResourceOperationBatchOutcome::SettledValue,
+            AggregateAnswer::All => lash_vm::ResourceOperationBatchOutcome::AllResults(
                 (0..leaves)
-                    .map(|leaf| lashlang::ResourceOperationOutcome::from_result(result_of(leaf)))
+                    .map(|leaf| lash_vm::ResourceOperationOutcome::from_result(result_of(leaf)))
                     .collect(),
             ),
             AggregateAnswer::Exhausted => {
@@ -603,7 +599,7 @@ impl HostBridge<'_> {
                         }
                     }
                 }
-                lashlang::ResourceOperationBatchOutcome::ExhaustedRejections(errors)
+                lash_vm::ResourceOperationBatchOutcome::ExhaustedRejections(errors)
             }
             AggregateAnswer::HostControl(leaf) => {
                 return Err(result_of(leaf).err().unwrap_or_else(|| {
@@ -613,13 +609,10 @@ impl HostBridge<'_> {
         };
         if !self.is_cancelled()
             && trace_calls.len() > 1
-            && let Some(trace) = &self.lashlang_execution_trace
+            && let Some(trace) = &self.lash_vm_execution_trace
         {
             for call_site in &trace_calls {
-                trace.emit_resumed(
-                    call_site,
-                    lash_lashlang_runtime::TraceNodeWaitResolution::Resumed,
-                );
+                trace.emit_resumed(call_site, lash_vm_runtime::TraceNodeWaitResolution::Resumed);
             }
         }
         Ok(AbilityOutcome::ResourceOperationBatch(outcome))

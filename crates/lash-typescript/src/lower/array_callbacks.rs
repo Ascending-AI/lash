@@ -3,7 +3,7 @@
 //! guest function implements the ECMA sequential loop without adding a new VM
 //! continuation shape.
 
-use lashlang::{
+use lash_vm::{
     AssignPathStep, AssignTarget, CoercingBinaryOp, Expr as LashExpr, FunctionExpr, MethodKey,
     StructuralRole,
 };
@@ -155,7 +155,7 @@ impl Lowerer {
         );
         let output_value = if owner == "Map" {
             LashExpr::BuiltinCall {
-                name: "__lashlang_heap_new".into(),
+                name: "__lash_vm_heap_new".into(),
                 args: vec![LashExpr::String("Map".into())],
             }
         } else {
@@ -642,7 +642,7 @@ fn callback_body(
             else_block: Box::new(LashExpr::Block(vec![
                 append(&output, LashExpr::Absent),
                 LashExpr::BuiltinCall {
-                    name: "__lashlang_heap_delete_member".into(),
+                    name: "__lash_vm_heap_delete_member".into(),
                     args: vec![variable(&output), variable(&index)],
                 },
             ])),
@@ -894,7 +894,7 @@ fn require_callable(value: LashExpr) -> LashExpr {
 fn stdlib(method: &str, mut args: Vec<LashExpr>) -> LashExpr {
     args.insert(0, LashExpr::String(method.into()));
     LashExpr::BuiltinCall {
-        name: "__lashlang_stdlib".into(),
+        name: "__lash_vm_stdlib".into(),
         args,
     }
 }

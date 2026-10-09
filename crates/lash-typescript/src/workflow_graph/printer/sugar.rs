@@ -2,7 +2,7 @@
 //! spellings that re-lower to them: `sugar` tries each re-sugar in turn and
 //! reports `Ok(None)` for an expression that is none of them.
 
-use lashlang::{Expr, FunctionExpr, ResourceRefExpr, StructuralRole};
+use lash_vm::{Expr, FunctionExpr, ResourceRefExpr, StructuralRole};
 
 use crate::signatures::INSTANCE_STDLIB_SIGNATURES;
 
@@ -16,7 +16,7 @@ impl<'p> Printer<'p> {
     pub(super) fn sugar(&self, expression: &Expr) -> Result<Option<String>, TypeScriptSourceError> {
         // `await x` on a value that may be a pending promise.
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_await_pending"
+            && name.as_str() == "__lash_vm_await_pending"
             && let [value] = args.as_slice()
         {
             return Ok(Some(format!("await {}", self.unary_operand(value)?)));
@@ -27,7 +27,7 @@ impl<'p> Printer<'p> {
             return Ok(Some(format!("console.log({})", self.arguments(args)?)));
         }
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_await_array"
+            && name.as_str() == "__lash_vm_await_array"
             && let [items, Expr::String(method)] = args.as_slice()
         {
             return Ok(Some(format!(
@@ -48,13 +48,13 @@ impl<'p> Printer<'p> {
             )));
         }
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_pending_timer"
+            && name.as_str() == "__lash_vm_pending_timer"
             && let [duration] = args.as_slice()
         {
             return Ok(Some(format!("sleep({})", self.expression(duration)?)));
         }
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_pending_tool"
+            && name.as_str() == "__lash_vm_pending_tool"
             && let [call @ Expr::ReceiverCall { .. }] = args.as_slice()
         {
             return Ok(Some(self.expression(call)?));
@@ -66,10 +66,10 @@ impl<'p> Printer<'p> {
             return Ok(Some("arguments".to_string()));
         }
         // A function with defaults or a rest parameter carries its arity in
-        // a `__lashlang_closure` wrap; the signature the function spells
+        // a `__lash_vm_closure` wrap; the signature the function spells
         // reproduces both, so the wrap drops away.
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_closure"
+            && name.as_str() == "__lash_vm_closure"
             && let [
                 Expr::Function(function),
                 Expr::Number(arity),
@@ -105,7 +105,7 @@ impl<'p> Printer<'p> {
         }
         // `globalThis.name`, read live through the root-global read.
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_global_get"
+            && name.as_str() == "__lash_vm_global_get"
             && let [Expr::String(global)] = args.as_slice()
         {
             return Ok(Some(format!(
@@ -140,7 +140,7 @@ impl<'p> Printer<'p> {
         }
         // An instance standard-library call, `receiver.method(..)`.
         if let Expr::BuiltinCall { name, args } = expression
-            && name.as_str() == "__lashlang_stdlib"
+            && name.as_str() == "__lash_vm_stdlib"
             && let [Expr::String(method), receiver, args @ ..] = args.as_slice()
             && INSTANCE_STDLIB_SIGNATURES
                 .iter()
@@ -205,16 +205,16 @@ pub(super) fn attribute_assignment(
     else {
         return Ok(None);
     };
-    let Some(parts) = lashlang::AttributeAssignParts::of(expr) else {
+    let Some(parts) = lash_vm::AttributeAssignParts::of(expr) else {
         return Ok(None);
     };
     let printer = Printer::plain();
     let object = printer.member_target(parts.object)?;
     let target = match parts.step {
-        lashlang::AttributeStep::Field(field) => {
+        lash_vm::AttributeStep::Field(field) => {
             format!("{object}.{}", printer.identifier("field", field.as_str())?)
         }
-        lashlang::AttributeStep::Index(index) => {
+        lash_vm::AttributeStep::Index(index) => {
             format!("{object}[{}]", printer.expression(index)?)
         }
     };
@@ -239,7 +239,7 @@ fn all_settled_results_source<'a>(items: &'a Expr, function: &'a Expr) -> Option
     let [source, Expr::String(mode)] = args.as_slice() else {
         return None;
     };
-    if name.as_str() != "__lashlang_await_array" || mode.as_str() != "allSettled" {
+    if name.as_str() != "__lash_vm_await_array" || mode.as_str() != "allSettled" {
         return None;
     }
     let Expr::Function(function) = function else {
@@ -301,7 +301,7 @@ fn all_settled_results_source<'a>(items: &'a Expr, function: &'a Expr) -> Option
     let has_reason = fields.iter().any(|(name, value)| {
         name.as_str() == "reason"
             && matches!(value, Expr::BuiltinCall { name, args }
-                if name.as_str() == "__lashlang_heap_new"
+                if name.as_str() == "__lash_vm_heap_new"
                     && matches!(args.as_slice(),
                         [Expr::String(ctor), error, Expr::Record(cause)]
                             if ctor.as_str() == "EffectError"
@@ -313,14 +313,14 @@ fn all_settled_results_source<'a>(items: &'a Expr, function: &'a Expr) -> Option
     (fields.len() == 2 && has_status && has_reason).then_some(source)
 }
 
-/// A `__lashlang_closure` wrap prints as the function it carries — the
+/// A `__lash_vm_closure` wrap prints as the function it carries — the
 /// arrow is an AssignmentExpression, so operand positions that parenthesize
 /// a bare `Expr::Function` must parenthesize the wrap the same way.
 pub(super) fn is_closure_wrap(expression: &Expr) -> bool {
-    matches!(expression, Expr::BuiltinCall { name, .. } if name.as_str() == "__lashlang_closure")
+    matches!(expression, Expr::BuiltinCall { name, .. } if name.as_str() == "__lash_vm_closure")
 }
 
-/// The function a `__lashlang_closure` wrap carries together with its
+/// The function a `__lash_vm_closure` wrap carries together with its
 /// recorded `(required arity, accepts rest)`, or the bare `Expr::Function`
 /// with none.
 pub(super) fn closure_function(
@@ -329,7 +329,7 @@ pub(super) fn closure_function(
     match expression {
         Expr::Function(function) => Some((function, None)),
         Expr::BuiltinCall { name, args }
-            if name.as_str() == "__lashlang_closure"
+            if name.as_str() == "__lash_vm_closure"
                 && let [
                     Expr::Function(function),
                     Expr::Number(arity),

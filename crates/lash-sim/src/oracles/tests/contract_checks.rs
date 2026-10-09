@@ -276,9 +276,9 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
     );
     for contract in [
         "rlm.exec_error_max_turn_stop",
-        "rlm.retired_marker_plain_lashlang_text",
-        "rlm.lashlang_cell_exec_continues",
-        "rlm.streamed_lashlang_cell_exec_persists_trajectory",
+        "rlm.retired_marker_plain_lash_vm_text",
+        "rlm.lash_vm_cell_exec_continues",
+        "rlm.streamed_lash_vm_cell_exec_persists_trajectory",
         "rlm.exec_result_no_tool_call_replay",
         "rlm.exec_tool_control_frame_switch_terminal",
         "rlm.exec_tool_control_fail_terminal",
@@ -288,13 +288,10 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         }
     }
     assert!(
-            scenario_contract_generated_facts_for_semantic(
-                "rlm.lashlang_cell_exec_continues",
-                &events,
-            )
+        scenario_contract_generated_facts_for_semantic("rlm.lash_vm_cell_exec_continues", &events,)
             .is_ok(),
-            "positive fixture should prove RLM LashLang exec continuation facts"
-        );
+        "positive fixture should prove RLM Lash VM exec continuation facts"
+    );
     for contract in [
         "agent.foreground_tool_call_round_trip",
         "agent.started_process_tool_call_graph",
@@ -531,7 +528,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
     let mut retired_marker_code_changed = events.clone();
     mutate_contract_execution(
         &mut retired_marker_code_changed,
-        "rlm.retired_marker_plain_lashlang_text",
+        "rlm.retired_marker_plain_lash_vm_text",
         |execution| {
             execution
                 .pointer_mut("/result/exec_codes/0")
@@ -540,7 +537,7 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         },
     );
     let err = scenario_contract_generated_facts_for_semantic(
-        "rlm.retired_marker_plain_lashlang_text",
+        "rlm.retired_marker_plain_lash_vm_text",
         &retired_marker_code_changed,
     )
     .expect_err("RLM retired marker fact must require exact source text");
@@ -899,16 +896,16 @@ fn scenario_contract_generated_facts_fail_on_contract_specific_mutations() {
         "unexpected RLM schema-mismatch failure: {err}"
     );
 
-    let mut no_lashlang_continuation = events.clone();
-    no_lashlang_continuation.retain(|event| event.boundary_id != "session-001:provider:003");
+    let mut no_lash_vm_continuation = events.clone();
+    no_lash_vm_continuation.retain(|event| event.boundary_id != "session-001:provider:003");
     let err = scenario_contract_generated_facts_for_semantic(
-        "rlm.lashlang_cell_exec_continues",
-        &no_lashlang_continuation,
+        "rlm.lash_vm_cell_exec_continues",
+        &no_lash_vm_continuation,
     )
-    .expect_err("RLM LashLang cell execution must require later model continuation");
+    .expect_err("RLM Lash VM cell execution must require later model continuation");
     assert!(
         err.contains("later same-actor provider continuation"),
-        "unexpected RLM LashLang continuation failure: {err}"
+        "unexpected RLM Lash VM continuation failure: {err}"
     );
 
     let mut no_observer_reconnect = events;

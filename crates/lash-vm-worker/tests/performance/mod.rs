@@ -1,6 +1,6 @@
 use super::*;
 use crate::frontend::TypeScriptFrontend;
-use lashlang::Value;
+use lash_vm::Value;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -144,7 +144,7 @@ fn delivering_a_request_keeps_the_original_payload_allocation() {
         }
     });
     let (delivered, bytes) = allocated(|| {
-        server.deliver(VmStep::Suspended(lashlang::VmSuspended {
+        server.deliver(VmStep::Suspended(lash_vm::VmSuspended {
             request: VmRequest::Effect(AbilityOp::Print(Value::Null)),
             observations: Vec::new(),
         }))

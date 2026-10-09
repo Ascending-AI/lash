@@ -1,4 +1,4 @@
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, Declaration, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Expr, ResourceOperationBatchOutcome, ResourceOperationOutcome, State, Value, Vm, VmRunOutcome,
 };
@@ -30,20 +30,20 @@ impl ExecutionHost for Host {
 /// a fixture starts one through `processes.*`. The `process` slot
 /// is typed `Process` through `x-lash`, which is what the linker lifts the
 /// literal into.
-fn process_environment() -> lashlang::LashlangHostEnvironment {
-    process_environment_with(lashlang::LashlangHostCatalog::new())
+fn process_environment() -> lash_vm::LashVmHostEnvironment {
+    process_environment_with(lash_vm::LashVmHostCatalog::new())
 }
 
 fn process_environment_with(
-    mut catalog: lashlang::LashlangHostCatalog,
-) -> lashlang::LashlangHostEnvironment {
+    mut catalog: lash_vm::LashVmHostCatalog,
+) -> lash_vm::LashVmHostEnvironment {
     catalog
         .add_module_operation_contract(
             ["processes"],
             "Processes",
             "start",
             "tool:processes/start",
-            &lashlang::OperationContract::new(
+            &lash_vm::OperationContract::new(
                 serde_json::json!({
                     "type": "object",
                     "additionalProperties": true,
@@ -55,12 +55,12 @@ fn process_environment_with(
         )
         .expect("process start operation");
 
-    lashlang::LashlangHostEnvironment::new(catalog)
+    lash_vm::LashVmHostEnvironment::new(catalog)
 }
 
 pub(super) fn finished(source: &str) -> Value {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
-    match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    match futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
         .expect("TypeScript should execute")
     {
         ExecutionOutcome::Finished(value) => value,
@@ -101,7 +101,7 @@ fn process_handle_json(label: &str) -> serde_json::Value {
 /// The handle record a real host mints for a started process; a bare string
 /// is a resolved value, and awaiting one is a guest error.
 fn process_handle(label: &str) -> Value {
-    let mut handle = lashlang::Record::new();
+    let mut handle = lash_vm::Record::new();
     handle.insert("__handle__".to_string(), Value::String("lash".into()));
     let process_id = lash_sansio::ProcessId::fixture(label);
     handle.insert(
@@ -168,8 +168,8 @@ fn caught_process_await(host: &impl ExecutionHost, probe: &str) -> Value {
     );
     let linked =
         lash_typescript::link(&source, &process_environment()).expect("process await should link");
-    match futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    match futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         host,
     ))
@@ -194,7 +194,7 @@ fn direct_process_handle_await_preserves_typed_tool_failure_fields() {
               source: error.cause.source
             }"#,
         ),
-        lashlang::from_json(serde_json::json!({
+        lash_vm::from_json(serde_json::json!({
             "caught": true,
             "name": "EffectError",
             "code": "approval_denied",
@@ -212,7 +212,7 @@ fn direct_process_handle_await_keeps_message_only_error_shape() {
             &ProcessAwaitFailureHost::MessageOnly,
             "[error.message, error.cause.code, error.cause.details.kind, error.cause.details.operation]",
         ),
-        lashlang::from_json(serde_json::json!([
+        lash_vm::from_json(serde_json::json!([
             "`?` unwrapped failed tool result: plain await failure",
             "UnwrappedToolResultFailed",
             "effect",
@@ -295,7 +295,7 @@ fn regexp_match_value_of_preserves_guest_shape_and_identity() {
             finish({ index: matched.index, first: matched[0], same: matched.valueOf() === matched });
             "#,
         ),
-        lashlang::from_json(serde_json::json!({
+        lash_vm::from_json(serde_json::json!({
             "index": 1,
             "first": "b",
             "same": true
@@ -357,7 +357,7 @@ impl ExecutionHost for AggregateHost {
                     batch
                         .leaves
                         .iter()
-                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                        .filter_map(lash_vm::ResourceOperationBatchLeaf::operation)
                         .enumerate()
                         .map(|(index, _)| {
                             ResourceOperationOutcome::Value(Value::Number(index as f64 + 1.0))
@@ -381,7 +381,7 @@ impl ExecutionHost for SettledHost {
                     batch
                         .leaves
                         .iter()
-                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                        .filter_map(lash_vm::ResourceOperationBatchLeaf::operation)
                         .enumerate()
                         .map(|(index, _)| {
                             if index == 0 {
@@ -432,8 +432,8 @@ fn promise_all_settled_async_map_catches_each_effect_failure_and_continues() {
     let host = SequentialAsyncMapHost {
         calls: AtomicUsize::new(0),
     };
-    let outcome = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let outcome = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &host,
     ))
@@ -451,24 +451,24 @@ fn promise_all_settled_async_map_catches_each_effect_failure_and_continues() {
 
 #[test]
 fn promise_all_executes_on_the_shared_aggregate_batch_machine() {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+            &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
-    let environment = lashlang::LashlangHostEnvironment::new(catalog);
+    let environment = lash_vm::LashVmHostEnvironment::new(catalog);
     let linked = lash_typescript::link(
         "const results = await Promise.all([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]); finish(results);",
         &environment,
     )
     .expect("Promise.all tool calls should link");
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
-    let outcome = futures::executor::block_on(lashlang::execute(
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
+    let outcome = futures::executor::block_on(lash_vm::execute(
         &compiled,
         &mut State::new(),
         &AggregateHost,
@@ -484,31 +484,31 @@ fn promise_all_executes_on_the_shared_aggregate_batch_machine() {
 
 #[test]
 fn promise_all_settled_preserves_javascript_result_shape() {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+            &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
-    let environment = lashlang::LashlangHostEnvironment::new(catalog);
+    let environment = lash_vm::LashVmHostEnvironment::new(catalog);
     let linked = lash_typescript::link(
         "finish(await Promise.allSettled([web.fetch({ url: 'a' }), web.fetch({ url: 'b' })]));",
         &environment,
     )
     .expect("Promise.allSettled tool calls should link");
-    let outcome = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let outcome = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &SettledHost,
     ))
     .expect("settled aggregate should execute");
     assert_eq!(
         outcome,
-        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
+        ExecutionOutcome::Finished(lash_vm::from_json(serde_json::json!([
             { "status": "fulfilled", "value": "ok" },
             { "status": "rejected", "reason": {
                 "name": "EffectError",
@@ -534,15 +534,15 @@ fn promise_all_settled_rejection_reason_is_an_idiomatic_error() {
         &environment,
     )
     .expect("Promise.allSettled tool calls should link");
-    let outcome = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let outcome = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &SettledHost,
     ))
     .expect("settled aggregate should execute");
     assert_eq!(
         outcome,
-        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
+        ExecutionOutcome::Finished(lash_vm::from_json(serde_json::json!([
             true,
             "EffectError: boom",
             "EffectError",
@@ -573,8 +573,8 @@ fn caught_rejection(probe: &str) -> Value {
          catch (error) {{ finish({probe}); }}"
     );
     let linked = lash_typescript::link(&source, &environment).expect("probe should link");
-    match futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    match futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &RejectingToolHost,
     ))
@@ -596,7 +596,7 @@ fn a_tool_rejection_is_an_instance_of_error() {
     );
     assert_eq!(
         caught_rejection("[error instanceof TypeError, error instanceof RangeError]"),
-        lashlang::from_json(serde_json::json!([false, false])),
+        lash_vm::from_json(serde_json::json!([false, false])),
         "the brand is an Error and nothing narrower"
     );
 }
@@ -637,7 +637,7 @@ fn a_tool_rejection_answers_the_standard_discrimination_pattern() {
         caught_rejection(
             "[error.name, typeof error.message, error.cause.code, error.cause.details.kind]"
         ),
-        lashlang::from_json(serde_json::json!([
+        lash_vm::from_json(serde_json::json!([
             "EffectError",
             "string",
             "UnwrappedModuleOperationFailed",
@@ -651,11 +651,11 @@ fn a_tool_rejection_answers_the_standard_discrimination_pattern() {
 fn promise_aggregates_apply_promise_resolve_to_plain_values() {
     assert_eq!(
         finished("finish(await Promise.all([1, 2]));"),
-        lashlang::from_json(serde_json::json!([1, 2]))
+        lash_vm::from_json(serde_json::json!([1, 2]))
     );
     assert_eq!(
         finished("finish(await Promise.allSettled([1, 2]));"),
-        lashlang::from_json(serde_json::json!([
+        lash_vm::from_json(serde_json::json!([
             { "status": "fulfilled", "value": 1 },
             { "status": "fulfilled", "value": 2 }
         ]))
@@ -675,15 +675,15 @@ impl ExecutionHost for RuntimeValueHost {
                 };
                 assert_eq!(
                     receiver.resource_type.as_str(),
-                    lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE
+                    lash_vm::LANGUAGE_RUNTIME_RESOURCE_TYPE
                 );
                 assert_eq!(receiver.alias.as_str(), "builtin");
                 assert!(operation.args.is_empty());
                 match operation.operation.as_str() {
-                    lashlang::LANGUAGE_RUNTIME_NOW_OPERATION => {
+                    lash_vm::LANGUAGE_RUNTIME_NOW_OPERATION => {
                         Ok(AbilityOutcome::Value(Value::Number(1_723_456.0)))
                     }
-                    lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION => {
+                    lash_vm::LANGUAGE_RUNTIME_RANDOM_OPERATION => {
                         Ok(AbilityOutcome::Value(Value::Number(0.25)))
                     }
                     other => Err(ExecutionHostError::new(format!(
@@ -702,13 +702,13 @@ fn time_and_randomness_are_host_effects_instead_of_vm_nondeterminism() {
     let lowered = lash_typescript::parse("finish([Date.now(), Math.random()]);")
         .expect("runtime values should lower");
     assert!(
-        lashlang::referenced_module_call_paths(&lowered).is_empty(),
+        lash_vm::referenced_module_call_paths(&lowered).is_empty(),
         "resolved runtime intrinsics must not enter deferred tool discovery"
     );
     let program =
         lash_typescript::testing::compile("finish({ now: Date.now(), random: Math.random() });")
             .expect("runtime values should compile");
-    let outcome = futures::executor::block_on(lashlang::execute(
+    let outcome = futures::executor::block_on(lash_vm::execute(
         &program,
         &mut State::new(),
         &RuntimeValueHost,
@@ -716,7 +716,7 @@ fn time_and_randomness_are_host_effects_instead_of_vm_nondeterminism() {
     .expect("runtime values should execute through the host");
     assert_eq!(
         outcome,
-        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!({
+        ExecutionOutcome::Finished(lash_vm::from_json(serde_json::json!({
             "now": 1_723_456,
             "random": 0.25
         })))
@@ -729,7 +729,7 @@ fn argless_date_uses_the_same_journaled_clock_effect_as_date_now() {
         "const d=new Date(); finish(`${d.getTime()}|${Date.now()}|${d.toISOString()}`);",
     )
     .expect("argless Date should compile through the runtime clock");
-    let outcome = futures::executor::block_on(lashlang::execute(
+    let outcome = futures::executor::block_on(lash_vm::execute(
         &program,
         &mut State::new(),
         &RuntimeValueHost,
@@ -753,7 +753,7 @@ impl ExecutionHost for ProcessDurabilityHost {
                     batch
                         .leaves
                         .iter()
-                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                        .filter_map(lash_vm::ResourceOperationBatchLeaf::operation)
                         .map(|operation| {
                             ResourceOperationOutcome::Value(
                                 operation
@@ -782,7 +782,7 @@ impl ExecutionHost for ProcessDurabilityHost {
                     .and_then(|record| record.get("name"))
                     .map(|name| name.to_string())
                     .unwrap_or_else(|| "worker".to_string());
-                Ok(AbilityOutcome::Value(lashlang::from_json(
+                Ok(AbilityOutcome::Value(lash_vm::from_json(
                     process_handle_json(&name),
                 )))
             }
@@ -809,7 +809,7 @@ impl ExecutionHost for ProcessDurabilityHost {
 /// FIG-2999: a process literal's name is the linker's lift identity, not an
 /// authored string, so a fixture that lifts more than one process picks the
 /// one it means by shape instead of by name.
-fn lifted_process_name(linked: &lashlang::LinkedModule, params: usize) -> String {
+fn lifted_process_name(linked: &lash_vm::LinkedModule, params: usize) -> String {
     linked
         .artifact
         .ir()
@@ -830,14 +830,14 @@ fn suspend_and_resume_process(
     params: usize,
 ) -> ExecutionOutcome {
     futures::executor::block_on(async {
-        let mut catalog = lashlang::LashlangHostCatalog::new();
+        let mut catalog = lash_vm::LashVmHostCatalog::new();
         catalog
             .add_module_operation_contract(
                 ["web"],
                 "Web",
                 "fetch",
                 "tool:web/fetch",
-                &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+                &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
             )
             .expect("test host binding");
         let linked = lash_typescript::link(source, &process_environment_with(catalog))
@@ -847,16 +847,16 @@ fn suspend_and_resume_process(
         // lifted rather than spelling a name the source no longer carries.
         let process_name = lifted_process_name(&linked, params);
         let compiled =
-            lashlang::testing::harness::compile_linked_process_named(&linked, &process_name)
+            lash_vm::testing::harness::compile_linked_process_named(&linked, &process_name)
                 .expect("process should compile");
-        let mut state = State::from_snapshot(lashlang::Snapshot::new(
-            lashlang::from_json(globals)
+        let mut state = State::from_snapshot(lash_vm::Snapshot::new(
+            lash_vm::from_json(globals)
                 .as_record()
                 .expect("process globals must be a record")
                 .clone(),
         ));
         let host = ProcessDurabilityHost;
-        let execution_environment = lashlang::ExecutionEnvironment::new(&host).process();
+        let execution_environment = lash_vm::ExecutionEnvironment::new(&host).process();
         let mut vm = Vm::from_state(&compiled, &mut state, &execution_environment)
             .expect("install process VM");
         assert_eq!(
@@ -867,7 +867,7 @@ fn suspend_and_resume_process(
         );
         let encoded = serde_json::to_vec(&vm.suspend().expect("capture continuation"))
             .expect("encode continuation");
-        let continuation = lashlang::VmInstance::pristine()
+        let continuation = lash_vm::VmInstance::pristine()
             .open_continuation(&encoded)
             .expect("decode continuation");
         let mut resumed = Vm::resume_from(continuation, &compiled, &execution_environment)
@@ -897,11 +897,11 @@ fn uncaught_throw_fails_a_durable_process() {
             lash_typescript::link(source, &process_environment()).expect("process should link");
         let process_name = lifted_process_name(&linked, 0);
         let compiled =
-            lashlang::testing::harness::compile_linked_process_named(&linked, &process_name)
+            lash_vm::testing::harness::compile_linked_process_named(&linked, &process_name)
                 .expect("process compiles");
         let mut state = State::new();
         let host = ProcessDurabilityHost;
-        let execution_environment = lashlang::ExecutionEnvironment::new(&host).process();
+        let execution_environment = lash_vm::ExecutionEnvironment::new(&host).process();
         let mut vm = Vm::from_state(&compiled, &mut state, &execution_environment)
             .expect("install process VM");
         let outcome = match vm
@@ -954,7 +954,7 @@ impl ExecutionHost for FirstSettledRejectionHost {
                 Ok(AbilityOutcome::ResourceOperationBatch(
                     match batch.consumer {
                         // Leaf 1 settled first.
-                        lashlang::AggregateConsumer::All => {
+                        lash_vm::AggregateConsumer::All => {
                             ResourceOperationBatchOutcome::Selected {
                                 leaf: 1,
                                 result: ResourceOperationOutcome::Error(ExecutionHostError::new(
@@ -962,7 +962,7 @@ impl ExecutionHost for FirstSettledRejectionHost {
                                 )),
                             }
                         }
-                        lashlang::AggregateConsumer::AllSettled => {
+                        lash_vm::AggregateConsumer::AllSettled => {
                             ResourceOperationBatchOutcome::AllResults(vec![
                                 ResourceOperationOutcome::Error(ExecutionHostError::new("late-A")),
                                 ResourceOperationOutcome::Error(ExecutionHostError::new("early-B")),
@@ -980,30 +980,30 @@ impl ExecutionHost for FirstSettledRejectionHost {
     }
 }
 
-fn two_leaf_web_environment() -> lashlang::LashlangHostEnvironment {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+fn two_leaf_web_environment() -> lash_vm::LashVmHostEnvironment {
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+            &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
-    lashlang::LashlangHostEnvironment::new(catalog)
+    lash_vm::LashVmHostEnvironment::new(catalog)
 }
 
 /// [`two_leaf_web_environment`] plus the process control tools.
-fn mixed_aggregate_environment() -> lashlang::LashlangHostEnvironment {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+fn mixed_aggregate_environment() -> lash_vm::LashVmHostEnvironment {
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+            &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("test host binding");
     process_environment_with(catalog)
@@ -1017,8 +1017,8 @@ fn promise_all_rejects_with_the_rejection_its_host_consumed_first() {
         &environment,
     )
     .expect("Promise.all should link");
-    let error = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let error = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &FirstSettledRejectionHost,
     ))
@@ -1045,8 +1045,8 @@ fn promise_all_settled_stays_input_ordered_under_out_of_order_settlement() {
         &environment,
     )
     .expect("Promise.allSettled should link");
-    let outcome = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let outcome = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &FirstSettledRejectionHost,
     ))
@@ -1077,7 +1077,7 @@ impl ExecutionHost for MisfitReplyHost {
             AbilityOp::ResourceOperationBatch(batch) => Ok(AbilityOutcome::ResourceOperationBatch(
                 match batch.consumer {
                     // Two leaves, but the host names a fifth.
-                    lashlang::AggregateConsumer::All => ResourceOperationBatchOutcome::Selected {
+                    lash_vm::AggregateConsumer::All => ResourceOperationBatchOutcome::Selected {
                         leaf: 5,
                         result: ResourceOperationOutcome::Error(ExecutionHostError::new("boom")),
                     },
@@ -1108,8 +1108,8 @@ fn a_reply_that_does_not_fit_its_aggregate_fails_closed() {
         ),
     ] {
         let linked = lash_typescript::link(source, &environment).expect("the aggregate links");
-        let error = futures::executor::block_on(lashlang::execute(
-            &lashlang::testing::harness::compile_linked_main(&linked),
+        let error = futures::executor::block_on(lash_vm::execute(
+            &lash_vm::testing::harness::compile_linked_main(&linked),
             &mut State::new(),
             &MisfitReplyHost,
         ))
@@ -1268,8 +1268,8 @@ fn run_typescript(source: &str) -> Value {
     let environment = two_leaf_web_environment();
     let linked = lash_typescript::link(source, &environment)
         .unwrap_or_else(|error| panic!("link `{source}`: {error}"));
-    match futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    match futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &AggregateHost,
     ))
@@ -1397,8 +1397,8 @@ fn map_callbacks_cannot_perform_effects() {
         &environment,
     )
     .expect("an effect inside a callback is not a link-time rejection today");
-    let error = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let error = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &AggregateHost,
     ))
@@ -1432,8 +1432,8 @@ fn runtime_array_rejections_report_the_selected_rejection() {
     ] {
         let source = format!("const pending = {array}; finish(await Promise.all(pending));");
         let linked = lash_typescript::link(&source, &environment).expect("runtime array links");
-        let error = futures::executor::block_on(lashlang::execute(
-            &lashlang::testing::harness::compile_linked_main(&linked),
+        let error = futures::executor::block_on(lash_vm::execute(
+            &lash_vm::testing::harness::compile_linked_main(&linked),
             &mut State::new(),
             &FirstSettledRejectionHost,
         ))
@@ -1471,7 +1471,7 @@ fn pending_tool_handles_survive_durable_process_park() {
         };
         assert_eq!(
             suspend_and_resume_process(&source, serde_json::json!({}), 0),
-            ExecutionOutcome::Finished(lashlang::from_json(expected)),
+            ExecutionOutcome::Finished(lash_vm::from_json(expected)),
             "{mode}"
         );
     }
@@ -1486,7 +1486,7 @@ fn pending_tool_handles_survive_durable_process_park() {
 struct MixedAggregateHost;
 
 impl MixedAggregateHost {
-    fn settle(operation: &lashlang::ResourceOperation) -> ResourceOperationOutcome {
+    fn settle(operation: &lash_vm::ResourceOperation) -> ResourceOperationOutcome {
         let args = operation.args.first().and_then(Value::as_record);
         match args.and_then(|record| record.get("fail")) {
             Some(Value::Bool(true)) => {
@@ -1509,7 +1509,7 @@ impl ExecutionHost for MixedAggregateHost {
                     batch
                         .leaves
                         .iter()
-                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                        .filter_map(lash_vm::ResourceOperationBatchLeaf::operation)
                         .map(Self::settle)
                         .collect(),
                 ),
@@ -1526,7 +1526,7 @@ impl ExecutionHost for MixedAggregateHost {
                     .and_then(|record| record.get("input"))
                     .cloned()
                     .unwrap_or(Value::Null);
-                Ok(AbilityOutcome::Value(lashlang::from_json(
+                Ok(AbilityOutcome::Value(lash_vm::from_json(
                     process_handle_json(&input.to_string()),
                 )))
             }
@@ -1552,15 +1552,15 @@ impl ExecutionHost for MixedAggregateHost {
     }
 }
 
-fn run_mixed_aggregate(body: &str) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
+fn run_mixed_aggregate(body: &str) -> Result<ExecutionOutcome, lash_vm::RuntimeError> {
     let source = format!(
         r#"const worker = async (input: unknown) => input;
         {body}"#
     );
     let linked = lash_typescript::link(&source, &mixed_aggregate_environment())
         .expect("mixed aggregate should link");
-    futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &MixedAggregateHost,
     ))
@@ -1610,7 +1610,7 @@ fn promise_all_keeps_nested_process_handles_shallow() {
                 finish(await Promise.all([[h], web.fetch({ value: 1 })]));";
     assert_eq!(
         run_mixed_aggregate(body).expect("nested process handle remains an ordinary value"),
-        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
+        ExecutionOutcome::Finished(lash_vm::from_json(serde_json::json!([
             [process_handle_json("p")],
             1
         ])))
@@ -1630,8 +1630,8 @@ fn tool_handles_do_not_cross_cells() {
         &environment,
     )
     .expect("first cell should link");
-    futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut state,
         &MixedAggregateHost,
     ))
@@ -1643,13 +1643,13 @@ fn tool_handles_do_not_cross_cells() {
         state.globals().get("p")
     );
 
-    let stale = lashlang::from_json(serde_json::json!({
+    let stale = lash_vm::from_json(serde_json::json!({
         // The forgery a cell could most plausibly attempt: the one handle
         // shape, spelled with the nonce an execution that allocated nothing
         // would mint. It still names no live request (ADR 0095).
         "p": { "__handle__": "lash", "id": "t.0000000000000000.0" }
     }));
-    let mut state = State::from_snapshot(lashlang::Snapshot::new(
+    let mut state = State::from_snapshot(lash_vm::Snapshot::new(
         stale.as_record().expect("globals record").clone(),
     ));
     let linked = lash_typescript::link(
@@ -1657,13 +1657,13 @@ fn tool_handles_do_not_cross_cells() {
         &environment.with_globals(["p"]),
     )
     .expect("second cell should link");
-    let error = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let error = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut state,
         &MixedAggregateHost,
     ))
     .expect_err("a stale handle must not alias the new request");
-    let lashlang::RuntimeError::PendingTool { problem, .. } = &error else {
+    let lash_vm::RuntimeError::PendingTool { problem, .. } = &error else {
         panic!("expected the typed pending-tool refusal: {error}");
     };
     assert!(

@@ -6,7 +6,7 @@
 `lash-regress` is a publishable Lash workspace crate forked from `regress`
 0.11.1 at upstream commit
 `7e64ad5e6807b5503e5cc97a79e0f129b23c556b`. It adds the fuel/step-budget and
-anchored-matching APIs Lashlang needs. The upstream integration tests are
+anchored-matching APIs Lash VM needs. The upstream integration tests are
 carried with only the crate import renamed from `regress` to `lash_regress`.
 
 The crate keeps upstream's `clippy::all` warning group suppressed for carried

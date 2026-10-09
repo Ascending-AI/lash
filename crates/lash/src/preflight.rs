@@ -279,13 +279,13 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             primary: true,
         },
         DurableFormat::VmContinuation => {
-            SurfaceRelation::CarriedBy(DurableFormat::LashlangSegmentHandover)
+            SurfaceRelation::CarriedBy(DurableFormat::LashVmSegmentHandover)
         }
-        DurableFormat::LashlangSnapshot => {
+        DurableFormat::LashVmSnapshot => {
             SurfaceRelation::CarriedBy(DurableFormat::RlmSnapshotEnvelope)
         }
-        DurableFormat::LashlangSegmentHandover => SurfaceRelation::Unwalkable(
-            "no bounded surface: a lashlang process's engine state is its snapshot row, refused \
+        DurableFormat::LashVmSegmentHandover => SurfaceRelation::Unwalkable(
+            "no bounded surface: a lash_vm process's engine state is its snapshot row, refused \
              when the process activation restores it rather than at rest",
         ),
         DurableFormat::RlmSnapshotEnvelope => SurfaceRelation::Walk {
@@ -539,9 +539,9 @@ fn carrier_verdict(
 /// Which format's envelope enforces a carried format's boundary.
 ///
 /// Both relationships are stated by the constants themselves: the segment
-/// handover documents that it embeds the VM continuation and Lashlang snapshot
+/// handover documents that it embeds the VM continuation and Lash VM snapshot
 /// formats its build carries, and the RLM snapshot envelope's history records
-/// which Lashlang snapshot version each of its versions carries. A probe that
+/// which Lash VM snapshot version each of its versions carries. A probe that
 /// invented an independent check for them would be reporting a boundary that
 /// does not exist.
 fn carrier_of(format: DurableFormat) -> Option<DurableFormat> {
@@ -659,7 +659,7 @@ fn release_report(release: &StoreReleaseState) -> ReleaseStampReport {
 }
 
 // Gated with the language, not merely with `test`: every fixture in there
-// describes a store holding Lashlang durable data, and the version constants
+// describes a store holding Lash VM durable data, and the version constants
 // it compares against are themselves `rlm`-only.
 #[cfg(all(test, feature = "rlm"))]
 mod tests;

@@ -77,7 +77,7 @@ pub(super) struct CurrentIterationMessageInput {
     pub(super) protocol_iteration: usize,
 }
 
-/// Assistant prose awaiting a fold into the next lashlang step. Buffered because
+/// Assistant prose awaiting a fold into the next lash_vm step. Buffered because
 /// `visit_turn_view` is a push visitor with no lookahead.
 struct PendingProse {
     text: String,
@@ -146,7 +146,7 @@ pub(super) fn render_history_messages(
             BorrowedChronologicalPayload::Message(message)
                 if matches!(message.role, lash_core::MessageRole::Assistant) =>
             {
-                // Assistant prose: buffer to fold into the next lashlang step.
+                // Assistant prose: buffer to fold into the next lash_vm step.
                 flush_pending_prose(&mut messages, &mut pending);
                 let mut image_blocks = Vec::new();
                 append_borrowed_entry_image_blocks(entry, &mut image_blocks);

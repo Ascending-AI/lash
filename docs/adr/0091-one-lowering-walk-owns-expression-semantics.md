@@ -32,8 +32,8 @@ completion. Index expressions lower both target and index operands.
 Product registration keys belong to the host under ADR 0137. Lowering checks
 ordinary tool contracts and carries no static product-routing facts.
 
-Evidence: `crates/lashlang/src/linker/lower_expr.rs` and
-`crates/lashlang/src/linker/pass_validation.rs`.
+Evidence: `crates/lash-vm/src/linker/lower_expr.rs` and
+`crates/lash-vm/src/linker/pass_validation.rs`.
 
 ## Alternatives considered
 

@@ -199,7 +199,7 @@ fn link_rejection(
     expired: BTreeSet<String>,
 ) -> Option<(String, String)> {
     globals.insert("history".to_string());
-    let environment = lash_lashlang_runtime::LashlangSurface::default()
+    let environment = lash_vm_runtime::LashVmSurface::default()
         .host_environment(&lash_core::ToolCatalog::default())
         .expect("the default surface builds a host environment")
         .with_globals(globals)
@@ -223,7 +223,7 @@ fn link_rejection(
 /// (ADR 0062, register entry `runtime-fault-brand`), so that is its class.
 fn thrown_class(message: &str) -> String {
     message
-        .strip_prefix("uncaught lashlang exception: ")
+        .strip_prefix("uncaught lash_vm exception: ")
         .and_then(|rest| rest.lines().next())
         .and_then(|thrown| serde_json::from_str::<serde_json::Value>(thrown).ok())
         .map_or_else(

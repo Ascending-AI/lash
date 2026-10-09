@@ -61,8 +61,8 @@ fn workspace_inventory_keeps_protocol_crates_out_of_lash_core_dependencies() {
 
     let forbidden_library_targets = [
         concat!("lash_protocol_", "r", "lm"),
-        concat!("lash_", "lash", "lang_runtime"),
-        concat!("lash", "lang"),
+        concat!("lash_", "vm_runtime"),
+        concat!("lash_", "vm"),
         "lash_protocol_standard",
     ];
     let forbidden_package_names = packages
@@ -131,7 +131,7 @@ fn scan_path(path: &Path, failures: &mut Vec<String>) {
     let text = fs::read_to_string(path)
         .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
     let lower = text.to_ascii_lowercase();
-    for needle in [concat!("lash", "lang"), concat!("r", "lm")] {
+    for needle in [concat!("lash_", "vm"), concat!("r", "lm")] {
         if !lower.contains(needle) {
             continue;
         }

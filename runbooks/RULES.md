@@ -71,10 +71,10 @@ Confirm the served language from the row's **own evidence** — prompt, cell tag
 events — never from the environment. The environment is what you asked for; the evidence
 is what you got, and the gap between them is the whole reason the label exists.
 
-Runbook prose predating this ruling may say "Lashlang cell/program/source". Read that as
+Runbook prose predating this ruling may say "Lash VM cell/program/source". Read that as
 the TypeScript cell and its source unless it names a stable product API, artifact
-filename, trace field, or historical term (for example `/api/lashlang-graphs` or
-`lashlang-execution.jsonl`), which keep their spellings because they name the IR and the
+filename, trace field, or historical term (for example `/api/lash-vm-graphs` or
+`lash-vm-execution.jsonl`), which keep their spellings because they name the IR and the
 VM, which are not retired. Prompts ask for outcomes, not ready-made source. A
 deterministic provider must expose a TypeScript program its scenario can actually run;
 serving a program in the retired surface is a failed harness, not a skipped row.
@@ -257,7 +257,7 @@ workspace feature resolution the generated BUCK files describe, so no Buck2 labe
 that shape.
 
 This exists because a judged run scores what the host ships. A `dev` build turns
-in-contract outcomes into opaque failures: an exhausted Lashlang execution bound is a
+in-contract outcomes into opaque failures: an exhausted Lash VM execution bound is a
 `Policy` observation the runtime hands back to the agent, but under the workbench's old
 `testing`-feature build it tripped an assertion inside the effect task and the turn
 surfaced as `effect_panicked` → "turn could not be completed" — a permanently

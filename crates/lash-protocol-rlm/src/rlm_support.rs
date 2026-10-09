@@ -9,7 +9,7 @@ use lash_core::LlmUsage;
 use lash_render::{RenderNode, RenderParams, RenderValue, truncate_chars};
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
 use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeField, ShapeKind};
-use lashlang::Value as FlowValue;
+use lash_vm::Value as FlowValue;
 
 /// What a turn runs under, read from `namespace`, the RLM namespace the
 /// turn's run recorded. A session that recorded none runs under the
@@ -849,7 +849,7 @@ mod bound_variable_tests {
             .as_object()
             .expect("object")
             .iter()
-            .map(|(key, value)| (key.clone(), lashlang::from_json(value.clone())))
+            .map(|(key, value)| (key.clone(), lash_vm::from_json(value.clone())))
             .collect()
     }
 
@@ -936,7 +936,7 @@ mod bound_variable_tests {
     #[tokio::test]
     async fn model_visible_reserved_prefix_key_matches_preview_and_schema() {
         let reserved_key = "__projected__payload";
-        let value = FlowValue::Record(Arc::new(lashlang::Record::from_iter([
+        let value = FlowValue::Record(Arc::new(lash_vm::Record::from_iter([
             (
                 reserved_key.to_string(),
                 FlowValue::String("z".repeat(2_000).into()),
@@ -1023,13 +1023,13 @@ mod bound_variable_tests {
         let params = RenderParams::preview();
         assert_ne!(
             value_hash(
-                &lashlang::from_json(first),
+                &lash_vm::from_json(first),
                 &params,
                 "lash.ax.v1",
                 crate::RlmPresentationConfig::standard().max_inline_keys
             ),
             value_hash(
-                &lashlang::from_json(second),
+                &lash_vm::from_json(second),
                 &params,
                 "lash.ax.v1",
                 crate::RlmPresentationConfig::standard().max_inline_keys

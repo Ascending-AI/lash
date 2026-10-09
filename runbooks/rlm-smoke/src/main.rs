@@ -469,7 +469,7 @@ async fn main() -> Result<()> {
             .into_components(),
     )?);
     // One SQLite file store set under the data directory holds the sessions
-    // and the compiled Lashlang artifacts; the durable engine runs every turn
+    // and the compiled Lash VM artifacts; the durable engine runs every turn
     // over it.
     let stores = lash::sqlite::SqliteStoreSet::open(
         args.data_dir.join("sessions.db"),

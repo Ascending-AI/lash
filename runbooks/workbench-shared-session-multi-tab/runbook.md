@@ -249,7 +249,7 @@ Require the registration in **both** rails: the rail is a 1.4 s scoped `/api/tri
 poll, so a registration created by A's turn must appear in B without B acting. Expect the
 **lifted process hash**, not the friendly name: a trigger target defined inline is a lifted
 process named by content hash (`LIFTED_PROCESS_NAME_PREFIX = "__process_"`,
-`crates/lashlang/src/ast.rs:554`), so the rail renders `__process_<hash> ← ui.button.pressed`
+`crates/lash-vm/src/ast.rs:554`), so the rail renders `__process_<hash> ← ui.button.pressed`
 by design. Gate on the same registration appearing in both rails, not on the name the prompt
 asked for; a driver hunting for that name will report a false defect. Screenshot
 `02a-registered-{a,b,both}.png`; save `02a-triggers.json`.

@@ -16,7 +16,7 @@ members = [
     "crates/lash-core-worker",
     "crates/lash-core",
     "crates/lash-conformance",
-    "crates/lash-lashlang-runtime",
+    "crates/lash-vm-runtime",
     "crates/lash-http-transport",
     "crates/lash-llm-transport",
     "crates/lash-sqlite-store",
@@ -40,7 +40,7 @@ members = [
     "crates/lash-sim",
     "crates/lash-perf",
     "crates/lash-regress",
-    "crates/lashlang",
+    "crates/lash-vm",
     "crates/lash-typescript",
     "crates/lash-vm-protocol",
     "crates/lash-vm-broker",
@@ -280,7 +280,7 @@ lash-core-worker = { package = "lash-internal-core-worker", path = "crates/lash-
 lash-http-transport = { package = "lash-internal-http-transport", path = "crates/lash-http-transport", version = "=0.0.0-dev" }
 lash-llm-tools = { package = "lash-internal-llm-tools", path = "crates/lash-llm-tools", version = "=0.0.0-dev" }
 lash-llm-transport = { package = "lash-internal-llm-transport", path = "crates/lash-llm-transport", version = "=0.0.0-dev" }
-lash-lashlang-runtime = { package = "lash-internal-lashlang-runtime", path = "crates/lash-lashlang-runtime", version = "=0.0.0-dev" }
+lash-vm-runtime = { package = "lash-internal-vm-runtime", path = "crates/lash-vm-runtime", version = "=0.0.0-dev" }
 lash-postgres-store = { package = "lash-internal-postgres-store", path = "crates/lash-postgres-store", version = "=0.0.0-dev" }
 lash-s3-store = { package = "lash-internal-s3-store", path = "crates/lash-s3-store", version = "=0.0.0-dev" }
 lash-plugin-mcp = { package = "lash-internal-plugin-mcp", path = "crates/lash-plugin-mcp", version = "=0.0.0-dev" }
@@ -303,7 +303,7 @@ delegation = { path = "examples/delegation" }
 lash-tool-support = { package = "lash-internal-tool-support", path = "crates/lash-tool-support", version = "=0.0.0-dev" }
 lash-trace = { package = "lash-internal-trace", path = "crates/lash-trace", version = "=0.0.0-dev" }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = "crates/lash-sqlite-store", version = "=0.0.0-dev" }
-lashlang = { package = "lash-internal-lashlang", path = "crates/lashlang", version = "=0.0.0-dev" }
+lash-vm = { package = "lash-internal-vm", path = "crates/lash-vm", version = "=0.0.0-dev" }
 lash-typescript = { package = "lash-internal-typescript", path = "crates/lash-typescript", version = "=0.0.0-dev" }
 swc_common = "=25.0.0"
 swc_ecma_ast = "=28.0.0"
@@ -346,7 +346,7 @@ opt-level = 2
 # `runbooks/RULES.md` requires every judged host boot to use this profile.
 #
 # The alternative — judging a `dev` build — turned in-contract outcomes into
-# `effect_panicked`: a Lashlang execution bound the runtime is supposed to
+# `effect_panicked`: a Lash VM execution bound the runtime is supposed to
 # report back as feedback instead tripped a debug-only assertion inside the
 # effect task, and the turn surfaced as an opaque "turn could not be
 # completed". Debug-assert coverage is real coverage, but it belongs to the

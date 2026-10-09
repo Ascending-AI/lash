@@ -102,18 +102,18 @@ pub(super) fn a_typescript_rejection_reaches_the_model_with_its_own_line_number(
 
 #[tokio::test]
 pub(super) async fn typescript_method_diagnostics_consult_the_link_time_module_catalog() {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation(
             ["text"],
             "TextModule",
             "sha256",
             "tool:text/sha256",
-            lashlang::TypeExpr::Any,
-            lashlang::TypeExpr::Any,
+            lash_vm::TypeExpr::Any,
+            lash_vm::TypeExpr::Any,
         )
         .expect("text module operation");
-    let environment = lashlang::LashlangHostEnvironment::new(catalog).with_globals(["text"]);
+    let environment = lash_vm::LashVmHostEnvironment::new(catalog).with_globals(["text"]);
 
     let diagnostic = async |source: &str| match lash_vm_client::service::Service::default()
         .request_accounted(lash_vm_client::service::Request::CompileModule {
@@ -125,7 +125,7 @@ pub(super) async fn typescript_method_diagnostics_consult_the_link_time_module_c
         .expect("worker diagnostic")
     {
         lash_vm_client::service::Response::CompileRefused {
-            error: lashlang::ModuleCompileError::Parse(diagnostic),
+            error: lash_vm::ModuleCompileError::Parse(diagnostic),
             ..
         } => diagnostic.message,
         other => panic!("expected a parse refusal: {other:?}"),
@@ -159,7 +159,7 @@ impl ExecutionHost for NoopHost {
 }
 
 pub(super) async fn worker_compile_program(
-    program: &lashlang::Program,
+    program: &lash_vm::Program,
 ) -> Result<lash_vm_client::service::CompiledModule, String> {
     match lash_vm_client::service::Service::default()
         .request_accounted(lash_vm_client::service::Request::CompileAst {
@@ -188,7 +188,7 @@ impl WorkerFixtureState for lash_vm_client::RemoteState {
             .map_err(|error| error.to_string())
     }
 }
-impl WorkerFixtureState for lashlang::State {
+impl WorkerFixtureState for lash_vm::State {
     fn worker_bytes(&self) -> Option<Vec<u8>> {
         Some(
             self.snapshot()
@@ -197,8 +197,8 @@ impl WorkerFixtureState for lashlang::State {
         )
     }
     async fn install_worker_bytes(&mut self, bytes: Vec<u8>) -> Result<(), String> {
-        *self = lashlang::State::from_snapshot(
-            lashlang::VmInstance::pristine()
+        *self = lash_vm::State::from_snapshot(
+            lash_vm::VmInstance::pristine()
                 .open_snapshot(&bytes)
                 .map_err(|e| e.to_string())?,
         );
@@ -209,7 +209,7 @@ pub(super) async fn execute_with_projected(
     module: &lash_vm_client::service::CompiledModule,
     state: &mut impl WorkerFixtureState,
     projected: &ProjectedBindings,
-) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
+) -> Result<ExecutionOutcome, lash_vm::RuntimeError> {
     let service = lash_vm_client::service::Service::default();
     let owner = lash_vm_protocol::VmOwner::new("projection-witness");
     let snapshot = state
@@ -218,7 +218,7 @@ pub(super) async fn execute_with_projected(
             lash_vm_protocol::StartState::Snapshot(lash_vm_protocol::OpaqueVmState::seal(
                 lash_vm_protocol::VmStateKind::Snapshot,
                 owner.clone(),
-                lashlang::vm_contract_versions(),
+                lash_vm::vm_contract_versions(),
                 bytes,
             ))
         })
@@ -233,7 +233,7 @@ pub(super) async fn execute_with_projected(
     // A run that makes no tool call admits no member.
     struct NoMembers;
     #[async_trait::async_trait]
-    impl lash_lashlang_runtime::MemberAdmissions for NoMembers {
+    impl lash_vm_runtime::MemberAdmissions for NoMembers {
         async fn members(
             &self,
             _ordinal: u64,
@@ -242,12 +242,12 @@ pub(super) async fn execute_with_projected(
             Ok(Vec::new())
         }
     }
-    let admissions = lash_lashlang_runtime::RunAdmissions {
+    let admissions = lash_vm_runtime::RunAdmissions {
         cx: &cx,
         members: &NoMembers,
         host_state: &|| Ok(None),
     };
-    let run = lash_lashlang_runtime::WorkerRun {
+    let run = lash_vm_runtime::WorkerRun {
         service: &service,
         host: &NoopHost,
         identities: lash_vm_broker::CodeCallIdentities::process_body(
@@ -262,9 +262,9 @@ pub(super) async fn execute_with_projected(
         },
         context: lash_vm_client::RunContext::default(),
         projected: projected.clone(),
-        bounds: lashlang::ExecutionBounds::new(
-            lashlang::ExecutionBound::Unbounded,
-            lashlang::ExecutionBound::Unbounded,
+        bounds: lash_vm::ExecutionBounds::new(
+            lash_vm::ExecutionBound::Unbounded,
+            lash_vm::ExecutionBound::Unbounded,
         ),
         state: snapshot,
         from: None,
@@ -272,7 +272,7 @@ pub(super) async fn execute_with_projected(
         admissions: &admissions,
         boundary: &|| false,
         performing: None,
-        providers: lashlang::testing::projection::test_catalog(),
+        providers: lash_vm::testing::projection::test_catalog(),
     }
     .run()
     .await
@@ -292,7 +292,7 @@ pub(super) async fn execute_with_projected(
                     .await
                     .expect("install worker state");
             }
-            Err(rmp_serde::from_slice::<lashlang::RuntimeFailure>(&error.0)
+            Err(rmp_serde::from_slice::<lash_vm::RuntimeFailure>(&error.0)
                 .expect("worker guest failure")
                 .error)
         }
@@ -336,7 +336,7 @@ pub(super) struct SnapshotProjectedToolText {
     pub(super) render_count: AtomicUsize,
 }
 
-impl lashlang::testing::projection::TestView for SnapshotProjectedToolText {
+impl lash_vm::testing::projection::TestView for SnapshotProjectedToolText {
     fn type_name(&self) -> &str {
         "string"
     }
@@ -360,7 +360,7 @@ impl lashlang::testing::projection::TestView for SnapshotProjectedToolText {
     }
 }
 
-impl lashlang::testing::projection::TestView for TestProjectedValue {
+impl lash_vm::testing::projection::TestView for TestProjectedValue {
     fn type_name(&self) -> &str {
         "list"
     }
@@ -386,7 +386,7 @@ pub(super) fn projected_history(values: Vec<FlowValue>) -> ProjectedBindings {
     let mut projected = ProjectedBindings::new();
     projected.insert(
         "history",
-        lashlang::testing::projection::test_view("history", Arc::new(TestProjectedValue(values))),
+        lash_vm::testing::projection::test_view("history", Arc::new(TestProjectedValue(values))),
     );
     projected
 }
@@ -453,10 +453,7 @@ fn colliding_host_catalog() -> lash_core::ToolCatalog {
         )
         .expect("valid declared tool schemas")
         .with_execution(std::time::Duration::from_secs(120))
-        .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
-            ["test"],
-            "collision",
-        ))
+        .with_tool_binding(lash_vm_runtime::ToolBinding::new(["test"], "collision"))
     };
     lash_core::ToolCatalog::from_tool_definitions(vec![
         definition("tool:collision_a", "collision_a"),
@@ -471,8 +468,8 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
     let mut request = ExecRequest {
         code: "finish(1);".to_string(),
     };
-    let mut artifact_store: lashlang::LashlangArtifacts = handler.artifacts();
-    let mut surface = LashlangSurface::default();
+    let mut artifact_store: lash_vm::LashVmArtifacts = handler.artifacts();
+    let mut surface = LashVmSurface::default();
     let mut projected_bindings = RlmProjectedBindings::default();
 
     match site {
@@ -488,10 +485,10 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
             request.code = r#"const worker = async () => { return null; };
             finish(null);"#
                 .to_string();
-            artifact_store = lashlang::LashlangArtifacts::new(Arc::new(FailingArtifactStore));
-            surface = LashlangSurface::new(
-                lashlang::LashlangLanguageFeatures::default(),
-                lashlang::LashlangHostCatalog::new(),
+            artifact_store = lash_vm::LashVmArtifacts::new(Arc::new(FailingArtifactStore));
+            surface = LashVmSurface::new(
+                lash_vm::LashVmLanguageFeatures::default(),
+                lash_vm::LashVmHostCatalog::new(),
             );
         }
         HostSetupFailureSite::ResolveProjectedBindings => {
@@ -521,7 +518,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
         None,
         projected_bindings,
         None,
-        lashlang::ExecutionBounds::unbounded(),
+        lash_vm::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
     .await
@@ -538,7 +535,7 @@ pub(super) fn every_host_setup_failure_is_classified_as_host() {
         let cases = [
             (
                 HostSetupFailureSite::HostEnvironment,
-                "invalid Lashlang host tool surface",
+                "invalid Lash VM host tool surface",
             ),
             (
                 HostSetupFailureSite::ArtifactStore,
@@ -595,11 +592,11 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
                 code: "let survives: number = 7;".to_string(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             None,
             RlmProjectedBindings::default(),
             None,
-            lashlang::ExecutionBounds::unbounded(),
+            lash_vm::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
         .await;
@@ -613,11 +610,11 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
                 code: "let cancelledTail: number = 1; while (true) {}".to_string(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             None,
             RlmProjectedBindings::default(),
             None,
-            lashlang::ExecutionBounds::unbounded(),
+            lash_vm::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         );
         let response = Box::pin(tokio::time::timeout(
@@ -679,11 +676,11 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                         code: first_code.clone(),
                     },
                     handler.artifacts(),
-                    LashlangSurface::default(),
+                    LashVmSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
                     None,
-                    lashlang::ExecutionBounds::unbounded(),
+                    lash_vm::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
                 )
                 .await;
@@ -706,11 +703,11 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                         code: tail_code.to_string(),
                     },
                     handler.artifacts(),
-                    LashlangSurface::default(),
+                    LashVmSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
                     None,
-                    lashlang::ExecutionBounds::unbounded(),
+                    lash_vm::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
                 )
                 .await;
@@ -815,11 +812,11 @@ pub(super) async fn execute_continue_as_with_trace_sink(
                 .to_string(),
         },
         handler.artifacts(),
-        LashlangSurface::default(),
+        LashVmSurface::default(),
         None,
         RlmProjectedBindings::default(),
         trace_sink.map(test_trace),
-        lashlang::ExecutionBounds::unbounded(),
+        lash_vm::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
     .await;
@@ -848,9 +845,9 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
         // set lost the deep-copy instructions the retired surface compiled to,
         // so this program's canonical IR — and the digest keyed off it — is a
         // different constant. Re-pinned again by FIG-3071, which moved
-        // `LASHLANG_SEMANTIC_HASH_VERSION` to v10 because a declared process
+        // `LASH_VM_SEMANTIC_HASH_VERSION` to v10 because a declared process
         // parameter type now reaches module identity. Re-pinned again by
-        // FIG-2996 part 1, which moved `LASHLANG_SEMANTIC_HASH_VERSION` to v11
+        // FIG-2996 part 1, which moved `LASH_VM_SEMANTIC_HASH_VERSION` to v11
         // for the one handle kind. Re-pinned again by FIG-3088, which moved the
         // constant to v12 after the hash-writer rewrite. Re-pinned again by
         // FIG-2997, which moved the constant to v13 for the process-literal
@@ -908,7 +905,7 @@ pub(super) fn resource_call_identity_is_trace_sink_independent() {
 }
 
 #[test]
-#[should_panic(expected = "confidence execution exhausted a required Lashlang bound")]
+#[should_panic(expected = "confidence execution exhausted a required Lash VM bound")]
 pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
     let _mode = EXECUTION_BOUND_EXHAUSTION_MODE.lock_recover();
     block_on(async {
@@ -920,13 +917,13 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
                 code: "let i = 0;\nwhile (i < 5000) { i = i + 1; }\nfinish(i);".to_string(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             None,
             RlmProjectedBindings::default(),
             None,
-            lashlang::ExecutionBounds::new(
-                lashlang::ExecutionBound::instructions(1),
-                lashlang::ExecutionBound::Unbounded,
+            lash_vm::ExecutionBounds::new(
+                lash_vm::ExecutionBound::instructions(1),
+                lash_vm::ExecutionBound::Unbounded,
             ),
             crate::plugin::RlmChannel::Cell,
         )
@@ -966,11 +963,11 @@ fn typed_worker_size_limits_are_recorded_cell_failures_across_the_plugin_boundar
                     code: "finish(42);".to_owned(),
                 },
                 handler.artifacts(),
-                LashlangSurface::default(),
+                LashVmSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
                 None,
-                lashlang::ExecutionBounds::unbounded(),
+                lash_vm::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             )
             .await;

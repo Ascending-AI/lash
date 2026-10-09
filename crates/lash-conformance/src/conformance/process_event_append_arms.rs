@@ -193,7 +193,7 @@ async fn durable_effect_outcome_event_crash_windows(
         Some(lash_sansio::FailureCode::from_foreign_wire(
             "fixture:refused",
         )),
-        "lashlang:recorded-effect:1",
+        "lash_vm:recorded-effect:1",
         lash_core::FleetFormat::current(),
     );
 

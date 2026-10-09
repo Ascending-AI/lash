@@ -1,0 +1,957 @@
+use super::*;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum Binding {
+    Value(TypeExpr),
+    Function {
+        output: TypeExpr,
+    },
+    /// A compile-time schema descriptor. This metatype is linker-only: its
+    /// described shape cannot be written in LashVm's surface type grammar.
+    SchemaWitness {
+        described_ty: TypeExpr,
+    },
+    Resource {
+        resource_type: String,
+    },
+}
+
+/// The declared signature of a user function, as the call sites see it.
+///
+/// Both halves are always present: the parser makes parameter types and the
+/// return type mandatory, so a call site never has to guess and a recursive
+/// call is checked against the declaration rather than against a fixpoint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct FunctionSignature {
+    pub(super) params: Vec<(String, TypeExpr)>,
+    pub(super) return_ty: TypeExpr,
+}
+
+pub(super) fn function_signature(function: &crate::ast::FunctionDecl) -> FunctionSignature {
+    FunctionSignature {
+        params: function
+            .params
+            .iter()
+            .map(|param| (param.name.to_string(), param.ty.clone()))
+            .collect(),
+        return_ty: function.return_ty.clone(),
+    }
+}
+
+pub(super) struct Linker<'module> {
+    pub(super) program: &'module Program,
+    pub(super) surface: &'module LashVmHostEnvironment,
+    pub(super) process_types: BTreeMap<String, TypeExpr>,
+    /// Declared function signatures, keyed by name. Collected before any body
+    /// is lowered so a function may call one declared later, and itself.
+    pub(super) function_signatures: BTreeMap<String, FunctionSignature>,
+    /// Expected types recorded per node during the canonical walk, keyed by
+    /// the node's [`AstPath`] in `program`.
+    pub(super) expected_type_facts: Option<RefCell<ExpectedTypeFacts>>,
+    /// Completion facts produced by the canonical expression walk.
+    pub(super) completion_facts: RefCell<BTreeMap<AstPath, Completion>>,
+    pub(super) collect_completion: Cell<bool>,
+    /// Optional best-effort editor projection populated by the same walk.
+    pub(super) workflow_analysis: Option<RefCell<WorkflowLinkAnalysis>>,
+    pub(super) recover_workflow_errors: Cell<bool>,
+    /// The [`AstPath`] whose facts the workflow projector will read for a
+    /// recovered error in the current top-level workflow node.
+    pub(super) workflow_diagnostic_owner: RefCell<Option<AstPath>>,
+    pub(super) workflow_error_path: RefCell<Option<AstPath>>,
+
+    /// Process declarations lifted from `Expr::ProcessLiteral` during the
+    /// lowering walk, in lift order, with the span to record for each.
+    pub(super) lifted_declarations: RefCell<Vec<(Declaration, Option<Span>, AstPath)>>,
+    /// Cell locals bound to a lifted process literal, by source name: the
+    /// lifted declaration's digest name and the process type the lift settled.
+    ///
+    /// A lifted literal *is* a module-level process declaration (ADR 0095), so
+    /// one literal naming another names a declaration, not a runtime value. The
+    /// body of a lifting literal resolves such a name to that declaration's
+    /// `Expr::ProcessRef`, which is the only spelling that survives: a capture
+    /// carries the value a variable had when the process *started*, and a
+    /// nested definition has to reach the child's own start site — one level
+    /// deeper than any start argument the enclosing start can carry.
+    pub(super) lifted_process_aliases: RefCell<BTreeMap<String, (String, TypeExpr)>>,
+    /// The places whose object shapes the field guard may not trust
+    /// (FIG-3626): every read of a binding sees them open.
+    pub(super) open_places: OpenPlaces,
+}
+
+impl<'module> Linker<'module> {
+    pub(super) fn new(program: &'module Program, surface: &'module LashVmHostEnvironment) -> Self {
+        Self {
+            program,
+            surface,
+            process_types: BTreeMap::new(),
+            function_signatures: BTreeMap::new(),
+            expected_type_facts: None,
+            completion_facts: RefCell::new(BTreeMap::new()),
+            collect_completion: Cell::new(false),
+            workflow_analysis: None,
+            recover_workflow_errors: Cell::new(false),
+            workflow_diagnostic_owner: RefCell::new(None),
+            workflow_error_path: RefCell::new(None),
+            lifted_declarations: RefCell::new(Vec::new()),
+            lifted_process_aliases: RefCell::new(BTreeMap::new()),
+            open_places: OpenPlaces::of(program),
+        }
+    }
+
+    /// The source span recorded for the node at `path`, if the program
+    /// carries one.
+    pub(super) fn expression_span(&self, path: &AstPath) -> Option<Span> {
+        self.program.spans.get(path).copied()
+    }
+
+    pub(super) fn with_expected_type_facts(mut self) -> Self {
+        self.expected_type_facts = Some(RefCell::new(ExpectedTypeFacts::default()));
+        self
+    }
+
+    pub(super) fn with_workflow_analysis(mut self) -> Self {
+        self.workflow_analysis = Some(RefCell::new(WorkflowLinkAnalysis::default()));
+        self
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "a declaration count below u32::MAX is guaranteed by any AST that got this far"
+    )]
+    pub(super) fn link_program(&mut self) -> Result<Program, LinkError> {
+        // Single walk: collect declaration metadata, then lower (and validate)
+        // declarations in source order, then lower main. Declaration errors
+        // therefore still surface before main errors, matching the prior
+        // two-pass (validate-then-lower) ordering.
+        self.collect_declarations()?;
+        let declarations = self
+            .program
+            .declarations
+            .iter()
+            .enumerate()
+            .map(|(index, declaration)| {
+                let span = declaration_span(self.program, index);
+                self.lower_declaration(
+                    declaration,
+                    &AstPath::declaration(index as u32, Vec::new()),
+                    span,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut scope = Scope::new(false, None);
+        for name in &self.surface.globals {
+            scope.bind(name, any_binding());
+        }
+        let main = self
+            .lower_expr(&self.program.main, &AstPath::main(Vec::new()), &mut scope)?
+            .0;
+        let mut declarations = declarations;
+        let mut spans = self.program.spans.clone();
+        for (declaration, span, source_root) in self.lifted_declarations.borrow_mut().drain(..) {
+            let index = u32::try_from(declarations.len()).expect("declaration index fits u32");
+            if let Some(span) = span {
+                spans.insert(AstPath::declaration(index, Vec::new()), span);
+            }
+            for (source_path, source_span) in &self.program.spans {
+                if source_path.root == source_root.root
+                    && source_path.steps.starts_with(&source_root.steps)
+                {
+                    spans.insert(
+                        AstPath::declaration(
+                            index,
+                            source_path.steps[source_root.steps.len()..].to_vec(),
+                        ),
+                        *source_span,
+                    );
+                }
+            }
+            declarations.push(declaration);
+        }
+        Ok(Program {
+            declarations,
+            main,
+            private_bindings: self.program.private_bindings.clone(),
+            spans,
+        })
+    }
+
+    pub(super) fn collect_declarations(&mut self) -> Result<(), LinkError> {
+        self.ensure_label_annotations_enabled_for_program()?;
+        let mut names = BTreeSet::new();
+        for (index, declaration) in self.program.declarations.iter().enumerate() {
+            let span = declaration_span(self.program, index);
+            let (namespace, name) = match declaration {
+                Declaration::Process(decl) => ("process", decl.name.as_str()),
+                // Functions need nothing from the host — no journal, no
+                // scheduler, no durability tier — so unlike `process` they are
+                // not gated on an ability. There is deliberately no host switch
+                // to turn them off.
+                Declaration::Function(decl) => {
+                    if crate::builtins::is_builtin(decl.name.as_str()) {
+                        return Err(LinkError::FunctionShadowsBuiltin {
+                            name: decl.name.to_string(),
+                            span,
+                        });
+                    }
+                    ("function", decl.name.as_str())
+                }
+            };
+            if !names.insert((namespace, name.to_string())) {
+                return Err(LinkError::DuplicateDeclaration {
+                    name: name.to_string(),
+                    span,
+                });
+            }
+            match declaration {
+                Declaration::Process(_) => {}
+                Declaration::Function(decl) => {
+                    self.function_signatures
+                        .insert(decl.name.to_string(), function_signature(decl));
+                }
+            }
+        }
+        for declaration in &self.program.declarations {
+            match declaration {
+                Declaration::Function(function) => {
+                    for param in &function.params {
+                        self.validate_type_refs(&param.ty, None)?;
+                    }
+                    self.validate_type_refs(&function.return_ty, None)?;
+                }
+                Declaration::Process(process) => {
+                    for param in &process.params {
+                        self.validate_type_refs(&param.ty, None)?;
+                    }
+
+                    if let Some(return_ty) = &process.return_ty {
+                        self.validate_type_refs(return_ty, None)?;
+                    }
+                }
+            }
+        }
+        for declaration in &self.program.declarations {
+            if let Declaration::Process(process) = declaration {
+                self.process_types.insert(
+                    process.name.to_string(),
+                    process_type_for_decl(process, TypeExpr::Any),
+                );
+            }
+        }
+        for (index, declaration) in self.program.declarations.iter().enumerate() {
+            let Declaration::Process(process) = declaration else {
+                continue;
+            };
+            let span = declaration_span(self.program, index);
+            let output = self.infer_process_output(
+                process,
+                &AstPath::declaration(index as u32, Vec::new()),
+                span,
+            )?;
+            if let Some(expected) = &process.return_ty
+                && !self.is_type_assignable(&output, expected)
+            {
+                return Err(LinkError::IncompatibleProcessReturn {
+                    process: process.name.to_string(),
+                    expected: format_type_expr(&self.resolve_type_aliases(expected)),
+                    actual: format_type_expr(&self.resolve_type_aliases(&output)),
+                    span,
+                });
+            }
+            self.process_types.insert(
+                process.name.to_string(),
+                process_type_for_decl(process, output),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn ensure_label_annotations_enabled_for_program(&self) -> Result<(), LinkError> {
+        if self.surface.language_features.label_annotations {
+            return Ok(());
+        }
+        for (index, declaration) in self.program.declarations.iter().enumerate() {
+            let span = declaration_span(self.program, index);
+            if let Declaration::Process(process) = declaration
+                && (process.label.is_some() || expr_has_label_annotation(&process.body))
+            {
+                return Err(LinkError::FeatureDisabled {
+                    feature: "label annotations",
+                    span,
+                });
+            }
+        }
+        if let Some(path) = label_annotation_path(&self.program.main) {
+            return Err(LinkError::FeatureDisabled {
+                feature: "label annotations",
+                span: self.annotation_span(&path),
+            });
+        }
+        Ok(())
+    }
+
+    /// The source span recorded for the `main`-rooted expression at `path`,
+    /// falling back to the root statement that contains it when the program
+    /// was built from an AST and carries no nested spans.
+    pub(super) fn annotation_span(&self, path: &[u32]) -> Option<Span> {
+        self.program
+            .spans
+            .get(&AstPath::main(path.to_vec()))
+            .copied()
+            .or_else(|| {
+                let root = *path.first()?;
+                self.program.spans.get(&AstPath::main(vec![root])).copied()
+            })
+    }
+
+    pub(super) fn binding_for_type(&self, ty: &TypeExpr) -> Binding {
+        match self.resource_type_for_type(ty) {
+            Some(resource_type) => Binding::Resource { resource_type },
+            _ => Binding::Value(ty.clone()),
+        }
+    }
+
+    pub(super) fn resource_type_for_type(&self, ty: &TypeExpr) -> Option<String> {
+        match self.resolve_type_aliases(ty) {
+            TypeExpr::Ref(name) if self.surface.resources.has_resource_type(name.as_str()) => {
+                Some(name.to_string())
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn resolve_type_aliases(&self, ty: &TypeExpr) -> TypeExpr {
+        self.resolve_type_aliases_inner(ty, &mut BTreeSet::new())
+    }
+
+    pub(super) fn closed_schema_witness_binding(&self, expr: &Expr) -> Option<Binding> {
+        let described_ty = match strip_label_annotation(expr) {
+            Expr::Record(entries) => {
+                let mut shorthand = serde_json::Map::new();
+                for (name, descriptor) in entries {
+                    let Expr::String(descriptor) = strip_label_annotation(descriptor) else {
+                        return None;
+                    };
+                    shorthand.insert(
+                        name.to_string(),
+                        serde_json::Value::String(descriptor.to_string()),
+                    );
+                }
+                let schema = lash_sansio::schema_contract::parse_output_schema(Some(
+                    &serde_json::Value::Object(shorthand),
+                ))
+                .ok()??;
+                crate::json_schema_to_type_expr(&schema).ok()?
+            }
+            _ => return None,
+        };
+        Some(Binding::SchemaWitness { described_ty })
+    }
+
+    pub(super) fn operation_call_output_type(
+        &self,
+        operation: &ResourceOperationBinding,
+        args: &[Expr],
+    ) -> TypeExpr {
+        let Some(output_from_input) = &operation.output_from_input else {
+            return operation.output_ty.clone();
+        };
+        direct_call_input_field(args, &output_from_input.input_field)
+            .and_then(|witness| self.closed_schema_witness_binding(witness))
+            .and_then(|binding| match binding {
+                Binding::SchemaWitness { described_ty } => Some(described_ty),
+                Binding::Value(_) | Binding::Resource { .. } | Binding::Function { .. } => None,
+            })
+            .or_else(|| output_from_input.default_schema.clone())
+            .unwrap_or(TypeExpr::Any)
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "the original signature was checked, and only aliases are resolved on the way out, so the rebuilt signature remains valid, per the message"
+    )]
+    pub(super) fn resolve_type_aliases_inner(
+        &self,
+        ty: &TypeExpr,
+        seen: &mut BTreeSet<String>,
+    ) -> TypeExpr {
+        match ty {
+            TypeExpr::Ref(name) => {
+                if !seen.insert(name.to_string()) {
+                    return ty.clone();
+                }
+                let resolved = if let Some(data_type) = self
+                    .surface
+                    .resources
+                    .resolve_named_data_type(name.as_str())
+                {
+                    data_type.ty().clone()
+                } else {
+                    ty.clone()
+                };
+                seen.remove(name.as_str());
+                resolved
+            }
+            TypeExpr::List(item) => {
+                TypeExpr::List(Box::new(self.resolve_type_aliases_inner(item, seen)))
+            }
+            TypeExpr::Object(fields) => TypeExpr::Object(
+                fields
+                    .iter()
+                    .map(|field| TypeField {
+                        name: field.name.clone(),
+                        ty: self.resolve_type_aliases_inner(&field.ty, seen),
+                        optional: field.optional,
+                    })
+                    .collect(),
+            ),
+            TypeExpr::Union(items) => TypeExpr::union(
+                items
+                    .iter()
+                    .map(|item| self.resolve_type_aliases_inner(item, seen))
+                    .collect(),
+            ),
+            TypeExpr::Process(process) => match process.as_signature() {
+                None => ty.clone(),
+                Some(signature) => TypeExpr::Process(crate::ProcessType::known(
+                    crate::ProcessSignature::try_new(
+                        signature
+                            .params()
+                            .iter()
+                            .map(|param| ProcessParam {
+                                name: param.name.clone(),
+                                ty: self.resolve_type_aliases_inner(&param.ty, seen),
+                            })
+                            .collect(),
+                        self.resolve_type_aliases_inner(signature.output(), seen),
+                    )
+                    .expect("resolved checked process signature remains valid"),
+                )),
+            },
+            TypeExpr::Any
+            | TypeExpr::Str
+            | TypeExpr::Int
+            | TypeExpr::Float
+            | TypeExpr::Bool
+            | TypeExpr::Dict
+            | TypeExpr::Null
+            | TypeExpr::Enum(_) => ty.clone(),
+        }
+    }
+
+    pub(super) fn is_type_assignable(&self, source: &TypeExpr, target: &TypeExpr) -> bool {
+        let source = self.resolve_type_aliases(source);
+        let target = self.resolve_type_aliases(target);
+        if matches!(&target, TypeExpr::Dict)
+            && let TypeExpr::Ref(name) = &source
+            && self
+                .surface
+                .resources
+                .is_known_opaque_value_type(name.as_str())
+        {
+            return true;
+        }
+        crate::is_resolved_type_assignable(&source, &target)
+    }
+
+    pub(super) fn validate_expected_literals(
+        &self,
+        expr: &Expr,
+        expected: Option<&TypeExpr>,
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        let Some(expected) = expected else {
+            return Ok(());
+        };
+        let expected = self.resolve_type_aliases(expected);
+        match (expr, &expected) {
+            (Expr::String(value), TypeExpr::Enum(members)) if !members.contains(value) => {
+                Err(LinkError::IncompatibleExpectedLiteral {
+                    expected: format_type_expr(&expected),
+                    actual: format!("\"{value}\""),
+                    span,
+                })
+            }
+            (Expr::String(value), TypeExpr::Union(items)) => {
+                let accepts = items.iter().any(|item| match item {
+                    TypeExpr::Any | TypeExpr::Str => true,
+                    TypeExpr::Enum(members) => members.contains(value),
+                    _ => false,
+                });
+                if accepts {
+                    Ok(())
+                } else {
+                    Err(LinkError::IncompatibleExpectedLiteral {
+                        expected: format_type_expr(&expected),
+                        actual: format!("\"{value}\""),
+                        span,
+                    })
+                }
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub(super) fn assignment_target_type(
+        &self,
+        target: &crate::ast::AssignTarget,
+        scope: &Scope,
+    ) -> Result<Option<TypeExpr>, LinkError> {
+        let Some(mut ty) = scope
+            .binding_type(&target.root)
+            .map(|ty| self.open_type(target.root.as_str(), ty))
+        else {
+            return Ok(None);
+        };
+        for step in &target.steps {
+            ty = match step {
+                AssignPathStep::Field(field) => self.field_type(&ty, field, scope.span)?,
+                AssignPathStep::Index(_) => self.index_type(&ty, scope.span)?,
+            };
+        }
+        Ok(Some(ty))
+    }
+
+    pub(super) fn validate_shaping_builtin(
+        &self,
+        name: &str,
+        args: &[TypeExpr],
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        let incompatible = |builtin: &str, expected: &'static str, actual: &TypeExpr| {
+            LinkError::IncompatibleBuiltinOperands {
+                builtin: builtin.to_string(),
+                expected,
+                actual: format_type_expr(&self.resolve_type_aliases(actual)),
+                span,
+            }
+        };
+        match (name, args) {
+            ("sort", [list]) | ("min", [list]) | ("max", [list]) => {
+                let item = shaping_list_item(&self.resolve_type_aliases(list))
+                    .ok_or_else(|| incompatible(name, "a list or tuple", list))?;
+                if shaping_comparable_type(&item) {
+                    Ok(())
+                } else {
+                    Err(incompatible(name, "a list of comparable values", list))
+                }
+            }
+            ("sum", [list]) => {
+                let item = shaping_list_item(&self.resolve_type_aliases(list))
+                    .ok_or_else(|| incompatible("sum", "a list of numbers", list))?;
+                if shaping_number_type(&item) {
+                    Ok(())
+                } else {
+                    Err(incompatible("sum", "a list of numbers", list))
+                }
+            }
+            ("sort_by", [list, path]) => {
+                let item = shaping_list_item(&self.resolve_type_aliases(list))
+                    .ok_or_else(|| incompatible("sort_by", "a list of records", list))?;
+                if !shaping_record_type(&item) {
+                    return Err(incompatible("sort_by", "a list of records", list));
+                }
+                if shaping_text_type(&self.resolve_type_aliases(path)) {
+                    Ok(())
+                } else {
+                    Err(incompatible("sort_by", "a text field path", path))
+                }
+            }
+            ("unique" | "reverse", [list]) => {
+                if shaping_list_item(&self.resolve_type_aliases(list)).is_some() {
+                    Ok(())
+                } else {
+                    Err(incompatible(
+                        if name == "unique" {
+                            "unique"
+                        } else {
+                            "reverse"
+                        },
+                        "a list or tuple",
+                        list,
+                    ))
+                }
+            }
+            ("lower" | "upper", [value]) => {
+                if shaping_text_type(&self.resolve_type_aliases(value)) {
+                    Ok(())
+                } else {
+                    Err(incompatible(
+                        if name == "lower" { "lower" } else { "upper" },
+                        "text",
+                        value,
+                    ))
+                }
+            }
+            ("replace", [text, needle, replacement]) => {
+                for value in [text, needle, replacement] {
+                    if !shaping_text_type(&self.resolve_type_aliases(value)) {
+                        return Err(incompatible("replace", "three text arguments", value));
+                    }
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    pub(super) fn validate_type_refs(
+        &self,
+        ty: &TypeExpr,
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        match ty {
+            TypeExpr::Ref(name) => {
+                if self.surface.resources.has_resource_type(name.as_str())
+                    || self.surface.resources.has_named_data_type(name.as_str())
+                    || self
+                        .surface
+                        .resources
+                        .is_known_opaque_value_type(name.as_str())
+                {
+                    Ok(())
+                } else {
+                    Err(LinkError::UnknownType {
+                        name: name.to_string(),
+                        span,
+                    })
+                }
+            }
+            TypeExpr::List(item) => self.validate_type_refs(item, span),
+            TypeExpr::Object(fields) => {
+                for field in fields {
+                    self.validate_type_refs(&field.ty, span)?;
+                }
+                Ok(())
+            }
+            TypeExpr::Union(items) => {
+                for item in items {
+                    self.validate_type_refs(item, span)?;
+                }
+                Ok(())
+            }
+            TypeExpr::Process(process) => {
+                let Some(signature) = process.as_signature() else {
+                    return Ok(());
+                };
+                for param in signature.params() {
+                    self.validate_type_refs(&param.ty, span)?;
+                }
+                self.validate_type_refs(signature.output(), span)
+            }
+
+            TypeExpr::Any
+            | TypeExpr::Str
+            | TypeExpr::Int
+            | TypeExpr::Float
+            | TypeExpr::Bool
+            | TypeExpr::Dict
+            | TypeExpr::Null
+            | TypeExpr::Enum(_) => Ok(()),
+        }
+    }
+
+    pub(super) fn field_type(
+        &self,
+        target: &TypeExpr,
+        field: &str,
+        span: Option<Span>,
+    ) -> Result<TypeExpr, LinkError> {
+        let target = self.resolve_type_aliases(target);
+        field_type(&target, field, span, |name| {
+            self.surface.resources.is_known_opaque_value_type(name)
+        })
+    }
+
+    pub(super) fn index_type(
+        &self,
+        target: &TypeExpr,
+        span: Option<Span>,
+    ) -> Result<TypeExpr, LinkError> {
+        let target = self.resolve_type_aliases(target);
+        index_type(&target, span, |name| {
+            self.surface.resources.is_known_opaque_value_type(name)
+        })
+    }
+
+    pub(super) fn iterable_item_type(
+        &self,
+        target: &TypeExpr,
+        span: Option<Span>,
+    ) -> Result<TypeExpr, LinkError> {
+        iterable_item_type(&self.resolve_type_aliases(target), span)
+    }
+
+    pub(super) fn ensure_feature(
+        &self,
+        enabled: bool,
+        feature: &'static str,
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        if enabled {
+            Ok(())
+        } else {
+            Err(LinkError::FeatureDisabled { feature, span })
+        }
+    }
+
+    pub(super) fn validate_resource_ref(
+        &self,
+        resource: &ResourceRefExpr,
+        span: Option<Span>,
+    ) -> Result<ResourceRefExpr, LinkError> {
+        if !resource.resource_type.is_empty() {
+            return self
+                .surface
+                .resources
+                .resolve_alias(resource)
+                .map(|_| resource.clone())
+                .ok_or_else(|| LinkError::UnknownResource {
+                    path: resource.path_string(),
+                    span,
+                });
+        }
+        self.surface
+            .resources
+            .resolve_module_path(&resource.path)
+            .ok_or_else(|| LinkError::UnknownResource {
+                path: resource.path_string(),
+                span,
+            })
+    }
+
+    pub(super) fn lower_declaration(
+        &self,
+        declaration: &Declaration,
+        path: &AstPath,
+        span: Option<Span>,
+    ) -> Result<Declaration, LinkError> {
+        Ok(match declaration {
+            Declaration::Process(process) => {
+                if process.label.is_some() {
+                    self.ensure_feature(
+                        self.surface.language_features.label_annotations,
+                        "label annotations",
+                        span,
+                    )?;
+                }
+                let mut scope = Scope::new(true, span);
+                scope.expected_return = process.return_ty.clone();
+                let mut seen = BTreeSet::new();
+                for param in &process.params {
+                    if !seen.insert(param.name.to_string()) {
+                        return Err(LinkError::DuplicateProcessParam {
+                            name: param.name.to_string(),
+                            span,
+                        });
+                    }
+                    scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
+                }
+
+                scope.declare("input", Binding::Value(process_input_type(process)));
+                scope.declare("inputs", Binding::Value(process_input_record_type(process)));
+                let body = self.lower_expr(&process.body, path, &mut scope)?.0;
+                let return_ty = self
+                    .process_types
+                    .get(process.name.as_str())
+                    .and_then(|ty| match ty {
+                        TypeExpr::Process(process) => process
+                            .as_signature()
+                            .map(|signature| signature.output().clone()),
+                        _ => None,
+                    })
+                    .or_else(|| process.return_ty.clone())
+                    .unwrap_or(TypeExpr::Any);
+                Declaration::Process(ProcessDecl {
+                    name: process.name.clone(),
+                    params: process.params.clone(),
+
+                    // Linked artifacts carry the inferred result explicitly so an
+                    // immutable process identity resolves to one complete signature.
+                    return_ty: Some(return_ty),
+                    label: process.label.clone(),
+                    origin: process.origin.clone(),
+                    body,
+                })
+            }
+            Declaration::Function(function) => {
+                Declaration::Function(self.lower_function_decl(function, path, span)?)
+            }
+        })
+    }
+
+    /// Links one `fn` declaration: purity first, then types.
+    ///
+    /// The purity walk runs before the body is lowered so that a body which
+    /// both performs an effect and mentions an unknown name reports the effect.
+    /// That ordering matters for the model-facing diagnostic: the effect ban is
+    /// the rule a reader has to learn, and an incidental name error would hide
+    /// it.
+    pub(super) fn lower_function_decl(
+        &self,
+        function: &crate::ast::FunctionDecl,
+        path: &AstPath,
+        span: Option<Span>,
+    ) -> Result<crate::ast::FunctionDecl, LinkError> {
+        self.reject_effects_in_function(function, &function.body, path, span)?;
+        let mut scope = Scope::new(false, span);
+        scope.expected_return = Some(function.return_ty.clone());
+        let mut seen = BTreeSet::new();
+        for param in &function.params {
+            if !seen.insert(param.name.to_string()) {
+                return Err(LinkError::DuplicateFunctionParam {
+                    name: param.name.to_string(),
+                    span,
+                });
+            }
+            self.reject_function_name_binding(param.name.as_str(), span)?;
+            scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
+        }
+        // A function body's *variable* scope holds its parameters and nothing
+        // else. Host globals are turn state: letting a body read them would
+        // make one call's result depend on when it ran, which is exactly the
+        // property the effect ban exists to guarantee is absent. Names that are
+        // not variables at all still resolve, though -- a declared process name
+        // lowers to a process reference -- which is why the ban is re-applied
+        // to the lowered body below.
+        let (body, binding) = self.lower_expr(&function.body, path, &mut scope)?;
+        // Lowering is a resolver, not just a rewriter: it turns a bare
+        // identifier into whatever the name denotes, so it can *introduce* a
+        // forbidden node that the parsed body never contained. Walking the
+        // parsed body alone made `fn peek() -> any { worker }` link clean with
+        // an `Expr::ProcessRef` in its body. Checking both sides keeps the ban
+        // a property of the lowered program -- the thing that actually runs --
+        // while the parsed walk above still owns the precise span for effects
+        // a reader wrote themselves.
+        self.reject_effects_in_function(function, &body, path, span)?;
+        let output = binding_type(&binding);
+        if !self.is_type_assignable(&output, &function.return_ty) {
+            return Err(LinkError::IncompatibleFunctionReturn {
+                function: function.name.to_string(),
+                expected: format_type_expr(&self.resolve_type_aliases(&function.return_ty)),
+                actual: format_type_expr(&self.resolve_type_aliases(&output)),
+                span,
+            });
+        }
+        Ok(crate::ast::FunctionDecl {
+            name: function.name.clone(),
+            params: function.params.clone(),
+            return_ty: function.return_ty.clone(),
+            body,
+        })
+    }
+
+    /// Rejects every effectful construct inside a function body.
+    ///
+    /// This is the whole safety argument of the feature in one pass. Effects
+    /// keep their exactly-once identity from the syntactic site that performs
+    /// them, and continuation snapshots are taken at effect suspension points;
+    /// a function that could suspend would give one syntactic site many dynamic
+    /// occurrences and put a call frame into every snapshot. Refusing effects
+    /// outright keeps both properties true by construction rather than by
+    /// bookkeeping, which is why the ban is a link error and not a warning.
+    ///
+    /// Run on both the parsed and the lowered body: the parsed pass gives a
+    /// reader the precise span of an effect they wrote, and the lowered pass is
+    /// what makes the ban complete, because resolution can create a forbidden
+    /// node from an identifier that looked inert in the source.
+    pub(super) fn reject_effects_in_function(
+        &self,
+        function: &crate::ast::FunctionDecl,
+        body: &Expr,
+        body_path: &AstPath,
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        let mut pending = vec![(body, body_path.clone())];
+        while let Some((expr, path)) = pending.pop() {
+            if let Some(construct) = forbidden_function_construct(expr) {
+                return Err(LinkError::ForbiddenInFunction {
+                    function: function.name.to_string(),
+                    construct,
+                    span: self.expression_span(&path).or(span),
+                });
+            }
+            pending.extend(
+                expr.children()
+                    .enumerate()
+                    .map(|(index, child)| (child, path.child(index as u32))),
+            );
+        }
+        Ok(())
+    }
+
+    /// Rejects binding or reading a declared function name as a variable.
+    ///
+    /// Functions are called, never passed: there is no function type in the
+    /// surface type grammar, so a name that resolved to both a function and a
+    /// value would have no type to report at the value use. Reserving the name
+    /// keeps `name(...)` meaning exactly one thing everywhere in the program.
+    pub(super) fn reject_function_name_binding(
+        &self,
+        name: &str,
+        span: Option<Span>,
+    ) -> Result<(), LinkError> {
+        if self.function_signatures.contains_key(name) {
+            return Err(LinkError::FunctionNameIsNotAValue {
+                name: name.to_string(),
+                span,
+            });
+        }
+        Ok(())
+    }
+}
+
+/// Names the construct a function body may not contain, or `None` when the node
+/// is pure.
+///
+/// The match is exhaustive on purpose: a new `Expr` variant has to be classified
+/// here before it compiles, so an effect can never be added to the language and
+/// silently become legal inside a function.
+fn forbidden_function_construct(expr: &Expr) -> Option<&'static str> {
+    match expr {
+        Expr::ReceiverCall { .. } => Some("a module operation call"),
+        Expr::Await(_) => Some("await"),
+        Expr::SleepFor(_) => Some("sleep for"),
+        Expr::ProcessRef { .. } => Some("a process reference"),
+        Expr::ProcessLiteral(_) => Some("a process literal"),
+        Expr::Print(_) => Some("print"),
+        Expr::Finish(_) => Some("finish"),
+        Expr::Fail(_) => Some("fail"),
+        // A label names a step in the workflow graph, and a pure body
+        // contributes no steps: the annotation would be silently inert.
+        Expr::LabelAnnotated { .. } => Some("@label"),
+        Expr::Block(_)
+        | Expr::Role { .. }
+        | Expr::Null
+        | Expr::Absent
+        | Expr::Bool(_)
+        | Expr::Number(_)
+        | Expr::String(_)
+        | Expr::Variable(_)
+        | Expr::List(_)
+        | Expr::Record(_)
+        | Expr::Assign { .. }
+        | Expr::If { .. }
+        | Expr::For { .. }
+        | Expr::While { .. }
+        | Expr::Break
+        | Expr::Continue
+        | Expr::HostDescriptorConstructor { .. }
+        | Expr::ResourceRef(_)
+        | Expr::ResultUnwrap(_)
+        | Expr::BuiltinCall { .. }
+        | Expr::Function(_)
+        | Expr::Call { .. }
+        | Expr::MethodCall { .. }
+        | Expr::ThisCall { .. }
+        | Expr::FunctionCall { .. }
+        | Expr::Map { .. }
+        | Expr::Try(_)
+        | Expr::Throw(_)
+        | Expr::FunctionReturn(_)
+        | Expr::Field { .. }
+        | Expr::Index { .. }
+        | Expr::CoercingUnary { .. }
+        | Expr::CoercingBinary { .. }
+        | Expr::OperandLogical { .. } => None,
+    }
+}

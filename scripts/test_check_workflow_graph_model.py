@@ -11,7 +11,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 RLM = "crates/lash-protocol-rlm/src/executor/mod.rs"
 WORKER = "crates/lash-vm-worker/src/service.rs"
-TRACE = "crates/lash-lashlang-runtime/src/process/trace_map.rs"
+TRACE = "crates/lash-vm-runtime/src/process/trace_map.rs"
 
 
 class WorkflowGraphModelTests(unittest.TestCase):
@@ -26,31 +26,31 @@ class WorkflowGraphModelTests(unittest.TestCase):
         )
         self.write(
             "Cargo.toml",
-            '[workspace]\nmembers = ["crates/lashlang", "crates/lash-typescript"]\n',
+            '[workspace]\nmembers = ["crates/lash-vm", "crates/lash-typescript"]\n',
         )
-        for crate, role in (("lashlang", "language-neutral"), ("lash-typescript", "front-end")):
+        for crate, role in (("lash-vm", "language-neutral"), ("lash-typescript", "front-end")):
             self.write(
                 f"crates/{crate}/Cargo.toml",
                 f'[package]\nname = "{crate}"\nversion = "0.0.0"\n'
                 f'[package.metadata.lash]\nrole = "{role}"\n',
             )
-        self.write("crates/lashlang/src/lib.rs", "pub struct WorkflowGraph {}\n")
+        self.write("crates/lash-vm/src/lib.rs", "pub struct WorkflowGraph {}\n")
         self.write("crates/lash-typescript/src/lib.rs", "")
         self.write(
             RLM,
             "fn trace_main_map(artifact: &lash_vm_client::InspectedArtifact) {\n"
-            "    lash_lashlang_runtime::trace_lashlang_main_map(&artifact.graph)\n}\n",
+            "    lash_vm_runtime::trace_lashlang_main_map(&artifact.graph)\n}\n",
         )
         self.write(
             WORKER,
-            "fn inspect(artifact: &lashlang::ModuleArtifact) {\n"
+            "fn inspect(artifact: &lash_vm::ModuleArtifact) {\n"
             "    lash_vm_client::InspectedArtifact {\n"
-            "        graph: lashlang::workflow_graph_from_artifact(artifact, &lashlang::NoStatementText),\n"
+            "        graph: lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText),\n"
             "    }\n}\n",
         )
         self.write(
             TRACE,
-            "pub fn trace_lashlang_main_map(graph: &lashlang::WorkflowGraph) {\n"
+            "pub fn trace_lashlang_main_map(graph: &lash_vm::WorkflowGraph) {\n"
             "    trace_workflow_subgraph(&graph.main)\n}\n",
         )
         (self.root / "examples").mkdir()
@@ -78,7 +78,7 @@ class WorkflowGraphModelTests(unittest.TestCase):
         self.write(
             TRACE,
             "#[cfg(test)]\nmod tests {\n"
-            "    fn fixture() { lashlang::workflow_graph_from_artifact(artifact, &lashlang::NoStatementText); }\n"
+            "    fn fixture() { lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText); }\n"
             "}\n",
         )
         result = self.check()
@@ -96,7 +96,7 @@ class WorkflowGraphModelTests(unittest.TestCase):
         with (self.root / TRACE).open("a") as source:
             source.write(
                 "#[cfg(test)]\nmod tests {\n"
-                "    fn fixture() { lashlang::workflow_graph_from_artifact(artifact, &lashlang::NoStatementText); }\n"
+                "    fn fixture() { lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText); }\n"
                 "}\n"
             )
         result = self.check()
@@ -110,17 +110,17 @@ class WorkflowGraphModelTests(unittest.TestCase):
     def optional_worker_edge(self, features):
         self.write(
             "Cargo.toml",
-            '[workspace]\nmembers = ["crates/lashlang", "crates/lash-typescript", '
-            '"crates/lash-lashlang-runtime", "crates/lash-vm-worker"]\n',
+            '[workspace]\nmembers = ["crates/lash-vm", "crates/lash-typescript", '
+            '"crates/lash-vm-runtime", "crates/lash-vm-worker"]\n',
         )
         self.write(
-            "crates/lash-lashlang-runtime/Cargo.toml",
-            '[package]\nname = "lashlang-runtime"\nversion = "0.0.0"\n'
+            "crates/lash-vm-runtime/Cargo.toml",
+            '[package]\nname = "lash-vm-runtime"\nversion = "0.0.0"\n'
             '[package.metadata.lash]\nrole = "language-neutral"\n'
             '[dependencies]\nworker = { package = "vm-worker", path = "../lash-vm-worker", optional = true }\n'
             f'[features]\n{features}\n',
         )
-        self.write("crates/lash-lashlang-runtime/src/lib.rs", "")
+        self.write("crates/lash-vm-runtime/src/lib.rs", "")
         self.write(
             "crates/lash-vm-worker/Cargo.toml",
             '[package]\nname = "vm-worker"\nversion = "0.0.0"\n'

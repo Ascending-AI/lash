@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core::ExecRequest;
-use lash_lashlang_runtime::LashlangSurface;
+use lash_vm_runtime::LashVmSurface;
 
 use crate::executor::RlmExecutionState;
 use crate::projection::{RlmProjectedBindings, flow_to_json_value};
@@ -166,7 +166,7 @@ impl Session {
         };
         let state = &mut self.state;
         let host_bindings = self.host_bindings.clone();
-        let artifact_store = lashlang::LashlangArtifacts::of_backend(self.host.backend());
+        let artifact_store = lash_vm::LashVmArtifacts::of_backend(self.host.backend());
         let cell = self.history.len();
         let ports = self.host.ports();
         let response = self.runtime.block_on(async move {
@@ -190,11 +190,11 @@ impl Session {
                 context.with_recorded_render(crate::testing::recorded_test_render()),
                 request,
                 artifact_store,
-                LashlangSurface::default(),
+                LashVmSurface::default(),
                 None,
                 host_bindings,
                 None,
-                lashlang::ExecutionBounds::unbounded(),
+                lash_vm::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
                 crate::render::CodeRendererSlot::default(),
             )
@@ -307,7 +307,7 @@ impl Session {
                 .runtime
                 .block_on(
                     self.state
-                        .opaque_bound_variables(&none, &lashlang::BindingSummaryConfig::standard()),
+                        .opaque_bound_variables(&none, &lash_vm::BindingSummaryConfig::standard()),
                 )
                 .expect("opaque summaries"),
             &crate::dialect::TypescriptDialect,

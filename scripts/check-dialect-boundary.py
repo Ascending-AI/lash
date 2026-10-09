@@ -50,7 +50,7 @@ RETIRED_BINDING_NAMES = re.compile(
 # Shared code-mode production code: everything a second dialect runs through.
 SHARED_CODE_MODE_ROOTS = (
     "crates/lash-protocol-rlm/src/",
-    "crates/lash-lashlang-runtime/src/",
+    "crates/lash-vm-runtime/src/",
     "crates/lash-rlm-types/src/",
 )
 TYPESCRIPT_PROMPT_TEXT = re.compile(

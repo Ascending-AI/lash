@@ -5,7 +5,7 @@ use super::{ExecutionBounds, InstructionBound, MemoryBound, RlmLanguageFeatures}
 #[serde(default, deny_unknown_fields)]
 pub struct RlmPresentationConfig {
     pub tools: lash_sansio::ToolPresentationConfig,
-    pub binding_summary: lashlang::BindingSummaryConfig,
+    pub binding_summary: lash_vm::BindingSummaryConfig,
     pub max_inline_keys: usize,
     pub max_tool_call_records: usize,
     pub max_inline_scalar_bytes: usize,
@@ -22,7 +22,7 @@ impl RlmPresentationConfig {
     pub const fn standard() -> Self {
         Self {
             tools: lash_sansio::ToolPresentationConfig::standard(),
-            binding_summary: lashlang::BindingSummaryConfig::standard(),
+            binding_summary: lash_vm::BindingSummaryConfig::standard(),
             max_inline_keys: 12,
             max_tool_call_records: 128,
             max_inline_scalar_bytes: 64 * 1024,
@@ -33,7 +33,7 @@ impl RlmPresentationConfig {
 /// A host's RLM protocol configuration.
 ///
 /// The physical slots (the code renderer) are bound live. Every behavioural
-/// choice — the execution bounds, the Lashlang language
+/// choice — the execution bounds, the Lash VM language
 /// features, the prompt features, discovery, the output limit, the soft
 /// context-budget warning and the render — is this deployment's creation
 /// default: a session
@@ -59,12 +59,12 @@ pub struct RlmProtocolPluginConfig {
     pub memory_limit: MemoryBound,
     #[serde(default)]
     pub prompt_features: crate::protocol::RlmPromptFeatures,
-    /// Lashlang language features offered to the model. Absent from a host's
+    /// Lash VM language features offered to the model. Absent from a host's
     /// config means the RLM default (label annotations on); a host that spells
     /// a feature `false` gets it off end to end — the plugin never re-enables
     /// it (FIG-2768).
-    #[serde(default = "default_lashlang_language_features")]
-    pub lashlang_language_features: RlmLanguageFeatures,
+    #[serde(default = "default_lash_vm_language_features")]
+    pub lash_vm_language_features: RlmLanguageFeatures,
     #[serde(default = "default_max_output_chars")]
     pub max_output_chars: usize,
     #[serde(default = "default_continue_as_soft_warn_tokens")]
@@ -82,7 +82,7 @@ fn default_continue_as_soft_warn_tokens() -> Option<usize> {
 /// The RLM protocol's default language-feature set. This is the single site
 /// that decides the default: the builder and serde both read it, and the
 /// plugin factory applies the host's value verbatim.
-fn default_lashlang_language_features() -> RlmLanguageFeatures {
+fn default_lash_vm_language_features() -> RlmLanguageFeatures {
     RlmLanguageFeatures::default().with_label_annotations()
 }
 
@@ -97,7 +97,7 @@ fn default_lashlang_language_features() -> RlmLanguageFeatures {
 pub struct RlmRecordedBehaviour {
     pub instruction_limit: InstructionBound,
     pub memory_limit: MemoryBound,
-    pub lashlang_language_features: RlmLanguageFeatures,
+    pub lash_vm_language_features: RlmLanguageFeatures,
     pub prompt_features: crate::protocol::RlmPromptFeatures,
     pub max_output_chars: usize,
     /// The prompt-token threshold of the soft context-budget warning, or
@@ -184,7 +184,7 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
             prompt_features: crate::protocol::RlmPromptFeatures::default(),
-            lashlang_language_features: default_lashlang_language_features(),
+            lash_vm_language_features: default_lash_vm_language_features(),
             max_output_chars: default_max_output_chars(),
             continue_as_soft_warn_tokens: default_continue_as_soft_warn_tokens(),
         }
@@ -226,7 +226,7 @@ impl RlmProtocolPluginConfig {
         RlmRecordedBehaviour {
             instruction_limit: self.instruction_limit,
             memory_limit: self.memory_limit,
-            lashlang_language_features: self.lashlang_language_features,
+            lash_vm_language_features: self.lash_vm_language_features,
             prompt_features: self.prompt_features,
             max_output_chars: self.max_output_chars,
             continue_as_soft_warn_tokens: self.continue_as_soft_warn_tokens,
@@ -246,7 +246,7 @@ impl RlmProtocolPluginConfig {
         self.instruction_limit = behaviour.instruction_limit;
         self.memory_limit = behaviour.memory_limit;
 
-        self.lashlang_language_features = behaviour.lashlang_language_features;
+        self.lash_vm_language_features = behaviour.lash_vm_language_features;
         self.prompt_features = behaviour.prompt_features;
         self.max_output_chars = behaviour.max_output_chars;
         self.continue_as_soft_warn_tokens = behaviour.continue_as_soft_warn_tokens;
@@ -259,11 +259,11 @@ impl RlmProtocolPluginConfig {
         self
     }
 
-    pub fn with_lashlang_language_features(
+    pub fn with_lash_vm_language_features(
         mut self,
         language_features: impl Into<RlmLanguageFeatures>,
     ) -> Self {
-        self.lashlang_language_features = language_features.into();
+        self.lash_vm_language_features = language_features.into();
         self
     }
 }

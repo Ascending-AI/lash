@@ -4,11 +4,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::plugins::{AdmittedPluginConfig, EngineSteps, PluginHost};
-use crate::rlm::lang::{
-    self, ExecutionBound, ExecutionBounds, ExecutionMode, VmExecutionStart, VmInstance, VmRequest,
-    VmRunConfig, VmStep,
-};
 use crate::rlm::*;
+use crate::vm::{
+    self, ExecutionBound, ExecutionMode, VmExecutionBounds, VmExecutionStart, VmInstance,
+    VmRequest, VmRunConfig, VmStep,
+};
+use crate::vm::{
+    LashVmEngineSteps, LashVmProcessEngine, LashVmSurface, VmSegmentPolicy, WorkerService,
+    WorkerTuning,
+};
 
 async fn backend() -> std::result::Result<crate::Backend, Box<dyn std::error::Error>> {
     let stores = crate::sqlite::SqliteStoreSet::memory().await?;
@@ -30,10 +34,10 @@ fn factory(backend: &crate::Backend, service: WorkerService) -> RlmProtocolPlugi
 
 async fn compile(
     factory: RlmProtocolPluginFactory,
-) -> std::result::Result<ModuleCompileOutput, LashlangModuleCompileError> {
+) -> std::result::Result<ModuleCompileOutput, LashVmModuleCompileError> {
     let factory = Arc::new(factory);
     factory
-        .compile_lashlang_module(
+        .compile_lash_vm_module(
             &PluginHost::new(
                 vec![factory.clone()],
                 lash_core::ExecutionBudgets::recommended(),
@@ -41,7 +45,7 @@ async fn compile(
                     lash_core::facade_support::SystemClock,
                 )),
             ),
-            LashlangModuleCompileRequest::new(
+            LashVmModuleCompileRequest::new(
                 "worker-policy",
                 "const answer = 42;",
                 crate::process::ProcessExecutionEnvSpec::new(
@@ -75,7 +79,7 @@ async fn facade_pool_capacity_and_parent_wait_reach_real_workers() {
         .await
         .expect_err("parent wait expired");
     assert!(
-        matches!(error, LashlangModuleCompileError::Worker(_)),
+        matches!(error, LashVmModuleCompileError::Worker(_)),
         "the refusal must come from the worker: {error}"
     );
 }
@@ -99,16 +103,16 @@ async fn facade_parser_stack_policy_reaches_worker_frontend() {
 
 fn program(
     source: &str,
-) -> std::result::Result<Arc<lang::CompiledProgram>, Box<dyn std::error::Error>> {
+) -> std::result::Result<Arc<vm::CompiledProgram>, Box<dyn std::error::Error>> {
     let ast = crate::typescript::parse(source)?;
-    let artifact = lang::ModuleArtifact::from_program(ast)?;
-    Ok(Arc::new(lang::compile(&artifact, lang::Entry::Main, None)?))
+    let artifact = vm::ModuleArtifact::from_program(ast)?;
+    Ok(Arc::new(vm::compile(&artifact, vm::Entry::Main, None)?))
 }
 
 /// D-DEFAULTS2: cancellation pacing changes when a pure VM hands control back.
 #[test]
 fn facade_cancellation_pacing_changes_first_vm_checkpoint() {
-    let mut config = VmRunConfig::new(ExecutionMode::Foreground, ExecutionBounds::unbounded());
+    let mut config = VmRunConfig::new(ExecutionMode::Foreground, VmExecutionBounds::unbounded());
     config.pacing.cooperative_yield_instructions = NonZeroUsize::MIN;
     config.pacing.cancel_checkpoint_instructions = NonZeroU64::MIN;
     let step = VmInstance::pristine()
@@ -132,7 +136,7 @@ fn facade_gc_cadence_prevents_transient_allocations_exhausting_memory() {
             .expect("compile");
     let mut config = VmRunConfig::new(
         ExecutionMode::Foreground,
-        ExecutionBounds::new(
+        VmExecutionBounds::new(
             ExecutionBound::Unbounded,
             ExecutionBound::Bounded(NonZeroU64::new(4096).expect("memory")),
         ),
@@ -167,19 +171,19 @@ fn facade_zero_cache_capacity_bypasses_residency_across_reset() {
         tuning.linked_program_cache_capacity,
         tuning.compiled_process_cache_capacity,
     );
-    let environment = lang::LashlangHostEnvironment::default();
+    let environment = vm::LashVmHostEnvironment::default();
     let source = "const scan = async () => 42;";
-    let builders = lang::testing::ast_builders::module(
-        vec![lang::testing::ast_builders::process(
+    let builders = vm::testing::ast_builders::module(
+        vec![vm::testing::ast_builders::process(
             "scan",
             Vec::new(),
-            lang::testing::ast_builders::block(vec![lang::testing::ast_builders::finish(
-                lang::testing::ast_builders::num(42.0),
+            vm::testing::ast_builders::block(vec![vm::testing::ast_builders::finish(
+                vm::testing::ast_builders::num(42.0),
             )]),
         )],
         Vec::new(),
     );
-    let artifact = lang::LinkedModule::link(builders, &environment)
+    let artifact = vm::LinkedModule::link(builders, &environment)
         .expect("link process")
         .artifact;
     let process = artifact.process_ref("scan").expect("process");
@@ -222,12 +226,12 @@ async fn facade_vm_segment_policy_reaches_engine_step_admission() {
         retry_initial_ms: 11,
         retry_max_ms: 22,
     };
-    let engine = LashlangProcessEngine::new(
-        crate::persistence::LashlangArtifacts::of_backend(&backend),
-        LashlangSurface::default(),
+    let engine = LashVmProcessEngine::new(
+        crate::persistence::LashVmArtifacts::of_backend(&backend),
+        LashVmSurface::default(),
     )
     .with_segment_policy(policy);
-    let steps = LashlangEngineSteps::new(Arc::new(engine));
+    let steps = LashVmEngineSteps::new(Arc::new(engine));
     let kind = steps.kinds().pop().expect("VM run kind");
     assert_eq!(steps.execution(&kind), Duration::from_secs(7));
     assert_eq!(
@@ -259,7 +263,7 @@ async fn facade_vm_segment_policy_reaches_engine_step_admission() {
         .expect("engine contribution");
     let installed = runtime
         .process_engines
-        .engine_steps(crate::process::LASHLANG_ENGINE_KIND, &kind)
+        .engine_steps(crate::process::LASH_VM_ENGINE_KIND, &kind)
         .expect("registered step");
     assert_eq!(installed.execution(&kind), Duration::from_secs(7));
     assert_eq!(installed.retry(&kind), steps.retry(&kind));

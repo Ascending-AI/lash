@@ -655,7 +655,7 @@ pub(crate) async fn settle_retired_slot(
     );
     if replaced_current {
         state.messages.lock_recover().clear();
-        state.lashlang_execution.clear();
+        state.lash_vm_execution.clear();
         state.mail_world.clear();
         record_accounts_context(state).await?;
     }
@@ -937,30 +937,30 @@ pub(crate) async fn await_work(
     }))
 }
 
-pub(crate) async fn list_lashlang_graphs(
+pub(crate) async fn list_lash_vm_graphs(
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
-) -> Result<Json<execution_graphs::LashlangGraphIndex>, AppError> {
-    let session_id = state.admit_session(&query, "api.lashlang_graphs").await?;
+) -> Result<Json<execution_graphs::LashVmGraphIndex>, AppError> {
+    let session_id = state.admit_session(&query, "api.lash_vm_graphs").await?;
     let index = execution_graphs::index_for_session(
         &state.process_observer,
         &session_id,
-        state.lashlang_execution.graphs(),
+        state.lash_vm_execution.graphs(),
     )
     .await?;
     Ok(Json(index))
 }
 
-pub(crate) async fn lashlang_graph(
+pub(crate) async fn lash_vm_graph(
     AxumPath(graph_key): AxumPath<String>,
     State(state): State<AppState>,
     Query(query): Query<SessionQuery>,
 ) -> Result<Json<TraceLashlangGraph>, AppError> {
-    let session_id = state.admit_session(&query, "api.lashlang_graph").await?;
+    let session_id = state.admit_session(&query, "api.lash_vm_graph").await?;
     let graph = execution_graphs::visible_graph_by_key(
         &state.process_observer,
         &session_id,
-        state.lashlang_execution.graphs(),
+        state.lash_vm_execution.graphs(),
         &graph_key,
     )
     .await?;

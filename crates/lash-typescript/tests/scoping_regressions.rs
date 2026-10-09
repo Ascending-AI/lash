@@ -1,4 +1,4 @@
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
@@ -18,7 +18,7 @@ impl ExecutionHost for Host {
 
 fn finished(source: &str) -> Value {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
-    match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    match futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
         .expect("TypeScript should execute")
     {
         ExecutionOutcome::Finished(value) => value,
@@ -161,8 +161,8 @@ fn nested_function_loop_break_lowers_to_break_inside_switch_case() {
     )
     .expect("nested function loop break should lower");
 
-    fn break_count(expression: &lashlang::Expr) -> usize {
-        usize::from(matches!(expression, lashlang::Expr::Break))
+    fn break_count(expression: &lash_vm::Expr) -> usize {
+        usize::from(matches!(expression, lash_vm::Expr::Break))
             + expression.children().map(break_count).sum::<usize>()
     }
 
@@ -237,12 +237,12 @@ fn generated_binding_namespace_is_reserved() {
     // lowerer's own namespace and silently take a block-local value, including
     // over a durable root global.
     for source in [
-        "const __lashlang_0_a = 'top'; { const a = 'inner'; } finish(__lashlang_0_a);",
-        "const f = () => { const __lashlang_0_b = 'fn'; { const b = 'blk'; } return __lashlang_0_b; }; finish(f());",
-        "function __lashlang_0_f(): number { return 1; } finish(__lashlang_0_f());",
-        "const g = (__lashlang_0_p: number): number => __lashlang_0_p; finish(g(1));",
-        "try { throw 1; } catch (__lashlang_0_e) { finish(1); }",
-        "let __lashlang_0_frame = 1; finish(__lashlang_0_frame);",
+        "const __lash_vm_0_a = 'top'; { const a = 'inner'; } finish(__lash_vm_0_a);",
+        "const f = () => { const __lash_vm_0_b = 'fn'; { const b = 'blk'; } return __lash_vm_0_b; }; finish(f());",
+        "function __lash_vm_0_f(): number { return 1; } finish(__lash_vm_0_f());",
+        "const g = (__lash_vm_0_p: number): number => __lash_vm_0_p; finish(g(1));",
+        "try { throw 1; } catch (__lash_vm_0_e) { finish(1); }",
+        "let __lash_vm_0_frame = 1; finish(__lash_vm_0_frame);",
     ] {
         assert_eq!(
             lash_typescript::testing::compile(source)
@@ -296,7 +296,7 @@ fn named_function_expressions_bind_their_own_name() {
     // The generated namespace is reserved on this path too.
     assert_eq!(
         lash_typescript::testing::compile(
-            "const g = function __lashlang_h(): number { return 1; };"
+            "const g = function __lash_vm_h(): number { return 1; };"
         )
         .expect_err("a generated-namespace expression name must reject")
         .code,
@@ -338,7 +338,7 @@ fn assignment_preserves_the_exotic_iterable_role_through_its_rhs() {
 
 /// A top-level typo deep in a cell must be refused before a single effect
 /// runs, *and* the refusal must say where. The location half of this property
-/// used to be pinned on the retired Lashlang front end
+/// used to be pinned on the retired Lash VM front end
 /// (`unknown_top_level_name_on_line_40_fails_at_link`); it is re-pinned here
 /// from a TypeScript cell, which is the only surface that reaches lowering now.
 #[test]

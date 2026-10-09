@@ -2,7 +2,7 @@
 //! restore.
 
 use super::*;
-use lashlang::{
+use lash_vm::{
     DurableBaseline, DurableFragment, ProjectedReadRequest, ProjectedReadResponse,
     Record as FlowRecord, State as FlowState, Value as FlowValue,
 };
@@ -117,7 +117,7 @@ fn canonical_string_global_body(body_len: usize) -> Vec<u8> {
 async fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
     let old_snapshot = serde_json::to_vec(&json!({
         "version": 5,
-        "engine": "lashlang",
+        "engine": "lashvm",
         "vars": "{\"globals\":{}}",
         "files": {},
         "deferred_resolutions": {"resolutions": {}}
@@ -180,7 +180,7 @@ async fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
     let hydration = lash_core::plugin::HydratedExecutionState {
         root: rmp_serde::to_vec_named(&UnexpectedFilesEnvelope {
             version: RLM_SNAPSHOT_VERSION,
-            engine: "lashlang",
+            engine: "lashvm",
             globals: BTreeMap::new(),
             files: BTreeMap::new(),
             deferred_resolutions: json!({"resolutions": {}}),
@@ -189,7 +189,7 @@ async fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
         .into(),
         components: BTreeMap::new(),
     };
-    let mut target = RlmExecutionState::for_engine("lashlang");
+    let mut target = RlmExecutionState::for_engine("lashvm");
 
     let error = target
         .restore_execution_state(&hydration, lash_core::FleetFormat::current())
@@ -205,7 +205,7 @@ async fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
 
 #[tokio::test]
 async fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
-    let mut source = RlmExecutionState::for_engine("lashlang");
+    let mut source = RlmExecutionState::for_engine("lashvm");
     let hydration = hydrate(
         source
             .snapshot_execution_state(lash_core::FleetFormat::current())
@@ -222,7 +222,7 @@ async fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     assert!(matches!(
         error,
         RlmSnapshotError::EngineMismatch { expected, found }
-            if expected == "typescript" && found == "lashlang"
+            if expected == "typescript" && found == "lashvm"
     ));
 }
 
@@ -230,7 +230,7 @@ async fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
 /// cutover (FIG-3605) for the cell
 /// `const kept = [1, 2]; const order = { zeta: 1, alpha: 2 };` in the
 /// cell-conformance harness. Both bodies are inline one-binding host-view
-/// snapshots at Lashlang snapshot version 7, and the `order` body lists
+/// snapshots at Lash VM snapshot version 7, and the `order` body lists
 /// `alpha` before `zeta`: the sorted order FIG-3606 removes.
 const V22_PREDECESSOR_ROOT_HEX: &str = concat!(
     "86a776657273696f6e16a6656e67696e65aa74797065736372697074a7676c6f62616c7382a46b65707482a46b696e64",
@@ -480,7 +480,7 @@ async fn excludes_top_level_globals_containing_nested_projected_values() {
     // is the one that stays a projection inside a held value.
     record.insert(
         "body".to_string(),
-        FlowValue::Projected(lashlang::testing::projection::test_view(
+        FlowValue::Projected(lash_vm::testing::projection::test_view(
             "body",
             Arc::new(CountingProjectedValue::default()),
         )),
@@ -514,7 +514,7 @@ struct CountingProjectedValue {
     render_count: AtomicUsize,
 }
 
-impl lashlang::testing::projection::TestView for CountingProjectedValue {
+impl lash_vm::testing::projection::TestView for CountingProjectedValue {
     fn type_name(&self) -> &str {
         "string"
     }
@@ -545,7 +545,7 @@ async fn excludes_custom_projected_globals_without_rendering_or_materializing() 
         .state_mut()
         .insert_global(
             "projected".to_string(),
-            FlowValue::Projected(lashlang::testing::projection::test_view(
+            FlowValue::Projected(lash_vm::testing::projection::test_view(
                 "projected",
                 projected.clone(),
             )),
@@ -575,12 +575,12 @@ async fn excludes_custom_projected_globals_without_rendering_or_materializing() 
 #[test]
 fn the_1_0_root_encodes_to_golden_bytes() {
     const GOLDEN: &str = concat!(
-        "84a776657273696f6e01a6656e67696e65a86c6173686c616e67ac73746174655f686561646572c40a81a77665727369",
-        "6f6e01a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a5",
-        "76616c756582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f63",
-        "6f6d706f7369746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f62",
-        "6c616b65332f636637373832346332633132316630306631336265633431396261643064646637666539306466393137",
-        "30653732303139643938633732356164653966363561",
+        "84a776657273696f6e01a6656e67696e65a66c617368766dac73746174655f686561646572c40a81a776657273696f6e",
+        "01a7676c6f62616c7382ad696e6c696e655f7363616c617282a46b696e64a6696e6c696e65a4626f6479c42982a57661",
+        "6c756582a46b696e64a6737472696e67a576616c7565a5736d616c6ca76f626a6563747390b06c65616665645f636f6d",
+        "706f7369746582a46b696e64a46c656166a9636f6d706f6e656e74d957657865637574696f6e5f73746174652f626c61",
+        "6b65332f6366373738323463326331323166303066313362656334313962616430646466376665393064663931373065",
+        "3732303139643938633732356164653966363561",
     );
 
     let prior_leaf_keys = BTreeSet::new();
@@ -603,7 +603,7 @@ fn the_1_0_root_encodes_to_golden_bytes() {
     globals.insert("leafed_composite".to_string(), leaf_global);
     let root = RlmSnapshotRoot {
         version: RLM_SNAPSHOT_VERSION,
-        engine: "lashlang".to_string(),
+        engine: "lashvm".to_string(),
         state_header: FlowState::new()
             .durable_parts(
                 &DurableBaseline::default(),

@@ -141,7 +141,7 @@ run on merge groups, dispatches, and pull requests whose diff touches
 feature-gated code. The job is a matrix of four shards:
 `scripts/ci/feature_lane_shards.py` gives every lane target one owning shard,
 keeping each lane whole and balancing by measured compile reservation, and
-`CI conclusion` requires all four. Deferred Unicode and the lashlang consumer
+`CI conclusion` requires all four. Deferred Unicode and the lash_vm consumer
 remain dispatch-only.
 `docs/agents/hermetic-build.md` records how the resolution is computed and
 reconciled against Cargo, and the one faithfulness limitation that remains.
@@ -151,7 +151,7 @@ trigger at all: the queue already validated the exact tree that main
 fast-forwards to, so a second automatic run over the same tree bought nothing.
 The heavy families — `Test heavy suites`, `Test S3 store against Garage`, both
 `Functional E2E` jobs, `Fuzz smoke`, `Stack budget`, `Test deferred Unicode suites`,
-`Lashlang Git consumer` and `Build worker release artifacts` —
+`Lash VM Git consumer` and `Build worker release artifacts` —
 run on a manual `workflow_dispatch` of `ci.yml`, which is exactly the full
 profile release.yml certifies against. `Feature lanes` still compiles on
 trusted merge groups and on pull requests whose diff can move a Rust build. The

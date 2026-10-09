@@ -80,7 +80,7 @@ pub(crate) enum RuntimePerfScenario {
     RlmLlmQuery,
     RlmGlobals,
     RlmLargePrint,
-    RlmStreamedPairedLashlang,
+    RlmStreamedPairedLashVm,
     RlmLargeToolCatalog,
     RlmToolCatalogCold,
     RlmToolCatalogWarm,
@@ -393,7 +393,7 @@ impl RuntimePerfScenario {
             "rlm_process_handles",
             Rlm,
             AgentScenario,
-            "Measures facade process-handle orchestration across RLM and Lashlang, beyond protocol-only behavior.",
+            "Measures facade process-handle orchestration across RLM and LashVm, beyond protocol-only behavior.",
             ["agent_scenario_nested_process_start_await"]
         ),
         runtime_perf_metadata!(
@@ -434,11 +434,11 @@ impl RuntimePerfScenario {
             "rlm_large_print",
             Rlm,
             RlmProtocolScenario,
-            "Measures RLM Lashlang cell output projection and print handling."
+            "Measures RLM Lash VM cell output projection and print handling."
         ),
         runtime_perf_metadata!(
-            RlmStreamedPairedLashlang,
-            "rlm_streamed_paired_lashlang",
+            RlmStreamedPairedLashVm,
+            "rlm_streamed_paired_lash_vm",
             Rlm,
             RlmProtocolScenario,
             "Measures RLM streaming cell parsing and protocol continuation."
@@ -474,7 +474,7 @@ impl RuntimePerfScenario {
             "rlm_oblique_stack_mix",
             Rlm,
             RlmProtocolScenario,
-            "Measures mixed RLM protocol/Lashlang execution pressure without facade subagent ownership.",
+            "Measures mixed RLM protocol/Lash VM execution pressure without facade subagent ownership.",
             wiring { delegation_plugin = true, oblique_tools_plugin = true }
         ),
         runtime_perf_metadata!(

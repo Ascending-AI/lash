@@ -56,7 +56,7 @@
       oninput={(e) => (node.data.source = e.currentTarget.value)}
       onchange={() => data.onCommit?.()}
     ></textarea>
-    <div class="opaque-note">verbatim Lashlang · one statement · rendered as-is</div>
+    <div class="opaque-note">verbatim LashVm · one statement · rendered as-is</div>
   {:else}
     <pre class="opaque-ro">{node.data.source ?? ''}</pre>
     <div class="opaque-note">raw statement · switch to Power to edit</div>

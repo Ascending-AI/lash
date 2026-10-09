@@ -604,7 +604,7 @@ impl crate::ProcessEngine for ModuleNamingEngine {
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| crate::PluginError::Session("the payload names no module".into()))?;
         Ok(vec![crate::ArtifactName {
-            store: crate::ArtifactStoreId::LashlangModule,
+            store: crate::ArtifactStoreId::VmModule,
             artifact_ref: module.to_owned(),
         }])
     }

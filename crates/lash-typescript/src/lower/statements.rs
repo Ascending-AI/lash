@@ -103,7 +103,7 @@ impl Lowerer {
                         let [LashExpr::Function(definition), ..] = args.as_slice() else {
                             unreachable!("closure intrinsic starts with a function literal")
                         };
-                        debug_assert_eq!(name.as_str(), "__lashlang_closure");
+                        debug_assert_eq!(name.as_str(), "__lash_vm_closure");
                         definition
                     }
                     _ => unreachable!("function lowering returns a function expression"),

@@ -24,10 +24,10 @@ use std::num::NonZeroU64;
 use std::sync::Mutex;
 use std::task::{Context, Poll, Waker};
 
-use lashlang::testing::harness::EchoHost;
-use lashlang::{
+use lash_vm::testing::harness::EchoHost;
+use lash_vm::{
     AbilityOp, AbilityOutcome, CompiledProgram, ExecutionBound, ExecutionBounds, ExecutionHost,
-    ExecutionHostError, ExecutionMode, LashlangHostEnvironment, State, Value, VmExecutionStart,
+    ExecutionHostError, ExecutionMode, LashVmHostEnvironment, State, Value, VmExecutionStart,
     VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
 };
 
@@ -40,7 +40,7 @@ const INSTRUCTION_BUDGET: NonZeroU64 = NonZeroU64::new(2_000_000).expect("nonzer
 fn bounds() -> ExecutionBounds {
     ExecutionBounds::new(
         ExecutionBound::Bounded(INSTRUCTION_BUDGET),
-        ExecutionBound::Bounded(lashlang::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
+        ExecutionBound::Bounded(lash_vm::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
     )
 }
 
@@ -132,7 +132,7 @@ fn straight_through_within(
         transcript: Mutex::new(Vec::new()),
     };
     let mut state = globals.clone();
-    let result = ready(lashlang::execute(program, &mut state, &host));
+    let result = ready(lash_vm::execute(program, &mut state, &host));
     let end = match result {
         Ok(outcome) => format!("complete {outcome:?}"),
         Err(error) => format!("guest error {error:?}"),
@@ -185,7 +185,7 @@ fn compile(program: &CorpusProgram) -> Compiled {
     let environment = program.environment();
     let linked = lash_typescript::link(&program.source, &environment)
         .unwrap_or_else(|error| panic!("{}: does not admit: {error}", program.id));
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
     let mut globals = State::new();
     for name in &program.globals {
         globals
@@ -410,7 +410,7 @@ finish([first, second, third, total]);
     );
     let long = ExecutionBounds::new(
         ExecutionBound::Bounded(NonZeroU64::new(50_000_000).expect("nonzero")),
-        ExecutionBound::Bounded(lashlang::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
+        ExecutionBound::Bounded(lash_vm::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
     );
     for mode in [ExecutionMode::Foreground, ExecutionMode::Process] {
         let straight = straight_through_within(&program, &State::new(), mode, long);
@@ -443,14 +443,14 @@ finish([first, second, third, total]);
 /// The text session A plants everywhere guest state can live.
 const SENTINEL: &str = "SENTINEL-A-4158";
 
-fn probe_environment(globals: &[&str]) -> LashlangHostEnvironment {
-    lashlang::testing::harness::test_environment().with_globals(globals.iter().copied())
+fn probe_environment(globals: &[&str]) -> LashVmHostEnvironment {
+    lash_vm::testing::harness::test_environment().with_globals(globals.iter().copied())
 }
 
-fn link(source: &str, environment: &LashlangHostEnvironment) -> std::sync::Arc<CompiledProgram> {
+fn link(source: &str, environment: &LashVmHostEnvironment) -> std::sync::Arc<CompiledProgram> {
     let linked = lash_typescript::link(source, environment)
         .unwrap_or_else(|error| panic!("`{source}` links: {error}"));
-    std::sync::Arc::new(lashlang::testing::harness::compile_linked_main(&linked))
+    std::sync::Arc::new(lash_vm::testing::harness::compile_linked_main(&linked))
 }
 
 /// Drives a run to its end, answering every effect from the harness host.
@@ -582,7 +582,7 @@ finish(pendingEcho);
     assert!(
         matches!(
             instance.resume(VmResume::Continue),
-            Err(lashlang::VmStepError::NotRunning)
+            Err(lash_vm::VmStepError::NotRunning)
         ),
         "a reset instance has no pending request to answer"
     );
@@ -669,7 +669,7 @@ fn stepped_within(
     let mut parks = 0_usize;
     let mut owner = None::<VmInstance>;
     // The operation a parked run awaits and the outcome its host holds.
-    let mut held = None::<(String, Result<lashlang::AbilityOutcome, ExecutionHostError>)>;
+    let mut held = None::<(String, Result<lash_vm::AbilityOutcome, ExecutionHostError>)>;
     let mut effect_parks = 0_usize;
     let mut declined_parks = Vec::new();
     let mut step = instance
@@ -725,7 +725,7 @@ fn stepped_within(
             }
             VmStep::Parked(parked) => {
                 parks += 1;
-                if parked.reason == lashlang::VmParkReason::AwaitingEffect {
+                if parked.reason == lash_vm::VmParkReason::AwaitingEffect {
                     effect_parks += 1;
                     assert!(held.is_some(), "a run parks on an effect only when asked");
                 }

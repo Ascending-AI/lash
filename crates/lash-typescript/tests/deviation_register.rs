@@ -24,7 +24,7 @@
 
 use std::collections::BTreeSet;
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
@@ -552,7 +552,7 @@ fn fire(source: &str) -> Option<(String, String)> {
             return Some((diagnostic.code.as_str().to_string(), diagnostic.to_string()));
         }
     };
-    match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host)) {
+    match futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host)) {
         Ok(ExecutionOutcome::Finished(_)) => None,
         Ok(other) => Some(("<unfinished>".to_string(), format!("{other:?}"))),
         Err(error) => Some((error.code().to_string(), error.to_string())),
@@ -565,7 +565,7 @@ fn fire(source: &str) -> Option<(String, String)> {
 fn fire_session(cells: &[&str]) -> Option<(String, String)> {
     let mut state = State::new();
     for (index, source) in cells.iter().enumerate() {
-        let environment = lashlang::LashlangHostEnvironment::default()
+        let environment = lash_vm::LashVmHostEnvironment::default()
             .with_globals(
                 state
                     .binding_names()
@@ -577,11 +577,11 @@ fn fire_session(cells: &[&str]) -> Option<(String, String)> {
             Err(diagnostic) => Some((diagnostic.code.as_str().to_string(), diagnostic.to_string())),
             Ok(program) => {
                 let spans = program.spans.clone();
-                let artifact = lashlang::ModuleArtifact::from_program(program)
+                let artifact = lash_vm::ModuleArtifact::from_program(program)
                     .expect("a lowered cell forms an artifact");
-                let compiled = lashlang::compile(&artifact, lashlang::Entry::Main, Some(&spans))
+                let compiled = lash_vm::compile(&artifact, lash_vm::Entry::Main, Some(&spans))
                     .expect("a lowered cell compiles");
-                match futures::executor::block_on(lashlang::execute(&compiled, &mut state, &Host)) {
+                match futures::executor::block_on(lash_vm::execute(&compiled, &mut state, &Host)) {
                     Ok(_) => None,
                     Err(error) => Some((error.code().to_string(), error.to_string())),
                 }
@@ -617,7 +617,7 @@ fn judge(refusal: &str, fired: Option<(String, String)>) -> Result<(), String> {
 
 /// Whether linking `source` as a cell is refused with `refusal`.
 fn link_fires(refusal: &str, source: &str) -> Result<(), String> {
-    match lash_typescript::link(source, &lashlang::testing::harness::test_environment()) {
+    match lash_typescript::link(source, &lash_vm::testing::harness::test_environment()) {
         Ok(_) => Err("linked".to_string()),
         Err(diagnostic) if diagnostic.code.as_str() == refusal => Ok(()),
         Err(diagnostic) => Err(format!(

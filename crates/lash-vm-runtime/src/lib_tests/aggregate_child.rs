@@ -1,0 +1,494 @@
+use super::*;
+
+fn product_record(event: lash_trace::TraceEvent) -> lash_trace::TraceRecord {
+    let lash_trace::TraceEvent::LanguageExecution {
+        event: language, ..
+    } = &event
+    else {
+        panic!("language observation fixture");
+    };
+    lash_trace::TraceRecord {
+        schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+        id: language.event_key.clone(),
+        timestamp: lash_core::Clock::timestamp_datetime(&lash_core::testing::TestClock::new(0)),
+        content: lash_trace::TelemetryContent::Captured,
+        context: lash_trace::TraceContext::default(),
+        event,
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn real_aggregate_child_await_names_both_without_fold_conflict() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct ChildHost(AtomicUsize);
+
+    impl lash_vm::ExecutionHost for ChildHost {
+        async fn perform(
+            &self,
+            op: lash_vm::AbilityOp,
+        ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
+            match op {
+                lash_vm::AbilityOp::ResourceOperation(operation)
+                    if operation.operation == "start" =>
+                {
+                    let ordinal = self.0.fetch_add(1, Ordering::Relaxed) + 1;
+                    let mut record = lash_vm::Record::default();
+                    record.insert(
+                        lash_sansio::handle::HANDLE_FIELD.to_string(),
+                        lash_vm::Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                    );
+                    record.insert(
+                        "id".to_string(),
+                        lash_vm::Value::String(
+                            lash_sansio::handle::HandleId::process(&lash_core::ProcessId::fixture(
+                                &format!("child-{ordinal}"),
+                            ))
+                            .as_str()
+                            .into(),
+                        ),
+                    );
+                    Ok(lash_vm::AbilityOutcome::Value(lash_vm::Value::Record(
+                        Arc::new(record),
+                    )))
+                }
+                lash_vm::AbilityOp::Await(_) => {
+                    Ok(lash_vm::AbilityOutcome::Value(lash_vm::Value::Null))
+                }
+                lash_vm::AbilityOp::Finish(value) | lash_vm::AbilityOp::Fail(value) => {
+                    Ok(lash_vm::AbilityOutcome::Value(value))
+                }
+                _ => Err(lash_vm::ExecutionHostError::new(
+                    "unexpected child-host operation",
+                )),
+            }
+        }
+    }
+
+    let program = b::module(
+        vec![b::process(
+            "echo",
+            Vec::new(),
+            b::block(vec![b::finish(b::null())]),
+        )],
+        vec![
+            b::assign("first", b::start("echo", Vec::new())),
+            b::assign("second", b::start("echo", Vec::new())),
+            b::assign(
+                "both",
+                b::await_expr(b::list(vec![b::var("first"), b::var("second")])),
+            ),
+            b::finish(b::var("both")),
+        ],
+    );
+    let store = Arc::new(TraceLashlangGraphStore::default());
+    let identity = TraceLanguageExecutionIdentity {
+        scope: lash_trace::TraceRuntimeScope::none(),
+        subject: lash_trace::TraceRuntimeSubject::Process {
+            process_id: lash_core::ProcessId::fixture("parent"),
+        },
+        source_identity: "source".to_string(),
+        module_ref: "module".to_string(),
+        entry_kind: "main".to_string(),
+        entry_ref: None,
+        entry_name: "main".to_string(),
+        engine_execution_id: None,
+        generation: None,
+    };
+    let observer_store = Arc::clone(&store);
+    let traced = LanguageTraceHost::new(ChildHost::default(), move |_: &ChildHost, payload| {
+        let event = TraceLanguageExecution {
+            event_key: "real-aggregate".to_string(),
+            identity: identity.clone(),
+            payload,
+        };
+        lash_trace::TraceSink::append(
+            &*observer_store,
+            &product_record(lash_trace::TraceEvent::LanguageExecution {
+                language: "lashvm".to_string(),
+                event,
+            }),
+        )
+        .expect("trace append");
+    });
+    let compiled = lash_vm::testing::harness::compile_labeled_program(program);
+    lash_vm::execute(&compiled, &mut lash_vm::State::new(), &traced)
+        .await
+        .expect("aggregate await executes");
+    let graph = store.graphs().into_iter().next().expect("aggregate graph");
+    assert!(
+        graph.conflicts.is_empty(),
+        "one await occurrence must have one wait and resume"
+    );
+    assert!(graph.history.iter().any(|item| matches!(
+        &item.event.payload,
+        TraceLanguageExecutionPayload::NodeWaiting {
+            awaited: TraceNodeAwaited::ChildProcesses { process_ids },
+            ..
+        } if process_ids == &vec![
+            lash_core::ProcessId::fixture("child-1"),
+            lash_core::ProcessId::fixture("child-2"),
+        ]
+    )));
+}
+
+/// The public trace host observes cancellation through its wrapped host. A
+/// child await that is parked when the host cancels resolves as cancelled and
+/// its occurrence ends `Cancelled` instead of reporting a completion; the
+/// start that completed before it stays `Completed`.
+#[tokio::test(flavor = "current_thread")]
+async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_completion() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[derive(Default)]
+    struct CancellingHost(AtomicBool);
+
+    impl lash_vm::ExecutionHost for CancellingHost {
+        async fn perform(
+            &self,
+            op: lash_vm::AbilityOp,
+        ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
+            match op {
+                lash_vm::AbilityOp::ResourceOperation(operation)
+                    if operation.operation == "start" =>
+                {
+                    let mut record = lash_vm::Record::default();
+                    record.insert(
+                        lash_sansio::handle::HANDLE_FIELD.to_string(),
+                        lash_vm::Value::String(lash_sansio::handle::HANDLE_KIND.into()),
+                    );
+                    record.insert(
+                        "id".to_string(),
+                        lash_vm::Value::String(
+                            lash_sansio::handle::HandleId::process(&lash_core::ProcessId::fixture(
+                                "child",
+                            ))
+                            .as_str()
+                            .into(),
+                        ),
+                    );
+                    Ok(lash_vm::AbilityOutcome::Value(lash_vm::Value::Record(
+                        Arc::new(record),
+                    )))
+                }
+                lash_vm::AbilityOp::Await(_) => {
+                    self.0.store(true, Ordering::SeqCst);
+                    Err(lash_vm::ExecutionHostError::new("cancelled while parked"))
+                }
+                lash_vm::AbilityOp::Finish(value) | lash_vm::AbilityOp::Fail(value) => {
+                    Ok(lash_vm::AbilityOutcome::Value(value))
+                }
+                _ => Err(lash_vm::ExecutionHostError::new(
+                    "unexpected cancelling-host operation",
+                )),
+            }
+        }
+
+        fn is_cancelled(&self) -> bool {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    let program = b::module(
+        vec![b::process(
+            "echo",
+            Vec::new(),
+            b::block(vec![b::finish(b::null())]),
+        )],
+        vec![
+            b::assign("child", b::start("echo", Vec::new())),
+            b::assign("value", b::await_expr(b::var("child"))),
+            b::finish(b::var("value")),
+        ],
+    );
+    let store = Arc::new(TraceLashlangGraphStore::default());
+    let identity = TraceLanguageExecutionIdentity {
+        scope: lash_trace::TraceRuntimeScope::none(),
+        subject: lash_trace::TraceRuntimeSubject::Process {
+            process_id: lash_core::ProcessId::fixture("parent"),
+        },
+        source_identity: "source".to_string(),
+        module_ref: "module".to_string(),
+        entry_kind: "main".to_string(),
+        entry_ref: None,
+        entry_name: "main".to_string(),
+        engine_execution_id: None,
+        generation: None,
+    };
+    let payloads = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&payloads);
+    let observer_store = Arc::clone(&store);
+    let traced = LanguageTraceHost::new(
+        CancellingHost::default(),
+        move |_: &CancellingHost, payload: TraceLanguageExecutionPayload| {
+            observed.lock().expect("payload log").push(payload.clone());
+            lash_trace::TraceSink::append(
+                &*observer_store,
+                &product_record(lash_trace::TraceEvent::LanguageExecution {
+                    language: "lashvm".to_string(),
+                    event: TraceLanguageExecution {
+                        event_key: "public-cancel".to_string(),
+                        identity: identity.clone(),
+                        payload,
+                    },
+                }),
+            )
+            .expect("trace append");
+        },
+    );
+    let compiled = lash_vm::testing::harness::compile_labeled_program(program);
+    let _ = lash_vm::execute(&compiled, &mut lash_vm::State::new(), &traced).await;
+    let payloads = payloads.lock().expect("payload log").clone();
+    assert!(
+        payloads.iter().any(|payload| matches!(
+            payload,
+            TraceLanguageExecutionPayload::NodeResumed {
+                resolution: lash_trace::TraceNodeWaitResolution::Cancelled,
+                ..
+            }
+        )),
+        "the parked await must resolve as cancelled: {payloads:#?}"
+    );
+    let cancelled = payloads
+        .iter()
+        .filter_map(|payload| match payload {
+            TraceLanguageExecutionPayload::NodeCancelled { node_id, .. } => Some(node_id.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(cancelled.len(), 1, "{payloads:#?}");
+    assert!(
+        !payloads.iter().any(|payload| matches!(
+            payload,
+            TraceLanguageExecutionPayload::NodeFailed { node_id, .. } if node_id == &cancelled[0]
+        )),
+        "a cancelled occurrence must not also report a failure: {payloads:#?}"
+    );
+    let graph = store.graphs().into_iter().next().expect("cancelled graph");
+    assert!(graph.conflicts.is_empty(), "{:?}", graph.conflicts);
+    let observation = |id: &str| {
+        &graph
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .expect("observed node")
+            .observation
+    };
+    assert!(matches!(
+        observation(&cancelled[0]),
+        TraceLashlangNodeObservation::Cancelled { .. }
+    ));
+    assert!(
+        graph.nodes.iter().any(|node| matches!(
+            node.observation,
+            TraceLashlangNodeObservation::Completed { .. }
+        )),
+        "the start before the await completed: {:#?}",
+        graph.nodes
+    );
+}
+
+/// A branch inside a loop takes `then` in iteration 1 and `else` in
+/// iteration 2. The run is real VM execution; the static map is the module
+/// artifact's own. Each iteration's untaken arm folds to `Skipped` from the
+/// observed `BranchSelected` alone.
+#[tokio::test(flavor = "current_thread")]
+async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
+    #[derive(Default)]
+    struct PrintHost;
+
+    impl lash_vm::ExecutionHost for PrintHost {
+        async fn perform(
+            &self,
+            op: lash_vm::AbilityOp,
+        ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
+            match op {
+                lash_vm::AbilityOp::Print(_) => Ok(lash_vm::AbilityOutcome::Unit),
+                lash_vm::AbilityOp::Finish(value) | lash_vm::AbilityOp::Fail(value) => {
+                    Ok(lash_vm::AbilityOutcome::Value(value))
+                }
+                _ => Err(lash_vm::ExecutionHostError::new(
+                    "unexpected print-host operation",
+                )),
+            }
+        }
+    }
+
+    let program = b::program(vec![
+        b::for_in(
+            "flag",
+            b::list(vec![b::bool_lit(true), b::bool_lit(false)]),
+            b::block(vec![b::if_else(
+                b::var("flag"),
+                b::block(vec![b::labelled(
+                    b::label("Then print", None),
+                    b::print(b::num(1.0)),
+                )]),
+                b::block(vec![b::labelled(
+                    b::label("Else print", None),
+                    b::print(b::num(0.0)),
+                )]),
+            )]),
+        ),
+        b::finish(b::null()),
+    ]);
+    let source = r#"
+        for flag in [true, false] {
+          if flag {
+            @label(title: "Then print")
+            print 1
+          } else {
+            @label(title: "Else print")
+            print 0
+          }
+        }
+        finish null
+    "#;
+    let environment = LashVmHostEnvironment::new(lash_vm::LashVmHostCatalog::new())
+        .with_language_features(
+            lash_vm::LashVmLanguageFeatures::default().with_label_annotations(),
+        );
+    let output = lash_vm::compile_module(lash_vm::ModuleCompileRequest {
+        source,
+        program: program.clone(),
+        environment: &environment,
+    })
+    .expect("loop branch compiles");
+    let execution_map = trace_lashlang_main_map(&lash_vm::workflow_graph_from_artifact(
+        &output.artifact,
+        &lash_vm::NoStatementText,
+    ));
+    let arm = |title: &str| {
+        execution_map
+            .nodes
+            .iter()
+            .find(|node| node.label == title)
+            .map(|node| node.id.clone())
+            .unwrap_or_else(|| panic!("`{title}` is mapped: {execution_map:#?}"))
+    };
+    let (then_arm, else_arm) = (arm("Then print"), arm("Else print"));
+
+    let identity = TraceLanguageExecutionIdentity {
+        scope: lash_trace::TraceRuntimeScope::none(),
+        subject: lash_trace::TraceRuntimeSubject::Process {
+            process_id: lash_core::ProcessId::fixture("loop-branch"),
+        },
+        source_identity: output.artifact.source_identity(),
+        module_ref: output.module_ref.to_string(),
+        entry_kind: "main".to_string(),
+        entry_ref: None,
+        entry_name: "main".to_string(),
+        engine_execution_id: None,
+        generation: None,
+    };
+    let clock = lash_core::testing::TestClock::new(0);
+    let record = |payload: TraceLanguageExecutionPayload| {
+        clock.advance(1);
+        let mut record = product_record(lash_trace::TraceEvent::LanguageExecution {
+            language: "lashvm".to_string(),
+            event: TraceLanguageExecution {
+                event_key: "loop-branch".to_string(),
+                identity: identity.clone(),
+                payload,
+            },
+        });
+        record.timestamp = lash_core::Clock::timestamp_datetime(&clock);
+        record
+    };
+    let records = Arc::new(std::sync::Mutex::new(vec![record(
+        TraceLanguageExecutionPayload::ExecutionStarted {
+            execution_map: execution_map.clone(),
+        },
+    )]));
+    let observed = Arc::clone(&records);
+    let observed_record = record;
+    let traced = LanguageTraceHost::new(PrintHost, move |_: &PrintHost, payload| {
+        observed
+            .lock()
+            .expect("record log")
+            .push(observed_record(payload));
+    });
+    let compiled = lash_vm::testing::harness::compile_labeled_program(program);
+    lash_vm::execute(&compiled, &mut lash_vm::State::new(), &traced)
+        .await
+        .expect("loop branch executes");
+    let records = records.lock().expect("record log").clone();
+
+    let is_selection = |record: &lash_trace::TraceRecord| {
+        matches!(
+            &record.event,
+            lash_trace::TraceEvent::LanguageExecution { event, .. }
+                if matches!(event.payload, TraceLanguageExecutionPayload::BranchSelected { .. })
+        )
+    };
+    let second_selection = records
+        .iter()
+        .enumerate()
+        .filter(|(_, record)| is_selection(record))
+        .map(|(index, _)| index)
+        .nth(1)
+        .expect("the branch is selected in both iterations");
+    let fold = |records: &[lash_trace::TraceRecord]| {
+        let store = TraceLashlangGraphStore::default();
+        for record in records {
+            lash_trace::TraceSink::append(&store, record).expect("fold loop branch");
+        }
+        store
+            .graphs()
+            .into_iter()
+            .next()
+            .expect("loop branch graph")
+    };
+    let observation = |graph: &lash_trace::TraceLashlangGraph, id: &str| {
+        graph
+            .nodes
+            .iter()
+            .find(|node| node.id == id)
+            .map(|node| node.observation.clone())
+            .unwrap_or_else(|| panic!("`{id}` in graph: {:#?}", graph.nodes))
+    };
+
+    let first = fold(&records[..second_selection]);
+    assert!(
+        matches!(
+            observation(&first, &then_arm),
+            TraceLashlangNodeObservation::Completed { .. }
+        ),
+        "{:#?}",
+        first.nodes
+    );
+    assert!(
+        matches!(
+            observation(&first, &else_arm),
+            TraceLashlangNodeObservation::Skipped {
+                branch_occurrence: 1,
+                ..
+            }
+        ),
+        "{:#?}",
+        first.nodes
+    );
+
+    let last = fold(&records);
+    assert!(last.conflicts.is_empty(), "{:?}", last.conflicts);
+    assert!(
+        matches!(
+            observation(&last, &then_arm),
+            TraceLashlangNodeObservation::Skipped {
+                branch_occurrence: 2,
+                ..
+            }
+        ),
+        "{:#?}",
+        last.nodes
+    );
+    assert!(
+        matches!(
+            observation(&last, &else_arm),
+            TraceLashlangNodeObservation::Completed { .. }
+        ),
+        "{:#?}",
+        last.nodes
+    );
+}

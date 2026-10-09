@@ -109,7 +109,7 @@ async fn published(storage: &PostgresStorage) -> (i64, i64, i64, Vec<(String, St
     (
         count("lash_session_meta").await,
         count("lash_blobs").await,
-        count("lash_lashlang_artifacts").await,
+        count("lash_lash_vm_artifacts").await,
         heads,
     )
 }

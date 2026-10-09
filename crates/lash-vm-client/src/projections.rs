@@ -5,7 +5,7 @@
 //! through the provider the catalog holds for the resource's type, on
 //! whichever node runs the actor.
 use crate::{ProjectionAnswer, ProjectionDescription, ProjectionRead};
-use lashlang::{
+use lash_vm::{
     ProjectedBindings, ProjectedReadRequest, ProjectedValue, ProjectionCatalog, Record,
     ResourceRef, Value,
 };
@@ -50,8 +50,8 @@ impl Projections {
     /// is, and the host's own read of it refuses typed.
     pub async fn materialize_operation(
         &self,
-        mut op: lashlang::AbilityOp,
-    ) -> Result<lashlang::AbilityOp, String> {
+        mut op: lash_vm::AbilityOp,
+    ) -> Result<lash_vm::AbilityOp, String> {
         let mut resources = HashSet::new();
         for value in operation_values(&mut op) {
             collect_resources(value, 0, &mut resources)?;
@@ -78,8 +78,8 @@ impl Projections {
 }
 
 /// Every value an operation carries.
-fn operation_values(op: &mut lashlang::AbilityOp) -> Vec<&mut Value> {
-    use lashlang::AbilityOp;
+fn operation_values(op: &mut lash_vm::AbilityOp) -> Vec<&mut Value> {
+    use lash_vm::AbilityOp;
     let mut values = Vec::new();
     match op {
         AbilityOp::ResourceOperation(operation) => {
@@ -89,11 +89,11 @@ fn operation_values(op: &mut lashlang::AbilityOp) -> Vec<&mut Value> {
         AbilityOp::ResourceOperationBatch(batch) => {
             for leaf in &mut batch.leaves {
                 match leaf {
-                    lashlang::ResourceOperationBatchLeaf::Operation(operation) => {
+                    lash_vm::ResourceOperationBatchLeaf::Operation(operation) => {
                         values.push(&mut operation.receiver);
                         values.extend(operation.args.iter_mut());
                     }
-                    lashlang::ResourceOperationBatchLeaf::Timer(sleep) => {
+                    lash_vm::ResourceOperationBatchLeaf::Timer(sleep) => {
                         values.push(&mut sleep.value);
                     }
                 }

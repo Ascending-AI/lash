@@ -16,7 +16,7 @@
 //! name was read as an array and an array of process handles bound to a name
 //! took a different path from the same array written inline.
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     ResourceOperation, ResourceOperationOutcome, State, Value,
 };
@@ -81,7 +81,7 @@ impl ExecutionHost for OrderRecordingHost {
                 for operation in batch
                     .leaves
                     .iter()
-                    .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                    .filter_map(lash_vm::ResourceOperationBatchLeaf::operation)
                 {
                     let value = self.record(operation)?;
                     results.push(if self.fail_every_call {
@@ -112,9 +112,9 @@ impl ExecutionHost for OrderRecordingHost {
 fn execute(
     source: &str,
     host: &impl ExecutionHost,
-) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
+) -> Result<ExecutionOutcome, lash_vm::RuntimeError> {
     let compiled = lash_typescript::testing::compile(source).expect(source);
-    futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), host))
+    futures::executor::block_on(lash_vm::execute(&compiled, &mut State::new(), host))
 }
 
 fn numbers(values: &[f64]) -> ExecutionOutcome {
@@ -223,7 +223,7 @@ struct ProcessHost {
 
 /// The handle record a real host mints for a started process.
 fn process_handle(label: &str) -> Value {
-    let mut handle = lashlang::Record::new();
+    let mut handle = lash_vm::Record::new();
     handle.insert("__handle__".to_string(), Value::String("lash".into()));
     let process_id = lash_sansio::ProcessId::fixture(label);
     handle.insert(
@@ -270,7 +270,7 @@ impl ExecutionHost for ProcessHost {
                 let results = batch
                     .leaves
                     .iter()
-                    .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                    .filter_map(lash_vm::ResourceOperationBatchLeaf::operation)
                     .map(|operation| {
                         assert_eq!(operation.operation, "await");
                         ResourceOperationOutcome::Value(self.wait())
@@ -290,16 +290,16 @@ impl ExecutionHost for ProcessHost {
 
 /// `processes.await` is a host tool, not a dialect builtin, so the re-check
 /// binds it in the catalog the way the process-controls plugin does.
-fn process_environment() -> lashlang::LashlangHostEnvironment {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+fn process_environment() -> lash_vm::LashVmHostEnvironment {
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation(
             ["processes"],
             "Processes",
             "await",
             "processes.await",
-            lashlang::TypeExpr::Any,
-            lashlang::TypeExpr::Any,
+            lash_vm::TypeExpr::Any,
+            lash_vm::TypeExpr::Any,
         )
         .expect("processes.await binding");
     // FIG-2999: `start` is a leaf tool, and its `definition` slot is typed as a
@@ -311,24 +311,24 @@ fn process_environment() -> lashlang::LashlangHostEnvironment {
             "Processes",
             "start",
             "processes.start",
-            lashlang::TypeExpr::Object(vec![lashlang::TypeField {
+            lash_vm::TypeExpr::Object(vec![lash_vm::TypeField {
                 name: "definition".into(),
-                ty: lashlang::TypeExpr::Process(lashlang::ProcessType::unknown()),
+                ty: lash_vm::TypeExpr::Process(lash_vm::ProcessType::unknown()),
                 optional: false,
             }]),
-            lashlang::TypeExpr::Any,
+            lash_vm::TypeExpr::Any,
         )
         .expect("processes.start binding");
-    lashlang::LashlangHostEnvironment::new(catalog)
+    lash_vm::LashVmHostEnvironment::new(catalog)
 }
 
 fn execute_linked(
     source: &str,
     host: &impl ExecutionHost,
-) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
+) -> Result<ExecutionOutcome, lash_vm::RuntimeError> {
     let linked = lash_typescript::link(source, &process_environment()).expect(source);
-    futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         host,
     ))
@@ -341,10 +341,10 @@ const WORKER: &str = r#"
     const b = await processes.start({ definition: worker, args: { input: 2 } });
 "#;
 
-fn refusal(outcome: Result<ExecutionOutcome, lashlang::RuntimeError>, label: &str) -> String {
+fn refusal(outcome: Result<ExecutionOutcome, lash_vm::RuntimeError>, label: &str) -> String {
     match outcome {
         Ok(outcome) => panic!("{label}: expected a refusal, got {outcome:?}"),
-        Err(lashlang::RuntimeError::PendingTool { problem, .. }) => problem,
+        Err(lash_vm::RuntimeError::PendingTool { problem, .. }) => problem,
         Err(error) => panic!("{label}: expected the typed pending-tool refusal, got {error}"),
     }
 }

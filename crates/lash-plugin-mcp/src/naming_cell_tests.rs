@@ -1,6 +1,6 @@
 use super::*;
-use lashlang::testing::ast_builders as b;
-use lashlang::{
+use lash_vm::testing::ast_builders as b;
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     Value as CellValue,
 };
@@ -25,8 +25,8 @@ fn catalog(names: &[&str]) -> lash_core::ToolCatalog {
     )
 }
 
-fn environment(catalog: &lash_core::ToolCatalog) -> lashlang::LashlangHostEnvironment {
-    lash_lashlang_runtime::lashlang_host_environment_from_tool_catalog(
+fn environment(catalog: &lash_core::ToolCatalog) -> lash_vm::LashVmHostEnvironment {
+    lash_vm_runtime::lash_vm_host_environment_from_tool_catalog(
         catalog,
         Default::default(),
         Default::default(),
@@ -35,7 +35,7 @@ fn environment(catalog: &lash_core::ToolCatalog) -> lashlang::LashlangHostEnviro
 }
 
 struct McpCellHost {
-    resources: lashlang::LashlangHostCatalog,
+    resources: lash_vm::LashVmHostCatalog,
     pool: Arc<McpConnectionPool>,
     dispatched: Mutex<Vec<String>>,
 }
@@ -67,7 +67,7 @@ impl ExecutionHost for McpCellHost {
                     )
                     .await;
                 assert!(result.is_success(), "{result:?}");
-                Ok(AbilityOutcome::Value(lashlang::from_json(
+                Ok(AbilityOutcome::Value(lash_vm::from_json(
                     result.value_for_projection(),
                 )))
             }
@@ -123,18 +123,18 @@ for line in sys.stdin:
                 path.strip_prefix("docs.").expect("module"),
                 vec![b::record(Vec::new())],
             )))]);
-            lashlang::LinkedModule::link(program, &env).expect("Lashlang cell links")
+            lash_vm::LinkedModule::link(program, &env).expect("Lash VM cell links")
         };
-        let result = lashlang::execute(
-            &lashlang::testing::harness::compile_linked_main(&linked),
-            &mut lashlang::State::new(),
+        let result = lash_vm::execute(
+            &lash_vm::testing::harness::compile_linked_main(&linked),
+            &mut lash_vm::State::new(),
             &host,
         )
         .await
         .expect("cell executes");
         assert_eq!(
             result,
-            ExecutionOutcome::Finished(lashlang::from_json(
+            ExecutionOutcome::Finished(lash_vm::from_json(
                 json!({"content":[{"type":"text","text":raw}]})
             ))
         );
@@ -152,7 +152,7 @@ async fn typescript_cell_calls_bare_and_hashed_mcp_paths() {
 }
 
 #[tokio::test]
-async fn lashlang_cell_calls_bare_and_hashed_mcp_paths() {
+async fn lash_vm_cell_calls_bare_and_hashed_mcp_paths() {
     cell_calls_bare_and_hashed_paths(false).await;
 }
 
@@ -188,14 +188,14 @@ fn a_collision_rename_invalidates_the_process_host_requirements() {
         )],
         Vec::new(),
     );
-    let linked = lashlang::LinkedModule::link(b, &initial).expect("original process links");
+    let linked = lash_vm::LinkedModule::link(b, &initial).expect("original process links");
     let refreshed = environment(&catalog(&["search_docs", "search-docs"]));
-    let refusal = lash_lashlang_runtime::lashlang_host_environment_satisfies_requirements(
+    let refusal = lash_vm_runtime::lash_vm_host_environment_satisfies_requirements(
         linked.artifact.host_requirements(),
         &refreshed,
     )
     .expect_err("renamed process operation fails host admission");
     assert!(
-        matches!(refusal, lash_lashlang_runtime::LashlangRuntimeError::ModuleOperationUnavailable { module, operation } if module == "docs" && operation == "search_docs")
+        matches!(refusal, lash_vm_runtime::LashVmRuntimeError::ModuleOperationUnavailable { module, operation } if module == "docs" && operation == "search_docs")
     );
 }

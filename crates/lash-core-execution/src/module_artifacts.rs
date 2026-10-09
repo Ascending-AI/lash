@@ -1,10 +1,10 @@
-//! The Lashlang module-artifact port a store set supplies (ADR 0104, B2;
+//! The Lash VM module-artifact port a store set supplies (ADR 0104, B2;
 //! ADR 0113).
 //!
 //! The port stores a module's verified store bytes under its module
-//! reference, kept alive by referrer edges, and never decodes them: lashlang
+//! reference, kept alive by referrer edges, and never decodes them: lash_vm
 //! owns the artifact codec and wraps this port in its typed
-//! `LashlangArtifacts`. The port sits here, below lashlang, so
+//! `LashVmArtifacts`. The port sits here, below lash_vm, so
 //! [`StoreSet`](crate::StoreSet) can supply it like every other persistence
 //! port, and the artifacts an RLM session writes live in the storage that
 //! reopens the session.
@@ -186,7 +186,7 @@ fn module_artifact_refused(refusal: ModuleArtifactRefusal) -> crate::PluginError
     )
 }
 
-/// The Lashlang module-artifact store of one store set.
+/// The Lash VM module-artifact store of one store set.
 ///
 /// A module is published once under its module reference (an opaque key) as
 /// its verified store bytes, and kept alive by referrer edges. Only the

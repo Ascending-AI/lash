@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use axum::http::StatusCode;
-use lash::rlm::lang::{
+use lash::typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
+use lash::vm::ir::{
     Span, WorkflowDiagnosticClassification, WorkflowEdgeKind, WorkflowEffectKind,
     WorkflowNodeNameSource, WorkflowTerminalKind,
 };
-use lash::typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

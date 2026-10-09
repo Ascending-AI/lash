@@ -3,7 +3,7 @@
 //! A session global supplied by the host is a `Value::Projected`: a lazy handle
 //! the runtime reads through instead of a materialized tree. Every non-path
 //! operation is supposed to strip that wrapper and evaluate the value behind
-//! it — that is what `Binary` (the Lashlang arithmetic opcode) does by
+//! it — that is what `Binary` (the Lash VM arithmetic opcode) does by
 //! materializing a projected operand synchronously.
 //!
 //! The TypeScript opcodes `CoercingUnary`/`CoercingBinary` did not. A
@@ -28,8 +28,8 @@ use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use lashlang::testing::projection::{TestView, reading_test_views, test_view};
-use lashlang::{
+use lash_vm::testing::projection::{TestView, reading_test_views, test_view};
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, RuntimeError,
     State, Value,
@@ -67,7 +67,7 @@ async fn execute(source: &str) -> Result<(ExecutionOutcome, Vec<String>), Runtim
     let globals = BTreeSet::from(["text".to_string(), "count".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let program = lashlang::testing::harness::try_compile_program(&program)
+    let program = lash_vm::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let mut state = State::new();
     state
@@ -86,7 +86,7 @@ async fn execute(source: &str) -> Result<(ExecutionOutcome, Vec<String>), Runtim
         )
         .expect("projected number global");
     let host = Host::default();
-    let outcome = lashlang::execute(&program, &mut state, &host).await?;
+    let outcome = lash_vm::execute(&program, &mut state, &host).await?;
     let printed = host
         .printed
         .into_inner()
@@ -159,7 +159,7 @@ async fn execute_counting(
     let globals = BTreeSet::from(["pending".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let program = lashlang::testing::harness::try_compile_program(&program)
+    let program = lash_vm::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let projected = test_view(
         "pending",
@@ -169,7 +169,7 @@ async fn execute_counting(
         }),
     );
     let mut runtime_state = State::new();
-    lashlang::execute(&program, &mut runtime_state, &CountingHost { projected }).await
+    lash_vm::execute(&program, &mut runtime_state, &CountingHost { projected }).await
 }
 
 async fn run_counting_projection(

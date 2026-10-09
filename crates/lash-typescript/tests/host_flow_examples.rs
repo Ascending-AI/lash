@@ -10,15 +10,15 @@ const DURABLE_PROCESS: &str =
 
 /// The catalogue the host-flow cells are written against: the shipped process
 /// controls the cells call, plus the one web authority `turn.ts` fetches with.
-fn host_environment() -> lashlang::LashlangHostEnvironment {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+fn host_environment() -> lash_vm::LashVmHostEnvironment {
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation_contract(
             ["processes"],
             "Processes",
             "start",
             "tool:processes/start",
-            &lashlang::OperationContract::new(
+            &lash_vm::OperationContract::new(
                 serde_json::json!({
                     "type": "object",
                     "additionalProperties": false,
@@ -38,7 +38,7 @@ fn host_environment() -> lashlang::LashlangHostEnvironment {
             "Host",
             "approval",
             "tool:host/approval",
-            &lashlang::OperationContract::new(
+            &lash_vm::OperationContract::new(
                 serde_json::json!({
                     "type": "object",
                     "additionalProperties": false,
@@ -55,7 +55,7 @@ fn host_environment() -> lashlang::LashlangHostEnvironment {
             "Web",
             "fetch",
             "tool:web/fetch",
-            &lashlang::OperationContract::new(
+            &lash_vm::OperationContract::new(
                 serde_json::json!({
                     "type": "object",
                     "additionalProperties": false,
@@ -66,7 +66,7 @@ fn host_environment() -> lashlang::LashlangHostEnvironment {
             ),
         )
         .expect("web fetch operation");
-    lashlang::LashlangHostEnvironment::new(catalog)
+    lash_vm::LashVmHostEnvironment::new(catalog)
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn the_durable_process_example_links_and_lifts_one_process() {
         .declarations
         .iter()
         .filter_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) => Some(process),
+            lash_vm::Declaration::Process(process) => Some(process),
             _ => None,
         })
         .collect::<Vec<_>>();

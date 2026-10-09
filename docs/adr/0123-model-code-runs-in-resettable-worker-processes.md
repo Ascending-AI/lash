@@ -18,7 +18,7 @@ implements this execution boundary, not host auth or security policy.
 
 ### 1. One instance owns every guest-derived byte
 
-`lashlang::VmInstance` owns the session's globals, heap and roots, the
+`lash_vm::VmInstance` owns the session's globals, heap and roots, the
 execution scratch, the linked and compiled cell cache, and any run in
 flight with its operand stacks, pending handles and suspension. Nothing
 guest-derived lives in a `static`, `thread_local!`, `OnceLock` or
@@ -27,8 +27,8 @@ guest-derived lives in a `static`, `thread_local!`, `OnceLock` or
 - Record keys are content-addressed `Symbol`s (`&'static str` constants or
   shared `Arc<str>` text), compared by pointer then by text. Record symbols
   require no global interner.
-- `scripts/check-vm-static-state.py` refuses a static in lashlang,
-  lash-typescript, lash-lashlang-runtime or the worker crate unless
+- `scripts/check-vm-static-state.py` refuses a static in lash_vm,
+  lash-typescript, lash-vm-runtime or the worker crate unless
   `scripts/vm-static-state-allowlist.txt` names it with a reason. The
   allowlist holds build tables projected from constant lists, test-only
   counters, parent-side telemetry, and the heap's write-stamp counter,
@@ -134,12 +134,12 @@ policy.
 ### 5. The parent never decodes VM state
 
 At the broker boundary, VM state is `lash_vm_protocol::OpaqueVmState`: a kind, an
-owner, the VM component versions (`lashlang::vm_contract_versions()`), a BLAKE3
+owner, the VM component versions (`lash_vm::vm_contract_versions()`), a BLAKE3
 digest and the bytes. Each version is stored once: the bytes' format version is
 the contract component their kind names, and their length is the bytes' own
 (FIG-4645). The parent checks those
 structurally, admitting each component against its declared read range
-(`lashlang::vm_contract_reads()`, ADR 0115). The semantic decoders,
+(`lash_vm::vm_contract_reads()`, ADR 0115). The semantic decoders,
 which restore guest values and compile regular expressions, are reachable
 only through
 `VmInstance` (`open_continuation`, `open_snapshot`,
@@ -265,7 +265,7 @@ belongs to the transport, which reports a silent worker as
   admitted host tool calls for product events under ADR 0137.
 - **The parent owns every counter.** `ParentLedger` gives each admitted
   request the next ordinal and derives its `ToolCallId`s through
-  `CodeCallIdentities` (ADR 0117 §2), the one derivation both Lashlang
+  `CodeCallIdentities` (ADR 0117 §2), the one derivation both Lash VM
   hosts also mint from. Each admission carries a fingerprint (BLAKE3 over
   the canonical request) that the admission row retains, so a resumed run that
   asks something different at an admitted ordinal fails with
@@ -421,7 +421,7 @@ Parent adapters retain opaque VM bytes and worker-verified structural metadata.
 
 ## Implementation
 
-- `crates/lashlang/src/runtime/instance.rs` owns the instance;
+- `crates/lash-vm/src/runtime/instance.rs` owns the instance;
   `:65` resets by replacement and `:106` owns semantic state decoding.
 - `crates/lash-protocol-rlm/src/executor/state/worker_envelope.rs` separates
   guest bytes from parent authority.
@@ -430,7 +430,7 @@ Parent adapters retain opaque VM bytes and worker-verified structural metadata.
 - `crates/lash-vm-broker/src/broker.rs` defines worker-loss recovery;
   `:391` releases a slot for a nested effect without committing the park.
 - `crates/lash-protocol-rlm/src/executor/mod.rs` and
-  `crates/lash-lashlang-runtime/src/process.rs` broker worker execution.
+  `crates/lash-vm-runtime/src/process.rs` broker worker execution.
 - `crates/lash-vm-worker/src/service.rs` owns source compilation and artifact
   inspection; `scripts/check-vm-parent-paths.py` checks the production inventory.
 - `crates/lash-typescript/tests/corpus_laws/vm_instance.rs` pins reset and
@@ -546,7 +546,7 @@ The native laws in `crates/lash-vm-worker/tests/pool_laws.rs`
 `one_slot_aggregate_process_await_parks_on_every_pending_handle`,
 `a_parked_aggregate_await_resumes_after_a_parent_crash_with_the_same_result`,
 `one_slot_resource_operation_batch_parks_and_resumes`), the VM laws in
-`crates/lashlang/src/runtime/tests/await_park_cases.rs`, and the RLM law
+`crates/lash-vm/src/runtime/tests/await_park_cases.rs`, and the RLM law
 `one_slot_cell_that_starts_and_awaits_a_process_completes` in
 `crates/lash-protocol-rlm/src/executor/tests/one_slot_process_await.rs`
 pin this behaviour.

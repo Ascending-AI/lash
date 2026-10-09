@@ -486,7 +486,7 @@ export type WorkflowEffectKind = 'await_join' | 'sleep_for' | 'print' | 'break' 
 /**
  * An arithmetic operator a compound attribute assignment applies to the
  * attribute's current value. Named neutrally: a front end's IR decides
- * whether the operation is Lashlang's or ECMA-262's.
+ * whether the operation is LashVm's or ECMA-262's.
  */
 export type UpdateOperator = 'add' | 'subtract' | 'multiply' | 'divide' | 'remainder';
 export type WorkflowTerminalKind = 'finish' | 'fail';

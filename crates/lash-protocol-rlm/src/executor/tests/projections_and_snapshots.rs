@@ -1,6 +1,6 @@
 use super::*;
 
-use lashlang::testing::ast_builders as b;
+use lash_vm::testing::ast_builders as b;
 
 struct GrowthMeasurement {
     started: std::time::Instant,
@@ -27,9 +27,9 @@ impl Drop for GrowthMeasurement {
 }
 
 /// `finish { <name>: <expr>, .. }` — the shape every projection witness reads
-/// its bindings back with. ADR 0096 retired the Lashlang front-end, so these
+/// its bindings back with. ADR 0096 retired the Lash VM front-end, so these
 /// cells state their AST; the source each stood for is kept at the call site.
-fn finish_record(fields: &[(&str, lashlang::Expr)]) -> lashlang::Program {
+fn finish_record(fields: &[(&str, lash_vm::Expr)]) -> lash_vm::Program {
     b::program(vec![b::finish(b::record(
         fields
             .iter()
@@ -39,7 +39,7 @@ fn finish_record(fields: &[(&str, lashlang::Expr)]) -> lashlang::Program {
 }
 
 /// `seed = [{ nested: [1] }]`
-fn seed_nested_one() -> lashlang::Program {
+fn seed_nested_one() -> lash_vm::Program {
     b::program(vec![b::assign(
         "seed",
         b::list(vec![b::record(vec![(
@@ -169,10 +169,10 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
             .bytes()
             .expect("canonical worker state")
             .to_vec();
-        let snapshot = lashlang::VmInstance::pristine()
+        let snapshot = lash_vm::VmInstance::pristine()
             .open_snapshot(&bytes)
             .expect("decode patched state");
-        let mut restored = lashlang::State::from_snapshot(snapshot);
+        let mut restored = lash_vm::State::from_snapshot(snapshot);
         assert_eq!(
             execute_with_projected(&finish, &mut restored, &projected)
                 .await
@@ -300,7 +300,7 @@ pub(super) fn heap_backed_projection_and_prune_survive_execution_and_restore() {
         ]))
         .await
         .expect("compile setup");
-        let mut state = lashlang::State::new();
+        let mut state = lash_vm::State::new();
         execute_with_projected(&setup, &mut state, &ProjectedBindings::new())
             .await
             .expect("execute setup");
@@ -308,7 +308,7 @@ pub(super) fn heap_backed_projection_and_prune_survive_execution_and_restore() {
         state
             .insert_global(
                 "doc",
-                FlowValue::Projected(lashlang::testing::projection::test_view(
+                FlowValue::Projected(lash_vm::testing::projection::test_view(
                     "doc",
                     Arc::new(SnapshotProjectedToolText::default()),
                 )),
@@ -318,8 +318,8 @@ pub(super) fn heap_backed_projection_and_prune_survive_execution_and_restore() {
             .snapshot()
             .to_canonical_bytes()
             .expect("encode projected state");
-        state = lashlang::State::from_snapshot(
-            lashlang::VmInstance::pristine()
+        state = lash_vm::State::from_snapshot(
+            lash_vm::VmInstance::pristine()
                 .open_snapshot(&bytes)
                 .expect("restore projected state"),
         );
@@ -329,7 +329,7 @@ pub(super) fn heap_backed_projection_and_prune_survive_execution_and_restore() {
         let mut projected = ProjectedBindings::new();
         projected.insert(
             "doc",
-            lashlang::testing::projection::test_view(
+            lash_vm::testing::projection::test_view(
                 "doc",
                 Arc::new(SnapshotProjectedToolText::default()),
             ),
@@ -371,10 +371,10 @@ pub(super) fn heap_backed_projection_and_prune_survive_execution_and_restore() {
             .snapshot()
             .to_canonical_bytes()
             .expect("encode refreshed and pruned state");
-        let snapshot = lashlang::VmInstance::pristine()
+        let snapshot = lash_vm::VmInstance::pristine()
             .open_snapshot(&bytes)
             .expect("decode refreshed and pruned state");
-        let mut restored = lashlang::State::from_snapshot(snapshot);
+        let mut restored = lash_vm::State::from_snapshot(snapshot);
         assert_eq!(
             execute_with_projected(&finish, &mut restored, &projected)
                 .await
@@ -425,7 +425,7 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
             .expect_err("projected write should fail");
         let failure = env
             .take_runtime_failure()
-            .unwrap_or(lashlang::RuntimeFailure { error, span: None });
+            .unwrap_or(lash_vm::RuntimeFailure { error, span: None });
         assert!(
             failure
                 .error
@@ -444,7 +444,7 @@ pub(super) async fn executor_snapshot_does_not_materialize_projected_tool_result
         .state_mut()
         .insert_global(
             "m".to_string(),
-            FlowValue::Projected(lashlang::testing::projection::test_view(
+            FlowValue::Projected(lash_vm::testing::projection::test_view(
                 "search.matches[0].text",
                 projected.clone(),
             )),
@@ -482,10 +482,10 @@ pub(super) async fn executor_snapshot_does_not_materialize_projected_tool_result
 
 #[test]
 pub(super) fn flow_to_json_value_materializes_a_custom_projection() {
-    lashlang::testing::projection::with_test_views(|| {
+    lash_vm::testing::projection::with_test_views(|| {
         block_on(async {
             let host = Arc::new(SnapshotProjectedToolText::default());
-            let projected = lashlang::testing::projection::test_view("doc", host.clone());
+            let projected = lash_vm::testing::projection::test_view("doc", host.clone());
             let value = flow_to_json_value(&FlowValue::Projected(projected));
             assert_eq!(host.materialize_count.load(Ordering::SeqCst), 1);
             assert_eq!(
@@ -503,9 +503,9 @@ pub(super) fn flow_to_json_value_materializes_a_custom_projection() {
 
 #[test]
 pub(super) fn flow_record_to_tool_args_preserves_only_seed_projected_roots() {
-    lashlang::testing::projection::with_test_views(|| {
+    lash_vm::testing::projection::with_test_views(|| {
         block_on(async {
-            let projected_root = lashlang::testing::projection::test_view(
+            let projected_root = lash_vm::testing::projection::test_view(
                 "doc",
                 Arc::new(SnapshotProjectedToolText::default()),
             );
@@ -573,11 +573,11 @@ pub(super) async fn execute_test_code(
         lash_core::testing::code_execution_context(handler.ports()),
         ExecRequest { code },
         handler.artifacts(),
-        LashlangSurface::default(),
+        LashVmSurface::default(),
         None,
         RlmProjectedBindings::default(),
         None,
-        lashlang::ExecutionBounds::unbounded(),
+        lash_vm::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     ))
     .await;
@@ -1091,14 +1091,14 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             ctx,
             ExecRequest { code },
             handler.artifacts(),
-            LashlangSurface::new(
-                lashlang::LashlangLanguageFeatures::default(),
-                lashlang::LashlangHostCatalog::new(),
+            LashVmSurface::new(
+                lash_vm::LashVmLanguageFeatures::default(),
+                lash_vm::LashVmHostCatalog::new(),
             ),
             None,
             RlmProjectedBindings::default(),
             None,
-            lashlang::ExecutionBounds::unbounded(),
+            lash_vm::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
         .await;
@@ -1173,11 +1173,11 @@ pub(super) fn a_projected_scalar_read_reaches_a_tool_as_its_plain_value() {
                     .to_string(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             None,
             bindings,
             None,
-            lashlang::ExecutionBounds::unbounded(),
+            lash_vm::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
         .await;

@@ -8,18 +8,18 @@ use lash_core::{
     facade_support::ToolInvocation, facade_support::ToolInvocationReply,
     facade_support::TraceBranchSelection, facade_support::TraceRuntimeSubject,
 };
-use lash_lashlang_runtime::{
-    CommandShape, ExecutionCancellation, TraceLanguageChildExecution, TraceLanguageExecution,
-    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, lashlang_value_to_json,
-    process_sleep, protocol_tool_output_to_lashlang_value,
-};
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, Record as FlowRecord, Sleep,
     Value as FlowValue,
 };
+use lash_vm_runtime::{
+    CommandShape, ExecutionCancellation, TraceLanguageChildExecution, TraceLanguageExecution,
+    TraceLanguageExecutionIdentity, TraceLanguageExecutionPayload, lash_vm_value_to_json,
+    process_sleep, protocol_tool_output_to_lash_vm_value,
+};
 use serde_json::Value;
 
-use super::cell_run::{CellRun, LashlangCellOpener};
+use super::cell_run::{CellRun, LashVmCellOpener};
 use crate::projection::flow_to_json_value;
 
 mod resource_operations;
@@ -29,16 +29,16 @@ pub(super) struct HostBridge<'run> {
     /// The cell's replay run — the identities it mints and its command
     /// keys — or the reason this execution has no logical opener to mint
     /// under.
-    cell: Arc<Result<CellRun, LashlangCellOpener>>,
+    cell: Arc<Result<CellRun, LashVmCellOpener>>,
     prints: Arc<Mutex<Vec<FlowValue>>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
     calls: Mutex<Vec<LedgerCall>>,
     next_tool_index: Mutex<usize>,
-    lashlang_execution_trace: Option<LashlangExecutionTrace>,
-    host_environment: lashlang::LashlangHostEnvironment,
+    lash_vm_execution_trace: Option<LashVmExecutionTrace>,
+    host_environment: lash_vm::LashVmHostEnvironment,
     deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
     /// The cell's journaled binding set, against the live registry (FIG-3587).
-    cell_bindings: lash_lashlang_runtime::CellToolBindings,
+    cell_bindings: lash_vm_runtime::CellToolBindings,
     /// This cell's own cancellation scope, beside the turn's. A cancelled tool
     /// call ends the cell here, so `is_cancelled` refuses its next effect
     /// instead of the guest catching the cancellation as a rejected call. A
@@ -47,7 +47,7 @@ pub(super) struct HostBridge<'run> {
     /// The admitted operation the cell's broker is performing: the ordinal
     /// its commands are named by, the cell's one ordinal authority, and the
     /// waits its quiet point pinned.
-    performing: lash_lashlang_runtime::PerformingGate,
+    performing: lash_vm_runtime::PerformingGate,
     /// The cell's admitted calls, by call: what their bodies run.
     members: Arc<lash_core::tool_dispatch::CellMembers>,
     /// The cell's snapshots, which drive its admitted calls.
@@ -97,12 +97,12 @@ impl CellHostLedgers {
 
 pub(super) struct HostBridgeConfig<'run> {
     pub ctx: RuntimeExecutionContext<'run>,
-    pub cell: Arc<Result<CellRun, LashlangCellOpener>>,
+    pub cell: Arc<Result<CellRun, LashVmCellOpener>>,
     pub prints: Arc<Mutex<Vec<FlowValue>>>,
-    pub lashlang_execution_trace: Option<LashlangExecutionTrace>,
-    pub host_environment: lashlang::LashlangHostEnvironment,
+    pub lash_vm_execution_trace: Option<LashVmExecutionTrace>,
+    pub host_environment: lash_vm::LashVmHostEnvironment,
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
-    pub cell_bindings: lash_lashlang_runtime::CellToolBindings,
+    pub cell_bindings: lash_vm_runtime::CellToolBindings,
     /// The ledgers a predecessor segment handed over, for a resumed cell.
     pub ledgers: CellHostLedgers,
     /// The cell's admitted calls.
@@ -126,22 +126,22 @@ impl<'run> HostBridge<'run> {
             tool_calls: Mutex::new(config.ledgers.tool_calls),
             members: config.members,
             snapshots: config.snapshots,
-            lashlang_execution_trace: config.lashlang_execution_trace,
+            lash_vm_execution_trace: config.lash_vm_execution_trace,
             host_environment: config.host_environment,
             deferred_execution_grants: config.deferred_execution_grants,
             cell_bindings: config.cell_bindings,
             cancellation: ExecutionCancellation::new(),
-            performing: lash_lashlang_runtime::PerformingGate::new(),
+            performing: lash_vm_runtime::PerformingGate::new(),
         }
     }
 
     /// The gate the cell's broker names the operation it performs through.
-    pub(super) fn performing_gate(&self) -> &lash_lashlang_runtime::PerformingGate {
+    pub(super) fn performing_gate(&self) -> &lash_vm_runtime::PerformingGate {
         &self.performing
     }
 
     /// The admitted operation the broker is performing.
-    fn performing(&self) -> Result<lash_lashlang_runtime::Performing, ExecutionHostError> {
+    fn performing(&self) -> Result<lash_vm_runtime::Performing, ExecutionHostError> {
         self.performing.current().ok_or_else(|| {
             ExecutionHostError::new("a cell's command reached its host outside its admission")
         })
@@ -172,9 +172,7 @@ impl<'run> HostBridge<'run> {
     }
 
     /// The run's command protocol over this cell's execution (FIG-3586).
-    fn commands(
-        &self,
-    ) -> Result<lash_lashlang_runtime::ReplayCommands<'_, 'run>, ExecutionHostError> {
+    fn commands(&self) -> Result<lash_vm_runtime::ReplayCommands<'_, 'run>, ExecutionHostError> {
         Ok(self.cell()?.commands(&self.ctx, &self.cancellation))
     }
 
@@ -187,7 +185,7 @@ impl<'run> HostBridge<'run> {
         Option<lash_core::ToolCallRecord>,
     ) {
         let result =
-            protocol_tool_output_to_lashlang_value(&reply.output, replay_key, &self.cancellation);
+            protocol_tool_output_to_lash_vm_value(&reply.output, replay_key, &self.cancellation);
         (result, reply.record)
     }
 
@@ -283,8 +281,8 @@ impl<'run> HostBridge<'run> {
     /// the batch — which two identical aggregates share, so they minted one
     /// set of identities twice. The fallback was never reachable. Every
     /// production compile for this bridge and for the process bridge goes
-    /// through the one entry, `lashlang::compile`, which always enables
-    /// execution-site tracking; `lashlang_execution_paths` walks
+    /// through the one entry, `lash_vm::compile`, which always enables
+    /// execution-site tracking; `lash_vm_execution_paths` walks
     /// `program.main` through the total `Expr::children()` walk, which
     /// descends into function literals, process literals, callbacks, `try`
     /// bodies and comprehension clauses; a TypeScript `function` statement
@@ -296,15 +294,13 @@ impl<'run> HostBridge<'run> {
     fn require_call_site<'site>(
         operation: &str,
         host_operation: &str,
-        call_site: Option<&'site lashlang::LashlangExecutionCallSite>,
-    ) -> Result<&'site lashlang::LashlangExecutionCallSite, ExecutionHostError> {
+        call_site: Option<&'site lash_vm::LashVmExecutionCallSite>,
+    ) -> Result<&'site lash_vm::LashVmExecutionCallSite, ExecutionHostError> {
         call_site.ok_or_else(|| {
-            ExecutionHostError::from(
-                lash_lashlang_runtime::LashlangHostError::OperationCallSiteMissing {
-                    operation: operation.to_string(),
-                    host_operation: host_operation.to_string(),
-                },
-            )
+            ExecutionHostError::from(lash_vm_runtime::LashVmHostError::OperationCallSiteMissing {
+                operation: operation.to_string(),
+                host_operation: host_operation.to_string(),
+            })
         })
     }
 
@@ -323,7 +319,7 @@ impl<'run> HostBridge<'run> {
         call_id: lash_core::ToolCallId,
         host_operation: &str,
         payload: Value,
-        call_site: Option<&lashlang::LashlangExecutionCallSite>,
+        call_site: Option<&lash_vm::LashVmExecutionCallSite>,
     ) -> ToolInvocation {
         let mut invocation =
             ToolInvocation::new(call_id, lash_core::ToolId::from(host_operation), payload);
@@ -343,7 +339,7 @@ impl<'run> HostBridge<'run> {
 }
 
 #[async_trait::async_trait]
-impl lash_lashlang_runtime::MemberAdmissions for HostBridge<'_> {
+impl lash_vm_runtime::MemberAdmissions for HostBridge<'_> {
     async fn members(
         &self,
         ordinal: u64,
@@ -354,20 +350,20 @@ impl lash_lashlang_runtime::MemberAdmissions for HostBridge<'_> {
 }
 
 #[derive(Clone)]
-pub(super) struct LashlangExecutionTrace {
+pub(super) struct LashVmExecutionTrace {
     tracing: lash_core::plugin::PluginExecutionTrace,
-    /// The dialect of the *source* that ran. The substrate is the Lashlang VM
+    /// The dialect of the *source* that ran. The substrate is the Lash VM
     /// under both, which is why the event and the file keep their names.
     language: &'static str,
     identity: TraceLanguageExecutionIdentity,
     resource_call_ids: std::sync::Arc<Mutex<BTreeMap<(String, u64), lash_core::ToolCallId>>>,
     pending_resource_starts:
-        std::sync::Arc<Mutex<BTreeMap<(String, u64), lashlang::LashlangExecutionSite>>>,
+        std::sync::Arc<Mutex<BTreeMap<(String, u64), lash_vm::LashVmExecutionSite>>>,
     active_nodes: std::sync::Arc<Mutex<BTreeSet<(String, lash_sansio::ExecutionNodeKind, u64)>>>,
-    waiting_nodes: lash_lashlang_runtime::TraceWaitBookkeeping,
+    waiting_nodes: lash_vm_runtime::TraceWaitBookkeeping,
 }
 
-impl LashlangExecutionTrace {
+impl LashVmExecutionTrace {
     pub(super) fn new(
         tracing: lash_core::plugin::PluginExecutionTrace,
         language: &'static str,
@@ -380,7 +376,7 @@ impl LashlangExecutionTrace {
             resource_call_ids: std::sync::Arc::default(),
             pending_resource_starts: std::sync::Arc::default(),
             active_nodes: std::sync::Arc::default(),
-            waiting_nodes: lash_lashlang_runtime::TraceWaitBookkeeping::default(),
+            waiting_nodes: lash_vm_runtime::TraceWaitBookkeeping::default(),
         }
     }
 
@@ -389,7 +385,7 @@ impl LashlangExecutionTrace {
     }
 
     pub(super) fn event_key(&self, suffix: impl std::fmt::Display) -> String {
-        format!("lashlang_execution:{}:{suffix}", self.identity.graph_key())
+        format!("lash_vm_execution:{}:{suffix}", self.identity.graph_key())
     }
 
     pub(super) fn emit(&self, event: TraceLanguageExecution) {
@@ -415,8 +411,8 @@ impl LashlangExecutionTrace {
 
     fn emit_waiting(
         &self,
-        call_site: &lashlang::LashlangExecutionCallSite,
-        awaited: lash_lashlang_runtime::TraceNodeAwaited,
+        call_site: &lash_vm::LashVmExecutionCallSite,
+        awaited: lash_vm_runtime::TraceNodeAwaited,
     ) {
         let site = &call_site.site;
         self.waiting_nodes
@@ -439,8 +435,8 @@ impl LashlangExecutionTrace {
 
     fn emit_resumed(
         &self,
-        call_site: &lashlang::LashlangExecutionCallSite,
-        resolution: lash_lashlang_runtime::TraceNodeWaitResolution,
+        call_site: &lash_vm::LashVmExecutionCallSite,
+        resolution: lash_vm_runtime::TraceNodeWaitResolution,
     ) {
         let site = &call_site.site;
         self.waiting_nodes
@@ -461,7 +457,7 @@ impl LashlangExecutionTrace {
         });
     }
 
-    fn emit_cancelled_wait(&self, site: &lashlang::LashlangExecutionSite, occurrence: u64) {
+    fn emit_cancelled_wait(&self, site: &lash_vm::LashVmExecutionSite, occurrence: u64) {
         if self
             .waiting_nodes
             .finish(&site.node_id, site.node_kind, occurrence)
@@ -474,13 +470,13 @@ impl LashlangExecutionTrace {
                     node_kind: site.node_kind,
                     label: site.label.clone(),
                     occurrence,
-                    resolution: lash_lashlang_runtime::TraceNodeWaitResolution::Cancelled,
+                    resolution: lash_vm_runtime::TraceNodeWaitResolution::Cancelled,
                 },
             });
         }
     }
 
-    fn emit_cancelled_site(&self, site: lashlang::LashlangExecutionSite, occurrence: u64) {
+    fn emit_cancelled_site(&self, site: lash_vm::LashVmExecutionSite, occurrence: u64) {
         if !self.active_nodes.lock_recover().remove(&(
             site.node_id.clone(),
             site.node_kind,
@@ -504,7 +500,7 @@ impl LashlangExecutionTrace {
 
     fn record_resource_call(
         &self,
-        call_site: &lashlang::LashlangExecutionCallSite,
+        call_site: &lash_vm::LashVmExecutionCallSite,
         call_id: &lash_core::ToolCallId,
     ) {
         let key = (call_site.site.node_id.clone(), call_site.occurrence);
@@ -531,10 +527,10 @@ impl LashlangExecutionTrace {
 
     fn finish_resource_call(
         &self,
-        site: &lashlang::LashlangExecutionSite,
+        site: &lash_vm::LashVmExecutionSite,
         occurrence: u64,
     ) -> Option<lash_core::ToolCallId> {
-        if site.node_kind != lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND {
+        if site.node_kind != lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND {
             return None;
         }
         let key = (site.node_id.clone(), occurrence);
@@ -557,7 +553,7 @@ impl LashlangExecutionTrace {
 }
 
 impl HostBridge<'_> {
-    pub(super) fn host_environment_description(&self) -> lashlang::LashlangHostEnvironment {
+    pub(super) fn host_environment_description(&self) -> lash_vm::LashVmHostEnvironment {
         self.host_environment.clone()
     }
     /// Awaits a handle. An await the cell's run is parked on may be handed to
@@ -651,12 +647,12 @@ impl HostBridge<'_> {
             ));
         };
         let in_flight = commands.enter(command, CommandShape::Sleep).await?;
-        if let Some(trace) = &self.lashlang_execution_trace
+        if let Some(trace) = &self.lash_vm_execution_trace
             && let Some(call_site) = &call_site
         {
             trace.emit_waiting(
                 call_site,
-                lash_lashlang_runtime::TraceNodeAwaited::Sleep {
+                lash_vm_runtime::TraceNodeAwaited::Sleep {
                     deadline_ms: match spec {
                         lash_core::SleepSpec::Until { deadline_ms } => Some(deadline_ms),
                         lash_core::SleepSpec::For { .. } => None,
@@ -697,12 +693,12 @@ impl HostBridge<'_> {
             })
         })?;
         if !self.is_cancelled()
-            && let Some(trace) = &self.lashlang_execution_trace
+            && let Some(trace) = &self.lash_vm_execution_trace
             && let Some(call_site) = &call_site
         {
             trace.emit_resumed(
                 call_site,
-                lash_lashlang_runtime::TraceNodeWaitResolution::TimedOut,
+                lash_vm_runtime::TraceNodeWaitResolution::TimedOut,
             );
         }
         Ok(AbilityOutcome::Value(FlowValue::Null))
@@ -711,7 +707,7 @@ impl HostBridge<'_> {
     fn perform_selected_ability<'a>(&'a self, op: AbilityOp) -> HostAbilityFuture<'a> {
         match op {
             AbilityOp::ResourceOperation(operation) => Box::pin(async move {
-                let lashlang::ResourceOperation {
+                let lash_vm::ResourceOperation {
                     operation,
                     receiver,
                     args,
@@ -779,16 +775,16 @@ impl ExecutionHost for HostBridge<'_> {
         self.ctx.is_cancelled() || self.cancellation.is_cancelled()
     }
 
-    fn observes_lashlang_execution(&self) -> bool {
-        self.lashlang_execution_trace.is_some()
+    fn observes_lash_vm_execution(&self) -> bool {
+        self.lash_vm_execution_trace.is_some()
     }
 
-    fn observe_lashlang_execution(&self, observation: lashlang::LashlangExecutionObservation) {
-        let Some(trace) = &self.lashlang_execution_trace else {
+    fn observe_lash_vm_execution(&self, observation: lash_vm::LashVmExecutionObservation) {
+        let Some(trace) = &self.lash_vm_execution_trace else {
             return;
         };
         let observation = match observation {
-            lashlang::LashlangExecutionObservation::NodeFailed {
+            lash_vm::LashVmExecutionObservation::NodeFailed {
                 site, occurrence, ..
             } if self.is_cancelled()
                 && trace.active_nodes.lock_recover().contains(&(
@@ -800,7 +796,7 @@ impl ExecutionHost for HostBridge<'_> {
                 trace.emit_cancelled_site(site, occurrence);
                 return;
             }
-            lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence }
+            lash_vm::LashVmExecutionObservation::NodeCompleted { site, occurrence }
                 if self.is_cancelled()
                     && trace.waiting_nodes.is_waiting(
                         &site.node_id,
@@ -814,25 +810,23 @@ impl ExecutionHost for HostBridge<'_> {
             observation => observation,
         };
         match &observation {
-            lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence } => {
+            lash_vm::LashVmExecutionObservation::NodeStarted { site, occurrence } => {
                 trace.active_nodes.lock_recover().insert((
                     site.node_id.clone(),
                     site.node_kind,
                     *occurrence,
                 ));
             }
-            lashlang::LashlangExecutionObservation::ChildProcessWaiting {
-                site,
-                occurrence,
-                ..
+            lash_vm::LashVmExecutionObservation::ChildProcessWaiting {
+                site, occurrence, ..
             } => {
                 trace
                     .waiting_nodes
                     .mark_waiting(&site.node_id, site.node_kind, *occurrence);
             }
-            lashlang::LashlangExecutionObservation::NodeResumed { site, occurrence }
-            | lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence }
-            | lashlang::LashlangExecutionObservation::NodeFailed {
+            lash_vm::LashVmExecutionObservation::NodeResumed { site, occurrence }
+            | lash_vm::LashVmExecutionObservation::NodeCompleted { site, occurrence }
+            | lash_vm::LashVmExecutionObservation::NodeFailed {
                 site, occurrence, ..
             } => {
                 trace
@@ -841,8 +835,8 @@ impl ExecutionHost for HostBridge<'_> {
             }
             _ => {}
         }
-        if let lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence }
-        | lashlang::LashlangExecutionObservation::NodeFailed {
+        if let lash_vm::LashVmExecutionObservation::NodeCompleted { site, occurrence }
+        | lash_vm::LashVmExecutionObservation::NodeFailed {
             site, occurrence, ..
         } = &observation
         {
@@ -853,7 +847,7 @@ impl ExecutionHost for HostBridge<'_> {
             ));
         }
         let (suffix, payload) = match observation {
-            lashlang::LashlangExecutionObservation::ChildProcessWaiting {
+            lash_vm::LashVmExecutionObservation::ChildProcessWaiting {
                 site,
                 occurrence,
                 process_ids,
@@ -864,23 +858,21 @@ impl ExecutionHost for HostBridge<'_> {
                     node_kind: site.node_kind,
                     label: site.label,
                     occurrence,
-                    awaited: lash_lashlang_runtime::TraceNodeAwaited::ChildProcesses {
-                        process_ids,
-                    },
+                    awaited: lash_vm_runtime::TraceNodeAwaited::ChildProcesses { process_ids },
                 },
             ),
-            lashlang::LashlangExecutionObservation::NodeResumed { site, occurrence } => (
+            lash_vm::LashVmExecutionObservation::NodeResumed { site, occurrence } => (
                 format!("node:{}:{occurrence}:resumed", site.node_id),
                 TraceLanguageExecutionPayload::NodeResumed {
                     node_id: site.node_id,
                     node_kind: site.node_kind,
                     label: site.label,
                     occurrence,
-                    resolution: lash_lashlang_runtime::TraceNodeWaitResolution::Resumed,
+                    resolution: lash_vm_runtime::TraceNodeWaitResolution::Resumed,
                 },
             ),
-            lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence }
-                if site.node_kind == lashlang::RESOURCE_OPERATION_EXECUTION_SITE_KIND =>
+            lash_vm::LashVmExecutionObservation::NodeStarted { site, occurrence }
+                if site.node_kind == lash_vm::RESOURCE_OPERATION_EXECUTION_SITE_KIND =>
             {
                 trace
                     .pending_resource_starts
@@ -888,7 +880,7 @@ impl ExecutionHost for HostBridge<'_> {
                     .insert((site.node_id.clone(), occurrence), site);
                 return;
             }
-            lashlang::LashlangExecutionObservation::NodeStarted { site, occurrence } => (
+            lash_vm::LashVmExecutionObservation::NodeStarted { site, occurrence } => (
                 format!("node:{}:{occurrence}:started", site.node_id),
                 TraceLanguageExecutionPayload::NodeStarted {
                     node_id: site.node_id,
@@ -898,7 +890,7 @@ impl ExecutionHost for HostBridge<'_> {
                     call_id: None,
                 },
             ),
-            lashlang::LashlangExecutionObservation::NodeCompleted { site, occurrence } => {
+            lash_vm::LashVmExecutionObservation::NodeCompleted { site, occurrence } => {
                 let call_id = trace.finish_resource_call(&site, occurrence);
                 (
                     format!("node:{}:{occurrence}:completed", site.node_id),
@@ -911,7 +903,7 @@ impl ExecutionHost for HostBridge<'_> {
                     },
                 )
             }
-            lashlang::LashlangExecutionObservation::NodeFailed {
+            lash_vm::LashVmExecutionObservation::NodeFailed {
                 site,
                 occurrence,
                 failure,
@@ -925,11 +917,11 @@ impl ExecutionHost for HostBridge<'_> {
                         label: site.label,
                         occurrence,
                         call_id,
-                        failure: lash_lashlang_runtime::trace_failure(failure),
+                        failure: lash_vm_runtime::trace_failure(failure),
                     },
                 )
             }
-            lashlang::LashlangExecutionObservation::BranchSelected {
+            lash_vm::LashVmExecutionObservation::BranchSelected {
                 site,
                 occurrence,
                 edge_id,
@@ -941,12 +933,12 @@ impl ExecutionHost for HostBridge<'_> {
                     occurrence,
                     edge_id,
                     selected: match selected {
-                        lashlang::ProcessBranchSelection::Then => TraceBranchSelection::Then,
-                        lashlang::ProcessBranchSelection::Else => TraceBranchSelection::Else,
+                        lash_vm::ProcessBranchSelection::Then => TraceBranchSelection::Then,
+                        lash_vm::ProcessBranchSelection::Else => TraceBranchSelection::Else,
                     },
                 },
             ),
-            lashlang::LashlangExecutionObservation::ChildStarted {
+            lash_vm::LashVmExecutionObservation::ChildStarted {
                 site,
                 occurrence,
                 child,
@@ -960,7 +952,7 @@ impl ExecutionHost for HostBridge<'_> {
                         process_id: child.process_id,
                         attempt: child.attempt,
                         module_ref: Some(child.module_ref.to_string()),
-                        entry_ref: Some(lashlang::process_ref_key(&child.process_ref)),
+                        entry_ref: Some(lash_vm::process_ref_key(&child.process_ref)),
                         entry_name: Some(child.process_name),
                     },
                 },
@@ -992,7 +984,7 @@ fn language_event_node_id(payload: &TraceLanguageExecutionPayload) -> Option<&st
 fn handle_to_json(value: &FlowValue) -> Result<Value, ExecutionHostError> {
     match value {
         FlowValue::Projected(_) => Ok(flow_to_json_value(value)),
-        _ => lashlang_value_to_json(value),
+        _ => lash_vm_value_to_json(value),
     }
 }
 

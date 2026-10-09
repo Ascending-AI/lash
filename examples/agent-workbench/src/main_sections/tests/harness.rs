@@ -191,7 +191,7 @@ impl WorkbenchBuilder {
             #[cfg(feature = "e2e-tools")]
             operation: Arc::default(),
         };
-        let lashlang_execution = Arc::new(TraceLashlangGraphStore::default());
+        let lash_vm_execution = Arc::new(TraceLashlangGraphStore::default());
         let trace_sink = self
             .trace_sink
             .unwrap_or_else(|| Arc::new(TeeTraceSink::new([])) as Arc<dyn TraceSink>);
@@ -202,7 +202,7 @@ impl WorkbenchBuilder {
             plugins,
             WorkbenchTracing {
                 trace_sink: Arc::clone(&trace_sink),
-                lashlang_execution_sink: Arc::clone(&lashlang_execution) as Arc<dyn TraceSink>,
+                lash_vm_execution_sink: Arc::clone(&lash_vm_execution) as Arc<dyn TraceSink>,
                 process_events: None,
             },
             self.provider,
@@ -228,7 +228,7 @@ impl WorkbenchBuilder {
                 host_triggers,
                 selected_llm_profile: selection,
                 trace_sink: Some(trace_sink),
-                lashlang_execution,
+                lash_vm_execution,
             },
         )
         .expect("assemble the workbench state");

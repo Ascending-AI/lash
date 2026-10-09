@@ -166,7 +166,7 @@ uncatchable `AggregateAwaitUnsettled` terminal, whose code is
 
 SWC is pinned exactly at `swc_common 25.0.0`, `swc_ecma_ast 28.0.0` and
 `swc_ecma_parser 44.0.0`. The adapter converts SWC nodes into a Lash-owned
-normalized tree; lowering produces `lashlang::Program`. Public APIs and durable
+normalized tree; lowering produces `lash_vm::Program`. Public APIs and durable
 formats contain no SWC types. An alternative parser can target the same adapter
 boundary without changing the language contract.
 
@@ -316,7 +316,7 @@ that each entry is a limit taken knowingly.
 16. Reserved.
 17. **Closure boundary** (`closure-boundary`). A binding whose value reaches a
     function does not survive its cell
-    ([ADR 0076](0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
+    ([ADR 0076](0076-lash-vm-durable-stores-hold-exclusively-owned-copies.md)):
     a function's index means something only inside the program that compiled
     it. Where Node still holds the function, a later cell's reference to the
     name is refused as `TS_FUNCTION_NOT_PERSISTED`: the session keeps the
@@ -373,14 +373,14 @@ that each entry is a limit taken knowingly.
 - [Parser and lowering boundary](../../crates/lash-typescript/src/lib.rs#L70),
   [parse goals](../../crates/lash-typescript/src/adapter/goal.rs#L14), and
   [resource limits](../../crates/lash-typescript/src/adapter/mod.rs#L405).
-- [Error taxonomy](../../crates/lashlang/src/runtime/error.rs#L570) and
-  [guest coercion](../../crates/lashlang/src/runtime/vm/guest_coercion.rs).
+- [Error taxonomy](../../crates/lash-vm/src/runtime/error.rs#L570) and
+  [guest coercion](../../crates/lash-vm/src/runtime/vm/guest_coercion.rs).
 - [Aggregate and call lowering](../../crates/lash-typescript/src/lower/calls.rs).
 - [Refusal probes and register reader](../../crates/lash-typescript/tests/deviation_register.rs#L375).
 - [Session corpus laws](../../crates/lash-typescript/tests/corpus_laws/sessions.rs),
   [generated differential sessions](../../crates/lash-typescript/tests/differential/sessions/),
   and [Test262 census](../../crates/lash-typescript/tests/test262/census/).
-- [Durable shared heap](../../crates/lashlang/src/runtime/state.rs#L699) and
-  [fragment partition](../../crates/lashlang/src/runtime/heap/partition.rs#L1).
+- [Durable shared heap](../../crates/lash-vm/src/runtime/state.rs#L699) and
+  [fragment partition](../../crates/lash-vm/src/runtime/heap/partition.rs#L1).
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

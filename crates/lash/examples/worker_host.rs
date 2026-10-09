@@ -1,7 +1,9 @@
 //! A single executable enters its worker before any host runtime or credentials.
-use lash::rlm::lang::{LashlangHostEnvironment, ModuleCompileError, Program};
-use lash::rlm::{
-    WorkerEntry, WorkerFrontend, WorkerFrontendRefusal, WorkerPoolConfig, WorkerService,
+use lash::vm::WorkerService;
+use lash::vm::ir::Program;
+use lash::vm::{LashVmHostEnvironment, ModuleCompileError};
+use lash::vm::{
+    WorkerEntry, WorkerFrontend, WorkerFrontendRefusal, WorkerPoolConfig,
     worker_entry_with_frontend,
 };
 
@@ -13,7 +15,7 @@ impl WorkerFrontend for TypeScript {
     fn parse(
         &self,
         source: &str,
-        environment: Option<&LashlangHostEnvironment>,
+        environment: Option<&LashVmHostEnvironment>,
     ) -> Result<Program, WorkerFrontendRefusal> {
         let parsed = match environment {
             Some(environment) => lash::typescript::parse_cell(source, environment),
@@ -22,7 +24,7 @@ impl WorkerFrontend for TypeScript {
         parsed.map_err(|error| WorkerFrontendRefusal {
             policy: error.is_dialect_refusal(),
             error: ModuleCompileError::parse_failure(
-                error.span.map(|span| lash::rlm::lang::Span {
+                error.span.map(|span| lash::vm::ir::Span {
                     start: span.start,
                     end: span.end,
                 }),

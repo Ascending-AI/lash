@@ -72,7 +72,7 @@ table lash_artifact_referrer_edges
   column referrer_id text not-null
   column referrer_kind text not-null
   primary-key (namespace, artifact_ref, referrer_kind, referrer_id)
-  foreign-key (namespace, artifact_ref) references lash_lashlang_artifacts (namespace, artifact_ref) on delete cascade
+  foreign-key (namespace, artifact_ref) references lash_lash_vm_artifacts (namespace, artifact_ref) on delete cascade
 table lash_attachment_condemnations
   column attachment_id text not-null
   column delete_attempts integer not-null default
@@ -170,7 +170,7 @@ table lash_graph_nodes
   column tombstoned boolean not-null default
   unique (session_id, generation)
   primary-key (node_id)
-table lash_lashlang_artifacts
+table lash_lash_vm_artifacts
   column artifact_bytes bytea not-null
   column artifact_ref text not-null
   column namespace text not-null

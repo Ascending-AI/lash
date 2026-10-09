@@ -28,7 +28,7 @@
 //! ([`BrokerLedger::state`]), so the snapshot that drops the record holds
 //! what it changed, and a restore publishes them again.
 //!
-//! Owned by L7 (FIG-5177); L7b (FIG-5198) takes the lashlang-process half.
+//! Owned by L7 (FIG-5177); L7b (FIG-5198) takes the lash-vm-process half.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};

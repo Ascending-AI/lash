@@ -221,17 +221,17 @@ fn field(name: &str, field_type: &str, default: &str) -> OperationField {
     }
 }
 
-use lash::rlm::lang::{
-    LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures, OperationContract,
+use lash::vm::{
+    LashVmHostCatalog, LashVmHostEnvironment, LashVmLanguageFeatures, OperationContract,
 };
 
 #[expect(
     clippy::expect_used,
     reason = "the declared tool schemas and bindings are valid"
 )]
-pub(crate) fn host_environment() -> LashlangHostEnvironment {
+pub(crate) fn host_environment() -> LashVmHostEnvironment {
     use lash::tools::{ToolBindingResolutionExt, ToolManifestBindingExt, ToolOutputContract};
-    let mut catalog = LashlangHostCatalog::new();
+    let mut catalog = LashVmHostCatalog::new();
     for definition in tool_definitions() {
         let binding = definition
             .manifest()
@@ -265,8 +265,8 @@ pub(crate) fn host_environment() -> LashlangHostEnvironment {
             )
             .expect("unique tool binding");
     }
-    LashlangHostEnvironment::new(catalog)
-        .with_language_features(LashlangLanguageFeatures::default().with_label_annotations())
+    LashVmHostEnvironment::new(catalog)
+        .with_language_features(LashVmLanguageFeatures::default().with_label_annotations())
 }
 
 #[expect(

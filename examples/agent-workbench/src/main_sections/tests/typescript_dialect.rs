@@ -8,21 +8,21 @@ use super::*;
 /// would ever catch a stale one — the served prompt is the only place the two
 /// halves meet, so the assertion lives on the served prompt.
 const HOST_FOREIGN_MARKERS: &[&str] = &[
-    "<lashlang>",
-    "</lashlang>",
-    "lashlang block",
-    "lashlang blocks",
-    "lashlang process",
-    "bound in lashlang",
+    "<lash_vm>",
+    "</lash_vm>",
+    "lash_vm block",
+    "lash_vm blocks",
+    "lash_vm process",
+    "bound in lash_vm",
     "re-print",
     "finish <value>",
 ];
 
-/// `lashlang_step` is the one identifier that legitimately carries the old
+/// `lash_vm_step` is the one identifier that legitimately carries the old
 /// name: it is the `history` payload discriminant and the durable event-id
 /// prefix. ADR 0063 carries the whole carve-out list.
 fn strip_substrate_carve_outs(text: &str) -> String {
-    text.replace("lashlang_step", "«substrate carve-out»")
+    text.replace("lash_vm_step", "«substrate carve-out»")
 }
 
 fn foreign_words_in(text: &str, markers: &[&str]) -> Vec<String> {
@@ -40,7 +40,7 @@ fn foreign_words_in(text: &str, markers: &[&str]) -> Vec<String> {
 /// The substrate's own walker cannot see a word of this, because none of it is
 /// substrate copy.
 ///
-/// ADR 0096: the half that read the Lashlang prompt against the TypeScript
+/// ADR 0096: the half that read the Lash VM prompt against the TypeScript
 /// marker list is gone with the second dialect, and with it the marker list's
 /// own non-vacuity check.
 #[test]
@@ -80,8 +80,8 @@ fn typescript_prompt_programs() -> Vec<String> {
 /// The tool modules are stated at the paths the real bindings produce —
 /// `with_tool_binding` writes the binding at the same path a TypeScript call
 /// uses. `workbench.register_trigger` carries the shipped tool's own contract.
-fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
-    let mut resources = lash::rlm::lang::LashlangHostCatalog::new();
+fn workbench_link_environment() -> lash::vm::LashVmHostEnvironment {
+    let mut resources = lash::vm::LashVmHostCatalog::new();
     let register = host_triggers::register_trigger_tool_definition();
     let contract = register.contract();
     resources
@@ -90,7 +90,7 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
             "Workbench",
             "register_trigger",
             register.manifest().id.to_string(),
-            &lash::rlm::lang::OperationContract::new(
+            &lash::vm::OperationContract::new(
                 contract.input_schema.canonical().clone(),
                 contract.output_schema.canonical().clone(),
             ),
@@ -113,10 +113,7 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
                     resource_type,
                     *operation,
                     format!("tool:{}/{operation}", path.join("/")),
-                    &lash::rlm::lang::OperationContract::new(
-                        serde_json::json!({}),
-                        serde_json::json!({}),
-                    ),
+                    &lash::vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
                 )
                 .expect("workbench tutorial tool binding");
         }
@@ -134,7 +131,7 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
             "Processes",
             "create",
             "tool:create_process",
-            &lash::rlm::lang::OperationContract::new(
+            &lash::vm::OperationContract::new(
                 serde_json::json!({
                     "type": "object",
                     "properties": { "source": { "type": "string" }, "dialect": { "type": "string" } },
@@ -146,7 +143,7 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
         )
         .expect("link process create operation");
     add_process_control_operations(&mut resources);
-    lash::rlm::lang::LashlangHostEnvironment::new(resources)
+    lash::vm::LashVmHostEnvironment::new(resources)
 }
 
 /// The `processes` module the workbench's process-controls plugin binds.
@@ -156,7 +153,7 @@ fn workbench_link_environment() -> lash::rlm::lang::LashlangHostEnvironment {
 /// `SessionProcessAdminPluginFactory`, so this fixture declares the
 /// operations the tutorials may call, each carrying the shipped tool's own
 /// contract.
-fn add_process_control_operations(resources: &mut lash::rlm::lang::LashlangHostCatalog) {
+fn add_process_control_operations(resources: &mut lash::vm::LashVmHostCatalog) {
     for (operation, definition) in [
         (
             "start",
@@ -196,7 +193,7 @@ fn add_process_control_operations(resources: &mut lash::rlm::lang::LashlangHostC
                 "Processes",
                 operation,
                 definition.manifest().id.to_string(),
-                &lash::rlm::lang::OperationContract::new(
+                &lash::vm::OperationContract::new(
                     contract.input_schema.canonical().clone(),
                     contract.output_schema.canonical().clone(),
                 ),
@@ -245,7 +242,7 @@ fn the_workbench_typescript_tutorials_link() {
 /// workbench (FIG-3211). So every tutorial is *run*, not just linked, and the
 /// control below proves this harness can still see that placeholder.
 struct TutorialHost {
-    environment: lash::rlm::lang::LashlangHostEnvironment,
+    environment: lash::vm::LashVmHostEnvironment,
 }
 
 /// The one subscription id the tutorial host hands back.
@@ -289,20 +286,20 @@ impl TutorialHost {
         }
     }
 
-    /// Resolution goes through `resolve_lashlang_module_operation`, the same
-    /// function `LashlangExecutionHost` uses, so a renamed or moved binding
+    /// Resolution goes through `resolve_lash_vm_module_operation`, the same
+    /// function `LashVmExecutionHost` uses, so a renamed or moved binding
     /// surfaces as an unanswered operation instead of falling into a default.
     fn resource_result(
         &self,
-        call: &lash::rlm::lang::ResourceOperation,
-    ) -> Result<lash::rlm::lang::Value, lash::rlm::lang::ExecutionHostError> {
-        let lash::rlm::lang::Value::Resource(receiver) = &call.receiver else {
-            return Err(lash::rlm::lang::ExecutionHostError::new(format!(
+        call: &lash::vm::ResourceOperation,
+    ) -> Result<lash::vm::Value, lash::vm::ExecutionHostError> {
+        let lash::vm::Value::Resource(receiver) = &call.receiver else {
+            return Err(lash::vm::ExecutionHostError::new(format!(
                 "`{}` was called on something that is not a module authority",
                 call.operation
             )));
         };
-        let host_operation = lash::rlm::resolve_lashlang_module_operation(
+        let host_operation = lash::vm::resolve_lash_vm_module_operation(
             &self.environment,
             receiver,
             &call.operation,
@@ -319,7 +316,7 @@ impl TutorialHost {
                 .id
                 .to_string()
         {
-            return Ok(lash::rlm::lang::from_json(serde_json::json!({
+            return Ok(lash::vm::from_json(serde_json::json!({
                 "subscription_id": TUTORIAL_SUBSCRIPTION_ID
             })));
         }
@@ -327,69 +324,67 @@ impl TutorialHost {
             // Creation now takes source text. Keep the tutorial law's check
             // of the process body against the host surface before mocking its
             // publication receipt, just as the inline body was link-checked.
-            let Some(lash::rlm::lang::Value::String(source)) = call
+            let Some(lash::vm::Value::String(source)) = call
                 .args
                 .first()
-                .and_then(lash::rlm::lang::Value::as_record)
+                .and_then(lash::vm::Value::as_record)
                 .and_then(|input| input.get("source"))
             else {
-                return Err(lash::rlm::lang::ExecutionHostError::new(
+                return Err(lash::vm::ExecutionHostError::new(
                     "the tutorial must create a process from source text",
                 ));
             };
             lash::typescript::link(source.as_str(), &self.environment).map_err(|error| {
-                lash::rlm::lang::ExecutionHostError::new(format!(
+                lash::vm::ExecutionHostError::new(format!(
                     "the tutorial's process source does not link: {error}"
                 ))
             })?;
-            return Ok(lash::rlm::lang::from_json(serde_json::json!({
+            return Ok(lash::vm::from_json(serde_json::json!({
                 "id": { "$lash_definition_id": format!("lash.definition:sha256:{}", "0".repeat(64)) },
                 "signature": { "signature": "unknown" }
             })));
         }
         if host_operation == process_start {
-            return Ok(lash::rlm::lang::from_json(tutorial_process_handle()));
+            return Ok(lash::vm::from_json(tutorial_process_handle()));
         }
-        Err(lash::rlm::lang::ExecutionHostError::new(format!(
+        Err(lash::vm::ExecutionHostError::new(format!(
             "the workbench tutorials reached an unanswered host operation `{host_operation}`"
         )))
     }
 }
 
-impl lash::rlm::lang::ExecutionHost for TutorialHost {
+impl lash::vm::ExecutionHost for TutorialHost {
     async fn perform(
         &self,
-        op: lash::rlm::lang::AbilityOp,
-    ) -> Result<lash::rlm::lang::AbilityOutcome, lash::rlm::lang::ExecutionHostError> {
+        op: lash::vm::AbilityOp,
+    ) -> Result<lash::vm::AbilityOutcome, lash::vm::ExecutionHostError> {
         match op {
-            lash::rlm::lang::AbilityOp::ResourceOperation(call) => self
+            lash::vm::AbilityOp::ResourceOperation(call) => self
                 .resource_result(&call)
-                .map(lash::rlm::lang::AbilityOutcome::Value),
+                .map(lash::vm::AbilityOutcome::Value),
             // The one tutorial that awaits a process awaits a subagent branch,
             // whose declared output is `{ summary, key_metrics }`.
-            lash::rlm::lang::AbilityOp::Await(_) => Ok(lash::rlm::lang::AbilityOutcome::Value(
-                lash::rlm::lang::from_json(serde_json::json!({
+            lash::vm::AbilityOp::Await(_) => Ok(lash::vm::AbilityOutcome::Value(
+                lash::vm::from_json(serde_json::json!({
                     "summary": "what the branch found",
                     "key_metrics": ["first metric", "second metric"]
                 })),
             )),
-            lash::rlm::lang::AbilityOp::Finish(value) => {
-                Ok(lash::rlm::lang::AbilityOutcome::Value(value))
-            }
-            lash::rlm::lang::AbilityOp::Print(_) => Ok(lash::rlm::lang::AbilityOutcome::Unit),
-            other => Err(lash::rlm::lang::ExecutionHostError::new(format!(
+            lash::vm::AbilityOp::Finish(value) => Ok(lash::vm::AbilityOutcome::Value(value)),
+            lash::vm::AbilityOp::Print(_) => Ok(lash::vm::AbilityOutcome::Unit),
+            other => Err(lash::vm::ExecutionHostError::new(format!(
                 "the workbench tutorials should not reach {other:?}"
             ))),
         }
     }
 }
 
-async fn run_tutorial(source: &str) -> Result<lash::rlm::lang::ExecutionOutcome, String> {
+async fn run_tutorial(source: &str) -> Result<lash::vm::ExecutionOutcome, String> {
     let host = TutorialHost::new();
     let linked = lash::typescript::link(source, &host.environment)
         .map_err(|error| format!("does not link: {error}"))?;
-    let compiled = lash::rlm::lang::testing::harness::compile_linked_main(&linked);
-    lash::rlm::lang::execute(&compiled, &mut lash::rlm::lang::State::new(), &host)
+    let compiled = lash::vm::testing::harness::compile_linked_main(&linked);
+    lash::vm::execute(&compiled, &mut lash::vm::State::new(), &host)
         .await
         .map_err(|error| format!("{error:?}"))
 }
@@ -410,7 +405,7 @@ async fn the_workbench_typescript_tutorials_run_without_a_dialect_refusal() {
     let mut hits = Vec::new();
     for (index, program) in programs.iter().enumerate() {
         match run_tutorial(program).await {
-            Ok(lash::rlm::lang::ExecutionOutcome::Finished(_)) => {}
+            Ok(lash::vm::ExecutionOutcome::Finished(_)) => {}
             Ok(other) => hits.push(format!("tutorial {}: {other:?}", index + 1)),
             Err(problem) => hits.push(format!("tutorial {}: {problem}", index + 1)),
         }
@@ -513,7 +508,7 @@ fn every_scripted_dev_provider_reply_is_a_cell_of_the_hosts_dialect() {
 // The laws below run through the workbench's chat route on the in-process
 // durable workbench, whose engine runs every turn.
 
-fn assert_no_lashlang_words(prompts: &[String]) {
+fn assert_no_lash_vm_words(prompts: &[String]) {
     let mut violations = prompts
         .iter()
         .flat_map(|prompt| foreign_words_in(prompt, HOST_FOREIGN_MARKERS))
@@ -522,7 +517,7 @@ fn assert_no_lashlang_words(prompts: &[String]) {
     violations.dedup();
     assert!(
         violations.is_empty(),
-        "a TypeScript session was served Lashlang words: {violations:?}"
+        "a TypeScript session was served Lash VM words: {violations:?}"
     );
 }
 
@@ -585,7 +580,7 @@ async fn a_typescript_workbench_serves_typescript_turns_and_records_the_dialect(
     // The substrate's own walker covers the fragments the RLM crate
     // contributes; this covers the host's, where the workbench's worked
     // tutorials are injected.
-    assert_no_lashlang_words(&prompts);
+    assert_no_lash_vm_words(&prompts);
     let projected = read_state(state, None).await.expect("project the session");
     assert_eq!(
         transcript_code_languages(&projected),

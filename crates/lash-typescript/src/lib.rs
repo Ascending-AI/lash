@@ -16,7 +16,7 @@ pub use adapter::{MAX_SOURCE_BYTES, MAX_SOURCE_NESTING_DEPTH, ParserStack};
 /// Exists so a test can demonstrate that the no-abort guarantee does not depend on the
 /// preflight.
 #[cfg(feature = "testing")]
-pub fn parse_without_nesting_preflight(source: &str) -> Result<lashlang::Program, Diagnostic> {
+pub fn parse_without_nesting_preflight(source: &str) -> Result<lash_vm::Program, Diagnostic> {
     let normalized = adapter::parse_without_nesting_preflight(source)?;
     lower::lower(&normalized)
 }
@@ -24,7 +24,7 @@ pub fn parse_without_nesting_preflight(source: &str) -> Result<lashlang::Program
 /// Parses on the caller's own stack with no guard at all, for measuring how
 /// much stack the parser needs per source byte.
 #[cfg(feature = "testing")]
-pub fn parse_unguarded_for_measurement(source: &str) -> Result<lashlang::Program, Diagnostic> {
+pub fn parse_unguarded_for_measurement(source: &str) -> Result<lash_vm::Program, Diagnostic> {
     let normalized = adapter::parse_unguarded(source)?;
     lower::lower(&normalized)
 }
@@ -91,8 +91,8 @@ impl Parser {
     pub fn parse(
         &mut self,
         source: &str,
-        host: Option<&lashlang::LashlangHostEnvironment>,
-    ) -> Result<lashlang::Program, Diagnostic> {
+        host: Option<&lash_vm::LashVmHostEnvironment>,
+    ) -> Result<lash_vm::Program, Diagnostic> {
         let normalized = self.parser.parse(source)?;
         match host {
             Some(host) => lower::lower_with_ambient(
@@ -109,8 +109,8 @@ impl Parser {
     pub fn link(
         &mut self,
         source: &str,
-        host: &lashlang::LashlangHostEnvironment,
-    ) -> Result<lashlang::LinkedModule, Diagnostic> {
+        host: &lash_vm::LashVmHostEnvironment,
+    ) -> Result<lash_vm::LinkedModule, Diagnostic> {
         link_normalized(self.parser.parse(source)?, host)
     }
 
@@ -121,7 +121,7 @@ impl Parser {
     }
 }
 
-pub fn parse(source: &str) -> Result<lashlang::Program, Diagnostic> {
+pub fn parse(source: &str) -> Result<lash_vm::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
     lower::lower(&normalized)
 }
@@ -136,7 +136,7 @@ pub fn parse(source: &str) -> Result<lashlang::Program, Diagnostic> {
 pub fn parse_with_globals(
     source: &str,
     globals: &std::collections::BTreeSet<String>,
-) -> Result<lashlang::Program, Diagnostic> {
+) -> Result<lash_vm::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
     lower::lower_with_ambient(
         &normalized,
@@ -153,8 +153,8 @@ pub fn parse_with_globals(
 /// (`TS_FUNCTION_NOT_PERSISTED`).
 pub fn parse_cell(
     source: &str,
-    host: &lashlang::LashlangHostEnvironment,
-) -> Result<lashlang::Program, Diagnostic> {
+    host: &lash_vm::LashVmHostEnvironment,
+) -> Result<lash_vm::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
     lower::lower_with_ambient(
         &normalized,
@@ -178,7 +178,7 @@ pub fn parse_workflow_fragment(
     globals: &std::collections::BTreeSet<String>,
     session_globals: &std::collections::BTreeSet<String>,
     processes: &std::collections::BTreeSet<String>,
-) -> Result<lashlang::Program, Diagnostic> {
+) -> Result<lash_vm::Program, Diagnostic> {
     let normalized = adapter::parse(source)?;
     lower::lower_workflow_fragment(&normalized, globals, session_globals, processes)
 }
@@ -189,8 +189,8 @@ pub fn validate(source: &str) -> Result<(), Diagnostic> {
 
 pub fn link(
     source: &str,
-    host: &lashlang::LashlangHostEnvironment,
-) -> Result<lashlang::LinkedModule, Diagnostic> {
+    host: &lash_vm::LashVmHostEnvironment,
+) -> Result<lash_vm::LinkedModule, Diagnostic> {
     // The host environment already carries the session globals and module
     // catalog, so lowering reads them from the same surface the linker will.
     let normalized = adapter::parse(source)?;
@@ -199,8 +199,8 @@ pub fn link(
 
 fn link_normalized(
     normalized: adapter::Program,
-    host: &lashlang::LashlangHostEnvironment,
-) -> Result<lashlang::LinkedModule, Diagnostic> {
+    host: &lash_vm::LashVmHostEnvironment,
+) -> Result<lash_vm::LinkedModule, Diagnostic> {
     let module_authority_roots = host
         .resources
         .module_instances()
@@ -213,7 +213,7 @@ fn link_normalized(
         &module_authority_roots,
         &host.expired_functions,
     )?;
-    lashlang::LinkedModule::link(program, host)
+    lash_vm::LinkedModule::link(program, host)
         .map_err(|error| Diagnostic::new(DiagnosticCode::LinkError, error.to_string(), None))
 }
 
@@ -225,13 +225,13 @@ pub mod testing {
 
     /// Parses `source` and compiles it as the main entry of the raw module
     /// artifact it forms. Source spans are kept for runtime diagnostics.
-    pub fn compile(source: &str) -> Result<lashlang::CompiledProgram, Diagnostic> {
+    pub fn compile(source: &str) -> Result<lash_vm::CompiledProgram, Diagnostic> {
         let program = crate::parse(source)?;
         let spans = program.spans.clone();
-        let artifact = lashlang::ModuleArtifact::from_program(program).map_err(|error| {
+        let artifact = lash_vm::ModuleArtifact::from_program(program).map_err(|error| {
             Diagnostic::new(DiagnosticCode::InvalidAst, error.to_string(), None)
         })?;
-        lashlang::compile(&artifact, lashlang::Entry::Main, Some(&spans))
+        lash_vm::compile(&artifact, lash_vm::Entry::Main, Some(&spans))
             .map_err(|error| Diagnostic::new(DiagnosticCode::InvalidAst, error.to_string(), None))
     }
 }

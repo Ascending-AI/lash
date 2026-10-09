@@ -33,7 +33,7 @@ pub enum AbandonWriter {
 pub enum ProcessResumeRefusal {
     /// The process's executable was written by a retired generation, so this
     /// build cannot run it (FIG-3571). `found` names the stored identity the
-    /// run refused (a Lashlang process names its module ref), so a later
+    /// run refused (a Lash VM process names its module ref), so a later
     /// drain or migration can find what was refused.
     RetiredGeneration { found: String },
     /// Stored executable bytes failed validation; another generation cannot repair them.

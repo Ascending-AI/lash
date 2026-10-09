@@ -46,7 +46,7 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
         serde_json::from_value(body["document"].clone()).expect("typed document");
     assert_eq!(
         document.facet_schema_version,
-        Some(lash::rlm::lang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+        Some(lash::formats::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
     let call = document
         .nodes
@@ -69,7 +69,7 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
             .any(|variable| { variable.name == "result" && variable.variable_type == "null" })
     );
     // FIG-3033: TypeScript's `for (const x of xs)` lowers through an iterable
-    // copy, so a non-list target is never statically flagged the way Lashlang's
+    // copy, so a non-list target is never statically flagged the way LashVm's
     // `for x in xs` was. The property kept here is the one the suite exists
     // for: a type diagnostic lands on the node whose expression caused it.
     assert!(loop_node.data.diagnostics.iter().any(|diagnostic| {
@@ -108,7 +108,7 @@ async fn type_facets_are_projected_and_client_echoes_are_ignored_on_save() {
     }));
     assert_eq!(
         saved.document.facet_schema_version,
-        Some(lash::rlm::lang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+        Some(lash::formats::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
     assert!(saved.document.nodes.iter().all(|node| {
         node.data
@@ -290,7 +290,7 @@ async fn mocked_tool_schemas_project_into_seed_workflow_facets() {
 fn assert_clean_facets(document: &WorkflowDocument) {
     assert_eq!(
         document.facet_schema_version,
-        Some(lash::rlm::lang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+        Some(lash::formats::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
     assert!(
         document

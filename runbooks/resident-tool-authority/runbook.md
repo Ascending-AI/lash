@@ -54,7 +54,7 @@ kiln gate lash "$LASH_RESIDENT_AUTHORITY_FORK" -- bash -lc '
     --test_arg=rlm_catalog_distinguishes_ambient_from_restricted_empty_access \
     --test_arg=deferred_call_executes_through_grant_without_mutating_catalog \
     --test_arg=typescript_deferred_call_executes_through_the_same_grant_path
-  kiln test --test_output=all //crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test \
+  kiln test --test_output=all //crates/lash-vm-runtime:lash-vm-runtime__unit_test \
     --test_arg=replay_reuses_record_without_calling_resolver
   kiln test --test_output=all //crates/lash-core:lash-core__unit_test \
     --test_arg=process_run_context_captures_catalog_and_execution_route_together
@@ -99,7 +99,7 @@ registry state can change, so it cannot replace another advertised route.
 The explicit-access witnesses prove that ambient authority retains captured
 residents while restricted empty produces no resident native tools or RLM
 documentation. The deferred witnesses start from that restricted empty
-catalog: a separately granted tool remains executable in Lashlang and
+catalog: a separately granted tool remains executable in Lash VM and
 TypeScript without becoming a resident, re-enumerating the provider, or
 consulting a later registry definition.
 

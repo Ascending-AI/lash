@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_typescript::DiagnosticCode;
-use lashlang::{
+use lash_vm::{
     ExecutionBound, ExecutionBounds, ExecutionEnvironment, ExecutionOutcome, RuntimeError, State,
     Value,
 };
@@ -344,7 +344,7 @@ fn fig_4570_unused_declarations_and_unresolved_calls_have_distinct_outcomes() {
     ] {
         let compiled = runner::admit(source).unwrap_or_else(|error| panic!("{source}: {error}"));
         assert_eq!(
-            futures::executor::block_on(lashlang::execute(
+            futures::executor::block_on(lash_vm::execute(
                 &compiled,
                 &mut State::new(),
                 &Host::default()
@@ -399,7 +399,7 @@ fn program_bounds_bypass_guest_catch_and_finally() {
         ExecutionBound::Unbounded,
     ));
     let error =
-        futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &environment))
+        futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &environment))
             .expect_err("the instruction bound must terminate the program");
     assert!(matches!(
         error,
@@ -421,7 +421,7 @@ fn typescript_type_syntax_status_is_pinned() {
         finish(value);
     "#;
     let program = lash_typescript::testing::compile(erased).expect("type-only syntax is erased");
-    let outcome = futures::executor::block_on(lashlang::execute(
+    let outcome = futures::executor::block_on(lash_vm::execute(
         &program,
         &mut State::new(),
         &Host::default(),
@@ -431,7 +431,7 @@ fn typescript_type_syntax_status_is_pinned() {
 
     let enum_program = lash_typescript::testing::compile("enum E { A } finish(E.A);")
         .expect("runtime enums are accepted TypeScript syntax");
-    let enum_outcome = futures::executor::block_on(lashlang::execute(
+    let enum_outcome = futures::executor::block_on(lash_vm::execute(
         &enum_program,
         &mut State::new(),
         &Host::default(),
@@ -488,7 +488,7 @@ fn rejected_census_rows_name_the_diagnostic_that_fires() {
         if expected == "TS_PENDING_TOOL" {
             let program =
                 lash_typescript::testing::compile(probe).expect("await resolves at runtime");
-            let error = futures::executor::block_on(lashlang::execute(
+            let error = futures::executor::block_on(lash_vm::execute(
                 &program,
                 &mut State::new(),
                 &Host::default(),
@@ -531,7 +531,7 @@ fn rejected_census_rows_name_the_diagnostic_that_fires() {
                         continue;
                     }
                 };
-                let error = futures::executor::block_on(lashlang::execute(
+                let error = futures::executor::block_on(lash_vm::execute(
                     &program,
                     &mut State::new(),
                     &Host::default(),
@@ -569,7 +569,7 @@ fn run_harnessed(includes: &[&str], body: &str) -> Result<ExecutionOutcome, Runt
     source.push_str(body);
     let program = runner::admit(&source)
         .unwrap_or_else(|error| panic!("the harness with {includes:?} must be admitted: {error}"));
-    futures::executor::block_on(lashlang::execute(
+    futures::executor::block_on(lash_vm::execute(
         &program,
         &mut State::new(),
         &Host::default(),

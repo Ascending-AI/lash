@@ -131,7 +131,7 @@ impl ToolSurfaceDrift {
             .map(|provider_call_id| format!("provider call `{provider_call_id}`, "))
             .unwrap_or_default();
         crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::LashlangCellBindingDrift,
+            crate::RuntimeErrorCode::LashVmCellBindingDrift,
             format!(
                 "tool call `{}` ({provider}tool `{}`) names a tool {} the live tool registry \
                  since the turn's tool surface was recorded; its journal serves only recorded \

@@ -29,9 +29,9 @@ impl Dialect for SeamProofDialect {
         LANGUAGE_ID
     }
 
-    fn worker_service(&self) -> lash::rlm::WorkerService {
-        let entry = lash::rlm::WorkerEntry::helper(super::worker_executable());
-        lash::rlm::WorkerService::new(lash::rlm::WorkerPoolConfig::standard(entry))
+    fn worker_service(&self) -> lash::vm::WorkerService {
+        let entry = lash::vm::WorkerEntry::helper(super::worker_executable());
+        lash::vm::WorkerService::new(lash::vm::WorkerPoolConfig::standard(entry))
     }
 
     fn tool_call_path(&self, binding: &ResolvedToolBinding) -> Result<String, DialectRefusal> {

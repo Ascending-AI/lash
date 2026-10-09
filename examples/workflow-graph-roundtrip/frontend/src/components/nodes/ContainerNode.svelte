@@ -11,7 +11,7 @@
   // A `for`/comprehension iterable is structurally a list: the lens rejects a
   // non-list target with a diagnostic. We surface that as a `list[any]` expected
   // type so the iterable's variable picker offers only list-typed (and gradual)
-  // vars — a purely UI fact, not client-side Lashlang re-parsing.
+  // vars — a purely UI fact, not client-side LashVm re-parsing.
   const ITERABLE_TYPE = 'list[any]';
 
   let { id, data } = $props();

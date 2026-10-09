@@ -122,10 +122,10 @@ async fn run_cell(
         .ports()
         .with_module_artifact_store(&backend, store.clone());
     ports.process_engines = lash_core::ProcessEngineRegistry::new().with_registration(
-        lash_lashlang_runtime::lashlang_process_engine_registration(
-            lash_lashlang_runtime::LashlangProcessEngine::new(
-                lashlang::LashlangArtifacts::new(store.clone()),
-                LashlangSurface::default(),
+        lash_vm_runtime::lash_vm_process_engine_registration(
+            lash_vm_runtime::LashVmProcessEngine::new(
+                lash_vm::LashVmArtifacts::new(store.clone()),
+                LashVmSurface::default(),
             ),
         ),
     );
@@ -140,14 +140,12 @@ async fn run_cell(
         ExecRequest {
             code: code.to_string(),
         },
-        lashlang::LashlangArtifacts::new(
-            Arc::clone(store) as Arc<dyn lash_core::ModuleArtifactStore>
-        ),
-        LashlangSurface::default(),
+        lash_vm::LashVmArtifacts::new(Arc::clone(store) as Arc<dyn lash_core::ModuleArtifactStore>),
+        LashVmSurface::default(),
         None,
         RlmProjectedBindings::default(),
         None,
-        lashlang::ExecutionBounds::unbounded(),
+        lash_vm::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
     .await
@@ -155,16 +153,16 @@ async fn run_cell(
 
 /// A process definition value naming a module built from `source`.
 fn definition_value(source: &str) -> (String, FlowValue) {
-    let module_ref = lashlang::ModuleRef::new(&lashlang::ContentHash::new(source));
-    let identity = lashlang::ProcessDefinitionIdentity::new(
+    let module_ref = lash_vm::ModuleRef::new(&lash_vm::ContentHash::new(source));
+    let identity = lash_vm::ProcessDefinitionIdentity::new(
         module_ref.clone(),
-        lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("host")),
-        lashlang::ProcessRef::new(lashlang::ContentHash::new("component"), 0),
+        lash_vm::HostRequirementsRef::new(&lash_vm::ContentHash::new("host")),
+        lash_vm::ProcessRef::new(lash_vm::ContentHash::new("component"), 0),
         "run",
     );
     (
         module_ref.to_string(),
-        lashlang::from_json(identity.to_process_value()),
+        lash_vm::from_json(identity.to_process_value()),
     )
 }
 

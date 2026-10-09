@@ -107,9 +107,9 @@ fn round_trip(program: &CorpusProgram) -> Result<Trip, String> {
 /// Whether `printed` re-admits to `linked`'s module and identity, or how it
 /// does not.
 fn readmits(
-    linked: &lashlang::LinkedModule,
+    linked: &lash_vm::LinkedModule,
     printed: &str,
-    environment: &lashlang::LashlangHostEnvironment,
+    environment: &lash_vm::LashVmHostEnvironment,
     what: &str,
 ) -> Option<String> {
     let relinked = match lash_typescript::link(printed, environment) {

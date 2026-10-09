@@ -6,23 +6,23 @@ fn return_runs_finally_while_finish_stops_the_cell() {
         finished(
             "const trace = []; function f() { try { return 'returned'; } finally { trace.push('finally'); } } const result = f(); finish({ result, trace });"
         ),
-        lashlang::from_json(serde_json::json!({"result":"returned", "trace":["finally"]}))
+        lash_vm::from_json(serde_json::json!({"result":"returned", "trace":["finally"]}))
     );
     assert_eq!(
         finished("const trace = []; try { finish(trace); } finally { trace.push('finally'); }"),
-        lashlang::from_json(serde_json::json!([]))
+        lash_vm::from_json(serde_json::json!([]))
     );
 }
 
 #[test]
 fn pending_handle_survives_park_without_cross_cell_export() {
-    let environment = lashlang::LashlangHostEnvironment::new(two_leaf_web_environment().resources);
+    let environment = lash_vm::LashVmHostEnvironment::new(two_leaf_web_environment().resources);
     let linked = lash_typescript::link("const p = web.fetch({ value: 'kept' }); const nested = [p]; await sleep(5); finish(await p);", &environment).expect("cell links");
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
     futures::executor::block_on(async {
         let mut state = State::new();
         let host = ProcessDurabilityHost;
-        let execution = lashlang::ExecutionEnvironment::new(&host).process();
+        let execution = lash_vm::ExecutionEnvironment::new(&host).process();
         let mut vm = Vm::from_state(&compiled, &mut state, &execution).expect("VM");
         assert_eq!(
             vm.run_process_until_effect()
@@ -38,7 +38,7 @@ fn pending_handle_survives_park_without_cross_cell_export() {
         );
         let bytes = serde_json::to_vec(&continuation).expect("encode");
         let mut resumed = Vm::resume_from(
-            lashlang::VmInstance::pristine()
+            lash_vm::VmInstance::pristine()
                 .open_continuation(&bytes)
                 .expect("decode"),
             &compiled,
@@ -59,7 +59,7 @@ fn pending_handle_survives_park_without_cross_cell_export() {
             }
         }
         let globals = resumed.into_globals().expect("export state");
-        state = State::from_snapshot(lashlang::Snapshot::new(globals));
+        state = State::from_snapshot(lash_vm::Snapshot::new(globals));
         assert!(state.globals().get("p").is_none());
         assert!(
             state.globals().get("nested").is_none(),
@@ -67,7 +67,7 @@ fn pending_handle_survives_park_without_cross_cell_export() {
         );
         let snapshot = state.snapshot().to_canonical_bytes().expect("snapshot");
         let mut next_state = State::from_snapshot(
-            lashlang::VmInstance::pristine()
+            lash_vm::VmInstance::pristine()
                 .open_snapshot(&snapshot)
                 .expect("restore session"),
         );
@@ -77,8 +77,8 @@ fn pending_handle_survives_park_without_cross_cell_export() {
         )
         .expect("next cell");
         assert_eq!(
-            lashlang::execute(
-                &lashlang::testing::harness::compile_linked_main(&next),
+            lash_vm::execute(
+                &lash_vm::testing::harness::compile_linked_main(&next),
                 &mut next_state,
                 &host
             )
@@ -96,7 +96,7 @@ pub(super) fn literal_elisions_are_holes_for_in_has_own_property_and_iteration()
     for fixture in fixtures {
         let literal = fixture["literal"].as_str().expect("literal");
         let probe = fixture["probe"].as_str().expect("probe");
-        let expected = lashlang::from_json(fixture["expected"].clone());
+        let expected = lash_vm::from_json(fixture["expected"].clone());
         assert!(
             include_str!("../../README.md").contains(literal),
             "the admitted literal has a public teaching example: {literal}"
@@ -117,25 +117,25 @@ pub(super) fn literal_elisions_are_holes_for_in_has_own_property_and_iteration()
         let mut state = State::new();
         let seed = lash_typescript::testing::compile(&format!("const a = {literal};"))
             .expect("sparse seed");
-        futures::executor::block_on(lashlang::execute(&seed, &mut state, &Host))
+        futures::executor::block_on(lash_vm::execute(&seed, &mut state, &Host))
             .expect("seed executes");
         let snapshot = state.snapshot();
         let bytes = snapshot
             .to_canonical_bytes()
             .expect("canonical sparse snapshot");
         {
-            let restored = lashlang::VmInstance::pristine()
+            let restored = lash_vm::VmInstance::pristine()
                 .open_snapshot(&bytes)
                 .expect("canonical restore");
             let mut state = State::from_snapshot(restored);
             let linked = lash_typescript::link(
                 &format!("finish({probe});"),
-                &lashlang::LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::new())
+                &lash_vm::LashVmHostEnvironment::new(lash_vm::LashVmHostCatalog::new())
                     .with_globals(["a"]),
             )
             .expect("restored probe links");
-            let outcome = futures::executor::block_on(lashlang::execute(
-                &lashlang::testing::harness::compile_linked_main(&linked),
+            let outcome = futures::executor::block_on(lash_vm::execute(
+                &lash_vm::testing::harness::compile_linked_main(&linked),
                 &mut state,
                 &Host,
             ))

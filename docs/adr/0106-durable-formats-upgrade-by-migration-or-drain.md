@@ -38,7 +38,7 @@ Evidence: `crates/lash-core-execution/src/engine/contracts.rs`,
 
 A build's format set names every durable format its actors' state holds:
 turn checkpoints, the session-state generation, VM continuations and
-Lashlang snapshots, the RLM cell envelope used as snapshot data, Run record
+Lash VM snapshots, the RLM cell envelope used as snapshot data, Run record
 bodies, wait rows, outcome materials and each process engine's state format.
 Each format declares its version surface under
 [ADR 0131](0131-durable-types-declare-their-version-surface.md). A set is

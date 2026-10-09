@@ -7,9 +7,9 @@ use super::*;
 /// bytes that cross to a worker.
 const SENTINEL_SECRET: &str = "sentinel-secret-7b1d9e40-execution-binding";
 
-fn sentinel_grant() -> lash_lashlang_runtime::Resolution {
-    lash_lashlang_runtime::Resolution::Resolved(Box::new(
-        lash_lashlang_runtime::ToolGrant::new(
+fn sentinel_grant() -> lash_vm_runtime::Resolution {
+    lash_vm_runtime::Resolution::Resolved(Box::new(
+        lash_vm_runtime::ToolGrant::new(
             lash_core::ToolDefinition::raw(
                 "tool:vault",
                 "vault.read",
@@ -58,7 +58,7 @@ struct ForgedCapture {
     state_header: ByteBuf,
     changed: BTreeMap<String, ByteBuf>,
     unchanged: BTreeSet<String>,
-    deferred_resolutions: BTreeMap<String, lash_lashlang_runtime::Resolution>,
+    deferred_resolutions: BTreeMap<String, lash_vm_runtime::Resolution>,
 }
 
 #[tokio::test]
@@ -83,8 +83,8 @@ async fn worker_returned_state_cannot_replace_parent_authority() {
     let mut forged_grants = crate::testing::deferred_link();
     forged_grants.record(
         "vault.read",
-        lash_lashlang_runtime::Resolution::Resolved(Box::new(
-            lash_lashlang_runtime::ToolGrant::new(
+        lash_vm_runtime::Resolution::Resolved(Box::new(
+            lash_vm_runtime::ToolGrant::new(
                 lash_core::ToolDefinition::raw(
                     "tool:vault",
                     "vault.read",
@@ -162,10 +162,10 @@ async fn worker_capture(
     };
     for (name, fragment) in parts.fragments {
         match fragment {
-            lashlang::DurableFragment::Changed(body) => {
+            lash_vm::DurableFragment::Changed(body) => {
                 capture.changed.insert(name, body.into());
             }
-            lashlang::DurableFragment::Unchanged => {
+            lash_vm::DurableFragment::Unchanged => {
                 capture.unchanged.insert(name);
             }
         }

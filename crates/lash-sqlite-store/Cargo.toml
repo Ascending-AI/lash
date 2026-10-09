@@ -54,13 +54,13 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 lash-durable = { workspace = true, features = ["testing"] }
-lash-lashlang-runtime = { workspace = true, features = ["testing"] }
+lash-vm-runtime = { workspace = true, features = ["testing"] }
 lash.workspace = true
-lash-conformance = { workspace = true, features = ["lashlang"] }
+lash-conformance = { workspace = true, features = ["lash-vm"] }
 lash-core = { workspace = true, features = ["testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
-lashlang = { workspace = true, features = ["testing"] }
+lash-vm = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }
 rusqlite = { version = "0.37", features = ["bundled", "trace"] }
 tempfile = { workspace = true }

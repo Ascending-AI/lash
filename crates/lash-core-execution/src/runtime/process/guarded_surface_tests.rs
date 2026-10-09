@@ -25,7 +25,7 @@ fn write_occurrence(fleet: FleetFormat) -> Vec<u8> {
         "fixture.operation",
         ProcessEffectOutcomeClass::Success,
         None,
-        "lashlang:scope:resource:17:fixture.operation:23:resource_operation:node:1",
+        "lash_vm:scope:resource:17:fixture.operation:23:resource_operation:node:1",
         fleet,
     ))
     .expect("encode the occurrence")

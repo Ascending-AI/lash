@@ -145,7 +145,7 @@ in a session global, reloaded from the durable snapshot and used in the next
 cell behaves as if it had never been stored: as the same code in a single
 cell, which must itself be Node's answer (the round-trip rows of
 `generated/`). The rows cover every heap object kind the VM has, which
-`lashlang::testing::heap_object_kinds` names by an exhaustive match, and the
+`lash_vm::testing::heap_object_kinds` names by an exhaustive match, and the
 primitives. A type that cannot round-trip is refused with a named diagnostic;
 a row whose law fails today is pinned by the open defect or registered
 deviation that breaks it, in the harness modes it fails in, and fails once

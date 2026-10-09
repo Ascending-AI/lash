@@ -34,7 +34,7 @@ pub struct Invocation {
 
 /// The single detached effect request type shared with the VM. The worker
 /// and broker both encode it with MessagePack; no second wire vocabulary exists.
-pub use lashlang::AbilityOp as OperationRequest;
+pub use lash_vm::AbilityOp as OperationRequest;
 
 pub trait OperationRequestCodec {
     fn kind(&self) -> EffectKind;
@@ -74,13 +74,13 @@ impl Invocation {
     /// Builds a detached request for a scripted test worker.
     #[cfg(any(test, feature = "testing"))]
     pub fn request(self) -> OperationRequest {
-        OperationRequest::ResourceOperation(Box::new(lashlang::ResourceOperation {
-            receiver: lashlang::Value::Resource(lashlang::ResourceHandle::new(
+        OperationRequest::ResourceOperation(Box::new(lash_vm::ResourceOperation {
+            receiver: lash_vm::Value::Resource(lash_vm::ResourceHandle::new(
                 "module",
                 self.binding,
             )),
             operation: self.operation,
-            args: vec![lashlang::from_json(self.arguments)],
+            args: vec![lash_vm::from_json(self.arguments)],
             call_site: None,
         }))
     }
@@ -330,8 +330,8 @@ pub fn resolve(
             arguments: invocation.arguments,
         })
     };
-    let invocation = |op: lashlang::ResourceOperation| -> Result<ResolvedCall, AuthorityRefusal> {
-        let lashlang::Value::Resource(receiver) = op.receiver else {
+    let invocation = |op: lash_vm::ResourceOperation| -> Result<ResolvedCall, AuthorityRefusal> {
+        let lash_vm::Value::Resource(receiver) = op.receiver else {
             return Err(AuthorityRefusal::Malformed {
                 reason: "a resource request has no module receiver".into(),
             });
@@ -357,7 +357,7 @@ pub fn resolve(
             }
             let mut calls = Vec::new();
             for leaf in batch.leaves {
-                if let lashlang::ResourceOperationBatchLeaf::Operation(op) = leaf {
+                if let lash_vm::ResourceOperationBatchLeaf::Operation(op) = leaf {
                     calls.push(invocation(op)?);
                 }
             }
@@ -365,7 +365,7 @@ pub fn resolve(
         }
         OperationRequest::Await(value) => {
             let handle = match value {
-                lashlang::Value::String(value) => value.to_string(),
+                lash_vm::Value::String(value) => value.to_string(),
                 _ => {
                     return Err(AuthorityRefusal::Malformed {
                         reason: "an await names no granted handle".into(),
@@ -386,7 +386,7 @@ pub fn resolve(
             })
         }
         OperationRequest::Sleep(sleep) => {
-            let lashlang::Value::Number(millis) = sleep.value else {
+            let lash_vm::Value::Number(millis) = sleep.value else {
                 return Err(AuthorityRefusal::Malformed {
                     reason: "a sleep duration is not numeric".into(),
                 });
@@ -525,20 +525,20 @@ mod hex_digest {
 #[cfg(test)]
 mod tests;
 
-fn value_json(value: &lashlang::Value) -> Result<serde_json::Value, AuthorityRefusal> {
+fn value_json(value: &lash_vm::Value) -> Result<serde_json::Value, AuthorityRefusal> {
     match value {
-        lashlang::Value::Null | lashlang::Value::Undefined => Ok(serde_json::Value::Null),
-        lashlang::Value::Bool(v) => Ok((*v).into()),
-        lashlang::Value::Number(v) => serde_json::Number::from_f64(*v)
+        lash_vm::Value::Null | lash_vm::Value::Undefined => Ok(serde_json::Value::Null),
+        lash_vm::Value::Bool(v) => Ok((*v).into()),
+        lash_vm::Value::Number(v) => serde_json::Number::from_f64(*v)
             .map(serde_json::Value::Number)
             .ok_or_else(|| AuthorityRefusal::Malformed {
                 reason: "non-finite argument".into(),
             }),
-        lashlang::Value::String(v) => Ok(v.to_string().into()),
-        lashlang::Value::List(v) | lashlang::Value::Tuple(v) => Ok(serde_json::Value::Array(
+        lash_vm::Value::String(v) => Ok(v.to_string().into()),
+        lash_vm::Value::List(v) | lash_vm::Value::Tuple(v) => Ok(serde_json::Value::Array(
             v.iter().map(value_json).collect::<Result<_, _>>()?,
         )),
-        lashlang::Value::Record(v) => Ok(serde_json::Value::Object(
+        lash_vm::Value::Record(v) => Ok(serde_json::Value::Object(
             v.iter()
                 .map(|(k, v)| Ok((k.to_string(), value_json(v)?)))
                 .collect::<Result<_, AuthorityRefusal>>()?,

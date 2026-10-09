@@ -22,4 +22,4 @@ An availability ladder mixes callability, prompt presentation and discovery into
 
 Hosts own discovery and grant storage. `examples/agent-workbench` supplies a host implementation. Standard discovery reaches catalog members through its admitted dispatch paths; link-time deferred resolution belongs to RLM.
 
-[Standard presentation](../../crates/lash-protocol-standard/src/lib.rs), [link records](../../crates/lash-lashlang-runtime/src/deferred.rs) and [recorded resolution](../../crates/lash-lashlang-runtime/src/deferred/journal.rs) implement the decision.
+[Standard presentation](../../crates/lash-protocol-standard/src/lib.rs), [link records](../../crates/lash-vm-runtime/src/deferred.rs) and [recorded resolution](../../crates/lash-vm-runtime/src/deferred/journal.rs) implement the decision.

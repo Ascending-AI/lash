@@ -1,4 +1,4 @@
-use lash::rlm::lang::{ExecutionHostError, Record, Value};
+use lash::vm::{ExecutionHostError, Record, Value};
 use serde_json::{Value as JsonValue, json};
 
 #[derive(Clone, Copy, Debug)]

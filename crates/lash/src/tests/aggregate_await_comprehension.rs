@@ -73,7 +73,7 @@ fn retail_order_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["retail"], "order"))
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["retail"], "order"))
 }
 
 const TICKET_CELL: &str = r#"

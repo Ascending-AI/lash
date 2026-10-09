@@ -338,7 +338,7 @@ impl SqliteStoreSet {
     }
 
     /// The [`SqliteStore`] that serves process execution environments and
-    /// Lashlang artifacts. Unbound to any session.
+    /// Lash VM artifacts. Unbound to any session.
     pub fn process_env_store(&self) -> Arc<SqliteStore> {
         Arc::clone(&self.inner.process_env_store)
     }
@@ -423,7 +423,7 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
     }
 
     /// The durable-core store that keeps the process execution environments
-    /// keeps the Lashlang module artifacts too.
+    /// keeps the Lash VM module artifacts too.
     fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
         SqliteStoreSet::process_env_store(self)
     }

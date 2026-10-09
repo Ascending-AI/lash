@@ -1438,7 +1438,7 @@ impl Adapter<'_> {
             swc::MemberProp::Ident(name) => {
                 if is_prototype_chain_property(name.sym.as_ref())
                     && !(name.sym.as_ref() == "prototype"
-                        && matches!(&member.obj.as_ref(), swc::Expr::Ident(owner) if lashlang::is_javascript_builtin_global(owner.sym.as_ref())))
+                        && matches!(&member.obj.as_ref(), swc::Expr::Ident(owner) if lash_vm::is_javascript_builtin_global(owner.sym.as_ref())))
                 {
                     return Err(prototype_access_rejection(member.span));
                 }

@@ -25,7 +25,7 @@ const blank = async () => {
 };
 ```
 
-and the old lashlang form `process blank() { finish 0 }` is rejected by `POST /project`
+and the old lash_vm form `process blank() { finish 0 }` is rejected by `POST /project`
 with HTTP 422 `{"error":{"code":"invalid_source","message":"TS_SYNTAX_ERROR: …"}}`. Assert
 the TypeScript form everywhere below, and do not carry the earlier note that the TypeScript
 canonical printer is unbuilt future work: it has landed for this seam. Every source string
@@ -109,7 +109,7 @@ After readiness, gate these API facts before opening the editor:
   `const` declaration is itself a node, so "one process and one terminal" is the shape of
   the body, not the whole node list. The envelope matters too: the response is
   `{"document": {…}}`, not the document at top level. None of this changes
-  `GET /workflow`'s version. A lashlang probe returns 422
+  `GET /workflow`'s version. A lash_vm probe returns 422
   `invalid_source`; that refusal is the current contract, not a gap.
 
 Open the browser, gate the workflow selector, Steps view, Save/Play controls, canonical

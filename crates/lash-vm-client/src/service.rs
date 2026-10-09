@@ -2,8 +2,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 
+use lash_vm::{LashVmHostEnvironment, Record, Value};
 use lash_vm_protocol::{EncodedPayload, FrameEpoch, OwnerEpoch, VmOwner};
-use lashlang::{LashlangHostEnvironment, Record, Value};
 use serde::{Deserialize, Serialize};
 
 use crate::{ExecutionBudget, PoolConfig, PoolError, WorkerEntry, WorkerPool};
@@ -19,19 +19,19 @@ pub enum Request {
         bytes: Vec<u8>,
     },
     InspectArtifact {
-        module_ref: lashlang::ModuleRef,
+        module_ref: lash_vm::ModuleRef,
         #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
     },
     InspectDocument {
-        module_ref: lashlang::ModuleRef,
+        module_ref: lash_vm::ModuleRef,
         #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
     },
     CompileAst {
         source: String,
-        program: lashlang::Program,
-        environment: LashlangHostEnvironment,
+        program: lash_vm::Program,
+        environment: LashVmHostEnvironment,
     },
     ContinuationInfo {
         bytes: Vec<u8>,
@@ -43,21 +43,21 @@ pub enum Request {
     },
     CreateDefinition {
         source: String,
-        environment: LashlangHostEnvironment,
+        environment: LashVmHostEnvironment,
     },
     LinkAst {
         source: String,
-        program: lashlang::Program,
-        environment: LashlangHostEnvironment,
+        program: lash_vm::Program,
+        environment: LashVmHostEnvironment,
     },
     CompileModule {
         source: String,
-        environment: LashlangHostEnvironment,
+        environment: LashVmHostEnvironment,
         cell: bool,
     },
     OpaqueBindings {
         snapshot: serde_bytes::ByteBuf,
-        config: lashlang::BindingSummaryConfig,
+        config: lash_vm::BindingSummaryConfig,
     },
     State {
         snapshot: Option<serde_bytes::ByteBuf>,
@@ -81,14 +81,14 @@ pub enum StateAction {
     Inspect,
     Insert {
         name: String,
-        #[serde(with = "lashlang::effect_value")]
+        #[serde(with = "lash_vm::effect_value")]
         value: Value,
     },
     Remove {
         names: BTreeSet<String>,
     },
     Defaults {
-        #[serde(with = "lashlang::effect_value::map")]
+        #[serde(with = "lash_vm::effect_value::map")]
         values: BTreeMap<String, Value>,
         protected: BTreeSet<String>,
     },
@@ -98,7 +98,7 @@ pub enum StateAction {
 #[serde(deny_unknown_fields)]
 pub struct StateMetadata {
     pub definition_ids: BTreeSet<lash_core_execution::ProcessDefinitionId>,
-    #[serde(with = "lashlang::effect_value::record")]
+    #[serde(with = "lash_vm::effect_value::record")]
     pub globals: Record,
     pub names: BTreeSet<String>,
     pub expired: BTreeSet<String>,
@@ -117,7 +117,7 @@ pub struct StateView {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CellCompletion {
-    pub outcome: lashlang::ExecutionOutcome,
+    pub outcome: lash_vm::ExecutionOutcome,
     /// Independently bounded, as the separate state-view response was.
     pub state: EncodedPayload,
 }
@@ -131,9 +131,9 @@ pub enum Response {
     Definition(CreatedDefinition),
     Artifact(crate::InspectedArtifact),
     Document(Box<crate::InspectedDocument>),
-    ArtifactRefused(lashlang::ModuleArtifactRefusal),
+    ArtifactRefused(lash_vm::ModuleArtifactRefusal),
     CompileRefused {
-        error: lashlang::ModuleCompileError,
+        error: lash_vm::ModuleCompileError,
         policy: bool,
     },
     ContinuationInfo {
@@ -155,14 +155,14 @@ pub enum Response {
         message: String,
         policy: bool,
     },
-    SnapshotRefused(lashlang::SnapshotDecodeError),
+    SnapshotRefused(lash_vm::SnapshotDecodeError),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ArtifactVerification {
     Match,
-    Refused(lashlang::ModuleArtifactRefusal),
+    Refused(lash_vm::ModuleArtifactRefusal),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -170,7 +170,7 @@ pub struct Capture {
     pub definition_ids: BTreeSet<lash_core_execution::ProcessDefinitionId>,
     #[serde(with = "serde_bytes")]
     pub header: Vec<u8>,
-    pub fragments: BTreeMap<String, lashlang::DurableFragment>,
+    pub fragments: BTreeMap<String, lash_vm::DurableFragment>,
     pub baseline: BTreeMap<String, String>,
 }
 
@@ -186,23 +186,23 @@ pub struct CreatedDefinition {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompiledModule {
-    pub module_ref: lashlang::ModuleRef,
-    pub host_requirements_ref: lashlang::HostRequirementsRef,
+    pub module_ref: lash_vm::ModuleRef,
+    pub host_requirements_ref: lash_vm::HostRequirementsRef,
     pub artifact: crate::InspectedArtifact,
-    pub introspection: lashlang::ModuleIntrospection,
+    pub introspection: lash_vm::ModuleIntrospection,
 }
 impl CompiledModule {
     /// Decode a fixture's artifact for low-level VM assertions.
     #[cfg(feature = "testing")]
-    pub fn into_fixture_output(self) -> Result<lashlang::ModuleCompileOutput, PoolError> {
+    pub fn into_fixture_output(self) -> Result<lash_vm::ModuleCompileOutput, PoolError> {
         let artifact =
-            lashlang::ModuleArtifact::from_store_bytes(&self.artifact.bytes).map_err(|error| {
+            lash_vm::ModuleArtifact::from_store_bytes(&self.artifact.bytes).map_err(|error| {
                 PoolError::refused(lash_vm_protocol::RunRefusal::Undecodable {
                     input: lash_vm_protocol::RunInput::Artifact,
                     detail: lash_vm_protocol::Detail::new(error),
                 })
             })?;
-        Ok(lashlang::ModuleCompileOutput {
+        Ok(lash_vm::ModuleCompileOutput {
             module_ref: self.module_ref,
             host_requirements_ref: self.host_requirements_ref,
             artifact,
@@ -377,7 +377,7 @@ pub struct WorkerReceipt {
 }
 
 /// Runtime-only operations on a [`Service`]: the pool, requests, and the
-/// per-execution budget the Lashlang runtime and the RLM protocol drive a
+/// per-execution budget the Lash VM runtime and the RLM protocol drive a
 /// worker through. A dialect only constructs a service; these members are
 /// the cross-crate runtime seam, which the `lash` facade does not re-export,
 /// and the impl is hidden from docs because it is support plumbing rather
@@ -402,8 +402,8 @@ pub mod runtime_ops {
 
         fn inspect_artifact(
             &self,
-            store: &lashlang::LashlangArtifacts,
-            module_ref: &lashlang::ModuleRef,
+            store: &lash_vm::LashVmArtifacts,
+            module_ref: &lash_vm::ModuleRef,
         ) -> impl Future<
             Output = Result<
                 Option<crate::InspectedArtifact>,
@@ -415,8 +415,8 @@ pub mod runtime_ops {
         /// retains it.
         fn inspect_document(
             &self,
-            store: &lashlang::LashlangArtifacts,
-            module_ref: &lashlang::ModuleRef,
+            store: &lash_vm::LashVmArtifacts,
+            module_ref: &lash_vm::ModuleRef,
         ) -> impl Future<
             Output = Result<
                 Option<crate::InspectedDocument>,
@@ -469,8 +469,8 @@ pub mod runtime_ops {
 
         async fn inspect_artifact(
             &self,
-            store: &lashlang::LashlangArtifacts,
-            module_ref: &lashlang::ModuleRef,
+            store: &lash_vm::LashVmArtifacts,
+            module_ref: &lash_vm::ModuleRef,
         ) -> Result<Option<crate::InspectedArtifact>, lash_core_execution::ArtifactStoreError>
         {
             let Some(bytes) = store
@@ -498,8 +498,8 @@ pub mod runtime_ops {
 
         async fn inspect_document(
             &self,
-            store: &lashlang::LashlangArtifacts,
-            module_ref: &lashlang::ModuleRef,
+            store: &lash_vm::LashVmArtifacts,
+            module_ref: &lash_vm::ModuleRef,
         ) -> Result<Option<crate::InspectedDocument>, lash_core_execution::ArtifactStoreError>
         {
             let Some(bytes) = store

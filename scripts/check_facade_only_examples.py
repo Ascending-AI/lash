@@ -43,7 +43,7 @@ def forbidden_crates() -> set[str]:
                 crate = alias.replace("-", "_")
                 # Workspace aliases retain the implementation crate name even
                 # when the published package is named lash-internal-*.
-                if crate in forbidden or not (crate.startswith("lash_") or crate == "lashlang"):
+                if crate in forbidden or not crate.startswith("lash_"):
                     continue
                 forbidden.add(crate)
                 if crate in manifests:

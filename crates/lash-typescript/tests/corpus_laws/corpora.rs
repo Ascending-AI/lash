@@ -13,7 +13,7 @@
 
 use std::collections::BTreeSet;
 
-use lashlang::{LashlangHostEnvironment, TypeExpr};
+use lash_vm::{LashVmHostEnvironment, TypeExpr};
 
 use super::goldens;
 use super::ingest::{data_path, harness_bindings, test_script};
@@ -309,8 +309,8 @@ impl CorpusProgram {
     /// The host every corpus links against: the harness's catalogue, the
     /// operations the goldens and the host-flow cells call, and the program's
     /// session globals.
-    pub(crate) fn environment(&self) -> LashlangHostEnvironment {
-        let mut environment = lashlang::testing::harness::test_environment();
+    pub(crate) fn environment(&self) -> LashVmHostEnvironment {
+        let mut environment = lash_vm::testing::harness::test_environment();
         for (module, type_name, operation) in [
             ("tools", "Tools", "lookup"),
             ("web", "Web", "fetch"),

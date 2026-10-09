@@ -24,7 +24,7 @@ pub use attachment_condemnation_recovery::{
     persistently_failing_delete_stalls_typed,
 };
 
-#[cfg(feature = "lashlang")]
+#[cfg(feature = "lash-vm")]
 mod artifact_referrers;
 mod artifact_store;
 mod attachment_referrers;
@@ -90,7 +90,7 @@ mod support_prelude;
 mod tool_access_persistence;
 mod tool_intent_retention;
 
-#[cfg(feature = "lashlang")]
+#[cfg(feature = "lash-vm")]
 pub use artifact_referrers::*;
 pub use artifact_store::*;
 

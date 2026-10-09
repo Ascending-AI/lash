@@ -10,7 +10,7 @@
 
 use std::collections::BTreeSet;
 
-use lashlang::{AssignPathStep, AssignTarget, Expr, Program};
+use lash_vm::{AssignPathStep, AssignTarget, Expr, Program};
 
 use super::printer::typescript_statement_source;
 use super::{GraphRenderError, RenderContext, RenderScope, WorkflowNode};

@@ -14,7 +14,7 @@
 
 use std::collections::BTreeSet;
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
     State, Value, Vm, VmContinuation, VmRunOutcome,
 };
@@ -41,7 +41,7 @@ impl ExecutionHost for Host {
 fn finished(source: &str) -> Value {
     let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    match futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
         .unwrap_or_else(|error| panic!("`{source}` should execute: {error}"))
     {
         ExecutionOutcome::Finished(value) => value,
@@ -386,7 +386,7 @@ async fn resident_restored_and_replayed(source: &str) -> Value {
     let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("TypeScript should compile: {source}: {error}"));
     let run = || async {
-        match lashlang::execute(&program, &mut State::new(), &Host)
+        match lash_vm::execute(&program, &mut State::new(), &Host)
             .await
             .unwrap_or_else(|error| panic!("{source}: {error}"))
         {
@@ -423,7 +423,7 @@ async fn resident_restored_and_replayed(source: &str) -> Value {
         let continuation = vm.suspend().expect("the parked program must be capturable");
         drop(vm);
         let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-        let restored: VmContinuation = lashlang::VmInstance::pristine()
+        let restored: VmContinuation = lash_vm::VmInstance::pristine()
             .open_continuation(&bytes)
             .expect("continuation should deserialize");
         let host = Host;

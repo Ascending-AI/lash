@@ -31,7 +31,7 @@ const LASH_RLM_CELL_SEGMENT_CODE_DOMAIN_VERSION: &str = "lash-rlm-cell-segment-c
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
-pub(super) struct RecordedPrint(#[serde(with = "lashlang::effect_value")] pub lashlang::Value);
+pub(super) struct RecordedPrint(#[serde(with = "lash_vm::effect_value")] pub lash_vm::Value);
 
 /// A cell's envelope at a quiet point, as the activation that resumes the
 /// cell reads it.
@@ -44,9 +44,9 @@ pub(super) struct CellSegmentState {
     /// The session's projected bindings as the cell recorded them.
     pub projected_bindings: BTreeMap<String, crate::projection::bindings::RecordedProjection>,
     /// The host environment the cell linked against.
-    pub host_environment: lashlang::LashlangHostEnvironment,
+    pub host_environment: lash_vm::LashVmHostEnvironment,
     /// The cell's journaled ambient binding set (FIG-3587).
-    pub cell_bindings: lash_lashlang_runtime::RecordedCellToolBindings,
+    pub cell_bindings: lash_vm_runtime::RecordedCellToolBindings,
     /// The grants the cell's deferred resolutions recorded.
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
     pub prints: Vec<RecordedPrint>,
@@ -84,11 +84,11 @@ impl CellSegmentState {
         code: &str,
         linked: (
             BTreeMap<String, crate::projection::bindings::RecordedProjection>,
-            lash_lashlang_runtime::RecordedCellToolBindings,
-            lashlang::LashlangHostEnvironment,
+            lash_vm_runtime::RecordedCellToolBindings,
+            lash_vm::LashVmHostEnvironment,
         ),
         deferred_execution_grants: BTreeMap<lash_core::ToolId, lash_core::ToolExecutionGrant>,
-        prints: &std::sync::Mutex<Vec<lashlang::Value>>,
+        prints: &std::sync::Mutex<Vec<lash_vm::Value>>,
     ) -> Self {
         let (projected_bindings, cell_bindings, host_environment) = linked;
         Self {
@@ -171,8 +171,7 @@ mod tests {
             serde_json::json!({"tool": {"invented": true}}),
         ] {
             assert!(
-                serde_json::from_value::<lash_lashlang_runtime::RecordedCellToolBindings>(value)
-                    .is_err()
+                serde_json::from_value::<lash_vm_runtime::RecordedCellToolBindings>(value).is_err()
             );
         }
         assert!(

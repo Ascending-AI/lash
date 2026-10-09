@@ -174,7 +174,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
 
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw() -> Result<()> {
+pub(super) fn rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_raw() -> Result<()> {
     run_async_test_on_stack_budget("rlm-streamed-cell-raw-final-test", || async {
         const RAW_FINAL: &str = "Visible before cell.\n<typescript>\nconst payload = \"```markdown\\ninside\\n```\";\nfinish(\"streamed raw final ok\");\n</typescript>";
         const EXPECTED_CODE: &str =
@@ -979,14 +979,14 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
 
 #[cfg(feature = "rlm")]
 #[test]
-pub(super) fn rlm_pending_host_tool_completion_resumes_lashlang_await() -> Result<()> {
+pub(super) fn rlm_pending_host_tool_completion_resumes_lash_vm_await() -> Result<()> {
     run_async_test_on_stack_budget("rlm-pending-host-tool-test", || {
-        rlm_pending_host_tool_completion_resumes_lashlang_await_inner()
+        rlm_pending_host_tool_completion_resumes_lash_vm_await_inner()
     })
 }
 
 #[cfg(feature = "rlm")]
-pub(super) async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inner() -> Result<()> {
+pub(super) async fn rlm_pending_host_tool_completion_resumes_lash_vm_await_inner() -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
     let core =

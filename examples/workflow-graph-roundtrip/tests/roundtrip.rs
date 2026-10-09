@@ -262,7 +262,7 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
             .data
             .process_name()
             .as_deref()
-            .is_some_and(|name| name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX))
+            .is_some_and(|name| name.starts_with(lash::vm::ir::LIFTED_PROCESS_NAME_PREFIX))
     );
     assert!(added.data.params().is_empty());
     let body = added
@@ -274,7 +274,7 @@ async fn catalog_process_shape_adds_a_seeded_top_level_process_that_reprojects_a
     assert_eq!(body.node_ids.len(), 1);
     assert!(saved.document.nodes.iter().any(|node| {
         node.id == body.node_ids[0]
-            && node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+            && node.data.terminal_kind() == Some(&lash::vm::ir::WorkflowTerminalKind::Finish)
             && node.data.expression().as_deref() == Some("0")
     }));
     let graph =
@@ -319,7 +319,7 @@ async fn process_name_and_params_add_remove_and_round_trip() {
         .process_name()
         .clone()
         .expect("projected process name");
-    assert!(derived_name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX));
+    assert!(derived_name.starts_with(lash::vm::ir::LIFTED_PROCESS_NAME_PREFIX));
     *process.data.process_name_mut().expect("process_name node") = Some("renamed".to_string());
     *process.data.params_mut().expect("params node") = vec![
         EditableProcessField {
@@ -371,7 +371,7 @@ async fn process_name_and_params_add_remove_and_round_trip() {
             .data
             .process_name()
             .as_deref()
-            .is_some_and(|name| name.starts_with(lash::rlm::lang::LIFTED_PROCESS_NAME_PREFIX)),
+            .is_some_and(|name| name.starts_with(lash::vm::ir::LIFTED_PROCESS_NAME_PREFIX)),
         "a lifted process keeps its derived name: {:?}",
         process.data.process_name()
     );
@@ -534,7 +534,7 @@ async fn source_projection_is_a_stateless_canonical_fixpoint_with_typed_errors()
     );
     assert!(document.nodes.iter().any(|node| {
         node.data.kind() == "terminal"
-            && node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+            && node.data.terminal_kind() == Some(&lash::vm::ir::WorkflowTerminalKind::Finish)
             && node.data.expression().as_deref() == Some("value")
     }));
     let process = document
@@ -606,7 +606,7 @@ async fn projected_available_vars_follow_ssa_and_nested_lexical_scope() {
         serde_json::from_value(body["document"].clone()).expect("scoped document");
     assert_eq!(
         document.facet_schema_version,
-        Some(lash::rlm::lang::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
+        Some(lash::formats::WORKFLOW_TYPE_FACET_SCHEMA_VERSION)
     );
     let state = document
         .nodes
@@ -638,7 +638,7 @@ async fn projected_available_vars_follow_ssa_and_nested_lexical_scope() {
     );
     // `for (const item of xs)` hands the loop its iterable itself (FIG-3625),
     // so the loop binding projects as `[1]`'s element type, `int`, as the
-    // Lashlang `for item in [1]` did. (Through FIG-3033 it lowered through an
+    // Lash VM `for item in [1]` did. (Through FIG-3033 it lowered through an
     // opaque iterable copy and projected `any`.) The lash-typescript law
     // `a_for_of_body_sees_its_loop_binding_typed_by_the_iterable` holds the
     // same in PR CI.
@@ -696,7 +696,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     );
     append_process_node(&mut document, call);
     let mut effect = new_flow_node("new:effect-from-catalog", "effect", None, "Sleep");
-    *effect.data.effect_mut().expect("effect node") = lash::rlm::lang::WorkflowEffectKind::SleepFor;
+    *effect.data.effect_mut().expect("effect node") = lash::vm::ir::WorkflowEffectKind::SleepFor;
     effect.data.fields_mut().expect("fields node").insert(
         "duration".to_string(),
         EditableValue::String("1ms".to_string()),
@@ -736,7 +736,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
         .expect("saved terminal");
     assert_eq!(
         terminal.data.terminal_kind(),
-        Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+        Some(&lash::vm::ir::WorkflowTerminalKind::Finish)
     );
     assert_eq!(terminal.data.expression().as_deref(), Some("0"));
     // FIG-3033: a process ends with `return` in TypeScript and the dialect has
@@ -761,7 +761,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     let effect = saved
         .nodes
         .iter_mut()
-        .find(|node| node.data.effect() == Some(lash::rlm::lang::WorkflowEffectKind::SleepFor))
+        .find(|node| node.data.effect() == Some(lash::vm::ir::WorkflowEffectKind::SleepFor))
         .expect("saved effect");
     effect.data.fields_mut().expect("fields node").insert(
         "duration".to_string(),
@@ -817,7 +817,7 @@ async fn data_terminal_call_and_effect_edits_round_trip_without_raw_constructor_
     assert!(!restored.source.contains("tone:"));
     assert!(restored.nodes.iter().any(|node| {
         node.data.kind() == "terminal"
-            && node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
+            && node.data.terminal_kind() == Some(&lash::vm::ir::WorkflowTerminalKind::Finish)
             && node.data.expression().as_deref() == Some("value")
     }));
 
@@ -995,7 +995,7 @@ async fn lists_selects_projects_and_runs_built_in_workflows() {
             assert!(projected.nodes().any(|node| {
                 matches!(
                     &node.kind,
-                    lash::rlm::lang::WorkflowNodeKind::StateUpdate { target, .. }
+                    lash::vm::ir::WorkflowNodeKind::StateUpdate { target, .. }
                         if !target.steps.is_empty()
                 )
             }));
@@ -2095,9 +2095,9 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
     assert_eq!(body["error"]["code"], "unsupported_schema_version");
     assert_eq!(
         body["error"]["details"]["found"],
-        lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION - 1
+        lash::formats::WORKFLOW_GRAPH_SCHEMA_VERSION - 1
     );
-    let current = lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION;
+    let current = lash::formats::WORKFLOW_GRAPH_SCHEMA_VERSION;
     assert_eq!(
         body["error"]["details"],
         serde_json::json!({
@@ -2107,7 +2107,7 @@ async fn invalid_graph_post_returns_typed_unprocessable_entity() {
         })
     );
 
-    document.schema_version = lash::rlm::lang::WORKFLOW_GRAPH_SCHEMA_VERSION;
+    document.schema_version = lash::formats::WORKFLOW_GRAPH_SCHEMA_VERSION;
     let while_node = document
         .nodes
         .iter_mut()

@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lashlang::{AstString, ExprFolder, StructuralRole, fold_expr_children};
+use lash_vm::{AstString, ExprFolder, StructuralRole, fold_expr_children};
 
 use super::{Expr, Printer, TypeScriptSourceError};
 use crate::workflow_graph::parse_typescript_expression;

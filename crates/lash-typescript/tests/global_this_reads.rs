@@ -16,7 +16,7 @@
 use std::collections::BTreeSet;
 
 use lash_typescript::DiagnosticCode;
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
@@ -37,7 +37,7 @@ impl ExecutionHost for Host {
 fn finished(source: &str) -> Value {
     let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    match futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
         .unwrap_or_else(|error| panic!("`{source}` should execute: {error}"))
     {
         ExecutionOutcome::Finished(value) => value,
@@ -225,7 +225,7 @@ fn a_function_written_global_exists_only_once_written() {
     let program = lash_typescript::testing::compile("function s() { globalThis.y = 5; }")
         .expect("an unrun global write compiles");
     let mut state = State::new();
-    futures::executor::block_on(lashlang::execute(&program, &mut state, &Host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut state, &Host))
         .expect("the cell runs");
     assert!(
         state.globals().get("y").is_none(),
@@ -239,7 +239,7 @@ fn a_function_written_global_exists_only_once_written() {
 fn a_function_reads_an_earlier_cells_global() {
     let mut state = State::new();
     let first = lash_typescript::testing::compile("var count = 4;").expect("first cell compiles");
-    futures::executor::block_on(lashlang::execute(&first, &mut state, &Host))
+    futures::executor::block_on(lash_vm::execute(&first, &mut state, &Host))
         .expect("first cell runs");
     let globals = BTreeSet::from(["count".to_string()]);
     let second = lash_typescript::parse_with_globals(
@@ -247,9 +247,9 @@ fn a_function_reads_an_earlier_cells_global() {
         &globals,
     )
     .expect("second cell lowers");
-    let artifact = lashlang::ModuleArtifact::from_program(second).expect("second cell artifact");
-    let second = lashlang::compile(&artifact, lashlang::Entry::Main, None).expect("compiles");
-    match futures::executor::block_on(lashlang::execute(&second, &mut state, &Host))
+    let artifact = lash_vm::ModuleArtifact::from_program(second).expect("second cell artifact");
+    let second = lash_vm::compile(&artifact, lash_vm::Entry::Main, None).expect("compiles");
+    match futures::executor::block_on(lash_vm::execute(&second, &mut state, &Host))
         .expect("second cell runs")
     {
         ExecutionOutcome::Finished(value) => {

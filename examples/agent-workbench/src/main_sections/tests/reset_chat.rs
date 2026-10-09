@@ -410,7 +410,7 @@ async fn reset_chat_deletes_old_session_and_hands_back_a_fresh_one() {
             .is_empty()
     );
     let Json(graph_index) =
-        list_lashlang_graphs(State(state.clone()), Query(SessionQuery::default()))
+        list_lash_vm_graphs(State(state.clone()), Query(SessionQuery::default()))
             .await
             .expect("list graphs after reset");
     assert!(

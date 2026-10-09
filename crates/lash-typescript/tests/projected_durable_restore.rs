@@ -22,7 +22,7 @@
 use std::collections::BTreeSet;
 
 use lash_core_execution::FleetFormat;
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, DurableBaseline, DurableFragment, ExecutionHost, ExecutionHostError,
     ExecutionMode, ExecutionOutcome, ProjectedBindings, ProjectedValue, State, Value, Vm,
     VmContinuation, VmInstance, VmRunOutcome,
@@ -66,11 +66,11 @@ impl ExecutionHost for RestoreHost {
     }
 }
 
-fn compile(source: &str) -> lashlang::CompiledProgram {
+fn compile(source: &str) -> lash_vm::CompiledProgram {
     let globals = BTreeSet::from(["report".to_string(), "rows".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should parse: {error}"));
-    lashlang::testing::harness::try_compile_program(&program)
+    lash_vm::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"))
 }
 
@@ -99,7 +99,7 @@ async fn a_nested_projection_parks_and_resumes() {
     drop(vm);
 
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation = lashlang::VmInstance::pristine()
+    let restored: VmContinuation = lash_vm::VmInstance::pristine()
         .open_continuation(&bytes)
         .expect("continuation should deserialize");
 
@@ -142,7 +142,7 @@ async fn a_projection_inside_an_error_survives_a_park() {
     drop(vm);
 
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation = lashlang::VmInstance::pristine()
+    let restored: VmContinuation = lash_vm::VmInstance::pristine()
         .open_continuation(&bytes)
         .expect("continuation should deserialize");
 
@@ -190,7 +190,7 @@ impl ExecutionHost for RecordHost {
             "report",
             ProjectedValue::scalar(
                 "report",
-                lashlang::from_json(serde_json::json!({ "title": "q3" })),
+                lash_vm::from_json(serde_json::json!({ "title": "q3" })),
             ),
         );
         bindings
@@ -206,9 +206,9 @@ async fn run_cell(source: &str, state: &mut State) -> Value {
     globals.insert("report".to_string());
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should parse: {error}"));
-    let program = lashlang::testing::harness::try_compile_program(&program)
+    let program = lash_vm::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    match lashlang::execute(&program, state, &RecordHost { process: false })
+    match lash_vm::execute(&program, state, &RecordHost { process: false })
         .await
         .expect("the cell should run")
     {

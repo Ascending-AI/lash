@@ -9,7 +9,7 @@
     reason = "test target: clippy's allow-expect-in-tests only exempts #[test] functions, and the scripted host around them is test code too"
 )]
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, AggregateConsumer, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, ResourceOperationBatchLeaf, ResourceOperationBatchOutcome,
     ResourceOperationOutcome, State, Value,
@@ -31,7 +31,7 @@ struct ScriptedHost {
     asked: Mutex<Vec<Asked>>,
     /// Answer every aggregate on the host-control channel instead, the way
     /// the product host answers a settlement read that failed on store I/O.
-    /// A flag rather than a second host type: `lashlang::execute` is generic
+    /// A flag rather than a second host type: `lash_vm::execute` is generic
     /// over its host, and a second instantiation doubles this binary's
     /// compile.
     host_control_failure: Option<&'static str>,
@@ -89,10 +89,10 @@ impl ExecutionHost for ScriptedHost {
     }
 }
 
-fn run(source: &str, host: &ScriptedHost) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
+fn run(source: &str, host: &ScriptedHost) -> Result<ExecutionOutcome, lash_vm::RuntimeError> {
     let compiled =
         lash_typescript::testing::compile(source).unwrap_or_else(|error| panic!("{error}"));
-    futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), host))
+    futures::executor::block_on(lash_vm::execute(&compiled, &mut State::new(), host))
 }
 
 fn finished(outcome: ExecutionOutcome) -> serde_json::Value {
@@ -123,7 +123,7 @@ fn json(value: &Value) -> serde_json::Value {
 }
 
 fn value(json: serde_json::Value) -> ResourceOperationOutcome {
-    ResourceOperationOutcome::Value(lashlang::from_json(json))
+    ResourceOperationOutcome::Value(lash_vm::from_json(json))
 }
 
 fn rejection(message: &str) -> ResourceOperationOutcome {
@@ -211,10 +211,7 @@ fn racing_nothing_ends_the_cell_uncaught() {
     )
     .expect_err("the unsettled await ends the cell");
     assert!(
-        matches!(
-            error,
-            lashlang::RuntimeError::AggregateAwaitUnsettled { .. }
-        ),
+        matches!(error, lash_vm::RuntimeError::AggregateAwaitUnsettled { .. }),
         "{error:?}"
     );
     assert!(host.asked().is_empty());
@@ -329,7 +326,7 @@ fn a_timer_nothing_awaits_fails_at_cell_end_like_a_pending_tool() {
     let host = ScriptedHost::new(|_| unreachable!("nothing is awaited"));
     let error = run("sleep(5); finish(1);", &host).expect_err("an abandoned timer");
     assert!(
-        matches!(error, lashlang::RuntimeError::PendingTool { .. }),
+        matches!(error, lash_vm::RuntimeError::PendingTool { .. }),
         "{error:?}"
     );
 }

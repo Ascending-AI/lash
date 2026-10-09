@@ -23,7 +23,7 @@ fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHis
         RlmProtocolEvent::RlmTrajectoryEntry(Box::new(CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
-            id: format!("lashlang_step_{protocol_iteration}"),
+            id: format!("lash_vm_step_{protocol_iteration}"),
             protocol_iteration,
             code: code.to_string(),
             prints: if output.is_empty() {
@@ -53,7 +53,7 @@ fn terminal_step_event(
         RlmProtocolEvent::RlmTrajectoryEntry(Box::new(CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
-            id: format!("lashlang_step_{protocol_iteration}"),
+            id: format!("lash_vm_step_{protocol_iteration}"),
             protocol_iteration,
             code: code.to_string(),
             prints: output.into_iter().map(Into::into).collect(),
@@ -96,7 +96,7 @@ pub(super) fn projector(max_output_chars: usize) -> RlmContextProjector {
         max_output_chars,
         dialect: Arc::new(SessionDialect::prompt_only(
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
         )),
     }
 }
@@ -109,7 +109,7 @@ pub(crate) fn rendered_bound_variables(
         .as_object()
         .expect("globals object")
         .iter()
-        .map(|(name, value)| (name.clone(), lashlang::from_json(value.clone())))
+        .map(|(name, value)| (name.clone(), lash_vm::from_json(value.clone())))
         .collect::<Vec<_>>();
     crate::rlm_support::render_bound_variables(
         cache,
@@ -527,7 +527,7 @@ fn long_user_message_gets_full_history_reference() {
 }
 
 #[test]
-fn structured_lashlang_step_output_keeps_diagnostic_fields_in_projected_history() {
+fn structured_lash_vm_step_output_keeps_diagnostic_fields_in_projected_history() {
     let projector = projector(10);
     let raw = serde_json::json!({
         "output": "x".repeat(60 * 1024),
@@ -584,7 +584,7 @@ fn printed_images_render_as_llm_image_blocks() {
         RlmProtocolEvent::RlmTrajectoryEntry(Box::new(CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
-            id: "lashlang_step_1".to_string(),
+            id: "lash_vm_step_1".to_string(),
             protocol_iteration: 1,
             code: "print img".to_string(),
             prints: vec![r#"{"type":"image","id":"img"}"#.to_string().into()],

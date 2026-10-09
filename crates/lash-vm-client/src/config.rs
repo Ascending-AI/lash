@@ -70,12 +70,12 @@ pub struct WorkerTuning {
     pub compiled_process_cache_capacity: usize,
     pub parser_stack_base_bytes: usize,
     pub parser_stack_bytes_per_source_byte: usize,
-    pub vm_pacing: lashlang::VmPacing,
+    pub vm_pacing: lash_vm::VmPacing,
 }
 impl WorkerTuning {
     /// Existing presets: parent wait 86,400 s; inbound buffer 16 KiB; both
     /// caches 64 entries; parser stack 8 MiB plus 40,000 bytes/source byte;
-    /// [`lashlang::VmPacing::standard`]. Parser slope is measured at 1.8x the
+    /// [`lash_vm::VmPacing::standard`]. Parser slope is measured at 1.8x the
     /// worst observed frames; the other working values have no workload measurements.
     pub const fn standard() -> Self {
         Self {
@@ -85,7 +85,7 @@ impl WorkerTuning {
             compiled_process_cache_capacity: 64,
             parser_stack_base_bytes: 8 * 1024 * 1024,
             parser_stack_bytes_per_source_byte: 40_000,
-            vm_pacing: lashlang::VmPacing::standard(),
+            vm_pacing: lash_vm::VmPacing::standard(),
         }
     }
 }

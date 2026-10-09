@@ -10,12 +10,12 @@
 //! The document comes from the document provider its engine was registered
 //! with
 //! ([`ProcessEngineRegistration::with_document_provider`](crate::plugins::ProcessEngineRegistration::with_document_provider)).
-//! The lashlang engine's is built in and answers a [`WorkflowDocument`]; an
+//! The lash_vm engine's is built in and answers a [`WorkflowDocument`]; an
 //! engine with none, or with a document of another type, reads
 //! [`WorkflowRead::Unsupported`].
 
-pub use lash_lashlang_runtime::WorkflowDocument;
-pub use lashlang::WorkflowGraph;
+pub use lash_vm::WorkflowGraph;
+pub use lash_vm_runtime::WorkflowDocument;
 
 use crate::persistence::ArtifactName;
 use crate::process::{ProcessDefinition, ProcessDefinitionId, ProcessEngineKind};

@@ -51,13 +51,13 @@ pub enum OwnerKey {
     Cell(SessionId, TurnId, CellId),
 }
 
-/// A VM execution with a snapshot: a code cell or a lashlang process.
+/// A VM execution with a snapshot: a code cell or a lash_vm process.
 /// Stored as `c/<session>/<run>/<cell>` or `p/<process>`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ExecKey {
     /// A code cell.
     Cell(SessionId, TurnId, CellId),
-    /// A lashlang process.
+    /// A lash_vm process.
     Process(ProcessId),
 }
 

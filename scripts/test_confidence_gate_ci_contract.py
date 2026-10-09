@@ -653,12 +653,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "stack-budget",
             "s3-store",
             "fuzz-smoke",
-            # Deferred Unicode and the lashlang consumer left the
+            # Deferred Unicode and the lash_vm consumer left the
             # PR/merge-group board entirely: the queue runs the same minimal
             # board as a pull request, and the release dispatch is their sole
             # home. Feature lanes came back to every trusted event (FIG-3572).
             "unicode-tests",
-            "lashlang-git-consumer",
+            "lash-vm-git-consumer",
         }
         guard = "github.event_name == 'workflow_dispatch'"
         for job in sorted(dispatch_only):
@@ -1733,7 +1733,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
             validate_release,
         )
         self.assertIn(
-            "profile_lashlang.py --iterations 2500 --profile-iterations 2500 "
+            "profile_lash_vm.py --iterations 2500 --profile-iterations 2500 "
             "--enforce-budgets",
             validate_release,
         )
@@ -1761,7 +1761,7 @@ run_mutants_recorded() {{ printf 'RECORDED %s\\n' "$*"; }}
         for command in (
             "profile_runtime.py --profile full --release --scenario all "
             "--enforce-budgets",
-            "profile_lashlang.py --iterations 2500 --profile-iterations 2500 "
+            "profile_lash_vm.py --iterations 2500 --profile-iterations 2500 "
             "--enforce-budgets",
         ):
             self.assertIn(command, perf)
@@ -2544,7 +2544,7 @@ derive_mutation_jobs() {{
                 "store-features",
                 "runtime-features",
                 "protocol-rlm-testing",
-                "tool-lashlang-proxies",
+                "tool-lash-vm-proxies",
                 "provider-testing-features",
                 "perf-dhat-heap",
                 "upgrade-harness-synthetic-next",

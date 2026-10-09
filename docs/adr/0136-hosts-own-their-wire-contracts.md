@@ -27,7 +27,7 @@ continues the local recoverable observation feed with cursors, replacement
 commits, and replay gaps. It performs no engine protocol negotiation.
 
 The six independent schema documents remain: workflow graph and type facets,
-trace record and Lashlang graph, and process effect outcome and omissions.
+trace record and Lash VM graph, and process effect outcome and omissions.
 Their owners define their stored or projection contracts. The VM IPC contract
 also belongs to its own execution boundary.
 

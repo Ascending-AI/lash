@@ -2,7 +2,7 @@
 //!
 //! One [`PostgresStorage`] owns the role pools of one [`PostgresHostConfig`]
 //! and creates durable implementations for the runtime session store, process
-//! registry, Lashlang artifact store, process execution
+//! registry, Lash VM artifact store, process execution
 //! environment store, and attachment manifest. Every connection it opens is
 //! made by the role-aware factory in [`host`]: named, sized and guarded by the
 //! one validated configuration (FIG-5240).
@@ -200,7 +200,7 @@ impl PostgresProcessRegistry {
 }
 
 #[derive(Clone)]
-pub struct PostgresLashlangArtifactStore {
+pub struct PostgresLashVmArtifactStore {
     pool: PgPool,
     fence: guarded_tx::WriterFence,
     /// The store set's clock: the instant a guard's cleanup is due and a
@@ -208,7 +208,7 @@ pub struct PostgresLashlangArtifactStore {
     clock: Arc<dyn lash_core_execution::Clock>,
 }
 
-impl PostgresLashlangArtifactStore {
+impl PostgresLashVmArtifactStore {
     pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
         self.clock = clock;
         self
@@ -719,16 +719,16 @@ impl PostgresStorage {
         }
     }
 
-    pub fn lashlang_artifact_store(&self) -> PostgresLashlangArtifactStore {
-        PostgresLashlangArtifactStore {
+    pub fn lash_vm_artifact_store(&self) -> PostgresLashVmArtifactStore {
+        PostgresLashVmArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
         }
     }
 
-    pub fn process_env_store(&self) -> PostgresLashlangArtifactStore {
-        PostgresLashlangArtifactStore {
+    pub fn process_env_store(&self) -> PostgresLashVmArtifactStore {
+        PostgresLashVmArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
@@ -737,8 +737,8 @@ impl PostgresStorage {
 
     /// The retained tool-material store (FIG-4889), over the same artifact
     /// and referrer tables.
-    pub fn tool_material_store(&self) -> PostgresLashlangArtifactStore {
-        PostgresLashlangArtifactStore {
+    pub fn tool_material_store(&self) -> PostgresLashVmArtifactStore {
+        PostgresLashVmArtifactStore {
             pool: self.pool.clone(),
             fence: self.fence.clone(),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),

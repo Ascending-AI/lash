@@ -9,8 +9,8 @@ dialects. TypeScript is the only shipped dialect. Each dialect defines its own
 semantics and targets the IR. Dialects need no parity and do not emulate one
 another.
 
-`lashlang` names the AST, linker, compiler, bytecode, continuations, heap and
-value model, VM, workflow graph and `lash-lashlang-runtime` engine. It has no
+`lash_vm` names the AST, linker, compiler, bytecode, continuations, heap and
+value model, VM, workflow graph and `lash-vm-runtime` engine. It has no
 authored source language. A dialect is a front end for the current IR, with
 its own semantics and acceptance evidence.
 
@@ -51,7 +51,7 @@ field and refuses one.
 - `language_id`: the stable id the session records.
 - `worker_service`: the compiled worker entry and bounds for the source
   frontend. That entry implements `WorkerFrontend::parse`: source to
-  `lashlang::Program`, with the live host environment for cells, including
+  `lash_vm::Program`, with the live host environment for cells, including
   prior globals, expired functions and process handles. It returns typed
   `WorkerFrontendRefusal` outcomes with the diagnostic and policy class.
   `worker_entry_with_frontend` is entered before host initialization. Parent
@@ -107,7 +107,7 @@ Alpha-variant cells have distinct refs and immutable artifacts (law L9).
 `0` and `-0` are distinct, NaNs share one representation, and non-finite
 values store losslessly (FIG-3571).
 
-The module ref and source identity use the atom `lashlang-ir`. Identical
+The module ref and source identity use the atom `lash-vm-ir`. Identical
 linked programs share a module ref regardless of their source dialect
 (FIG-4020). Neither `ExecRequest` nor the exec-code effect command carries a
 language string. Compiled artifacts, durable processes, stores and wire
@@ -115,10 +115,10 @@ execution commands consume IR and shared values, not source syntax.
 `processes.create` lowers its source through the session's dialect and hands
 the process engine IR.
 
-The clock/random module is `__lashlang_runtime`, its receiver type
-is `lashlang.Runtime`, and its host operation is `lashlang.runtime`. Internal
+The clock/random module is `__lash_vm_runtime`, its receiver type
+is `lash_vm.Runtime`, and its host operation is `lash_vm.runtime`. Internal
 modules in the reserved `__` namespace are hidden from the model. Durable
-engine, process and effect identifiers keep their Lashlang spellings.
+engine, process and effect identifiers keep their Lash VM spellings.
 
 The compiler emits reference semantics. Durable capture preserves shared
 acyclic identity through validated graph encoding and refuses cycles. A new
@@ -158,6 +158,6 @@ upcasters or compatibility readers (FIG-3846). ADR 0115 governs the 1.0 cut.
 - `canonical_get_put_and_put_get` in
   [the lens tests](../../crates/lash-typescript/tests/workflow_graph.rs).
 - `shared_binding_list_and_record_literals_stay_shared_after_snapshot_round_trip`
-  in [the continuation tests](../../crates/lashlang/src/runtime/tests/continuation_wire_cases.rs).
+  in [the continuation tests](../../crates/lash-vm/src/runtime/tests/continuation_wire_cases.rs).
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

@@ -163,7 +163,7 @@ async fn postgres_first_commit_may_end_its_own_appended_frame_open() {
         lash_core_execution::FrameEnvironmentId::new(session_id.clone(), ended.clone()),
     );
     let claim = ReferrerClaim::unguarded(ended_referrer.clone()).expect("frame claim");
-    let artifacts = storage.lashlang_artifact_store();
+    let artifacts = storage.lash_vm_artifact_store();
     artifacts
         .publish_module_artifact(&claim, "first-turn-module", b"bytes")
         .await
@@ -387,7 +387,7 @@ async fn postgres_switch_out_of_a_resident_frame_ends_every_frame_the_commit_lea
     let claim = ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(resident.clone()))
         .expect("frame claim");
     storage
-        .lashlang_artifact_store()
+        .lash_vm_artifact_store()
         .publish_module_artifact(&claim, "held-by-resident-frame", b"bytes")
         .await
         .expect("hold module under the resident frame");
@@ -422,7 +422,7 @@ async fn postgres_switch_out_of_a_resident_frame_ends_every_frame_the_commit_lea
     assert_eq!(frame_end(&storage, &successor).await, (false, None));
     assert!(matches!(
         storage
-            .lashlang_artifact_store()
+            .lash_vm_artifact_store()
             .publish_module_artifact(&claim, "held-by-resident-frame", b"bytes")
             .await,
         Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
@@ -445,7 +445,7 @@ async fn postgres_commit_without_a_transition_that_changes_the_frame_ends_the_fr
     let claim = ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(first.clone()))
         .expect("frame claim");
     storage
-        .lashlang_artifact_store()
+        .lash_vm_artifact_store()
         .publish_module_artifact(&claim, "held-by-first-frame", b"bytes")
         .await
         .expect("hold module under the first frame");
@@ -483,7 +483,7 @@ async fn postgres_switch_carrying_a_module_its_frame_does_not_hold_fails_closed(
     let first = current_frame(&state);
     let (_, pinned) = host_pin();
     storage
-        .lashlang_artifact_store()
+        .lash_vm_artifact_store()
         .publish_module_artifact(&pinned, "held-by-a-host-pin", b"bytes")
         .await
         .expect("hold module under a host pin");
@@ -496,7 +496,7 @@ async fn postgres_switch_carrying_a_module_its_frame_does_not_hold_fails_closed(
             successor.frame_node_id().clone(),
         );
         transition.carries = vec![lash_core_execution::ArtifactName {
-            store: lash_core_execution::ArtifactStoreId::LashlangModule,
+            store: lash_core_execution::ArtifactStoreId::VmModule,
             artifact_ref: forged.into(),
         }];
         let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state)
@@ -540,7 +540,7 @@ async fn lock_artifact_mutations<'a>(
 ) -> sqlx::Transaction<'a, sqlx::Postgres> {
     let mut tx = storage.pool().begin().await.expect("begin blocker");
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(format!("lash-artifact:lashlang_module:{artifact_ref}"))
+        .bind(format!("lash-artifact:vm_module:{artifact_ref}"))
         .execute(&mut *tx)
         .await
         .expect("lock artifact mutation key");
@@ -576,7 +576,7 @@ async fn postgres_referrer_end_preserves_an_edge_committed_ahead_of_it() {
         return;
     };
     reset(storage.pool()).await;
-    let store = storage.lashlang_artifact_store();
+    let store = storage.lash_vm_artifact_store();
     let (a, a_claim) = host_pin();
     let (b, _) = host_pin();
     let artifact_ref = "artifact-race-preserve";
@@ -589,7 +589,7 @@ async fn postgres_referrer_end_preserves_an_edge_committed_ahead_of_it() {
     sqlx::query(
         "INSERT INTO lash_artifact_referrer_edges
         (namespace, artifact_ref, referrer_kind, referrer_id)
-        VALUES ('lashlang_module', $1, $2, $3)",
+        VALUES ('vm_module', $1, $2, $3)",
     )
     .bind(artifact_ref)
     .bind(b.kind().as_str())
@@ -629,7 +629,7 @@ async fn postgres_concurrent_final_referrer_ends_reclaim_bytes() {
         return;
     };
     reset(storage.pool()).await;
-    let store = storage.lashlang_artifact_store();
+    let store = storage.lash_vm_artifact_store();
     let (a, a_claim) = host_pin();
     let (b, b_claim) = host_pin();
     let artifact_ref = "artifact-race-final";
@@ -670,7 +670,7 @@ async fn postgres_referrer_fence_refuses_a_late_publisher() {
         return;
     };
     reset(storage.pool()).await;
-    let store = storage.lashlang_artifact_store();
+    let store = storage.lash_vm_artifact_store();
     let (referrer, claim) = host_pin();
     let artifact_ref = "artifact-race-late";
     store
@@ -708,7 +708,7 @@ async fn postgres_ended_cleanup_arms_a_fence_before_delivery() {
         return;
     };
     reset(storage.pool()).await;
-    let store = storage.lashlang_artifact_store();
+    let store = storage.lash_vm_artifact_store();
     let (referrer, claim) = host_pin();
     let artifact_ref = "artifact-host-pin-release";
     store
@@ -736,7 +736,7 @@ async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
         return;
     };
     reset(storage.pool()).await;
-    let store = storage.lashlang_artifact_store();
+    let store = storage.lash_vm_artifact_store();
     let (_, claim) = host_pin();
     let artifact_ref = "artifact-corrupt-edge";
     store
@@ -745,7 +745,7 @@ async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
         .expect("publish under live host pin");
     let empty_id = sqlx::query(
         "UPDATE lash_artifact_referrer_edges SET referrer_id = ''
-         WHERE namespace = 'lashlang_module' AND artifact_ref = $1",
+         WHERE namespace = 'vm_module' AND artifact_ref = $1",
     )
     .bind(artifact_ref)
     .execute(storage.pool())
@@ -756,7 +756,7 @@ async fn postgres_artifact_read_refuses_an_undecodable_referrer_id() {
     );
     sqlx::query(
         "UPDATE lash_artifact_referrer_edges SET referrer_id = 'invalid-host-pin'
-         WHERE namespace = 'lashlang_module' AND artifact_ref = $1",
+         WHERE namespace = 'vm_module' AND artifact_ref = $1",
     )
     .bind(artifact_ref)
     .execute(storage.pool())

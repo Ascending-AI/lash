@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
@@ -113,7 +113,7 @@ fn committed_node_expectations_match_the_accepted_dialect() {
 /// the linker refuses is recorded as such (`accept-unlinked`), so no row claims
 /// a cell accepts what a cell refuses.
 fn link_cell(source: &str) -> Result<(), String> {
-    lash_typescript::link(source, &lashlang::testing::harness::test_environment())
+    lash_typescript::link(source, &lash_vm::testing::harness::test_environment())
         .map(drop)
         .map_err(|error| error.code.as_str().to_string())
 }
@@ -144,7 +144,7 @@ fn check_row(
                 format!("`{expression}`: runtime-only deviation must compile: {error}")
             })?;
         let error =
-            futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+            futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
                 .err()
                 .ok_or_else(|| format!("`{expression}`: registered runtime deviation ran"))?;
         return error
@@ -161,7 +161,7 @@ fn check_row(
         let answer = lash_typescript::testing::compile(&source)
             .ok()
             .and_then(|program| {
-                futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+                futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
                     .ok()
             });
         if !README.contains(&format!("`{diagnostic}`")) {
@@ -198,9 +198,8 @@ fn check_row(
     let expected: String = serde_json::from_str(expected_json).expect("expected JSON");
     let program = lash_typescript::testing::compile(&source)
         .map_err(|error| format!("compile `{expression}`: {error}"))?;
-    let outcome =
-        futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
-            .map_err(|error| format!("execute `{expression}`: {error}"))?;
+    let outcome = futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
+        .map_err(|error| format!("execute `{expression}`: {error}"))?;
     (outcome == ExecutionOutcome::Finished(Value::String(expected.clone().into())))
         .then_some(())
         .ok_or_else(|| format!("`{expression}`: {outcome:?}, Node answers {expected:?}"))

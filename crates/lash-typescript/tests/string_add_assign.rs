@@ -10,7 +10,7 @@
 
 use std::collections::BTreeSet;
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
     ProjectedBindings, ProjectedValue, Record, RuntimeError, Snapshot, State, Value, Vm,
     VmContinuation, VmRunOutcome,
@@ -59,20 +59,20 @@ impl ExecutionHost for Host {
     }
 }
 
-fn compile(source: &str) -> lashlang::CompiledProgram {
+fn compile(source: &str) -> lash_vm::CompiledProgram {
     lash_typescript::testing::compile(source).unwrap_or_else(|error| panic!("`{source}`: {error}"))
 }
 
-fn compile_with_report(source: &str) -> lashlang::CompiledProgram {
+fn compile_with_report(source: &str) -> lash_vm::CompiledProgram {
     let globals = BTreeSet::from(["report".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should parse: {error}"));
-    lashlang::testing::harness::try_compile_program(&program)
+    lash_vm::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"))
 }
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
-    futures::executor::block_on(lashlang::execute(
+    futures::executor::block_on(lash_vm::execute(
         &compile(source),
         &mut State::new(),
         &Host::plain(),
@@ -208,7 +208,7 @@ async fn a_projected_operand_materializes_before_the_append() {
     let host = Host::live();
     let mut state = State::new();
     assert_eq!(
-        lashlang::execute(&program, &mut state, &host)
+        lash_vm::execute(&program, &mut state, &host)
             .await
             .expect("execution should finish"),
         ExecutionOutcome::Finished(text("pre:live/live"))
@@ -250,7 +250,7 @@ async fn a_concat_accumulator_survives_a_park_and_resume() {
         "accumulator should serialize as flat text: {json}"
     );
 
-    let restored: VmContinuation = lashlang::VmInstance::pristine()
+    let restored: VmContinuation = lash_vm::VmInstance::pristine()
         .open_continuation(&bytes)
         .expect("continuation should deserialize");
 
@@ -275,7 +275,7 @@ async fn a_snapshot_restored_string_appends_the_same_way() {
         Value::String("seed".into()),
     )]));
     let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-    let decoded = lashlang::VmInstance::pristine()
+    let decoded = lash_vm::VmInstance::pristine()
         .open_snapshot(&encoded)
         .expect("snapshot decode");
     let mut state = State::from_snapshot(decoded);
@@ -292,11 +292,11 @@ async fn a_snapshot_restored_string_appends_the_same_way() {
     )
     .expect("program should parse");
     let program =
-        lashlang::testing::harness::try_compile_program(&program).expect("program should compile");
+        lash_vm::testing::harness::try_compile_program(&program).expect("program should compile");
 
     let host = Host::plain();
     assert_eq!(
-        lashlang::execute(&program, &mut state, &host)
+        lash_vm::execute(&program, &mut state, &host)
             .await
             .expect("execution should finish"),
         ExecutionOutcome::Finished(text("seed:x:y"))

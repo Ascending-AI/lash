@@ -49,7 +49,7 @@ TERMS = (
 LEGITIMATE_MEMORY_IDENTIFIERS = frozenset({
     "InMemoryLiveReplayStore", "InMemoryLiveReplayStoreConfig",
     "InMemoryShiftEpochs", "InMemoryRunLedger", "InMemoryRuns",
-    "InMemoryLashlangArtifactStore", "InMemoryArtifactState",
+    "InMemoryLashVmArtifactStore", "InMemoryArtifactState",
     "InMemoryMetricExporter", "InMemorySpanExporter", "InMemory",
     "open_in_memory",
     "s3_attachment_store_satisfies_conformance_with_in_memory_object_store",

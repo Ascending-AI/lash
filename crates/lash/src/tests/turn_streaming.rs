@@ -118,7 +118,7 @@ impl ToolProvider for FailingAppTools {
     }
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
-        lash_core::ToolOutcome::err_fmt("lookup failed but Lashlang recovered").into()
+        lash_core::ToolOutcome::err_fmt("lookup failed but Lash VM recovered").into()
     }
 }
 

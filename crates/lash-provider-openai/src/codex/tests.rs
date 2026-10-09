@@ -2393,7 +2393,7 @@ mod conformance {
         fn conformance_spec(&self) -> ProviderConformanceSpec {
             ProviderConformanceSpec::with_unsupported(&[(
                 Scenario::ToolCallReplayRoundTrip,
-                "RLM history carries no native tool calls; tool use is projected into lashlang \
+                "RLM history carries no native tool calls; tool use is projected into lash_vm \
                  cells, so there is no function_call item to replay",
             )])
         }

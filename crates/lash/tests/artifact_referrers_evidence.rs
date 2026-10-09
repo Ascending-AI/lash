@@ -24,15 +24,15 @@ mod fixture;
 use fixture::{Backend, Fixture};
 
 async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: Backend) {
-    use lash_lashlang_runtime::LashlangProcessInput;
+    use lash_vm::testing::ast_builders as b;
     use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
-    use lashlang::testing::ast_builders as b;
+    use lash_vm_runtime::LashVmProcessInput;
 
-    let artifact = lashlang::ModuleArtifact::from_program(b::module(
+    let artifact = lash_vm::ModuleArtifact::from_program(b::module(
         vec![b::process_returning(
             "refused",
             Vec::new(),
-            lashlang::TypeExpr::Null,
+            lash_vm::TypeExpr::Null,
             b::finish(b::null()),
         )],
         Vec::new(),
@@ -60,7 +60,7 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: 
     {
         let fixture = Fixture::new(backend).await;
         let backend = fixture.backend.clone();
-        let store = lashlang::LashlangArtifacts::new(backend.module_artifacts());
+        let store = lash_vm::LashVmArtifacts::new(backend.module_artifacts());
         let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
             lash_core::HostArtifactPin::mint(),
         ))
@@ -70,12 +70,12 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: 
             .publish_module_artifact(&claim, artifact.module_ref().as_str(), &bytes)
             .await
             .expect("persist immutable refused bytes");
-        let expected: lashlang::ModuleArtifactRefusal =
-            lashlang::ModuleArtifact::from_store_bytes(&bytes)
+        let expected: lash_vm::ModuleArtifactRefusal =
+            lash_vm::ModuleArtifact::from_store_bytes(&bytes)
                 .unwrap_err()
                 .into();
         assert_eq!(
-            matches!(expected, lashlang::ModuleArtifactRefusal::Generation(_)),
+            matches!(expected, lash_vm::ModuleArtifactRefusal::Generation(_)),
             generation
         );
         let verification = lash_vm_client::service::Service::default()
@@ -106,7 +106,7 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: 
             serde_json::to_value(&expected).unwrap(),
             "store and plugin preserve the complete cause"
         );
-        let input = LashlangProcessInput {
+        let input = LashVmProcessInput {
             module_ref: artifact.module_ref().clone(),
             process_ref: artifact.process_ref("refused").unwrap().clone(),
             host_requirements_ref: artifact.host_requirements_ref().clone(),
@@ -126,7 +126,7 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: 
             .start(
                 lash_core::ProcessStartRequest::new(
                     lash_core::ProcessInput::Engine {
-                        kind: lash_lashlang_runtime::LASHLANG_ENGINE_KIND.to_owned(),
+                        kind: lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
                         payload: serde_json::to_value(&input).unwrap(),
                     },
                     lash_core::ProcessOriginator::host(),
@@ -158,13 +158,13 @@ async fn stored_module_refusals_preserve_causes_and_terminal_semantics(backend: 
             panic!("engine must own the refusal: {evidence:?}");
         };
         match expected {
-            lashlang::ModuleArtifactRefusal::Generation(_) => assert_eq!(
+            lash_vm::ModuleArtifactRefusal::Generation(_) => assert_eq!(
                 reason,
                 &lash_core::ProcessResumeRefusal::RetiredGeneration {
                     found: artifact.module_ref().to_string(),
                 }
             ),
-            lashlang::ModuleArtifactRefusal::Corrupt(source) => assert_eq!(
+            lash_vm::ModuleArtifactRefusal::Corrupt(source) => assert_eq!(
                 reason,
                 &lash_core::ProcessResumeRefusal::StoredArtifactCorrupt {
                     artifact_ref: artifact.module_ref().to_string(),

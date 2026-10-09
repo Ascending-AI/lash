@@ -20,7 +20,7 @@ path = "src/main.rs"
 test = false
 
 [features]
-synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-client/synthetic-next", "lashlang/synthetic-next", "lash-core-execution/synthetic-next"]
+synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm-client/synthetic-next", "lash-vm/synthetic-next", "lash-core-execution/synthetic-next"]
 testing = ["lash-vm-client/testing"]
 
 [[bin]]
@@ -37,7 +37,7 @@ blake3 = { workspace = true }
 lash-vm-client = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-vm-protocol = { workspace = true }
-lashlang = { workspace = true }
+lash-vm = { workspace = true }
 lash-typescript = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 rmp-serde = { workspace = true }
@@ -54,7 +54,7 @@ lash-sansio = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true }
 lash-vm-broker = { workspace = true, features = ["testing"] }
 lash-vm-worker = { package = "lash-internal-vm-worker", path = ".", features = ["testing"] }
-lashlang = { workspace = true, features = ["testing"] }
+lash-vm = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

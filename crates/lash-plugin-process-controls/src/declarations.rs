@@ -208,7 +208,7 @@ pub async fn execute_process_start_tool_call(
     // The documented `label` argument: a host-facing name for this run, never
     // part of the process's identity (FIG-3122). Declaring it here is the only
     // way it reaches the row — an engine derives its own label from the
-    // payload, and for Lashlang that is the lift digest, so a run the author
+    // payload, and for Lash VM that is the lift digest, so a run the author
     // named `probe` lists as `__process_<hash>` unless the start declares the
     // name. A start that passes no label keeps the engine's derived one.
     let declaration = match start_label(args) {

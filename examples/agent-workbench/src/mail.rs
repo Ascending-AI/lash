@@ -1,7 +1,7 @@
 //! Mocked multi-account inbox world for the workbench demo.
 //!
 //! The host owns a small in-memory set of named inboxes. Each is projected into
-//! the RLM Lashlang host environment as a typed module authority of type `Inbox` at
+//! the RLM Lash VM host environment as a typed module authority of type `Inbox` at
 //! module path `inbox.<slug>`, exposing three operations:
 //!
 //! - `send({ title, text })` — add a message to that inbox
@@ -98,7 +98,7 @@ impl Account {
 pub(crate) struct AccountSummary {
     pub slug: String,
     pub display_name: String,
-    /// Lashlang authority path the agent calls, e.g. `inbox.work`.
+    /// Lash VM authority path the agent calls, e.g. `inbox.work`.
     pub authority: String,
     pub total: usize,
 }
@@ -290,7 +290,7 @@ fn non_empty(value: &str) -> Option<&str> {
     (!trimmed.is_empty()).then_some(trimmed)
 }
 
-/// Turn a human account name into a Lashlang module-path segment (`[a-z][a-z0-9_]*`).
+/// Turn a human account name into a Lash VM module-path segment (`[a-z][a-z0-9_]*`).
 pub(crate) fn slugify(name: &str) -> Option<String> {
     let mut slug = String::new();
     let mut last_underscore = false;

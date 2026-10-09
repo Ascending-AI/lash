@@ -2,16 +2,16 @@
 
 use super::*;
 
-/// A lashlang process whose recorded input disagrees with its published
+/// A lash_vm process whose recorded input disagrees with its published
 /// artifact, in its host requirements or in the process it names, ends at
 /// its first `vm_run` with that refusal's typed code, before the VM runs.
-async fn a_lashlang_process_whose_input_disagrees_with_its_artifact_ends_with_its_typed_refusal(
+async fn a_lash_vm_process_whose_input_disagrees_with_its_artifact_ends_with_its_typed_refusal(
     tier: Tier,
 ) {
     let deployment = deploy_with(tier, Vec::new(), rlm_core).await;
     let payload = worker_payload(&deployment.backend).await;
-    let mismatched = |mutate: fn(&mut lash_lashlang_runtime::LashlangProcessInput)| {
-        let mut input = lash_lashlang_runtime::LashlangProcessInput::from_payload(payload.clone())
+    let mismatched = |mutate: fn(&mut lash_vm_runtime::LashVmProcessInput)| {
+        let mut input = lash_vm_runtime::LashVmProcessInput::from_payload(payload.clone())
             .expect("the worker's input decodes");
         mutate(&mut input);
         serde_json::to_value(input).expect("the input encodes")
@@ -20,21 +20,21 @@ async fn a_lashlang_process_whose_input_disagrees_with_its_artifact_ends_with_it
         (
             mismatched(|input| {
                 input.host_requirements_ref =
-                    lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("mismatch"));
+                    lash_vm::HostRequirementsRef::new(&lash_vm::ContentHash::new("mismatch"));
             }),
             "process_host_requirements_mismatch",
         ),
         (
             mismatched(|input| {
                 input.process_ref =
-                    lashlang::ProcessRef::new(lashlang::ContentHash::new("mismatch"), 0);
+                    lash_vm::ProcessRef::new(lash_vm::ContentHash::new("mismatch"), 0);
             }),
             "process_ref_mismatch",
         ),
     ] {
         let process = start(
             &deployment.core,
-            lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
+            lash_vm_runtime::LASH_VM_ENGINE_KIND,
             payload,
         )
         .await;
@@ -48,7 +48,7 @@ async fn a_lashlang_process_whose_input_disagrees_with_its_artifact_ends_with_it
 }
 
 on_every_tier!(
-    a_lashlang_process_whose_input_disagrees_with_its_artifact_ends_with_its_typed_refusal
+    a_lash_vm_process_whose_input_disagrees_with_its_artifact_ends_with_its_typed_refusal
 );
 
 /// A session tombstone leaves its detached process alive. Host cancellation
@@ -139,11 +139,11 @@ enum SleepState {
     Suspended,
 }
 
-/// A lashlang process cancelled while its VM is parked on a sleep ends
+/// A lash_vm process cancelled while its VM is parked on a sleep ends
 /// cancelled with the host's origin: the cancel is answered from the
 /// committed snapshot, never by a VM run that fails to resume.
-async fn a_sleeping_lashlang_process_ends_cancelled(tier: Tier, state: SleepState) {
-    use lashlang::testing::ast_builders as b;
+async fn a_sleeping_lash_vm_process_ends_cancelled(tier: Tier, state: SleepState) {
+    use lash_vm::testing::ast_builders as b;
     const IDLE_EVICT: Duration = Duration::from_millis(50);
     let settings = match state {
         SleepState::Hot => lash_core_execution::DurableSettings::default(),
@@ -153,13 +153,13 @@ async fn a_sleeping_lashlang_process_ends_cancelled(tier: Tier, state: SleepStat
         },
     };
     let deployment = deploy_configured(tier, settings, Vec::new(), rlm_core).await;
-    let payload = lashlang_payload(
+    let payload = lash_vm_payload(
         &deployment.backend,
         "process sleeper() -> str { sleep(3600000); finish \"woke\" }",
         b::process_returning(
             "sleeper",
             Vec::new(),
-            lashlang::TypeExpr::Str,
+            lash_vm::TypeExpr::Str,
             b::block(vec![
                 b::sleep_for(b::num(3_600_000.0)),
                 b::finish(b::string("woke")),
@@ -169,7 +169,7 @@ async fn a_sleeping_lashlang_process_ends_cancelled(tier: Tier, state: SleepStat
     .await;
     let process = start(
         &deployment.core,
-        lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
+        lash_vm_runtime::LASH_VM_ENGINE_KIND,
         payload,
     )
     .await;
@@ -229,13 +229,13 @@ async fn a_sleeping_lashlang_process_ends_cancelled(tier: Tier, state: SleepStat
     );
 }
 
-async fn a_lashlang_process_cancelled_while_its_sleep_is_hot_ends_cancelled(tier: Tier) {
-    a_sleeping_lashlang_process_ends_cancelled(tier, SleepState::Hot).await;
+async fn a_lash_vm_process_cancelled_while_its_sleep_is_hot_ends_cancelled(tier: Tier) {
+    a_sleeping_lash_vm_process_ends_cancelled(tier, SleepState::Hot).await;
 }
 
-async fn a_lashlang_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled(tier: Tier) {
-    a_sleeping_lashlang_process_ends_cancelled(tier, SleepState::Suspended).await;
+async fn a_lash_vm_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled(tier: Tier) {
+    a_sleeping_lash_vm_process_ends_cancelled(tier, SleepState::Suspended).await;
 }
 
-on_every_tier!(a_lashlang_process_cancelled_while_its_sleep_is_hot_ends_cancelled);
-on_every_tier!(a_lashlang_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled);
+on_every_tier!(a_lash_vm_process_cancelled_while_its_sleep_is_hot_ends_cancelled);
+on_every_tier!(a_lash_vm_process_cancelled_after_idle_eviction_of_its_sleep_ends_cancelled);

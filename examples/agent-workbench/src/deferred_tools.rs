@@ -2,7 +2,7 @@
 //!
 //! The resident `tools.search` capability searches a compact catalogue and
 //! persists every returned grant in SQLite. The RLM resolver authorizes only
-//! those persisted paths. Because Lashlang gathers call paths before it starts
+//! those persisted paths. Because Lash VM gathers call paths before it starts
 //! a block, a path discovered by `tools.search` is first callable in the next
 //! block; the SQLite grant survives later turns and process restarts.
 

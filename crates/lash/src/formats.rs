@@ -43,7 +43,7 @@
 //!
 //! # Feature gating is honest, not incidental
 //!
-//! The Lashlang VM and RLM formats exist only when the `rlm` feature is on,
+//! The Lash VM and RLM formats exist only when the `rlm` feature is on,
 //! because the crates that define them are optional dependencies. A build
 //! without the feature writes none of its formats, so
 //! [`durable_formats`] does not list them. Module artifacts are different: their durable surface and
@@ -69,25 +69,25 @@ pub use lash_core::{
     SESSION_NODE_BODY_SCHEMA_VERSION,
 };
 #[cfg(feature = "rlm")]
-pub use lash_lashlang_runtime::LASHLANG_SEGMENT_STATE_VERSION;
-#[cfg(feature = "rlm")]
 pub use lash_protocol_rlm::{
     RLM_DRIVER_STATE_VERSION, RLM_PROTOCOL_EVENT_VERSION, RLM_SNAPSHOT_VERSION,
 };
-pub use lash_sansio::{LASHLANG_SEMANTIC_HASH_VERSION, TURN_CHECKPOINT_SCHEMA_VERSION};
+pub use lash_sansio::{LASH_VM_SEMANTIC_HASH_VERSION, TURN_CHECKPOINT_SCHEMA_VERSION};
 #[cfg(feature = "rlm")]
-pub use lashlang::{
-    BYTECODE_FORMAT_VERSION, LASHLANG_SNAPSHOT_VERSION, LASHLANG_VM_ABI_VERSION,
+pub use lash_vm::{
+    BYTECODE_FORMAT_VERSION, LASH_VM_ABI_VERSION, LASH_VM_SNAPSHOT_VERSION,
     VM_CONTINUATION_FORMAT_VERSION, WORKFLOW_GRAPH_SCHEMA_VERSION,
     WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
 };
+#[cfg(feature = "rlm")]
+pub use lash_vm_runtime::LASH_VM_SEGMENT_STATE_VERSION;
 
 /// One durable format whose version decides whether stored bytes open under
 /// this build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum DurableFormat {
-    /// The identity-verified persisted Lashlang/TypeScript module artifact.
+    /// The identity-verified persisted LashVm/TypeScript module artifact.
     ModuleArtifact,
     /// The session checkpoint manifest: the keyed set of components a
     /// checkpoint root names.
@@ -132,16 +132,16 @@ pub enum DurableFormat {
     /// The persisted runtime turn-commit receipt a committed turn replays
     /// from `runtime_turn_commits.result_json`.
     RuntimeCommitReceipt,
-    /// Compiled Lashlang bytecode. Identity-checked rather than
+    /// Compiled Lash VM bytecode. Identity-checked rather than
     /// version-compared — see [`FormatProbe::IdentityOnly`].
     Bytecode,
-    /// The durable VM-continuation envelope a parked Lashlang segment carries.
+    /// The durable VM-continuation envelope a parked Lash VM segment carries.
     VmContinuation,
-    /// The canonical Lashlang execution snapshot.
-    LashlangSnapshot,
-    /// A lashlang process's engine state: its VM snapshot and the operation
+    /// The canonical Lash VM execution snapshot.
+    LashVmSnapshot,
+    /// A lash_vm process's engine state: its VM snapshot and the operation
     /// it parked on.
-    LashlangSegmentHandover,
+    LashVmSegmentHandover,
     /// The RLM snapshot envelope stored behind a checkpoint component.
     RlmSnapshotEnvelope,
     /// The serialized workflow-graph contract a persisted graph projection
@@ -158,7 +158,7 @@ pub enum DurableFormat {
     /// registry as this engine-neutral handle rather than as a variant
     /// spelled for the engine.
     Engine(EngineFormat),
-    /// The Lashlang VM ABI this build implements. Never persisted — see
+    /// The Lash VM ABI this build implements. Never persisted — see
     /// [`FormatProbe::NotPersisted`].
     VmAbi,
 }
@@ -207,14 +207,14 @@ impl DurableFormat {
             DurableFormat::RuntimeCommitReceipt => "runtime commit receipt",
             DurableFormat::Bytecode => "bytecode",
             DurableFormat::VmContinuation => "VM continuation",
-            DurableFormat::LashlangSnapshot => "Lashlang snapshot",
-            DurableFormat::LashlangSegmentHandover => "Lashlang segment handover",
+            DurableFormat::LashVmSnapshot => "Lash VM snapshot",
+            DurableFormat::LashVmSegmentHandover => "Lash VM segment handover",
             DurableFormat::RlmSnapshotEnvelope => "RLM snapshot envelope",
             DurableFormat::WorkflowGraphSchema => "workflow graph schema",
             DurableFormat::WorkflowTypeFacet => "workflow type facet",
             DurableFormat::RlmDriverState => "RLM driver state",
             DurableFormat::Engine(format) => format.name,
-            DurableFormat::VmAbi => "Lashlang VM ABI",
+            DurableFormat::VmAbi => "Lash VM ABI",
         }
     }
 
@@ -248,8 +248,8 @@ impl DurableFormat {
             DurableFormat::RuntimeCommitReceipt => UpgradePolicy::Migrate,
             DurableFormat::Bytecode => UpgradePolicy::Coexist,
             DurableFormat::VmContinuation => UpgradePolicy::Drain,
-            DurableFormat::LashlangSnapshot => UpgradePolicy::Migrate,
-            DurableFormat::LashlangSegmentHandover => UpgradePolicy::Drain,
+            DurableFormat::LashVmSnapshot => UpgradePolicy::Migrate,
+            DurableFormat::LashVmSegmentHandover => UpgradePolicy::Drain,
             DurableFormat::RlmSnapshotEnvelope => UpgradePolicy::Migrate,
             DurableFormat::WorkflowGraphSchema => UpgradePolicy::Migrate,
             DurableFormat::WorkflowTypeFacet => UpgradePolicy::Migrate,
@@ -346,9 +346,9 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         },
         DurableFormatEntry {
             format: DurableFormat::ModuleArtifact,
-            version: FormatVersion::Identity(LASHLANG_SEMANTIC_HASH_VERSION),
+            version: FormatVersion::Identity(LASH_VM_SEMANTIC_HASH_VERSION),
             owning_crate: "lash-sansio",
-            constant: "LASHLANG_SEMANTIC_HASH_VERSION",
+            constant: "LASH_VM_SEMANTIC_HASH_VERSION",
             probe: FormatProbe::IdentityOnly,
         },
         DurableFormatEntry {
@@ -460,7 +460,7 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         DurableFormatEntry {
             format: DurableFormat::Bytecode,
             version: FormatVersion::Counter(BYTECODE_FORMAT_VERSION),
-            owning_crate: "lashlang",
+            owning_crate: "lashvm",
             constant: "BYTECODE_FORMAT_VERSION",
             probe: FormatProbe::IdentityOnly,
         },
@@ -468,24 +468,24 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         DurableFormatEntry {
             format: DurableFormat::VmContinuation,
             version: FormatVersion::Counter(VM_CONTINUATION_FORMAT_VERSION),
-            owning_crate: "lashlang",
+            owning_crate: "lashvm",
             constant: "VM_CONTINUATION_FORMAT_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]
         DurableFormatEntry {
-            format: DurableFormat::LashlangSnapshot,
-            version: FormatVersion::Counter(LASHLANG_SNAPSHOT_VERSION),
-            owning_crate: "lashlang",
-            constant: "LASHLANG_SNAPSHOT_VERSION",
+            format: DurableFormat::LashVmSnapshot,
+            version: FormatVersion::Counter(LASH_VM_SNAPSHOT_VERSION),
+            owning_crate: "lashvm",
+            constant: "LASH_VM_SNAPSHOT_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]
         DurableFormatEntry {
-            format: DurableFormat::LashlangSegmentHandover,
-            version: FormatVersion::Counter(LASHLANG_SEGMENT_STATE_VERSION),
-            owning_crate: "lash-lashlang-runtime",
-            constant: "LASHLANG_SEGMENT_STATE_VERSION",
+            format: DurableFormat::LashVmSegmentHandover,
+            version: FormatVersion::Counter(LASH_VM_SEGMENT_STATE_VERSION),
+            owning_crate: "lash-vm-runtime",
+            constant: "LASH_VM_SEGMENT_STATE_VERSION",
             probe: FormatProbe::Comparable,
         },
         #[cfg(feature = "rlm")]
@@ -500,7 +500,7 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         DurableFormatEntry {
             format: DurableFormat::WorkflowGraphSchema,
             version: FormatVersion::Counter(WORKFLOW_GRAPH_SCHEMA_VERSION),
-            owning_crate: "lashlang",
+            owning_crate: "lashvm",
             constant: "WORKFLOW_GRAPH_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
         },
@@ -508,7 +508,7 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         DurableFormatEntry {
             format: DurableFormat::WorkflowTypeFacet,
             version: FormatVersion::Counter(WORKFLOW_TYPE_FACET_SCHEMA_VERSION),
-            owning_crate: "lashlang",
+            owning_crate: "lashvm",
             constant: "WORKFLOW_TYPE_FACET_SCHEMA_VERSION",
             probe: FormatProbe::Comparable,
         },
@@ -523,9 +523,9 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
         #[cfg(feature = "rlm")]
         DurableFormatEntry {
             format: DurableFormat::VmAbi,
-            version: FormatVersion::Identity(LASHLANG_VM_ABI_VERSION),
-            owning_crate: "lashlang",
-            constant: "LASHLANG_VM_ABI_VERSION",
+            version: FormatVersion::Identity(LASH_VM_ABI_VERSION),
+            owning_crate: "lashvm",
+            constant: "LASH_VM_ABI_VERSION",
             probe: FormatProbe::NotPersisted,
         },
     ];
@@ -542,7 +542,7 @@ fn engine_durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
 
 /// The manifest row for one format, when this build carries it.
 ///
-/// `None` means the format is not part of this build — the Lashlang and RLM
+/// `None` means the format is not part of this build — the Lash VM and RLM
 /// rows are absent without the `rlm` feature — which is a different answer from
 /// "version zero" and is reported as such.
 pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
@@ -550,8 +550,8 @@ pub fn durable_format(format: DurableFormat) -> Option<DurableFormatEntry> {
 }
 
 /// The durable formats actor state holds beyond the runtime core's own
-/// (ADR 0106 §1): with `rlm`, the VM continuation and Lashlang snapshot a
-/// code cell or a lashlang process resumes from, and the RLM snapshot
+/// (ADR 0106 §1): with `rlm`, the VM continuation and Lash VM snapshot a
+/// code cell or a lash_vm process resumes from, and the RLM snapshot
 /// envelope a cell's snapshot data is. [`DurableBackendBuilder`] adds them to
 /// every actor kind's format set, beside the turn checkpoint, run records,
 /// wait rows, outcome materials and engine states the core declares.
@@ -563,7 +563,7 @@ pub fn actor_state_surfaces() -> Vec<lash_core::durable_port::FormatSurface> {
         use lash_core::durable_port::FormatSurface;
         vec![
             FormatSurface::new("vm-continuation", VM_CONTINUATION_FORMAT_VERSION),
-            FormatSurface::new("lashlang-snapshot", LASHLANG_SNAPSHOT_VERSION),
+            FormatSurface::new("lash-vm-snapshot", LASH_VM_SNAPSHOT_VERSION),
             FormatSurface::new("rlm-snapshot", RLM_SNAPSHOT_VERSION),
         ]
     }

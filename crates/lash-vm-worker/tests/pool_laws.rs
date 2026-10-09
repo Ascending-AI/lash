@@ -4,12 +4,12 @@
     reason = "integration test helpers fail on broken fixture assumptions"
 )]
 
-use lash_vm_client::*;
-use lash_vm_protocol::*;
-use lashlang::testing::ast_builders as b;
-use lashlang::{
+use lash_vm::testing::ast_builders as b;
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionMode, ResourceOperationBatchLeaf, ResourceOperationOutcome,
 };
+use lash_vm_client::*;
+use lash_vm_protocol::*;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
@@ -85,7 +85,7 @@ fn start(source: &str, mode: ExecutionMode) -> Start {
             name: "context".into(),
             body: EncodedPayload(
                 rmp_serde::to_vec_named(&RunContext {
-                    environment: lashlang::testing::harness::test_environment(),
+                    environment: lash_vm::testing::harness::test_environment(),
                     mode,
                     ..RunContext::default()
                 })
@@ -104,7 +104,7 @@ fn answer(request: EffectRequest) -> EffectResponse {
             let op: AbilityOp = rmp_serde::from_slice(&request.payload.0).expect("operation");
             let result = match op {
                 AbilityOp::ResourceOperation(op) => {
-                    lashlang::testing::harness::EchoHost::perform_resource_operation(*op)
+                    lash_vm::testing::harness::EchoHost::perform_resource_operation(*op)
                         .map(AbilityOutcome::Value)
                 }
                 AbilityOp::ResourceOperationBatch(batch) => {
@@ -114,13 +114,13 @@ fn answer(request: EffectRequest) -> EffectResponse {
                         .map(|leaf| match leaf {
                             ResourceOperationBatchLeaf::Operation(operation) => {
                                 ResourceOperationOutcome::from_result(
-                                    lashlang::testing::harness::EchoHost::perform_resource_operation(
+                                    lash_vm::testing::harness::EchoHost::perform_resource_operation(
                                         operation.clone(),
                                     ),
                                 )
                             }
                             ResourceOperationBatchLeaf::Timer(_) => {
-                                ResourceOperationOutcome::Value(lashlang::Value::Undefined)
+                                ResourceOperationOutcome::Value(lash_vm::Value::Undefined)
                             }
                         })
                         .collect();
@@ -130,7 +130,7 @@ fn answer(request: EffectRequest) -> EffectResponse {
                 }
                 // The awaited process's terminal: a value that names the
                 // handle, so every leaf of an aggregate is told apart.
-                AbilityOp::Await(handle) => Ok(AbilityOutcome::Value(lashlang::Value::String(
+                AbilityOp::Await(handle) => Ok(AbilityOutcome::Value(lash_vm::Value::String(
                     format!("settled {handle:?}").into(),
                 ))),
                 AbilityOp::Finish(v) | AbilityOp::Fail(v) => Ok(AbilityOutcome::Value(v)),
@@ -545,14 +545,14 @@ fn parked_projected_tool_arguments_keep_the_recorded_request() {
     );
     input.contexts[0].body = EncodedPayload(
         rmp_serde::to_vec_named(&RunContext {
-            environment: lashlang::testing::harness::test_environment()
+            environment: lash_vm::testing::harness::test_environment()
                 .with_globals(["session_projection".to_string()]),
             mode: ExecutionMode::Foreground,
             projected: vec![ProjectionDescription {
                 name: "session_projection".into(),
-                value: lashlang::Value::Projected(lashlang::ProjectedValue::scalar(
+                value: lash_vm::Value::Projected(lash_vm::ProjectedValue::scalar(
                     "session_projection",
-                    lashlang::Value::String("session:durable".into()),
+                    lash_vm::Value::String("session:durable".into()),
                 )),
             }],
             ..RunContext::default()
@@ -579,10 +579,10 @@ fn parked_projected_tool_arguments_keep_the_recorded_request() {
     let WorkerMessage::Complete { value, .. } = drive(&mut resumed, message) else {
         panic!("the resumed cell completes");
     };
-    let outcome: lashlang::ExecutionOutcome = rmp_serde::from_slice(&value.0).expect("outcome");
+    let outcome: lash_vm::ExecutionOutcome = rmp_serde::from_slice(&value.0).expect("outcome");
     assert_eq!(
         outcome,
-        lashlang::ExecutionOutcome::Finished(lashlang::Value::Number(15.0)),
+        lash_vm::ExecutionOutcome::Finished(lash_vm::Value::Number(15.0)),
         "a scalar read from a projection finishes as its plain value"
     );
     resumed.release().expect("release");
@@ -739,7 +739,7 @@ fn equal_protocol_accepts_a_different_crate_version() {
 
 #[test]
 fn helper_entry_preserves_effect_values_losslessly() {
-    use lashlang::{ExecutionOutcome, Value};
+    use lash_vm::{ExecutionOutcome, Value};
     let mut cfg = config("");
     cfg.entry = WorkerEntry::helper(env!("CARGO_BIN_EXE_lash-vm-worker"));
     let pool = WorkerPool::new(cfg).expect("production helper");
@@ -796,12 +796,12 @@ fn cell_completion_carries_state_metadata_and_reset_clears_the_projection() {
         rmp_serde::from_slice(&completion.state.0).expect("state metadata");
     assert_eq!(
         completion.outcome,
-        lashlang::ExecutionOutcome::Finished(lashlang::Value::Number(7.0))
+        lash_vm::ExecutionOutcome::Finished(lash_vm::Value::Number(7.0))
     );
     assert!(metadata.names.contains("planted"));
     assert_eq!(
         metadata.globals.get("planted"),
-        Some(&lashlang::Value::Number(7.0))
+        Some(&lash_vm::Value::Number(7.0))
     );
     assert!(
         metadata
@@ -814,8 +814,8 @@ fn cell_completion_carries_state_metadata_and_reset_clears_the_projection() {
     let mut next = checkout(&pool);
     let (_, value) = complete(&mut next, "finish(typeof planted);");
     assert_eq!(
-        rmp_serde::from_slice::<lashlang::ExecutionOutcome>(&value).expect("plain outcome"),
-        lashlang::ExecutionOutcome::Finished(lashlang::Value::String("undefined".into()))
+        rmp_serde::from_slice::<lash_vm::ExecutionOutcome>(&value).expect("plain outcome"),
+        lash_vm::ExecutionOutcome::Finished(lash_vm::Value::String("undefined".into()))
     );
     next.release().expect("reset plain run");
 }
@@ -887,7 +887,7 @@ fn state_kind_mismatch_is_refused_before_worker_dispatch() {
         let state = OpaqueVmState::seal(
             kind,
             input.owner.clone(),
-            lashlang::vm_contract_versions(),
+            lash_vm::vm_contract_versions(),
             vec![1, 2, 3],
         );
         input.state = match kind {
@@ -922,7 +922,7 @@ fn a_deterministic_refusal_of_a_runs_inputs_is_terminal_and_typed() {
         OpaqueVmState::seal(
             kind,
             VmOwner::new(owner),
-            lashlang::vm_contract_versions(),
+            lash_vm::vm_contract_versions(),
             bytes,
         )
     };
@@ -1002,7 +1002,7 @@ fn a_deterministic_refusal_of_a_runs_inputs_is_terminal_and_typed() {
             "an artifact that does not decode",
             Start {
                 program: ProgramSource::Artifact {
-                    module_ref: "lashlang:v2:blake3:00".into(),
+                    module_ref: "lash-vm:v2:blake3:00".into(),
                     entry: ProgramEntry::Main,
                     artifact: b"not an artifact".to_vec(),
                 },
@@ -1187,7 +1187,7 @@ fn one_slot_process_await_releases_worker_for_the_awaited_body() {
     let response = EffectResponse {
         id: again.id,
         outcome: EffectOutcome::Value(EncodedPayload(
-            rmp_serde::to_vec_named(&AbilityOutcome::Value(lashlang::Value::Number(42.0)))
+            rmp_serde::to_vec_named(&AbilityOutcome::Value(lash_vm::Value::Number(42.0)))
                 .expect("process result"),
         )),
     };
@@ -1202,7 +1202,7 @@ fn one_slot_process_await_releases_worker_for_the_awaited_body() {
 }
 
 /// A process handle literal for the fixture process `name`.
-fn process_handle(name: &str) -> lashlang::Expr {
+fn process_handle(name: &str) -> lash_vm::Expr {
     b::record(vec![
         ("__handle__", b::string("lash")),
         (
@@ -1216,8 +1216,8 @@ fn process_handle(name: &str) -> lashlang::Expr {
 }
 
 /// A foreground run of `program`, sent to the worker as a module artifact.
-fn artifact_start(program: lashlang::Program) -> Start {
-    let artifact = lashlang::ModuleArtifact::from_program(program).expect("module artifact");
+fn artifact_start(program: lash_vm::Program) -> Start {
+    let artifact = lash_vm::ModuleArtifact::from_program(program).expect("module artifact");
     let mut input = start("", ExecutionMode::Foreground);
     input.program = ProgramSource::Artifact {
         module_ref: artifact.module_ref().to_string(),
@@ -1228,11 +1228,11 @@ fn artifact_start(program: lashlang::Program) -> Start {
 }
 
 /// A cell that awaits `awaited`, a container of three process handles.
-fn aggregate_await(awaited: lashlang::Expr) -> Start {
+fn aggregate_await(awaited: lash_vm::Expr) -> Start {
     artifact_start(b::program(vec![b::finish(b::await_expr(awaited))]))
 }
 
-fn three_handles() -> [lashlang::Expr; 3] {
+fn three_handles() -> [lash_vm::Expr; 3] {
     ["aggregate-a", "aggregate-b", "aggregate-c"].map(process_handle)
 }
 
@@ -1504,7 +1504,7 @@ fn observed(source: &str, mode: ExecutionMode) -> Start {
     let mut input = start(source, mode);
     input.contexts[0].body = EncodedPayload(
         rmp_serde::to_vec_named(&RunContext {
-            environment: lashlang::testing::harness::test_environment(),
+            environment: lash_vm::testing::harness::test_environment(),
             mode,
             observe_execution: true,
             ..RunContext::default()
@@ -1540,14 +1540,14 @@ fn a_long_loop_streams_its_observations_in_chunks_within_the_decode_bounds() {
         codec
             .check_payload(&chunk.0)
             .expect("every observation chunk is within the decode bounds");
-        let observations: Vec<lashlang::LashlangExecutionObservation> =
+        let observations: Vec<lash_vm::LashVmExecutionObservation> =
             rmp_serde::from_slice(&chunk.0).expect("an observation chunk");
         loop_steps += observations
             .iter()
             .filter(|observation| {
                 matches!(
                     observation,
-                    lashlang::LashlangExecutionObservation::NodeCompleted { .. }
+                    lash_vm::LashVmExecutionObservation::NodeCompleted { .. }
                 )
             })
             .count();
@@ -1680,7 +1680,7 @@ fn oversized_effect_answers_preserve_their_typed_run_limit() {
             panic!("request")
         };
         let payload = EncodedPayload(
-            rmp_serde::to_vec_named(&AbilityOutcome::Value(lashlang::Value::String(
+            rmp_serde::to_vec_named(&AbilityOutcome::Value(lash_vm::Value::String(
                 "x".repeat(1024).into(),
             )))
             .expect("answer"),

@@ -48,7 +48,7 @@ name: CI
 #   the pull-request critical path by design (FIG-878).
 # * Test deferred Unicode suites: slow regress suites, excluded from the PR
 #   Buck2 partition.
-# * Lashlang Git consumer: a compile configuration no other job resolves,
+# * Lash VM Git consumer: a compile configuration no other job resolves,
 #   carried by the release dispatch (FIG-2854).
 
 on:
@@ -397,11 +397,11 @@ jobs:
       - name: Hold the lash-runtime dependency boundary
         run: |
           set -euo pipefail
-          forbidden='lash-internal-protocol-rlm|lash-internal-lashlang-runtime|lash-internal-lashlang'
+          forbidden='lash-internal-protocol-rlm|lash-internal-vm-runtime|lash-internal-vm'
           for resolution in "--no-default-features" "" "--no-default-features --features testing"; do
             # shellcheck disable=SC2086
             if cargo tree -p lash-runtime -e normal $resolution --locked | grep -E "$forbidden"; then
-              echo "lash-runtime pulled RLM/Lashlang dependencies at: ${resolution:-default}"
+              echo "lash-runtime pulled RLM/Lash VM dependencies at: ${resolution:-default}"
               exit 1
             fi
           done
@@ -494,10 +494,10 @@ jobs:
         run: cargo shear
 
   # A dependency workspace's [patch] table is invisible to its consumers.
-  # Resolve lashlang from this checkout as a Git dependency in a fresh external
+  # Resolve lash_vm from this checkout as a Git dependency in a fresh external
   # crate so every dependency needed by downstream users is carried explicitly.
-  lashlang-git-consumer:
-    name: Lashlang Git consumer
+  lash-vm-git-consumer:
+    name: Lash VM Git consumer
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: plan
@@ -519,15 +519,15 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
-          shared-key: queue-lashlang-git-consumer
-          workspaces: . -> target/lashlang-git-consumer
+          shared-key: queue-lash-vm-git-consumer
+          workspaces: . -> target/lash-vm-git-consumer
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install mold
         uses: ./.github/actions/setup-mold
 
-      - name: Check lashlang Git consumer without patch mirror
-        run: bash scripts/check-lashlang-git-consumer.sh "${GITHUB_SHA}"
+      - name: Check lash_vm Git consumer without patch mirror
+        run: bash scripts/check-lash-vm-git-consumer.sh "${GITHUB_SHA}"
 
       - name: Report cache disk capacity
         if: always()
@@ -1464,7 +1464,7 @@ jobs:
       #
       # `lash-postgres-store`'s conformance tests run the backend-agnostic
       # RuntimePersistence / SessionStoreFactory / ProcessRegistry /
-      # TriggerStore / LashlangArtifactStore suites against a real Postgres.
+      # TriggerStore / LashVmArtifactStore suites against a real Postgres.
       # `connect()` applies the crate's `schema.sql` artifact itself, so there
       # is no separate migrate step. The same run
       # carries the `schema_shape` and `schema_drift` suites, which assert this
@@ -2166,7 +2166,7 @@ jobs:
       - check
       - repo-gates
       - unused-deps
-      - lashlang-git-consumer
+      - lash-vm-git-consumer
       - feature-lanes
       - workspace-tests
       - buck2-tests

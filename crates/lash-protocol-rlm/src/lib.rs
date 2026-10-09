@@ -1,4 +1,4 @@
-//! RLM protocol plugin: a trajectory-shaped driver that uses lashlang as the
+//! RLM protocol plugin: a trajectory-shaped driver that uses lash_vm as the
 //! persistent REPL. Provider reasoning is stored as trajectory reasoning, the
 //! host-selected [`Dialect`]'s cells are executed, printed values yield
 //! observations, and the dialect's finish form yields the final value.
@@ -36,25 +36,23 @@ pub use driver::{RlmProjectorConfig, build_rlm_preamble};
 pub use executor::RLM_SNAPSHOT_VERSION;
 #[cfg(feature = "testing")]
 pub use executor::RlmCheckpointPerfFixture;
-pub use lash_lashlang_runtime::ResolvedToolBinding;
-pub use lash_lashlang_runtime::{
-    LashlangHostCatalog, LashlangHostEnvironment, LashlangLanguageFeatures,
-};
 /// The schema shapes a [`Dialect`] spells: the contract layer's reading of a
 /// tool's JSON Schemas, also constructed directly by runtime-value inference.
 pub use lash_sansio::{
     ExtraKeys, ObjectShape, ProcessParamShape, ProcessShape, SchemaShape, ShapeConstraints,
     ShapeField, ShapeKind, ShapeRow,
 };
-pub use lashlang::{NamedDataType, TypeExpr, TypeField, format_type_expr};
+pub use lash_vm::{NamedDataType, TypeExpr, TypeField, format_type_expr};
+pub use lash_vm_runtime::ResolvedToolBinding;
+pub use lash_vm_runtime::{LashVmHostCatalog, LashVmHostEnvironment, LashVmLanguageFeatures};
 pub use plugin::{
-    ExecutionBounds, InstructionBound, LashlangCompileSurface, LashlangCompileSurfaceRequest,
-    LashlangModuleCompileError, LashlangModuleCompileRequest, MemoryBound, ModuleCompileOutput,
+    ExecutionBounds, InstructionBound, LashVmCompileSurface, LashVmCompileSurfaceRequest,
+    LashVmModuleCompileError, LashVmModuleCompileRequest, MemoryBound, ModuleCompileOutput,
     RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmConfigOwner, RlmConfigRefusal, RlmCreateConfig,
     RlmLanguageFeatures, RlmPresentationConfig, RlmProtocolPluginConfig,
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmRecordedBehaviour,
     RlmRecordedConfig, RlmRenderRefusal, RlmRunOptions, RlmSessionConfigDecodeError, SetRlmRender,
-    UnsetBound, UnsetChannel, rlm_lashlang_surface, rlm_session_config,
+    UnsetBound, UnsetChannel, rlm_lash_vm_surface, rlm_session_config,
 };
 pub use projection::{
     HISTORY_PROJECTION, RLM_PROTOCOL_EVENT_VERSION, RlmHistoryProjection, RlmSeed,

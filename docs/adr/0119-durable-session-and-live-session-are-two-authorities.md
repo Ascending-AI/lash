@@ -37,7 +37,7 @@ it recorded at creation (ADR 0088). Config changes are typed config commands
 (ADR 0126).
 
 A factory is live wiring, not behaviour. What a protocol factory states
-about how a session behaves — the RLM execution bounds, Lashlang abilities
+about how a session behaves — the RLM execution bounds, Lash VM abilities
 and language features, prompt features, discovery operation, output limit,
 soft-warning threshold and render; the standard protocol's discovery
 operation, `batch` choice and maximum and render — is a creation default. The

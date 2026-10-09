@@ -278,7 +278,7 @@ impl Lowerer {
         let mut values = vec![LashExpr::String(method.into())];
         values.extend(args);
         LashExpr::BuiltinCall {
-            name: "__lashlang_stdlib".into(),
+            name: "__lash_vm_stdlib".into(),
             args: values,
         }
     }
@@ -745,7 +745,7 @@ impl Lowerer {
                     ));
                     for key in keys {
                         output.push(LashExpr::BuiltinCall {
-                            name: "__lashlang_heap_delete_member".into(),
+                            name: "__lash_vm_heap_delete_member".into(),
                             args: vec![Self::variable(&copy), Self::variable(&key)],
                         });
                     }
@@ -868,7 +868,7 @@ impl Lowerer {
                 return Ok(LashExpr::Block(vec![
                     Self::temp_assignment(&result, self.lower_expr(value)?),
                     LashExpr::BuiltinCall {
-                        name: "__lashlang_global_set".into(),
+                        name: "__lash_vm_global_set".into(),
                         args: vec![LashExpr::String(global.into()), Self::variable(&result)],
                     },
                 ]));
@@ -1046,7 +1046,7 @@ impl Lowerer {
             self.refuse_global_this_in_process(global)?;
             self.record_global_write(global);
             return Ok(LashExpr::BuiltinCall {
-                name: "__lashlang_global_delete".into(),
+                name: "__lash_vm_global_delete".into(),
                 args: vec![LashExpr::String(global.into())],
             });
         }
@@ -1055,7 +1055,7 @@ impl Lowerer {
             MemberProperty::Index(index) => self.lower_expr(index)?,
         };
         Ok(LashExpr::BuiltinCall {
-            name: "__lashlang_heap_delete_member".into(),
+            name: "__lash_vm_heap_delete_member".into(),
             args: vec![self.lower_expr(object)?, key],
         })
     }
@@ -1067,7 +1067,7 @@ impl Lowerer {
     ) -> Result<LashExpr, Diagnostic> {
         let arguments = self.lower_argument_list(args)?;
         Ok(LashExpr::BuiltinCall {
-            name: "__lashlang_call_dynamic".into(),
+            name: "__lash_vm_call_dynamic".into(),
             args: vec![callee, arguments],
         })
     }
@@ -1113,7 +1113,7 @@ impl Lowerer {
                 };
                 self.refuse_global_this_in_process(name)?;
                 return Ok(LashExpr::BuiltinCall {
-                    name: "__lashlang_global_has".into(),
+                    name: "__lash_vm_global_has".into(),
                     args: vec![LashExpr::String(name.as_str().into())],
                 });
             }
@@ -1191,7 +1191,7 @@ impl Lowerer {
             "Error" | "TypeError" | "RangeError" | "SyntaxError" | "ReferenceError"
             | "URIError" | "EvalError" | "AggregateError" | "Map" | "Set" | "Date" | "RegExp"
             | "URL" | "URLSearchParams" => Ok(LashExpr::BuiltinCall {
-                name: "__lashlang_heap_instanceof".into(),
+                name: "__lash_vm_heap_instanceof".into(),
                 args: vec![
                     self.lower_expr(left)?,
                     LashExpr::String(constructor.as_str().into()),
@@ -1303,11 +1303,11 @@ impl Lowerer {
         }
         if constructor == "Date" && args.is_empty() {
             return Ok(LashExpr::BuiltinCall {
-                name: "__lashlang_heap_new".into(),
+                name: "__lash_vm_heap_new".into(),
                 args: vec![
                     LashExpr::String("Date".into()),
                     LashExpr::ResultUnwrap(Box::new(journaled_runtime_call(
-                        lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
+                        lash_vm::LANGUAGE_RUNTIME_NOW_OPERATION,
                     ))),
                 ],
             });
@@ -1325,7 +1325,7 @@ impl Lowerer {
                 .collect::<Result<Vec<_>, _>>()?,
         );
         Ok(LashExpr::BuiltinCall {
-            name: "__lashlang_heap_new".into(),
+            name: "__lash_vm_heap_new".into(),
             args: values,
         })
     }
@@ -1348,7 +1348,7 @@ pub(super) fn global_this_member_name<'a>(
 /// the linker lifts process literals to.
 pub(super) fn is_reserved_name(name: &str) -> bool {
     name.starts_with(LOWERED_BINDING_PREFIX)
-        || name.starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
+        || name.starts_with(lash_vm::LIFTED_PROCESS_NAME_PREFIX)
 }
 
 pub(super) fn reserved_identifier(name: &str) -> Diagnostic {
@@ -1356,7 +1356,7 @@ pub(super) fn reserved_identifier(name: &str) -> Diagnostic {
         DiagnosticCode::ReservedIdentifier,
         format!(
             "`{name}` is reserved: identifiers starting with `{LOWERED_BINDING_PREFIX}` or `{}` name generated bindings and lifted processes",
-            lashlang::LIFTED_PROCESS_NAME_PREFIX
+            lash_vm::LIFTED_PROCESS_NAME_PREFIX
         ),
         None,
     )

@@ -1,7 +1,7 @@
 //! The `collection_transform` role's TypeScript spelling: a method call whose
 //! receiver, callback and operands the role's shape names.
 
-use lashlang::{Expr, StructuralRole};
+use lash_vm::{Expr, StructuralRole};
 
 use super::{Printer, TypeScriptSourceError, stdlib_call};
 
@@ -26,7 +26,7 @@ impl<'p> Printer<'p> {
         else {
             return Ok(None);
         };
-        let Some(parts) = lashlang::CollectionTransformParts::of(expr) else {
+        let Some(parts) = lash_vm::CollectionTransformParts::of(expr) else {
             return Ok(None);
         };
         let mut operands = parts.operands;

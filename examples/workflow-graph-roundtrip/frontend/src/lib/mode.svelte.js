@@ -2,7 +2,7 @@
 //
 // SIMPLIFIED (default) shows a non-expert affordance set — labeled operation
 // palette, typed field forms with variable pickers, read-only source peek.
-// POWER adds the engineer affordances — raw Lashlang inputs on every
+// POWER adds the engineer affordances — raw LashVm inputs on every
 // expression, add-any-kind in the palette, and a live bidirectional source
 // pane. Nothing is ever removed from the document; only the affordances change.
 

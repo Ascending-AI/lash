@@ -2,7 +2,7 @@
 //! the blob that holds its bytes.
 //!
 //! The table has no PostgreSQL half and therefore no shared statement: on
-//! PostgreSQL the bytes live inline in `lash_lashlang_artifacts` and there is
+//! PostgreSQL the bytes live inline in `lash_lash_vm_artifacts` and there is
 //! no pointer row to keep. Its name and its column lists still live here,
 //! because the column discipline is the same discipline, and because a
 //! PostgreSQL reader looking for the pointer table should find the record of

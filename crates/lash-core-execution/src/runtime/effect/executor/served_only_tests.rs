@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[tokio::test]
 async fn a_served_only_executor_refuses_and_trips_its_guard() {
     let refusal = RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::LashlangCellBindingDrift,
+        crate::RuntimeErrorCode::LashVmCellBindingDrift,
         "binding drifted",
     );
     let ran = Arc::new(AtomicBool::new(false));
@@ -43,6 +43,6 @@ async fn a_served_only_executor_refuses_and_trips_its_guard() {
     assert!(!ran.load(Ordering::SeqCst), "the effect did not run");
     assert_eq!(
         guard.tripped().map(|tripped| tripped.code),
-        Some(crate::RuntimeErrorCode::LashlangCellBindingDrift)
+        Some(crate::RuntimeErrorCode::LashVmCellBindingDrift)
     );
 }

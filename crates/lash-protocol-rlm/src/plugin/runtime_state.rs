@@ -36,7 +36,7 @@ impl RlmRuntimeState {
     /// arriving after the first was cancelled — actually sees.
     #[cfg(test)]
     fn new_for_tests_with_resolver(
-        deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
+        deferred_tool_resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
     ) -> Result<Self, SessionError> {
         let services = crate::dialect::RlmDialectServices {
             presentation: crate::RlmPresentationConfig::standard(),
@@ -50,7 +50,7 @@ impl RlmRuntimeState {
         };
         Self::new(Arc::new(crate::dialect::SessionDialect::new(
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            lash_lashlang_runtime::LashlangSurface::default(),
+            lash_vm_runtime::LashVmSurface::default(),
             services,
         )))
     }
@@ -390,7 +390,7 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
     }
 
     fn executable_generation(&self) -> Option<lash_core::ExecutableGeneration> {
-        Some(lash_lashlang_runtime::lashlang_cell_generation())
+        Some(lash_vm_runtime::lash_vm_cell_generation())
     }
 
     async fn snapshot_execution_state(
@@ -466,7 +466,7 @@ fn frame_switch_carries(
         // Both bodies are JSON maps, so encoding them cannot fail; a body
         // that did would carry nothing.
         if let Ok(values) = values {
-            definitions.extend(lashlang::referenced_definition_ids(
+            definitions.extend(lash_vm::referenced_definition_ids(
                 &crate::projection::json_to_flow_value(values.clone()),
             ));
         }
@@ -646,12 +646,12 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl lash_lashlang_runtime::DeferredToolResolver for ParkingResolver {
+    impl lash_vm_runtime::DeferredToolResolver for ParkingResolver {
         async fn resolve(
             &self,
-            _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+            _cx: &lash_vm_runtime::DeferredResolveContext<'_>,
             paths: &[&str],
-        ) -> std::collections::BTreeMap<String, lash_lashlang_runtime::Resolution> {
+        ) -> std::collections::BTreeMap<String, lash_vm_runtime::Resolution> {
             self.entered.fetch_add(1, Ordering::SeqCst);
             // A self-waking park: every poll re-reads the flag, so a release
             // is never missed whichever waker happens to execute the future.
@@ -669,7 +669,7 @@ mod tests {
                 .map(|path| {
                     (
                         (*path).to_string(),
-                        lash_lashlang_runtime::Resolution::NotAvailable,
+                        lash_vm_runtime::Resolution::NotAvailable,
                     )
                 })
                 .collect()
@@ -679,7 +679,7 @@ mod tests {
     fn parked_session() -> (Arc<ParkingResolver>, RlmRuntimeState) {
         let resolver = Arc::new(ParkingResolver::default());
         let state = RlmRuntimeState::new_for_tests_with_resolver(Some(
-            Arc::clone(&resolver) as lash_lashlang_runtime::SharedDeferredToolResolver
+            Arc::clone(&resolver) as lash_vm_runtime::SharedDeferredToolResolver
         ))
         .expect("runtime state");
         (resolver, state)
@@ -916,11 +916,11 @@ mod tests {
 
     /// A process definition value naming a module built from `source`.
     fn definition_json(source: &str) -> (String, serde_json::Value) {
-        let module_ref = lashlang::ModuleRef::new(&lashlang::ContentHash::new(source));
-        let identity = lashlang::ProcessDefinitionIdentity::new(
+        let module_ref = lash_vm::ModuleRef::new(&lash_vm::ContentHash::new(source));
+        let identity = lash_vm::ProcessDefinitionIdentity::new(
             module_ref.clone(),
-            lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("host")),
-            lashlang::ProcessRef::new(lashlang::ContentHash::new("component"), 0),
+            lash_vm::HostRequirementsRef::new(&lash_vm::ContentHash::new("host")),
+            lash_vm::ProcessRef::new(lash_vm::ContentHash::new("component"), 0),
             "run",
         );
         (

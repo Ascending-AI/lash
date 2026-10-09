@@ -1,4 +1,4 @@
-//! Carrying TypeScript source positions into the lashlang span table.
+//! Carrying TypeScript source positions into the lash_vm span table.
 //!
 //! Lowering changes tree shape: it synthesizes nodes, moves authored values
 //! into wrappers, and lifts process literals into declarations. Matching the
@@ -13,7 +13,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use lashlang::{AstPath, AstRoot, Declaration, Expr as LashExpr, LabelMetadata, Program, Span};
+use lash_vm::{AstPath, AstRoot, Declaration, Expr as LashExpr, LabelMetadata, Program, Span};
 
 use crate::SourceSpan;
 
@@ -154,7 +154,7 @@ fn extract(
 ///
 /// Only the forms a diagnostic points at carry one: a call, a member access
 /// and an await. Everything else inherits the nearest enclosing span the
-/// linker is already carrying, which is what the lashlang parser's tables did
+/// linker is already carrying, which is what the lash_vm parser's tables did
 /// for a sub-expression it recorded no span for.
 pub(super) fn source_span(expr: &super::Expr) -> Option<SourceSpan> {
     match expr {

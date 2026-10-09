@@ -84,7 +84,7 @@ while (elapsedSeconds < 240) {
 `sleep` takes milliseconds and must be awaited, and `run` is `async`, so the loop body is
 a durable step boundary rather than a busy wait. Count the iterations as above rather than
 timing the loop against the clock: `Date.now()` lowers to the journaled runtime operation
-`lashlang.runtime.now`, which the durable process engine does not serve, so a
+`lash_vm.runtime.now`, which the durable process engine does not serve, so a
 clock-driven loop fails the process on its first iteration instead of waiting. If a run
 produces that failure, the prompt did not pin the shape hard enough — say the loop shape
 again, do not raise the driver tier.
@@ -152,10 +152,10 @@ Do:
    several minutes (a long-running research/loop prompt), and let it reach a non-terminal
    card in the work rail. Pin the shape in the prompt the way Phase 1 pins its wait shape:
    the request must produce a `spawn_agent` subagent — a process whose `/api/work` row
-   carries a `child_session_id` — not a plain Lashlang process. Prose alone does not pin
-   it: an economy run asked in prose produced `identity_kind = lashlang` with no
+   carries a `child_session_id` — not a plain Lash VM process. Prose alone does not pin
+   it: an economy run asked in prose produced `identity_kind = lash_vm` with no
    `child_session_id`, completing in 0.6 s, and the gate could not be read from that turn.
-   If the first attempt yields a Lashlang process, re-prompt once naming the subagent
+   If the first attempt yields a Lash VM process, re-prompt once naming the subagent
    explicitly, then stop; a bounded single retry, not repeated re-prompting. Capture its process id **and its child session id** as
    `03b-subagent-running.json` — the child session id is the subagent's
    `child_session_id` in `/api/work` (equivalently the `session_id` on the subagent's

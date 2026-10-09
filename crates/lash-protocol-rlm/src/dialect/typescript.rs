@@ -28,7 +28,7 @@ impl Dialect for TypescriptDialect {
     /// it is refused (FIG-1444).
     fn tool_call_path(
         &self,
-        binding: &lash_lashlang_runtime::ResolvedToolBinding,
+        binding: &lash_vm_runtime::ResolvedToolBinding,
     ) -> Result<String, DialectRefusal> {
         let call_path = binding.call_path();
         lash_typescript::ensure_tool_call_path_addressable(&call_path).map_err(|error| {
@@ -117,7 +117,7 @@ const TYPESCRIPT_PROMPT_VOCABULARY: DialectPromptVocabulary = DialectPromptVocab
 
 fn render_host_surface_section(
     tool_catalog: &lash_core::ToolCatalog,
-    host_environment: &lashlang::LashlangHostEnvironment,
+    host_environment: &lash_vm::LashVmHostEnvironment,
 ) -> String {
     let inventory = crate::protocol::prompt::host_surface_inventory(host_environment);
     // Catalog tools already have a fully typed declaration under **Tools**,
@@ -127,7 +127,7 @@ fn render_host_surface_section(
         .tools
         .iter()
         .filter_map(|tool| {
-            lash_lashlang_runtime::required_tool_executable(&tool.manifest)
+            lash_vm_runtime::required_tool_executable(&tool.manifest)
                 .ok()
                 .map(|binding| binding.call_path())
         })
@@ -149,7 +149,7 @@ fn render_host_surface_section(
             .iter()
             .map(|operation| {
                 let signature = format!(
-                    "{}.{}(input: {}): Promise<{}>; // lashlang `{}_{}`",
+                    "{}.{}(input: {}): Promise<{}>; // lash_vm `{}_{}`",
                     operation.alias,
                     operation.operation,
                     lash_typescript::render_schema_shape(&operation.input)
@@ -219,7 +219,7 @@ fn render_host_surface_section(
 /// host actually rendered rather than off an ability flag.
 pub(crate) fn catalogue_has_process_surface(tool_catalog: &lash_core::ToolCatalog) -> bool {
     tool_catalog.tools.iter().any(|tool| {
-        lash_lashlang_runtime::required_tool_executable(&tool.manifest)
+        lash_vm_runtime::required_tool_executable(&tool.manifest)
             .is_ok_and(|binding| binding.call_path().starts_with("processes."))
     })
 }
@@ -239,7 +239,7 @@ A started handle outlives the turn; Stop cancels only the awaited handle; cancel
         .to_string()
 }
 
-/// Rewrites an authored Lashlang example into this dialect.
+/// Rewrites an authored Lash VM example into this dialect.
 ///
 /// Deliberately a small, total rewriter over the shapes the authored corpus
 /// actually uses rather than a translator: every example is a sequence of
@@ -263,7 +263,7 @@ fn render_tool_example(example: &str) -> String {
             }
             let indent_len = trimmed.len() - trimmed.trim_start().len();
             let (indent, body) = trimmed.split_at(indent_len);
-            // `expr?` — the Lashlang try-operator. TypeScript propagates a
+            // `expr?` — the Lash VM try-operator. TypeScript propagates a
             // rejection from `await` itself, so the operator has no twin.
             let body = body.strip_suffix('?').unwrap_or(body);
             let body = match body.strip_prefix("finish ") {
@@ -378,15 +378,15 @@ mod tests {
 
     use crate::dialect::{RlmDialectServices, SessionDialect};
     use lash_core::plugin::ToolCatalogContext;
-    use lash_lashlang_runtime::LashlangSurface;
+    use lash_vm_runtime::LashVmSurface;
 
-    use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+    use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
     #[test]
     fn the_process_section_follows_the_catalogue_and_teaches_the_argument_convention() {
         let dialect = SessionDialect::new(
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             RlmDialectServices {
                 presentation: crate::RlmPresentationConfig::standard(),
                 workers: lash_vm_client::service::Service::default(),
@@ -597,7 +597,7 @@ mod tests {
         );
         let section = SessionDialect::prompt_only(
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
         )
         .render_execution_section(
             crate::protocol::RlmPromptFeatures::default(),
@@ -668,46 +668,44 @@ mod tests {
         struct RecordingHost {
             dispatched: std::sync::Mutex<Vec<(String, String)>>,
         }
-        impl lashlang::ExecutionHost for RecordingHost {
+        impl lash_vm::ExecutionHost for RecordingHost {
             async fn perform(
                 &self,
-                op: lashlang::AbilityOp,
-            ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
+                op: lash_vm::AbilityOp,
+            ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
                 match op {
-                    lashlang::AbilityOp::ResourceOperation(call) => {
+                    lash_vm::AbilityOp::ResourceOperation(call) => {
                         let alias = match &call.receiver {
-                            lashlang::Value::Resource(handle) => handle.alias.clone(),
+                            lash_vm::Value::Resource(handle) => handle.alias.clone(),
                             other => format!("{other:?}"),
                         };
                         self.dispatched
                             .lock()
                             .expect("dispatched lock")
                             .push((alias, call.operation));
-                        Ok(lashlang::AbilityOutcome::Value(lashlang::Value::String(
+                        Ok(lash_vm::AbilityOutcome::Value(lash_vm::Value::String(
                             "tool-ok".into(),
                         )))
                     }
-                    lashlang::AbilityOp::Finish(value) => {
-                        Ok(lashlang::AbilityOutcome::Value(value))
-                    }
-                    other => Err(lashlang::ExecutionHostError::new(format!(
+                    lash_vm::AbilityOp::Finish(value) => Ok(lash_vm::AbilityOutcome::Value(value)),
+                    other => Err(lash_vm::ExecutionHostError::new(format!(
                         "unexpected ability {other:?}"
                     ))),
                 }
             }
         }
 
-        let mut catalog = lashlang::LashlangHostCatalog::new();
+        let mut catalog = lash_vm::LashVmHostCatalog::new();
         catalog
             .add_module_operation_contract(
                 modules.to_vec(),
                 "ToolModule",
                 operation,
                 format!("tool:test/{}", modules.join("_")),
-                &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+                &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
             )
             .expect("operation binding");
-        let environment = lashlang::LashlangHostEnvironment::new(catalog);
+        let environment = lash_vm::LashVmHostEnvironment::new(catalog);
         let source = format!(r#"finish(await {call_path}({{ id: "m1" }}));"#);
         let linked = lash_typescript::link(&source, &environment)
             .unwrap_or_else(|error| panic!("`{source}` must link: {error:?}"));
@@ -717,9 +715,9 @@ mod tests {
         tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("runtime")
-            .block_on(lashlang::execute(
-                &lashlang::testing::harness::compile_linked_main(&linked),
-                &mut lashlang::State::new(),
+            .block_on(lash_vm::execute(
+                &lash_vm::testing::harness::compile_linked_main(&linked),
+                &mut lash_vm::State::new(),
                 &host,
             ))
             .unwrap_or_else(|error| panic!("`{source}` must execute: {error:?}"));

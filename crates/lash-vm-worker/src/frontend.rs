@@ -1,4 +1,4 @@
-use lashlang::{LashlangHostEnvironment, ModuleCompileError, Program};
+use lash_vm::{LashVmHostEnvironment, ModuleCompileError, Program};
 
 /// A source frontend compiled into a worker entry. The parent sends source
 /// text and host vocabulary; lowering and diagnostics run in the child.
@@ -11,7 +11,7 @@ pub trait Frontend: Send + Sync {
     fn parse(
         &self,
         source: &str,
-        cell_environment: Option<&LashlangHostEnvironment>,
+        cell_environment: Option<&LashVmHostEnvironment>,
     ) -> Result<Program, FrontendRefusal>;
 }
 
@@ -44,7 +44,7 @@ impl Frontend for TypeScriptFrontend {
     fn parse(
         &self,
         source: &str,
-        cell_environment: Option<&LashlangHostEnvironment>,
+        cell_environment: Option<&LashVmHostEnvironment>,
     ) -> Result<Program, FrontendRefusal> {
         let mut parser = self
             .parser
@@ -67,7 +67,7 @@ impl Frontend for TypeScriptFrontend {
             let rendered = lash_typescript::format_diagnostic(source, &error);
             FrontendRefusal {
                 error: ModuleCompileError::parse_failure(
-                    error.span.map(|span| lashlang::Span {
+                    error.span.map(|span| lash_vm::Span {
                         start: span.start,
                         end: span.end,
                     }),

@@ -438,7 +438,7 @@ impl Backend {
         self.inner.stores.attachment_store()
     }
 
-    /// The Lashlang module-artifact store, beside the sessions that write
+    /// The Lash VM module-artifact store, beside the sessions that write
     /// its artifacts.
     pub fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore> {
         self.inner.stores.module_artifacts()
@@ -522,7 +522,7 @@ pub trait StoreSet: Send + Sync {
     /// The attachment byte store sessions write through.
     fn attachment_store(&self) -> Arc<dyn AttachmentStore>;
 
-    /// The Lashlang module-artifact store.
+    /// The Lash VM module-artifact store.
     fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore>;
 
     /// The recovery leader lease over this storage (ADR 0109 §1.6).

@@ -114,7 +114,7 @@ impl Lowerer {
             body: Box::new(LashExpr::FunctionReturn(Box::new(js_add(
                 LashExpr::String("".into()),
                 LashExpr::BuiltinCall {
-                    name: "__lashlang_call_dynamic".into(),
+                    name: "__lash_vm_call_dynamic".into(),
                     args: vec![
                         variable(&replacement_slot),
                         LashExpr::Index {
@@ -173,7 +173,7 @@ impl Lowerer {
         let call = if own_method_guard {
             LashExpr::If {
                 condition: Box::new(LashExpr::BuiltinCall {
-                    name: "__lashlang_stdlib".into(),
+                    name: "__lash_vm_stdlib".into(),
                     args: vec![
                         LashExpr::String("Lash.OwnMethod".into()),
                         variable(&input_slot),
@@ -200,7 +200,7 @@ impl Lowerer {
 fn regexp_call(operation: &str, mut args: Vec<LashExpr>) -> LashExpr {
     args.insert(0, LashExpr::String(operation.into()));
     LashExpr::BuiltinCall {
-        name: "__lashlang_regexp".into(),
+        name: "__lash_vm_regexp".into(),
         args,
     }
 }

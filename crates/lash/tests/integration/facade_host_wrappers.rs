@@ -8,7 +8,7 @@
 //! * a [`PluginFactory`](lash::plugins::PluginFactory) that wraps the RLM
 //!   protocol factory and forwards its process-engine contributions, which
 //!   needs `ProcessEngineContributionContext` to be nameable; without the
-//!   forward the Lashlang process engine is dropped;
+//!   forward the Lash VM process engine is dropped;
 //! * a [`StoreSet`](lash::StoreSet) decorator that overrides
 //!   `definition_store`, which needs every trait object the store set hands
 //!   out to be nameable.
@@ -295,7 +295,7 @@ fn core(
 // ---- the law ----------------------------------------------------------------
 
 /// The law: a facade-only host wraps the RLM factory and the store set, the
-/// wrapped factory still contributes the Lashlang process engine, a code-mode
+/// wrapped factory still contributes the Lash VM process engine, a code-mode
 /// turn runs through both, and the runtime reads process definitions through
 /// the decorator.
 async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier) {
@@ -319,7 +319,7 @@ async fn a_facade_host_wraps_the_rlm_factory_and_its_stores(tier: Tier) {
     let forwarded = contributed_engines.lock_recover().clone();
     assert!(
         !forwarded.is_empty() && forwarded.iter().all(|engines| *engines == 1),
-        "every forward hands on the RLM factory's one contribution, the Lashlang process \
+        "every forward hands on the RLM factory's one contribution, the Lash VM process \
          engine: {forwarded:?}"
     );
 

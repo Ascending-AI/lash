@@ -2,10 +2,10 @@
 //! Owned by L7p (FIG-5197).
 //!
 //! The provider trait, its catalog and the plain-data `ResourceRef` live in
-//! `lashlang` beside the read types they answer (`ProjectedReadRequest`,
+//! `lash_vm` beside the read types they answer (`ProjectedReadRequest`,
 //! `ProjectedReadResponse`), because the VM sits above this crate. The
 //! backend carries the built catalog behind [`ProjectionProviders`], and the
-//! VM half reads it back as `lashlang::ProjectionCatalog`.
+//! VM half reads it back as `lash_vm::ProjectionCatalog`.
 
 use std::any::Any;
 

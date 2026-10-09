@@ -25,19 +25,19 @@ use served::{Tier, World};
 /// A worker service of exactly one slot, with a checkout deadline of
 /// `checkout`: long enough for any legitimate wait, short enough to report a
 /// deadlock or a saturated slot.
-fn one_slot_workers(checkout: std::time::Duration) -> lash::rlm::WorkerService {
+fn one_slot_workers(checkout: std::time::Duration) -> lash::vm::WorkerService {
     let mut config = sim::untimed_workers().config().clone();
     config.min_workers = 1;
     config.max_workers = 1;
     config.deadlines.checkout = checkout;
-    lash::rlm::WorkerService::new(config)
+    lash::vm::WorkerService::new(config)
 }
 
 /// A core running RLM turns whose cells and process engine share `workers`,
 /// with the session process controls and `tools`.
 async fn world(
     tier: Tier,
-    workers: lash::rlm::WorkerService,
+    workers: lash::vm::WorkerService,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
 ) -> Option<World> {
     World::new(tier, move |backend| {
@@ -102,7 +102,7 @@ const CREATE: &str = "create_saturated";
 /// attempt is recorded, and the slot held at the first is released after it.
 struct CreateAttemptProbe {
     inner: Arc<dyn lash_core::ToolProvider>,
-    workers: lash::rlm::WorkerService,
+    workers: lash::vm::WorkerService,
     /// Whether the first attempt has run: it holds the only slot while the
     /// production create checks one out.
     first_ran: Mutex<bool>,
@@ -119,7 +119,7 @@ enum Attempt {
 }
 
 fn create_definition() -> lash_core::ToolDefinition {
-    let production = lash_lashlang_runtime::process_create_tool_definition();
+    let production = lash_vm_runtime::process_create_tool_definition();
     lash_core::ToolDefinition::new(
         format!("tool:{CREATE}"),
         CREATE,
@@ -165,7 +165,7 @@ impl lash_core::ToolProvider for CreateAttemptProbe {
     }
 }
 
-fn held_worker(workers: &lash::rlm::WorkerService) -> lash_vm_client::Checkout {
+fn held_worker(workers: &lash::vm::WorkerService) -> lash_vm_client::Checkout {
     use lash_vm_client::WorkerPoolRuntimeOps as _;
     workers
         .pool()
@@ -185,9 +185,9 @@ fn held_worker(workers: &lash::rlm::WorkerService) -> lash_vm_client::Checkout {
 async fn saturated_process_create_retries_without_recording_a_tool_refusal(tier: Tier) {
     let workers = one_slot_workers(std::time::Duration::from_millis(100));
     let probe = Arc::new(CreateAttemptProbe {
-        inner: Arc::new(lash_lashlang_runtime::process_create_tool_provider(
+        inner: Arc::new(lash_vm_runtime::process_create_tool_provider(
             "typescript",
-            lash_lashlang_runtime::LashlangSurface::default(),
+            lash_vm_runtime::LashVmSurface::default(),
             workers.clone(),
         )),
         workers: workers.clone(),

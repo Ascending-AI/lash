@@ -86,7 +86,7 @@ class RetiredTermsTests(unittest.TestCase):
             "EngineOwnedCommitLayer", "open_in_memory",
             "InMemoryLiveReplayStore", "InMemoryLiveReplayStoreConfig",
             "InMemoryRunLedger", "InMemoryRuns", "InMemoryShiftEpochs",
-            "InMemoryLashlangArtifactStore", "InMemoryArtifactState",
+            "InMemoryLashVmArtifactStore", "InMemoryArtifactState",
             "InMemorySpanExporter", "InMemoryMetricExporter", "InMemory",
             "s3_attachment_store_satisfies_conformance_with_in_memory_object_store",
         ):

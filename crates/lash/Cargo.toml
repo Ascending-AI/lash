@@ -31,7 +31,7 @@ futures-util = { workspace = true }
 lash-core = { workspace = true }
 lash-core-store = { workspace = true }
 lash-core-worker = { workspace = true }
-lash-lashlang-runtime = { workspace = true, optional = true }
+lash-vm-runtime = { workspace = true, optional = true }
 lash-llm-tools = { workspace = true, optional = true }
 lash-llm-transport = { workspace = true, optional = true }
 lash-tool-support = { workspace = true }
@@ -52,7 +52,7 @@ lash-plugin-process-controls = { workspace = true }
 lash-rlm-types = { workspace = true, optional = true }
 lash-trace = { workspace = true }
 uuid = { workspace = true }
-lashlang = { workspace = true, optional = true }
+lash-vm = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 # The PostgreSQL live replay store (`postgres` feature).
@@ -67,13 +67,13 @@ default = []
 rlm = [
     "dep:lash-vm-client",
     "dep:lash-vm-worker",
-    "dep:lash-lashlang-runtime",
+    "dep:lash-vm-runtime",
     "dep:lash-llm-tools",
     "dep:lash-protocol-rlm",
     "dep:lash-render",
     "dep:lash-rlm-types",
-    "lash-plugin-mcp?/lashlang",
-    "dep:lashlang",
+    "lash-plugin-mcp?/lash-vm",
+    "dep:lash-vm",
 ]
 
 # Host-wired extension features (ADR 0079 section 1). Each gates one
@@ -96,7 +96,7 @@ testing = [
     "lash-core/testing",
     "lash-protocol-rlm?/testing",
     "lash-vm-worker?/testing",
-    "lashlang?/testing",
+    "lash-vm?/testing",
 ]
 # Exposes the host-installed OpenTelemetry adapter (`lash::tracing::OtelTelemetry`).
 otel-trace = ["lash-core/otel-trace"]
@@ -109,7 +109,7 @@ synthetic-next = [
     "lash-core-store/synthetic-next",
     "lash-postgres-store?/synthetic-next",
     "lash-sqlite-store?/synthetic-next",
-    "lashlang?/synthetic-next",
+    "lash-vm?/synthetic-next",
     "lash-protocol-rlm?/synthetic-next",
     "lash-vm-worker?/synthetic-next",
 ]
@@ -118,7 +118,7 @@ synthetic-next = [
 lash-conformance.workspace = true
 insta = "1"
 lash-core = { workspace = true, features = ["testing"] }
-lashlang = { workspace = true, features = ["testing"] }
+lash-vm = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-provider-anthropic = { workspace = true, features = ["testing"] }

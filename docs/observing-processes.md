@@ -22,7 +22,7 @@ oldest first): a deferred call (`WaitKind::Call`), a key its engine pinned
 (`WaitKind::Key`), a sleep (`WaitKind::Sleep { until_ms }`) or another
 process's terminal (`WaitKind::Process { process_id }`). Each `WaitState`
 carries `since_ms` and, when the engine named one, the `site` (`node_id`,
-`occurrence`) of the node that waits; the lashlang engine names the node of a
+`occurrence`) of the node that waits; the lash_vm engine names the node of a
 sleep. A wait never carries a completion key or a wait id: those resolve the
 wait, and `Completions::parked` and `pinned_keys` hand them only to a host
 that asks for them. The process reads `running` again once its last wait
@@ -131,8 +131,8 @@ For language graph records, the workbench installs its tee with
 The concrete example is
 [`examples/agent-workbench/src/main_sections/bootstrap.rs`](../examples/agent-workbench/src/main_sections/bootstrap.rs).
 It tees language execution records to a live graph store and a JSONL sink.
-`AGENT_WORKBENCH_LASHLANG_EXECUTION_TRACE` selects the file; by default it is
-`lashlang-execution.jsonl` beneath `AGENT_WORKBENCH_DATA_DIR`. Its separate
+`AGENT_WORKBENCH_LASH_VM_EXECUTION_TRACE` selects the file; by default it is
+`lash-vm-execution.jsonl` beneath `AGENT_WORKBENCH_DATA_DIR`. Its separate
 passive diagnostic trace is selected by `AGENT_WORKBENCH_TRACE` and defaults
 to `trace.jsonl` in that directory. Keep the language execution file when
 you need the process's node path. Flush host-owned sinks before orderly

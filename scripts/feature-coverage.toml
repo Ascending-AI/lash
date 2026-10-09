@@ -170,10 +170,10 @@ commands = [
 [[lane]]
 name = "language-testing-features"
 features = [
-  "lash-internal-lashlang/testing:on",
-  "lash-internal-lashlang/testing:off",
-  "lash-internal-lashlang-runtime/testing:on",
-  "lash-internal-lashlang-runtime/testing:off",
+  "lash-internal-vm/testing:on",
+  "lash-internal-vm/testing:off",
+  "lash-internal-vm-runtime/testing:on",
+  "lash-internal-vm-runtime/testing:off",
   "lash-internal-typescript/testing:on",
   "lash-internal-typescript/testing:off",
   "lash-internal-vm-broker/testing:on",
@@ -184,10 +184,10 @@ features = [
   "lash-internal-vm-worker/testing:off",
 ]
 commands = [
-  ["cargo", "check", "-p", "lash-internal-lashlang", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-lashlang", "--lib", "--no-default-features", "--features", "testing", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-lashlang-runtime", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-lashlang-runtime", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm", "--lib", "--no-default-features", "--features", "testing", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm-runtime", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-typescript", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-typescript", "--lib", "--no-default-features", "--features", "testing", "--locked"],
   ["cargo", "check", "-p", "lash-internal-vm-broker", "--lib", "--no-default-features", "--locked"],
@@ -230,12 +230,12 @@ features = [
   "lash-internal-postgres-store/testing:off",
   "lash-internal-s3-store/testing:on",
   "lash-internal-s3-store/testing:off",
-  "lash-internal-conformance/lashlang:on",
-  "lash-internal-conformance/lashlang:off",
+  "lash-internal-conformance/lash-vm:on",
+  "lash-internal-conformance/lash-vm:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-conformance", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-conformance", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-conformance", "--lib", "--no-default-features", "--features", "lash-vm", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--tests", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-sqlite-store", "--lib", "--no-default-features", "--features", "perf-witness", "--locked"],
@@ -343,16 +343,16 @@ commands = [
 ]
 
 [[lane]]
-name = "tool-lashlang-proxies"
+name = "tool-lash-vm-proxies"
 features = [
-  "lash-internal-plugin-mcp/lashlang:on",
-  "lash-internal-plugin-mcp/lashlang:off",
+  "lash-internal-plugin-mcp/lash-vm:on",
+  "lash-internal-plugin-mcp/lash-vm:off",
 ]
 commands = [
   ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--features", "lashlang", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-plugin-mcp", "--lib", "--no-default-features", "--features", "lash-vm", "--locked"],
   ["cargo", "test", "-p", "lash-internal-plugin-mcp", "--no-default-features", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-plugin-mcp", "--features", "lashlang", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-plugin-mcp", "--features", "lash-vm", "--locked"],
   ["cargo", "check", "-p", "lash-internal-plugin-process-controls", "--lib", "--no-default-features", "--locked"],
   ["cargo", "test", "-p", "lash-internal-plugin-process-controls", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-tool-support", "--lib", "--no-default-features", "--locked"],
@@ -439,8 +439,8 @@ features = [
   "lash-internal-core-store/synthetic-next:off",
   "lash-internal-core-execution/synthetic-next:on",
   "lash-internal-core-execution/synthetic-next:off",
-  "lash-internal-lashlang/synthetic-next:on",
-  "lash-internal-lashlang/synthetic-next:off",
+  "lash-internal-vm/synthetic-next:on",
+  "lash-internal-vm/synthetic-next:off",
   "lash-internal-postgres-store/synthetic-next:on",
   "lash-internal-postgres-store/synthetic-next:off",
   "lash-internal-sqlite-store/synthetic-next:on",
@@ -469,9 +469,9 @@ commands = [
   ["cargo", "test", "-p", "lash-internal-core-execution", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-lashlang", "--lib", "--no-default-features", "--locked"],
-  ["cargo", "check", "-p", "lash-internal-lashlang", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
-  ["cargo", "test", "-p", "lash-internal-lashlang", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm", "--lib", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-vm", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
+  ["cargo", "test", "-p", "lash-internal-vm", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-protocol-rlm", "--lib", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-protocol-rlm", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "test", "-p", "lash-internal-protocol-rlm", "--lib", "--no-default-features", "--features", "synthetic-next", "--locked"],

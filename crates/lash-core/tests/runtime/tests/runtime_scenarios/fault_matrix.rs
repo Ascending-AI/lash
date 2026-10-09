@@ -385,7 +385,7 @@ fn run_fast_gate_with_fake_cargo_inheriting(
         .env_remove("LASH_CONFIDENCE_PACKAGE")
         .env_remove("LASH_SIM_SHARD")
         .env("PATH", path)
-        .env("LASH_VM_WORKER", &worker_path)
+        .env(concat!("LASH_", "VM_WORKER"), &worker_path)
         .env(
             "LASH_POSTGRES_DATABASE_URL",
             "postgres://fault-matrix-probe.invalid/lash",

@@ -13,15 +13,15 @@ fn artifact_projection_spans_a_literal_lifted_from_a_declared_process() {
     // TypeScript itself never declares.
     let authored = "const worker=async()=>{const inner=async()=>{await sleep(2);return 2;};await sleep(1);return 1;};";
     let mut program = lash_typescript::parse(authored).expect("fixture parses");
-    let lashlang::Expr::Block(statements) = &mut program.main else {
+    let lash_vm::Expr::Block(statements) = &mut program.main else {
         panic!("a lowered program's main is a block")
     };
-    let [lashlang::Expr::Assign { target, expr }] = statements.as_mut_slice() else {
+    let [lash_vm::Expr::Assign { target, expr }] = statements.as_mut_slice() else {
         panic!("the fixture binds one process literal")
     };
-    let lashlang::Expr::ProcessLiteral(literal) = std::mem::replace(
+    let lash_vm::Expr::ProcessLiteral(literal) = std::mem::replace(
         expr.as_mut(),
-        lashlang::Expr::ProcessRef {
+        lash_vm::Expr::ProcessRef {
             process: "worker".into(),
         },
     ) else {
@@ -30,16 +30,16 @@ fn artifact_projection_spans_a_literal_lifted_from_a_declared_process() {
     assert_eq!(target.root.as_str(), "worker");
     program
         .declarations
-        .push(lashlang::Declaration::Process(lashlang::ProcessDecl {
+        .push(lash_vm::Declaration::Process(lash_vm::ProcessDecl {
             name: "worker".into(),
             params: Vec::new(),
             return_ty: None,
             label: None,
-            origin: lashlang::ProcessOrigin::Declared,
+            origin: lash_vm::ProcessOrigin::Declared,
             body: *literal.body,
         }));
     let linked =
-        lashlang::LinkedModule::link(program, lashlang::testing::harness::test_environment())
+        lash_vm::LinkedModule::link(program, lash_vm::testing::harness::test_environment())
             .expect("the declared process links");
     let lifted = linked
         .artifact
@@ -47,7 +47,7 @@ fn artifact_projection_spans_a_literal_lifted_from_a_declared_process() {
         .declarations
         .iter()
         .filter_map(|declaration| match declaration {
-            lashlang::Declaration::Process(process) if process.origin.is_lifted() => Some(process),
+            lash_vm::Declaration::Process(process) if process.origin.is_lifted() => Some(process),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -59,8 +59,8 @@ fn artifact_projection_spans_a_literal_lifted_from_a_declared_process() {
     assert!(
         matches!(
             &inner.origin,
-            lashlang::ProcessOrigin::Lifted { site, .. }
-                if matches!(site.root, lashlang::AstRoot::Declaration(_))
+            lash_vm::ProcessOrigin::Lifted { site, .. }
+                if matches!(site.root, lash_vm::AstRoot::Declaration(_))
         ),
         "the inner literal is lifted out of the declared body: {:?}",
         inner.origin
@@ -105,7 +105,7 @@ fn artifact_projection_spans_a_literal_lifted_from_a_declared_process() {
 fn graph_submission_cannot_edit_a_process_origin() {
     let source = "const child = async () => { return 1; };\nfinish(1);\n";
     let graph = workflow_graph_from_source(source).expect("fixture projects");
-    let edit = |change: &dyn Fn(&mut lashlang::WorkflowProcess)| {
+    let edit = |change: &dyn Fn(&mut lash_vm::WorkflowProcess)| {
         let mut edited = graph.clone();
         let process = edited
             .declarations
@@ -131,12 +131,12 @@ fn graph_submission_cannot_edit_a_process_origin() {
     };
 
     refused(
-        &edit(&|process| process.origin = lashlang::ProcessOrigin::Declared),
+        &edit(&|process| process.origin = lash_vm::ProcessOrigin::Declared),
         "dropping a lifted process's origin",
     );
     refused(
         &edit(&|process| {
-            if let lashlang::ProcessOrigin::Lifted { site, .. } = &mut process.origin {
+            if let lash_vm::ProcessOrigin::Lifted { site, .. } = &mut process.origin {
                 site.steps.push(0);
             }
         }),
@@ -152,7 +152,7 @@ fn graph_submission_cannot_edit_a_process_origin() {
     );
     refused(
         &edit(&|process| {
-            if let lashlang::ProcessOrigin::Lifted { hidden_params, .. } = &mut process.origin {
+            if let lash_vm::ProcessOrigin::Lifted { hidden_params, .. } = &mut process.origin {
                 *hidden_params = 1;
             }
         }),
@@ -182,7 +182,7 @@ fn graph_submission_cannot_edit_a_process_origin() {
 #[test]
 fn a_lifted_process_body_renders_after_host_text_round_trips_and_moves() {
     let source = "const blank = async () => {\n  return 0;\n};\n";
-    let environment = lashlang::testing::harness::test_environment();
+    let environment = lash_vm::testing::harness::test_environment();
     let admitted = workflow_graph_from_source_with_facets(source, Some(&environment))
         .expect("the source admits");
     let draft = workflow_graph_from_source(source).expect("the source projects");
@@ -223,17 +223,17 @@ fn a_lifted_process_body_renders_after_host_text_round_trips_and_moves() {
             .find(|node| matches!(node.kind, WorkflowNodeKind::Terminal { .. }))
             .expect("the body returns");
         if let WorkflowNodeKind::Terminal {
-            expression: lashlang::Expr::FunctionReturn(value),
+            expression: lash_vm::Expr::FunctionReturn(value),
             ..
         } = &mut terminal.kind
         {
-            **value = lashlang::Expr::Number(7.0);
+            **value = lash_vm::Expr::Number(7.0);
         }
         let mut inserted = edited.main.nodes[0].clone();
         inserted.id = WorkflowNodeId::new("node:0123456789abcdef01234567".to_string());
         inserted.kind = WorkflowNodeKind::Data {
-            binding: Some(lashlang::AssignTarget::variable("greeting".into())),
-            expression: lashlang::Expr::String("hello".into()),
+            binding: Some(lash_vm::AssignTarget::variable("greeting".into())),
+            expression: lash_vm::Expr::String("hello".into()),
         };
         edited.main.nodes.insert(0, inserted);
 

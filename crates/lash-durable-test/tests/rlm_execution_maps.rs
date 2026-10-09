@@ -23,11 +23,11 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use lash_core::facade_support::{TraceRecord, TraceSink, TraceSinkError};
-use lash_lashlang_runtime::{
+use lash_sansio::sync::MutexExt as _;
+use lash_vm_runtime::{
     TraceLanguageExecution, TraceLanguageExecutionIdentity, TraceLanguageExecutionMap,
     TraceLanguageExecutionPayload, TraceLashlangGraphStore, TraceLashlangNodeObservation,
 };
-use lash_sansio::sync::MutexExt as _;
 
 use served::{Tier, World};
 use web_fetch::{Fetch, GrantFetch};
@@ -58,7 +58,7 @@ impl RecordingSink {
 /// controls, the deferred `web.fetch`, and `sink` tracing every record.
 async fn world(
     tier: Tier,
-    workers: lash::rlm::WorkerService,
+    workers: lash::vm::WorkerService,
     sink: &Arc<RecordingSink>,
 ) -> Option<World> {
     world_with_tools(tier, workers, sink, Arc::new(Fetch)).await
@@ -84,7 +84,7 @@ impl lash_core::ToolProvider for ListedFetch {
 
 async fn world_with_tools(
     tier: Tier,
-    workers: lash::rlm::WorkerService,
+    workers: lash::vm::WorkerService,
     sink: &Arc<RecordingSink>,
     tools: Arc<dyn lash_core::ToolProvider>,
 ) -> Option<World> {
@@ -267,12 +267,12 @@ fn emitted_sites(
 /// The map law for one execution: `compiled` is the entry its artifact
 /// compiles to, `map` what the execution published, `emitted` what it ran.
 fn assert_map_is_the_compiled_inventory(
-    compiled: &lashlang::CompiledProgram,
+    compiled: &lash_vm::CompiledProgram,
     map: &TraceLanguageExecutionMap,
     emitted: &BTreeSet<(String, lash_sansio::ExecutionNodeKind)>,
     context: &str,
 ) {
-    let compiled_sites = lashlang::testing::harness::compiled_execution_sites(compiled);
+    let compiled_sites = lash_vm::testing::harness::compiled_execution_sites(compiled);
     let inventory = compiled_sites
         .iter()
         .map(|site| {
@@ -326,13 +326,13 @@ fn assert_map_is_the_compiled_inventory(
 }
 
 /// The node of `artifact`'s view whose payload names `marker`.
-fn node_naming(artifact: &lashlang::ModuleArtifact, marker: &str) -> String {
-    let graph = lashlang::workflow_graph_from_artifact(artifact, &lashlang::NoStatementText);
+fn node_naming(artifact: &lash_vm::ModuleArtifact, marker: &str) -> String {
+    let graph = lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText);
     let quoted = format!("\"{marker}\"");
     let matching = graph
         .nodes()
         .filter(|node| {
-            !matches!(node.kind, lashlang::WorkflowNodeKind::Container(_))
+            !matches!(node.kind, lash_vm::WorkflowNodeKind::Container(_))
                 && serde_json::to_string(&node.kind)
                     .expect("node kind serializes")
                     .contains(&quoted)
@@ -346,10 +346,10 @@ fn node_naming(artifact: &lashlang::ModuleArtifact, marker: &str) -> String {
 }
 
 /// The module `module_ref` names, read back from the backend's store.
-async fn stored_artifact(world: &World, module_ref: &str) -> Arc<lashlang::ModuleArtifact> {
-    let module_ref: lashlang::ModuleRef =
+async fn stored_artifact(world: &World, module_ref: &str) -> Arc<lash_vm::ModuleArtifact> {
+    let module_ref: lash_vm::ModuleRef =
         serde_json::from_value(serde_json::json!(module_ref)).expect("a module ref");
-    lashlang::LashlangArtifacts::of_backend(&world.backend)
+    lash_vm::LashVmArtifacts::of_backend(&world.backend)
         .get_module_artifact(&module_ref)
         .await
         .expect("the store reads")
@@ -357,7 +357,7 @@ async fn stored_artifact(world: &World, module_ref: &str) -> Arc<lashlang::Modul
 }
 
 /// Whether `node` folded to `Skipped`.
-fn assert_skipped(records: &[TraceRecord], artifact: &lashlang::ModuleArtifact, marker: &str) {
+fn assert_skipped(records: &[TraceRecord], artifact: &lash_vm::ModuleArtifact, marker: &str) {
     let graph = TraceLashlangGraphStore::fold(None, records).expect("the records fold");
     let id = node_naming(artifact, marker);
     let node = graph
@@ -392,8 +392,8 @@ async fn production_rlm_map_is_the_compiled_inventory_for_every_loop_kind(tier: 
         panic!("one execution_started event, got {}", maps.len());
     };
     let artifact = stored_artifact(&world, &started.identity.module_ref).await;
-    let compiled = lashlang::compile(&artifact, lashlang::Entry::Main, None)
-        .expect("the cell's main compiles");
+    let compiled =
+        lash_vm::compile(&artifact, lash_vm::Entry::Main, None).expect("the cell's main compiles");
     let emitted = emitted_sites(&events, &started.identity);
     assert_map_is_the_compiled_inventory(&compiled, map, &emitted, "the RLM cell");
     let resource_operations = emitted
@@ -470,7 +470,7 @@ async fn run_process_corpus(world: &World, corpus: &str, count: usize) {
 
 /// Run [`PROCESS_CORPUS`] on `workers` and check the map law on the worker
 /// and the literal nested in it.
-async fn process_map_fixture(tier: Tier, workers: lash::rlm::WorkerService) {
+async fn process_map_fixture(tier: Tier, workers: lash::vm::WorkerService) {
     let sink = Arc::new(RecordingSink::default());
     let Some(world) = world(tier, workers, &sink).await else {
         return;
@@ -497,7 +497,7 @@ async fn process_map_fixture(tier: Tier, workers: lash::rlm::WorkerService) {
     for (started, _) in &processes {
         let artifact = stored_artifact(&world, &started.identity.module_ref).await;
         if artifact.ir().declarations.iter().any(|declaration| {
-            matches!(declaration, lashlang::Declaration::Process(process)
+            matches!(declaration, lash_vm::Declaration::Process(process)
                 if process.name == started.identity.entry_name
                     && process.params.iter().any(|param| param.name.as_str() == "limit"))
         }) {
@@ -514,7 +514,7 @@ async fn process_map_fixture(tier: Tier, workers: lash::rlm::WorkerService) {
             .process_ref(&started.identity.entry_name)
             .expect("the executed process is exported")
             .clone();
-        let compiled = lashlang::compile(&artifact, lashlang::Entry::Process(&process_ref), None)
+        let compiled = lash_vm::compile(&artifact, lash_vm::Entry::Process(&process_ref), None)
             .expect("the executed process compiles");
         let emitted = emitted_sites(&events, &started.identity);
         assert!(!emitted.is_empty(), "the process run is observed");
@@ -555,7 +555,7 @@ async fn every_model_code_path_runs_in_a_worker(tier: Tier) {
     remote
         .insert_global(
             "definition",
-            lashlang::from_json(serde_json::json!({"$lash_definition_id": id.to_string()})),
+            lash_vm::from_json(serde_json::json!({"$lash_definition_id": id.to_string()})),
         )
         .await
         .expect("worker installs the candidate root");
@@ -571,9 +571,7 @@ async fn every_model_code_path_runs_in_a_worker(tier: Tier) {
     let definition = workers
         .request_accounted(Request::CreateDefinition {
             source: "const answer = async (): Promise<number> => { return 42; };".into(),
-            environment: lashlang::LashlangHostEnvironment::new(
-                lashlang::LashlangHostCatalog::new(),
-            ),
+            environment: lash_vm::LashVmHostEnvironment::new(lash_vm::LashVmHostCatalog::new()),
         })
         .await
         .expect("definition compiler runs in a worker");
@@ -746,9 +744,8 @@ finish(result);
             let process_ref = artifact
                 .process_ref(&started.identity.entry_name)
                 .expect("the process is exported");
-            let compiled =
-                lashlang::compile(&artifact, lashlang::Entry::Process(process_ref), None)
-                    .expect("the process compiles");
+            let compiled = lash_vm::compile(&artifact, lash_vm::Entry::Process(process_ref), None)
+                .expect("the process compiles");
             assert_map_is_the_compiled_inventory(
                 &compiled,
                 map,

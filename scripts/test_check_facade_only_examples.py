@@ -21,7 +21,7 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
         self.write(
             "crates/lash/Cargo.toml",
             '[dependencies]\nlash-core = "0.1"\nlash-durable = "0.1"\n'
-            'lashlang = "0.1"\n',
+            'lash-vm = "0.1"\n',
         )
         patch = mock.patch.object(gate, "REPO", self.repo)
         patch.start()
@@ -65,14 +65,14 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
             gate.violations(),
         )
 
-    def test_rlm_has_no_lashlang_source_exemptions(self) -> None:
+    def test_rlm_has_no_lash_vm_source_exemptions(self) -> None:
         self.write(
             "examples/agent-workbench/Cargo.toml",
             '[dependencies]\nlash = { version = "0.1", features = ["rlm"] }\n',
         )
-        self.write("examples/agent-workbench/src/turns.rs", "use lashlang::Program;\n")
+        self.write("examples/agent-workbench/src/turns.rs", "use lash_vm::Program;\n")
         self.assertEqual(
-            [(Path("examples/agent-workbench/src/turns.rs"), 1, "lashlang::")],
+            [(Path("examples/agent-workbench/src/turns.rs"), 1, "lash_vm::")],
             gate.violations(),
         )
 
@@ -90,13 +90,13 @@ class FacadeOnlyExamplesTests(unittest.TestCase):
         )
         self.write(
             "examples/plain/src/main.rs",
-            "use engine::DurableBackend;\nuse lash_core as core;\nextern crate lashlang;\n",
+            "use engine::DurableBackend;\nuse lash_core as core;\nextern crate lash_vm;\n",
         )
         self.assertEqual(
             [
                 (Path("examples/plain/src/main.rs"), 1, "engine::"),
                 (Path("examples/plain/src/main.rs"), 2, "lash_core"),
-                (Path("examples/plain/src/main.rs"), 3, "lashlang"),
+                (Path("examples/plain/src/main.rs"), 3, "lash_vm"),
             ],
             gate.violations(),
         )

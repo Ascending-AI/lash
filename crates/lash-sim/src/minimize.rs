@@ -1239,8 +1239,8 @@ mod tests {
             false,
         ),
         (
-            "rlm-lashlang-cell-missing-continuation",
-            include_str!("../failure-fixtures/rlm-lashlang-cell-missing-continuation.json"),
+            "rlm-lash-vm-cell-missing-continuation",
+            include_str!("../failure-fixtures/rlm-lash-vm-cell-missing-continuation.json"),
             true,
         ),
         (

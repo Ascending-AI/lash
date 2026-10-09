@@ -56,7 +56,7 @@ pub enum TraceLashlangGraphFoldError {
 }
 
 impl TraceLashlangGraphStore {
-    /// Returns a snapshot for one observed Lashlang graph key.
+    /// Returns a snapshot for one observed Lash VM graph key.
     pub fn graph(&self, graph_key: &str) -> Option<TraceLashlangGraph> {
         let graphs = self.inner.lock_recover();
         let observed = graphs.graphs.get(graph_key)?;
@@ -97,7 +97,7 @@ impl TraceLashlangGraphStore {
         previous: Option<&TraceLashlangGraph>,
         records: &[TraceRecord],
     ) -> Result<TraceLashlangGraph, TraceLashlangGraphFoldError> {
-        Self::fold_with_history_limit(previous, records, DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT)
+        Self::fold_with_history_limit(previous, records, DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT)
     }
 
     pub fn fold_with_history_limit(
@@ -115,11 +115,11 @@ impl TraceSink for TraceLashlangGraphStore {
             return Ok(());
         };
         // Any dialect's executions reduce into this projection. The events
-        // describe the Lashlang VM's node and edge lifecycle under every
+        // describe the Lash VM's node and edge lifecycle under every
         // dialect. The `language` field describes the source that ran, and
         // dropping a session's graph because its source was TypeScript would
         // empty every TypeScript session's execution view. The filter existed
-        // when `lashlang` was the only value this field could take.
+        // when `lash_vm` was the only value this field could take.
         let _ = language;
         let graph_key = event.identity.graph_key();
         let mut graphs = self.inner.lock_recover();

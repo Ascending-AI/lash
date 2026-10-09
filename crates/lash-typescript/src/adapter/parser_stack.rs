@@ -6,7 +6,7 @@ use super::*;
 /// It covers the parser's fixed frames and everything downstream of the parse,
 /// which is bounded independently of the source: [`Adapter`] refuses to convert
 /// past [`MAX_SOURCE_NESTING_DEPTH`], so the normalized tree it produces is at
-/// most that deep, the lowerer walks that tree, and `lashlang` then rejects any
+/// most that deep, the lowerer walks that tree, and `lash_vm` then rejects any
 /// shared AST deeper than its own `MAX_AST_NESTING_DEPTH`. Only the parse and
 /// the drop of its output scale with the source, which is what the allowance
 /// below pays for.

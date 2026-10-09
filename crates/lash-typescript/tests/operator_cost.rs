@@ -4,7 +4,7 @@
 //! instructions per `&`, which put test262's exhaustive URI tests past the
 //! instruction budget.
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, State, Value,
 };
@@ -31,7 +31,7 @@ fn loop_instructions(expression: &str) -> u64 {
         .unwrap_or_else(|error| panic!("`{expression}` compiles: {error}"));
     let environment = ExecutionEnvironment::new(&Host).profiled();
     let outcome =
-        futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &environment))
+        futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &environment))
             .unwrap_or_else(|error| panic!("`{expression}` runs: {error}"));
     assert_eq!(
         outcome,

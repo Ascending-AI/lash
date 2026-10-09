@@ -1,7 +1,7 @@
 //! The retained in-parent benchmark reference, never a production execution mode.
 use super::workload::{Case, Host, environment};
 use anyhow::{Result, bail};
-use lashlang::{
+use lash_vm::{
     ExecutionBounds, ExecutionMode, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig,
     VmStep,
 };
@@ -20,10 +20,10 @@ fn run_owned(case: &Case) -> Result<()> {
         let program = lash_typescript::parse_cell(source, &environment())
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
         let spans = program.spans.clone();
-        let artifact = lashlang::ModuleArtifact::from_program(program)?;
-        let compiled = Arc::new(lashlang::compile(
+        let artifact = lash_vm::ModuleArtifact::from_program(program)?;
+        let compiled = Arc::new(lash_vm::compile(
             &artifact,
-            lashlang::Entry::Main,
+            lash_vm::Entry::Main,
             Some(&spans),
         )?);
         let config = VmRunConfig::new(mode, ExecutionBounds::unbounded());
@@ -78,7 +78,7 @@ impl Reference {
         if case.resumed {
             return run_owned(case);
         }
-        let mut state = lashlang::State::new();
+        let mut state = lash_vm::State::new();
         let host = ImmediateHost(std::sync::Mutex::new(Host::default()));
         let mut outcome = None;
         for source in &case.cells {
@@ -90,11 +90,11 @@ impl Reference {
             }
             .map_err(|e| anyhow::anyhow!("{e:?}"))?;
             let spans = program.spans.clone();
-            let artifact = lashlang::ModuleArtifact::from_program(program)?;
-            let compiled = lashlang::compile(&artifact, lashlang::Entry::Main, Some(&spans))?;
+            let artifact = lash_vm::ModuleArtifact::from_program(program)?;
+            let compiled = lash_vm::compile(&artifact, lash_vm::Entry::Main, Some(&spans))?;
             match self
                 .0
-                .block_on(lashlang::execute(&compiled, &mut state, &host))
+                .block_on(lash_vm::execute(&compiled, &mut state, &host))
             {
                 Ok(value) => outcome = Some(value),
                 Err(error) if case.error => {
@@ -110,11 +110,11 @@ impl Reference {
     }
 }
 struct ImmediateHost(std::sync::Mutex<Host>);
-impl lashlang::ExecutionHost for ImmediateHost {
+impl lash_vm::ExecutionHost for ImmediateHost {
     async fn perform(
         &self,
-        op: lashlang::AbilityOp,
-    ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
+        op: lash_vm::AbilityOp,
+    ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -155,7 +155,7 @@ impl CodecSocket {
                 else {
                     anyhow::bail!("baseline expected value request");
                 };
-                let op: lashlang::AbilityOp = rmp_serde::from_slice(&request.payload.0)?;
+                let op: lash_vm::AbilityOp = rmp_serde::from_slice(&request.payload.0)?;
                 let answer = host.perform(op).map_err(|e| anyhow::anyhow!("{e}"))?;
                 let response = ParentFrame {
                     header: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0))
@@ -186,12 +186,12 @@ impl CodecSocket {
     pub fn measure(
         &mut self,
         request: &lash_vm_protocol::EffectRequest,
-        answer: &lashlang::AbilityOutcome,
+        answer: &lash_vm::AbilityOutcome,
     ) -> Result<i64> {
         use lash_vm_protocol::*;
         // Decode the fixture outside timing, then encode that identical value
         // inside it. Both directions also use the production bounded frame codec.
-        let op: lashlang::AbilityOp = rmp_serde::from_slice(&request.payload.0)?;
+        let op: lash_vm::AbilityOp = rmp_serde::from_slice(&request.payload.0)?;
         let measured = std::time::Instant::now();
         let frame = WorkerFrame {
             header: MessageFence::new(ExecutionLease(0), OwnerEpoch(0), FrameEpoch(0))
@@ -216,11 +216,11 @@ impl CodecSocket {
             anyhow::bail!("baseline expected encoded value");
         };
         self.codec.check_payload(&value.0)?;
-        let decoded: lashlang::AbilityOutcome = rmp_serde::from_slice(&value.0)?;
+        let decoded: lash_vm::AbilityOutcome = rmp_serde::from_slice(&value.0)?;
         let elapsed = super::nanos(measured) as i64;
         anyhow::ensure!(
             response.id == request.id
-                && matches!((&decoded, answer), (lashlang::AbilityOutcome::Value(actual), lashlang::AbilityOutcome::Value(expected)) if actual == expected),
+                && matches!((&decoded, answer), (lash_vm::AbilityOutcome::Value(actual), lash_vm::AbilityOutcome::Value(expected)) if actual == expected),
             "baseline changed the value"
         );
         Ok(elapsed)

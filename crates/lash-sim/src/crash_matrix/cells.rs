@@ -136,7 +136,7 @@ pub async fn send(core: &lash::LashCore, session: &SessionId, run: &TurnId) -> R
 /// held body keeps its cell waiting for as long as the host holds it. A
 /// worker runs off the runtime, so each worker call holds `clock` while it
 /// is in flight.
-fn untimed_workers(clock: &Arc<SimClock>) -> lash::rlm::WorkerService {
+fn untimed_workers(clock: &Arc<SimClock>) -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::rlm::TypescriptDialect
         .worker_service()
@@ -146,7 +146,7 @@ fn untimed_workers(clock: &Arc<SimClock>) -> lash::rlm::WorkerService {
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
     let clock = Arc::clone(clock);
-    lash::rlm::WorkerService::new(config).with_call_hold(Arc::new(move || Box::new(clock.hold())))
+    lash::vm::WorkerService::new(config).with_call_hold(Arc::new(move || Box::new(clock.hold())))
 }
 
 fn metadata() -> Result<lash_core::LlmProfileMetadata, String> {

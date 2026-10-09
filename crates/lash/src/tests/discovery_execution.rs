@@ -24,7 +24,7 @@ fn definition(name: &str) -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["tools"], name));
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["tools"], name));
     tool.manifest.inline = name != "hidden";
     tool
 }

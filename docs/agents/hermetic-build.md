@@ -762,7 +762,7 @@ The production witness checks the same two facade library graphs and refuses a
 `testing` feature in their normal/build dependency trees.
 The parity script additionally runs real Cargo through the admission shim, with Buck routing disabled,
 using `check --workspace --all-targets --locked --offline` and the isolated
-development graphs of lashlang and integrator-contract. Cargo manifests remain the single
+development graphs of lash_vm and integrator-contract. Cargo manifests remain the single
 source for the generated Buck graph. Resolver 2 isolates development features
 by package; the generated workspace feature union can hide an undeclared
 feature on a development dependency, so workspace compilation alone is not a

@@ -853,7 +853,7 @@
       "type": "string"
     },
     "TraceLashlangGraphChildLink": {
-      "description": "Link from an observed parent Lashlang node to a child execution graph.",
+      "description": "Link from an observed parent Lash VM node to a child execution graph.",
       "properties": {
         "child_attempt": {
           "format": "uint32",
@@ -943,7 +943,7 @@
       "type": "string"
     },
     "TraceLashlangGraphEdge": {
-      "description": "Trace-derived Lashlang graph edge.",
+      "description": "Trace-derived Lash VM graph edge.",
       "properties": {
         "from": {
           "type": "string"
@@ -992,7 +992,7 @@
       "type": "object"
     },
     "TraceLashlangGraphNode": {
-      "description": "Trace-derived Lashlang graph node.",
+      "description": "Trace-derived Lash VM graph node.",
       "oneOf": [
         {
           "properties": {
@@ -1664,7 +1664,7 @@
   },
   "$id": "https://lash.dev/schemas/trace-lashlang-graph/v36",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Trace-derived Lashlang execution graph snapshot for hosts and debugging tools.",
+  "description": "Trace-derived Lash VM execution graph snapshot for hosts and debugging tools.",
   "properties": {
     "children": {
       "items": {

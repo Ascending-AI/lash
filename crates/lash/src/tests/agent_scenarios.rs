@@ -150,7 +150,7 @@ fn retrying_direct_tool_definition() -> lash_core::ToolDefinition {
         0,
         0,
     ))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(
         ["tools"],
         "retrying_direct",
     ))

@@ -21,7 +21,7 @@ process commit. It is not a durable trace history.
 
 ### R0: one structural node identity
 
-`lashlang` mints `WorkflowNodeId` from structural owner and AST path under
+`lash_vm` mints `WorkflowNodeId` from structural owner and AST path under
 `lash-workflow-node/v3`. The preimage contains no whole-artifact hash.
 Runtime sites add their site kind under that node. Process-root graph nodes
 have no runtime site. A lifted literal's owner contains its body digest.
@@ -35,10 +35,10 @@ id, occurrence, and telemetry attempt do not name external effects. A process
 opener contains the minted process id. Editing a structural node cannot weaken
 that admitted identity.
 
-Evidence: `crates/lashlang/src/workflow_graph.rs::workflow_node_id`,
-`crates/lashlang/src/tracking.rs:50`,
-`crates/lashlang/src/workflow_graph/projection.rs:203`, `:307`, and
-`crates/lash-lashlang-runtime/src/host_identity.rs:1`.
+Evidence: `crates/lash-vm/src/workflow_graph.rs::workflow_node_id`,
+`crates/lash-vm/src/tracking.rs:50`,
+`crates/lash-vm/src/workflow_graph/projection.rs:203`, `:307`, and
+`crates/lash-vm-runtime/src/host_identity.rs:1`.
 
 ### R1: the map carries the site
 
@@ -53,10 +53,10 @@ program. Structural roles, binding visibility, loop bind expressions, and
 `ProcessOrigin::Lifted` describe generated structure without readers guessing
 front-end names. The process and RLM emitters use the same map contract.
 
-Evidence: `crates/lashlang/src/artifact.rs`,
-`crates/lashlang/src/workflow_graph/projection.rs:51`,
-`crates/lashlang/src/workflow_graph/execution_sites.rs:1`,
-`crates/lash-lashlang-runtime/src/process/trace_map.rs`, and
+Evidence: `crates/lash-vm/src/artifact.rs`,
+`crates/lash-vm/src/workflow_graph/projection.rs:51`,
+`crates/lash-vm/src/workflow_graph/execution_sites.rs:1`,
+`crates/lash-vm-runtime/src/process/trace_map.rs`, and
 `crates/lash-protocol-rlm/src/executor`.
 
 ### R2: process-scoped subscription with epochs
@@ -133,7 +133,7 @@ not enter effect idempotency keys, group keys, or admitted operation identities.
 identity is the minted id, with no additional process-incarnation component.
 
 Evidence: `crates/lash-trace/src/lashlang_graph/model.rs:24`,
-`crates/lash-lashlang-runtime/src/host_identity.rs:1`, and
+`crates/lash-vm-runtime/src/host_identity.rs:1`, and
 `crates/lash-sansio/src/process_cursor.rs:55`.
 
 ### R6: expose the admitted artifact's identity
@@ -146,9 +146,9 @@ and trace identity. Reconciliation checks a graph against its own canonical
 reprojection and reports matches, unmatched nodes, and ambiguity; it does not
 match arbitrary revisions semantically.
 
-Evidence: `crates/lashlang/src/artifact.rs:281`,
-`crates/lashlang/src/workflow_graph/projection.rs:51`, `:79`, and
-`crates/lashlang/src/workflow_graph.rs:455`.
+Evidence: `crates/lash-vm/src/artifact.rs:281`,
+`crates/lash-vm/src/workflow_graph/projection.rs:51`, `:79`, and
+`crates/lash-vm/src/workflow_graph.rs:455`.
 
 ### R7: expression fields carry IR
 
@@ -163,19 +163,19 @@ establishing an admission failure. Every current linker diagnostic kind is
 Definite. The facet reader requires the classification and refuses unknown
 classification variants.
 
-Evidence: `crates/lashlang/src/workflow_graph.rs:665`, `:735`, and
-`crates/lashlang/src/workflow_graph/facets.rs:96`, `:154`.
+Evidence: `crates/lash-vm/src/workflow_graph.rs:665`, `:735`, and
+`crates/lash-vm/src/workflow_graph/facets.rs:96`, `:154`.
 
 ### R8: the projector lives in the IR crate
 
-`lashlang::WorkflowGraphProjector` owns projection beside IR. A dialect supplies
+`lash_vm::WorkflowGraphProjector` owns projection beside IR. A dialect supplies
 statement text through `WorkflowStatementText`; trace maps use `NoStatementText`.
 The process engine does not depend on `lash-typescript` for trace skeletons.
 `check-workflow-graph-model.sh` guards that dependency boundary.
 
-Evidence: `crates/lashlang/src/workflow_graph/projection.rs:1`,
+Evidence: `crates/lash-vm/src/workflow_graph/projection.rs:1`,
 `crates/lash-typescript/src/workflow_graph/mod.rs:478`,
-`crates/lash-lashlang-runtime/Cargo.toml`, and
+`crates/lash-vm-runtime/Cargo.toml`, and
 `scripts/check-workflow-graph-model.sh`.
 
 Hosts own transport DTOs and wire compatibility ([ADR 0136](0136-hosts-own-their-wire-contracts.md)).
@@ -198,8 +198,8 @@ The pre-1.0 freeze governs changes in place.
 | `TraceLashlangGraph` | `TRACE_SCHEMA_VERSION = 36` | Exact snapshot version before shape | Additive fields tolerated; closed status, observation, wait, node, and completeness variants refused |
 | Durable effect-summary events | `PROCESS_EVENT_VOCABULARY_VERSION = 1` | Fleet read window and registered upcaster before strict payload decode | Unknown summary fields and lifecycle kinds refused; the vocabulary is closed under ADR 0137 |
 
-The owners and fences are in `crates/lashlang/src/workflow_graph.rs:61`, `:129`,
-`crates/lashlang/src/workflow_graph/facets.rs:12`,
+The owners and fences are in `crates/lash-vm/src/workflow_graph.rs:61`, `:129`,
+`crates/lash-vm/src/workflow_graph/facets.rs:12`,
 `crates/lash-trace/src/lib.rs:164`, `:187`,
 `crates/lash-trace/src/lashlang_graph/model.rs:140`, and
 `crates/lash-core-execution/src/runtime/process/effect_summary.rs:17`, `:125`.

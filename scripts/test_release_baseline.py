@@ -109,7 +109,7 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         values = {row["default"] for row in rows}
         at_cut = not baseline.mismatches(rows)
         for value in ("frame-key/v2/", "lash.agent-frame-key/v2", "frame-node/v3/",
-                      "lash-frame-node/v3", "lashlang:v2:blake3:",
+                      "lash-frame-node/v3", "lash-vm:v2:blake3:",
                       "process-env:v6:blake3:", "lash-process-env/v6",
                       "lash-stable-identity/v2"):
             self.assertIn(baseline.baseline_of(value) if at_cut else value, values)
@@ -173,7 +173,7 @@ async fn rewrite() { assert_eq!(std::env::var("LASH_REGENERATE").as_deref(), Ok(
         for path, constant, default, synthetic in [
             (compat, "POSTGRES_SCHEMA_VERSION", 1, 1),
             (compat, "SQLITE_CORE_SCHEMA_VERSION", 1, 1),
-            ("crates/lashlang/src/workflow_graph.rs", "WORKFLOW_GRAPH_SCHEMA_VERSION", 21, 22),
+            ("crates/lash-vm/src/workflow_graph.rs", "WORKFLOW_GRAPH_SCHEMA_VERSION", 21, 22),
         ]:
             row = by_name[f"{path}:{constant}"]
             if at_cut:
@@ -280,8 +280,8 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
 
     def test_baseline_is_derived_for_every_discovered_value(self):
         for value, expected in [(7, 1), ("frame-key/v2/", "frame-key/v1/"),
-                                ("lashlang:v2:blake3:", "lashlang:v1:blake3:"),
-                                ("lashlang-vm-abi-v14", "lashlang-vm-abi-v1"),
+                                ("lash-vm:v2:blake3:", "lash_vm:v1:blake3:"),
+                                ("lash-vm-abi-v14", "lash-vm-abi-v1"),
                                 ("wait-index/v2/wait/", "wait-index/v1/wait/")]:
             self.assertEqual(baseline.baseline_of(value), expected)
         with self.assertRaises(baseline.BaselineError):
@@ -369,7 +369,7 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             after = baseline.inventory(repo)
             self.assertEqual(baseline.table_mismatches(repo, after), [])
             pins = (repo / baseline.PREDECESSOR_TABLE).read_text()
-            for name in ("LASHLANG_SNAPSHOT_VERSION", "RLM_SNAPSHOT_VERSION", "RLM_DRIVER_STATE_VERSION",
+            for name in ("LASH_VM_SNAPSHOT_VERSION", "RLM_SNAPSHOT_VERSION", "RLM_DRIVER_STATE_VERSION",
                          "SCOPE_STORAGE_PAYLOAD_VERSION", "WORKFLOW_GRAPH_SCHEMA_VERSION"):
                 self.assertIn(f'("{name}", 1),', pins)
             by_name = {row["key"].rsplit(":", 1)[1]: row["default"] for row in after}
@@ -378,9 +378,9 @@ const RAW: &str = r#"// const V: u32 = 66;"#;
             floor = repo / "crates/lash-core-store/src/store/state_version.rs"
             self.assertEqual(baseline.resolve(floor.read_text(), "OLDEST_SUPPORTED_SESSION_STATE_VERSION", False), 1)
             # A constant that moves without its table is red.
-            source = repo / "crates/lashlang/src/runtime/state.rs"
-            source.write_text(source.read_text().replace("LASHLANG_SNAPSHOT_VERSION: u32 = 1;",
-                                                         "LASHLANG_SNAPSHOT_VERSION: u32 = 7;"))
+            source = repo / "crates/lash-vm/src/runtime/state.rs"
+            source.write_text(source.read_text().replace("LASH_VM_SNAPSHOT_VERSION: u32 = 1;",
+                                                         "LASH_VM_SNAPSHOT_VERSION: u32 = 7;"))
             errors = baseline.table_mismatches(repo, baseline.inventory(repo))
             self.assertEqual(len(errors), 1, errors)
             self.assertIn(str(baseline.PREDECESSOR_TABLE), errors[0])

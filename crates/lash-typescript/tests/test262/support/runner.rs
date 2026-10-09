@@ -19,7 +19,7 @@ use std::{
 };
 
 use lash_typescript::DiagnosticCode;
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionBound, ExecutionBounds, ExecutionEnvironment,
     ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError, State, Value,
 };
@@ -182,10 +182,10 @@ pub(crate) struct Host {
 /// The Test262 host's answer to a journaled host read: a fixed clock and a
 /// fixed draw, since a conformance test may call either but never depends on
 /// its value.
-fn host_read(call: &lashlang::ResourceOperation) -> Result<Value, ExecutionHostError> {
+fn host_read(call: &lash_vm::ResourceOperation) -> Result<Value, ExecutionHostError> {
     match call.operation.as_str() {
-        lashlang::LANGUAGE_RUNTIME_NOW_OPERATION => Ok(Value::Number(1_700_000_000_000.0)),
-        lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION => Ok(Value::Number(0.5)),
+        lash_vm::LANGUAGE_RUNTIME_NOW_OPERATION => Ok(Value::Number(1_700_000_000_000.0)),
+        lash_vm::LANGUAGE_RUNTIME_RANDOM_OPERATION => Ok(Value::Number(0.5)),
         _ => Err(ExecutionHostError::new(UNEXPECTED_ABILITY)),
     }
 }
@@ -198,8 +198,8 @@ impl ExecutionHost for Host {
                 let answers = batch
                     .leaves
                     .iter()
-                    .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
-                    .map(|call| host_read(call).map(lashlang::ResourceOperationOutcome::Value))
+                    .filter_map(lash_vm::ResourceOperationBatchLeaf::operation)
+                    .map(|call| host_read(call).map(lash_vm::ResourceOperationOutcome::Value))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(AbilityOutcome::ResourceOperationBatch(
                     batch.answer_in_leaf_order(answers),
@@ -621,25 +621,25 @@ impl fmt::Display for Rejection {
 /// Admits `source` the way a cell is admitted: lowered, then linked against
 /// a host environment (where link-time refusals such as the closed-shape
 /// field guard fire), then compiled from the linked artifact.
-pub(crate) fn admit(source: &str) -> Result<lashlang::CompiledProgram, Rejection> {
-    static ENVIRONMENT: OnceLock<lashlang::LashlangHostEnvironment> = OnceLock::new();
+pub(crate) fn admit(source: &str) -> Result<lash_vm::CompiledProgram, Rejection> {
+    static ENVIRONMENT: OnceLock<lash_vm::LashVmHostEnvironment> = OnceLock::new();
     let environment = ENVIRONMENT.get_or_init(|| {
-        let mut environment = lashlang::testing::harness::test_environment();
+        let mut environment = lash_vm::testing::harness::test_environment();
         // The journaled reads behind `Date.now()` and `Math.random()`, bound
         // as the production host binds them.
         for operation in [
-            lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
-            lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION,
+            lash_vm::LANGUAGE_RUNTIME_NOW_OPERATION,
+            lash_vm::LANGUAGE_RUNTIME_RANDOM_OPERATION,
         ] {
             environment
                 .resources
                 .add_module_operation(
-                    [lashlang::LANGUAGE_RUNTIME_MODULE_PATH],
-                    lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE,
+                    [lash_vm::LANGUAGE_RUNTIME_MODULE_PATH],
+                    lash_vm::LANGUAGE_RUNTIME_RESOURCE_TYPE,
                     operation,
                     operation,
-                    lashlang::TypeExpr::Any,
-                    lashlang::TypeExpr::Any,
+                    lash_vm::TypeExpr::Any,
+                    lash_vm::TypeExpr::Any,
                 )
                 .expect("the runtime operations are unique");
         }
@@ -649,15 +649,12 @@ pub(crate) fn admit(source: &str) -> Result<lashlang::CompiledProgram, Rejection
         code: diagnostic.code,
         message: diagnostic.to_string(),
     })?;
-    lashlang::compile(
-        &linked.artifact,
-        lashlang::Entry::Main,
-        Some(linked.spans()),
+    lash_vm::compile(&linked.artifact, lash_vm::Entry::Main, Some(linked.spans())).map_err(
+        |error| Rejection {
+            code: DiagnosticCode::InvalidAst,
+            message: format!("{}: {error}", DiagnosticCode::InvalidAst.as_str()),
+        },
     )
-    .map_err(|error| Rejection {
-        code: DiagnosticCode::InvalidAst,
-        message: format!("{}: {error}", DiagnosticCode::InvalidAst.as_str()),
-    })
 }
 
 /// The `name` of an uncaught thrown value: an ECMA error object or the
@@ -804,7 +801,7 @@ pub(crate) fn run(relative: &str) -> Observed {
         ExecutionBound::Unbounded,
     ));
     let result =
-        futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &environment));
+        futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &environment));
     let prints = host.prints.lock().expect("print journal").clone();
     classify_run(result, &meta, is_async, &prints, names)
 }

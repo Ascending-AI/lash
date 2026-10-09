@@ -291,8 +291,8 @@ pub fn cell(source: &str) -> LlmResponse {
 /// budgets generous.
 pub fn rlm(
     backend: &lash::Backend,
-    resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
-    workers: lash::rlm::WorkerService,
+    resolver: Option<lash_vm_runtime::SharedDeferredToolResolver>,
+    workers: lash::vm::WorkerService,
 ) -> lash::rlm::RlmProtocolPluginFactory {
     let factory = lash::rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()

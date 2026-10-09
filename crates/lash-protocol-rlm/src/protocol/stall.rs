@@ -129,7 +129,7 @@ fn count_pending_attempts(
 }
 
 fn trajectory_entry_turn_prefix(turn_id: &TurnId) -> String {
-    format!("lashlang_step_{turn_id}_")
+    format!("lash_vm_step_{turn_id}_")
 }
 
 /// The id of the cell a turn ran at one protocol iteration: its record's

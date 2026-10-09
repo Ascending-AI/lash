@@ -3,7 +3,7 @@
 //! `tool_batch_parallelism/limit.rs` worker-kill law and
 //! `tool_call_identity/admission.rs` replay law).
 //!
-//! A host sends an RLM turn whose cell starts a Lashlang process and awaits
+//! A host sends an RLM turn whose cell starts a Lash VM process and awaits
 //! it. The process races `max_tool_calls` probe calls, whose loser never
 //! answers, then asks for one more. The simulated nodes A and B run what
 //! the core's node runs (`lash::testing::node_activation`). The matrix runs
@@ -499,7 +499,7 @@ async fn tool_call_limit_counts_what_a_process_holds_across_a_worker_kill(tier: 
 }
 
 /// How long the aggregate's sleep lasts, in virtual milliseconds: past the
-/// lashlang engine's two-minute step bound and past the session's idle
+/// lash_vm engine's two-minute step bound and past the session's idle
 /// eviction.
 const AGGREGATE_SLEEP_MS: u64 = 300_000;
 

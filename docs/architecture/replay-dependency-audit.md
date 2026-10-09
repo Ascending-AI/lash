@@ -17,7 +17,7 @@ Each row has one class:
 
 - the session activation (`lash-core/src/runtime/durable/session.rs`);
 - the `TurnMachine` with `checkpoint` / `restore_from_checkpoint`;
-- a TypeScript cell lowered by `lash-typescript` and run on the lashlang VM, through `lash-vm-broker::cell::run_cell` and the `DurableSnapshotStore`;
+- a TypeScript cell lowered by `lash-typescript` and run on the Lash VM, through `lash-vm-broker::cell::run_cell` and the `DurableSnapshotStore`;
 - the admitted-execution primitive (`round::{admit, run_body, settle, fold}`);
 - the L1 store on SQLite memory, SQLite file and PostgreSQL;
 - the L2 harness (`FaultStore`, `SimClock`, `SimNodes`, `Matrix`, `Tripwire`).
@@ -33,7 +33,7 @@ The following were not executed and are covered here only:
 - the shift;
 - the `RunCoordinator`;
 - the RLM protocol driver;
-- the worker-process broker and the lashlang worker run path (`worker_execution.rs`, `replay_run.rs`).
+- the worker-process broker and the lash_vm worker run path (`worker_execution.rs`, `replay_run.rs`).
 
 ### The V0 commit labels
 
@@ -63,7 +63,7 @@ The following were not executed and are covered here only:
 | 12 | `RunCoordinator`: `run_coordinator/parallel.rs:49-302` | Concurrent attempts keep a recorded schedule that a replay walks | needs a phase record (L4) | Each member of a round is admitted at ordinal 1+2i with its outcome at 2+2i (`round::member_ordinal`). The fold reads members by ordinal, never by schedule |
 | 13 | `tool_dispatch/production.rs:339,470,620-640,1212,1297` | "Replay consults X's recorded outcome" in place of a live token. The attempt runs inside a replayable step body | covered for `Once` (V0); needs a phase record (L4) for the model tool-call path | `run_body` runs a body only after its admission commits, at most once per admission (P1). The outcome commits under `round.outcome`. The stop watch is the cancel token on the admitted execution |
 | 14 | RLM executor: `lash-protocol-rlm/src/native/driver.rs:372-460` (`handle_exec_result`, `projection_rehydration`) | None in itself: it interprets an `ExecResponse` | pure | Its driver state is inside the machine checkpoint. The response it receives is the cell's `Ended` result, read from state |
-| 15 | RLM executor: `lash-lashlang-runtime/src/cell_bindings.rs:1-31` | The cell's binding set is journaled so that a redrive links the same surface and its recorded results still apply | pure (V0 path); needs a phase record (L7, FIG-5177) for the worker path | V0 re-links and recompiles the cell from its code, with no recorded result served. The lashlang VM refuses a continuation whose executable differs (`ContinuationError::ExecutableMismatch`, `lashlang/src/runtime/vm/continuation.rs:1517`). The snapshot row carries `executable_identity`. L7 stores the binding set with the snapshot for worker-hosted cells |
+| 15 | RLM executor: `lash-vm-runtime/src/cell_bindings.rs:1-31` | The cell's binding set is journaled so that a redrive links the same surface and its recorded results still apply | pure (V0 path); needs a phase record (L7, FIG-5177) for the worker path | V0 re-links and recompiles the cell from its code, with no recorded result served. The Lash VM refuses a continuation whose executable differs (`ContinuationError::ExecutableMismatch`, `lash_vm/src/runtime/vm/continuation.rs:1517`). The snapshot row carries `executable_identity`. L7 stores the binding set with the snapshot for worker-hosted cells |
 | 16 | `worker_execution.rs:224-248` (`Capture`) | The quiet point is kept in memory. On a crash the run restarts fresh, which re-issues effects the lost run already issued | needs a phase record (L7) | `DurableSnapshotStore::{commit_quiet_point, latest}` (V0) commits VM bytes, the ledger and the admissions in one transaction (`cell.snapshot+admit`). L7 swaps `Capture` for it |
 | 17 | `replay_run.rs:1-12`, `replay_commands.rs:1-12` | Every command takes the run's next **issue ordinal** (a position), and its journal rows key under it | needs a phase record (L7, L6/L7b for process bodies) | An operation's identity is `OperationId{run, ordinal}`, minted at a quiet point from the snapshot ledger's `next_admission` and committed with the snapshot. A resumed VM re-issues only the operation its continuation is parked on, and it is answered by identity from the fold (`outcomes_to_inject`). V0 counted zero committed ordinals emitted again (P4) |
 | 18 | Broker contract: `lash-vm-broker/src/broker.rs:37-41`, `ledger.rs:13-14` | "Ordinals are positions in the invocation's journal". The VM and its counters are "rebuilt only by the substrate replaying the journal" | covered (V0 path); L7 rewrites the contract text for the worker broker | A `Checkpoint{vm, ledger}` commits with the admissions it issued (P6). Restore opens the continuation from the snapshot and folds outcomes from `run_records`, with no journal. The doc text predates FIG-5190, and L7 replaces it along with `Capture` |

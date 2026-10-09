@@ -14,7 +14,7 @@
 //!   whatever lash does in one cell.
 //!
 //! Every heap object kind has a row, or the stated reason no program builds
-//! one ([`NOT_A_DIALECT_VALUE`]); `lashlang::testing::heap_object_kinds` names
+//! one ([`NOT_A_DIALECT_VALUE`]); `lash_vm::testing::heap_object_kinds` names
 //! them by an exhaustive match, so a new kind cannot enter the heap without a
 //! row here.
 //!
@@ -44,7 +44,7 @@ pub(super) enum Pin {
 /// One value type: a cell that binds `value`, and a cell that uses it.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Row {
-    /// The heap object kind (`lashlang::testing::heap_object_kinds`) or the
+    /// The heap object kind (`lash_vm::testing::heap_object_kinds`) or the
     /// primitive the row holds to the law.
     pub(super) kind: &'static str,
     /// A name unique among the rows.

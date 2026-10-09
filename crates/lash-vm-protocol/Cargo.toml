@@ -20,7 +20,7 @@ synthetic-next = []
 [lints]
 workspace = true
 
-# No dependency reaches lashlang or its regexp engine: the parent handles VM
+# No dependency reaches lash_vm or its regexp engine: the parent handles VM
 # state through this crate as opaque bytes, and the type-level proof that it
 # cannot decode them semantically is that nothing here can (ADR 0123).
 [dependencies]

@@ -8,9 +8,9 @@ fn main() {
         .expect("seam proof worker entry");
 }
 
+use lash_vm::LashVmHostEnvironment;
+use lash_vm::{AssignTarget, Expr, Program, ResourceRefExpr, Span};
 use lash_vm_worker::{Frontend as WorkerFrontend, FrontendRefusal as WorkerFrontendRefusal};
-use lashlang::LashlangHostEnvironment;
-use lashlang::{AssignTarget, Expr, Program, ResourceRefExpr, Span};
 
 pub struct SeamProofFrontend;
 
@@ -22,7 +22,7 @@ impl WorkerFrontend for SeamProofFrontend {
     fn parse(
         &self,
         source: &str,
-        _cell_environment: Option<&LashlangHostEnvironment>,
+        _cell_environment: Option<&LashVmHostEnvironment>,
     ) -> Result<Program, WorkerFrontendRefusal> {
         let mut statements = Vec::new();
         for line in source
@@ -104,7 +104,7 @@ fn refusal(source: &str, line: &str) -> WorkerFrontendRefusal {
     let start = source.find(line).unwrap_or(0);
     let message = format!("not a seam-proof statement: `{line}`");
     WorkerFrontendRefusal {
-        error: lashlang::ModuleCompileError::parse_failure(
+        error: lash_vm::ModuleCompileError::parse_failure(
             Some(Span {
                 start,
                 end: start + line.len(),

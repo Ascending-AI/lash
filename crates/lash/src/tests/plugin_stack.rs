@@ -449,7 +449,7 @@ async fn facade_rlm_presentation_and_runtime_cuts_reach_the_running_turn() -> Re
         .instruction_limit(crate::rlm::InstructionBound::instructions(1_000_000))
         .memory_limit(crate::rlm::MemoryBound::mebibytes(64))
         .build();
-    config.presentation.binding_summary = crate::rlm::lang::BindingSummaryConfig {
+    config.presentation.binding_summary = crate::vm::BindingSummaryConfig {
         members: 1,
         depth: 1,
         max_chars: 18,

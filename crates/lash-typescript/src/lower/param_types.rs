@@ -11,7 +11,7 @@
 //! A parameter with no annotation stays `Any`, so existing programs lower
 //! byte-identically.
 
-use lashlang::{TypeExpr, TypeField};
+use lash_vm::{TypeExpr, TypeField};
 
 use crate::adapter::{TypeAnnotation, TypeAnnotationField, TypeShape};
 use crate::{Diagnostic, DiagnosticCode};

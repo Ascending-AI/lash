@@ -64,7 +64,7 @@ fn count(runs: &Arc<AtomicUsize>) -> Arc<dyn lash_core::ToolProvider> {
 /// The pool's one worker, killed once before a chosen checkout of the
 /// cell's.
 struct Killer {
-    workers: lash::rlm::WorkerService,
+    workers: lash::vm::WorkerService,
     /// Set once the model has answered: the cell's requests follow.
     armed: AtomicBool,
     /// The checkouts recorded before the cell's first request.
@@ -160,7 +160,7 @@ async fn setup_crash_case(tier: Tier, request: Request) {
         .config()
         .clone();
     config.max_workers = 1;
-    let receipts = lash::rlm::WorkerService::new(config).with_worker_receipts();
+    let receipts = lash::vm::WorkerService::new(config).with_worker_receipts();
     let killer = Arc::new(Killer {
         workers: receipts.clone(),
         armed: AtomicBool::new(false),

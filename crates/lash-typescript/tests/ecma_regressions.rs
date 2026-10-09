@@ -1,7 +1,7 @@
 //! ECMA conformance regressions, one file per ticket (FIG-3727): a new
 //! ticket's regressions land in `ecma_regressions/fig_<n>.rs`, so two lanes
 //! never edit the same file. The shared host and runners stay here.
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionBound, ExecutionBounds, ExecutionEnvironment,
     ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError, State, Value,
 };
@@ -22,7 +22,7 @@ impl ExecutionHost for Host {
 
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
 }
 
 fn finished(source: &str) -> Value {

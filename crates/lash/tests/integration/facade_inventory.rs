@@ -187,24 +187,24 @@ mod host_wrapping_inventory {
 /// RLM factory and resolvers name.
 #[cfg(feature = "rlm")]
 mod rlm_host_wrapping_inventory {
-    use lash::rlm::LashlangProcessAdmissionRefusal as _;
-    use lash::rlm::LashlangRuntimeError as _;
     use lash::rlm::RlmLanguageFeatures as _;
     use lash::rlm::RlmProjectedSeedEntry as _;
     use lash::rlm::RlmProjectedSeedSnapshot as _;
     use lash::rlm::RlmPromptFeatures as _;
     use lash::rlm::RlmSeedPluginBody as _;
-    use lash::rlm::ToolBindingError as _;
     use lash::rlm::UnsetChannel as _;
     use lash::tools::DeferredLinkError as _;
     use lash::tools::DeferredResolutionError as _;
+    use lash::vm::LashVmProcessAdmissionRefusal as _;
+    use lash::vm::LashVmRuntimeError as _;
+    use lash::vm::ToolBindingError as _;
 }
 
-// --- `rlm`: the Lashlang protocol, runtime and language surface ---
+// --- `rlm`: the Lash VM protocol, runtime and language surface ---
 
 #[cfg(feature = "rlm")]
 mod rlm_inventory {
-    use lash::persistence::LashlangArtifacts as _;
+    use lash::persistence::LashVmArtifacts as _;
     // The code-mode dialect seam (ADR 0096).
     use lash::rlm::CellTags as _;
     use lash::rlm::Dialect as _;
@@ -213,10 +213,7 @@ mod rlm_inventory {
     use lash::rlm::DialectRefusalKind as _;
     use lash::rlm::ExecutionSectionRequest as _;
     use lash::rlm::ExtraKeys as _;
-    use lash::rlm::LashlangHostEnvironment as _;
-    use lash::rlm::LinkedModule as _;
     use lash::rlm::ModuleCompileOutput as _;
-    use lash::rlm::NamedDataType as _;
     use lash::rlm::ObjectShape as _;
     use lash::rlm::ProcessParamShape as _;
     use lash::rlm::ProcessShape as _;
@@ -225,38 +222,41 @@ mod rlm_inventory {
     use lash::rlm::ShapeConstraints as _;
     use lash::rlm::ShapeField as _;
     use lash::rlm::ShapeKind as _;
-    use lash::rlm::TypeExpr as _;
-    use lash::rlm::TypeField as _;
     use lash::rlm::TypescriptDialect as _;
-    use lash::rlm::lashlang_surface_extension as _;
     use lash::tools::compile_with_deferred_resolution as _;
+    use lash::vm::LashVmHostEnvironment as _;
+    use lash::vm::LinkedModule as _;
+    use lash::vm::NamedDataType as _;
+    use lash::vm::ir::TypeExpr as _;
+    use lash::vm::ir::TypeField as _;
+    use lash::vm::lash_vm_surface_extension as _;
 
-    // The Lashlang language vocabulary, re-exported whole as `lash::rlm::lang`.
-    use lash::rlm::lang::AbilityOp as _;
-    use lash::rlm::lang::AbilityOutcome as _;
-    use lash::rlm::lang::ContentHash as _;
-    use lash::rlm::lang::Entry as _;
-    use lash::rlm::lang::ExecutionEnvironment as _;
-    use lash::rlm::lang::ExecutionHost as _;
-    use lash::rlm::lang::ExecutionHostError as _;
-    use lash::rlm::lang::Expr as _;
-    use lash::rlm::lang::HostDescriptor as _;
-    use lash::rlm::lang::HostRequirementsRef as _;
-    use lash::rlm::lang::ImageValue as _;
-    use lash::rlm::lang::ModuleCompileRequest as _;
-    use lash::rlm::lang::ModuleIntrospection as _;
-    use lash::rlm::lang::ModuleRef as _;
-    use lash::rlm::lang::NamedDataTypeIntrospection as _;
-    use lash::rlm::lang::ProcessIntrospection as _;
-    use lash::rlm::lang::ResourceOperation as _;
-    use lash::rlm::lang::ResourceOperationBatchOutcome as _;
-    use lash::rlm::lang::ResourceOperationOutcome as _;
-    use lash::rlm::lang::State as _;
-    use lash::rlm::lang::Value as _;
-    use lash::rlm::lang::compile as _;
-    use lash::rlm::lang::compile_module as _;
-    use lash::rlm::lang::execute as _;
-    use lash::rlm::lang::from_json as _;
+    // The Lash VM language vocabulary, re-exported whole as `lash::vm::ir`.
+    use lash::vm::AbilityOp as _;
+    use lash::vm::AbilityOutcome as _;
+    use lash::vm::ContentHash as _;
+    use lash::vm::Entry as _;
+    use lash::vm::ExecutionEnvironment as _;
+    use lash::vm::ExecutionHost as _;
+    use lash::vm::ExecutionHostError as _;
+    use lash::vm::HostDescriptor as _;
+    use lash::vm::HostRequirementsRef as _;
+    use lash::vm::ImageValue as _;
+    use lash::vm::ModuleCompileRequest as _;
+    use lash::vm::ModuleIntrospection as _;
+    use lash::vm::ModuleRef as _;
+    use lash::vm::NamedDataTypeIntrospection as _;
+    use lash::vm::ProcessIntrospection as _;
+    use lash::vm::ResourceOperation as _;
+    use lash::vm::ResourceOperationBatchOutcome as _;
+    use lash::vm::ResourceOperationOutcome as _;
+    use lash::vm::State as _;
+    use lash::vm::Value as _;
+    use lash::vm::compile as _;
+    use lash::vm::compile_module as _;
+    use lash::vm::execute as _;
+    use lash::vm::from_json as _;
+    use lash::vm::ir::Expr as _;
 }
 
 // --- `testing`: embedder test helpers ---
@@ -274,11 +274,11 @@ mod testing_inventory {
 mod rlm_testing_inventory {
     // The durable-store laws are not facade surface: a host depends on
     // `lash-internal-conformance` directly.
-    use lash::rlm::lang::testing::conformance::ReopenableLashlangArtifactStore as _;
     use lash::testing::deferred_resolution_link_key as _;
-    // The host names `lashlang_artifact_store_reopenable`; the live name of the
+    use lash::vm::testing::conformance::ReopenableLashVmArtifactStore as _;
+    // The host names `lash_vm_artifact_store_reopenable`; the live name of the
     // same conformance entry point is `survives_reopen`.
-    use lash::rlm::lang::testing::conformance::survives_reopen as _;
+    use lash::vm::testing::conformance::survives_reopen as _;
 }
 
 // --- Host-wired extension features: one module per feature ---

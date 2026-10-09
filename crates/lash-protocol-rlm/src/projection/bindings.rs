@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use lashlang::{ProjectedBindingError, ProjectedBindings, ProjectedValue, Value as FlowValue};
+use lash_vm::{ProjectedBindingError, ProjectedBindings, ProjectedValue, Value as FlowValue};
 
 #[derive(Clone, Default)]
 pub struct RlmProjectedBindings {
@@ -12,7 +12,7 @@ pub struct RlmProjectedBindings {
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
-pub(crate) struct RecordedProjection(#[serde(with = "lashlang::effect_value")] FlowValue);
+pub(crate) struct RecordedProjection(#[serde(with = "lash_vm::effect_value")] FlowValue);
 
 impl RlmProjectedBindings {
     pub(crate) async fn journaled(
@@ -90,7 +90,7 @@ impl RlmProjectedBindings {
             return Err(ProjectedBindingError::duplicate(name));
         }
         self.bindings
-            .insert(name.clone(), lashlang::from_json(value.clone()));
+            .insert(name.clone(), lash_vm::from_json(value.clone()));
         self.sources.insert(name, value);
         Ok(self)
     }

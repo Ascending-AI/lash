@@ -22,9 +22,8 @@ pub use config_owner::{
 };
 pub use config_types::{ExecutionBounds, InstructionBound, MemoryBound, RlmLanguageFeatures};
 pub use factory::{
-    LashlangCompileSurface, LashlangCompileSurfaceRequest, LashlangModuleCompileError,
-    LashlangModuleCompileRequest, ModuleCompileOutput, RlmProtocolPluginFactory,
-    rlm_lashlang_surface,
+    LashVmCompileSurface, LashVmCompileSurfaceRequest, LashVmModuleCompileError,
+    LashVmModuleCompileRequest, ModuleCompileOutput, RlmProtocolPluginFactory, rlm_lash_vm_surface,
 };
 pub use protocol_session::{RlmSessionConfigDecodeError, rlm_session_config};
 

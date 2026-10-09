@@ -206,14 +206,14 @@ pub fn child_effect_invocation_from_effect(
 /// The replay address of one command a replayed language program issued
 /// (FIG-3586).
 ///
-/// A language runtime that re-executes its program on replay (a lashlang
+/// A language runtime that re-executes its program on replay (a lash_vm
 /// cell) mints one of these per command, from the dense
 /// issue ordinal of that command within the run, and every journal row the
 /// command writes lives under it. Core derives the command's sub-keys from it
 /// — tool attempts, retry sleeps, a deferred completion's await, an
 /// aggregate's group and children, a sleep — and never reads its structure:
 /// the grammar that spells the prefix is the language runtime's, versioned
-/// there (`LASHLANG_REPLAY_KEY_GRAMMAR_VERSION`).
+/// there (`LASH_VM_REPLAY_KEY_GRAMMAR_VERSION`).
 ///
 /// Nothing a compiler produces may appear in it. That is the property the
 /// type exists for: a redrive on a build whose lowering differs reaches the

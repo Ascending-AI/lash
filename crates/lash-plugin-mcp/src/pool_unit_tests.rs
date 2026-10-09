@@ -1183,7 +1183,7 @@ fn replacement_connection(
     }
 }
 
-#[cfg(all(unix, feature = "lashlang"))]
+#[cfg(all(unix, feature = "lash-vm"))]
 #[tokio::test]
 async fn normalization_collisions_dispatch_stably_across_respawn() {
     let scratch = tempfile::tempdir().expect("tempdir");
@@ -1263,7 +1263,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
 
     async fn dispatch(pool: &McpConnectionPool, operation: &str) -> Option<lash_core::ToolOutcome> {
         let definition = pool.advertised_tools().into_iter().find(|definition| {
-            lash_lashlang_runtime::ToolManifestBindingExt::tool_binding(&definition.manifest)
+            lash_vm_runtime::ToolManifestBindingExt::tool_binding(&definition.manifest)
                 .ok()
                 .flatten()
                 .and_then(|binding| binding.operation)
@@ -1285,7 +1285,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
             .1
             .clone()
             .operation
-            .expect("MCP tools have a Lashlang operation")
+            .expect("MCP tools have a Lash VM operation")
     }
 
     fn bound_operation(pool: &McpConnectionPool, native_tool_name: &str) -> String {
@@ -1295,11 +1295,11 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
             .into_iter()
             .find(|definition| definition.manifest.id.as_str() == tool_id)
             .expect("raw MCP identity is advertised");
-        lash_lashlang_runtime::ToolManifestBindingExt::tool_binding(&definition.manifest)
-            .expect("valid Lashlang binding")
-            .expect("MCP tool has a Lashlang binding")
+        lash_vm_runtime::ToolManifestBindingExt::tool_binding(&definition.manifest)
+            .expect("valid Lash VM binding")
+            .expect("MCP tool has a Lash VM binding")
             .operation
-            .expect("MCP tools have a Lashlang operation")
+            .expect("MCP tools have a Lash VM operation")
     }
 
     let replacement = replacement_connection(&pool, "directory");
@@ -1311,7 +1311,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
 
     let first = dispatch(&pool, &hyphen_operation)
         .await
-        .expect("hyphenated Lashlang operation is available before respawn");
+        .expect("hyphenated Lash VM operation is available before respawn");
     assert_eq!(
         first.value_for_projection(),
         json!({"content":[{"type":"text","text":"hyphen"}]})
@@ -1322,7 +1322,7 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
     assert_eq!(bound_operation(&pool, "get_user"), underscore_operation);
     let result = dispatch(&pool, &underscore_operation)
         .await
-        .expect("underscore Lashlang operation is available after respawn");
+        .expect("underscore Lash VM operation is available after respawn");
     assert!(result.is_success(), "replacement call succeeds: {result:?}");
     assert_eq!(
         result.value_for_projection(),

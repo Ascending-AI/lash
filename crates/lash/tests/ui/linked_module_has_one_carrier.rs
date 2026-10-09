@@ -5,7 +5,7 @@
 // way to edit or deserialize an artifact around validation
 // (`module_artifact_cannot_be_assembled.rs` covers assembling one).
 
-use lash::rlm::lang::{LinkedModule, ModuleArtifact, Program};
+use lash::vm::{ir::Program, LinkedModule, ModuleArtifact};
 
 fn no_second_program(linked: &LinkedModule) {
     let _ = linked.program();

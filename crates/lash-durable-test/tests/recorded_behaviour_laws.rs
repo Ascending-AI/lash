@@ -123,7 +123,7 @@ fn rlm_redeploying() -> lash::rlm::RlmProtocolPluginConfig {
         .memory_limit(lash::rlm::MemoryBound::mebibytes(1))
         .build();
     config.prompt_features.decomposition = false;
-    config.lashlang_language_features.label_annotations = false;
+    config.lash_vm_language_features.label_annotations = false;
     config.max_output_chars = 100;
     config.continue_as_soft_warn_tokens = None;
     config
@@ -299,22 +299,22 @@ async fn an_rlm_run_executes_under_its_recorded_behaviour(tier: Tier) {
     );
 }
 
-/// The host process's lashlang module: a loop far past the redeploying
+/// The host process's lash_vm module: a loop far past the redeploying
 /// bound and far inside the recorded one, then its count. Published under a
 /// host pin; answers the start payload of its `looper` process.
 async fn looping_process_payload(backend: &lash::Backend) -> serde_json::Value {
-    use lashlang::CoercingBinaryOp::{Add, Less};
-    use lashlang::testing::ast_builders as b;
-    let environment = lash_lashlang_runtime::LashlangSurface::default()
+    use lash_vm::CoercingBinaryOp::{Add, Less};
+    use lash_vm::testing::ast_builders as b;
+    let environment = lash_vm_runtime::LashVmSurface::default()
         .host_environment(&lash_core::ToolCatalog::default())
         .expect("the host environment");
-    let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
+    let output = lash_vm::compile_module(lash_vm::ModuleCompileRequest {
         source: "process looper() -> str { i = 0; while i < 5000 { i = i + 1 }; finish \"ran \" + i }",
         program: b::module(
             vec![b::process_returning(
                 "looper",
                 Vec::new(),
-                lashlang::TypeExpr::Str,
+                lash_vm::TypeExpr::Str,
                 b::block(vec![
                     b::assign("i", b::num(0.0)),
                     b::while_loop(
@@ -332,7 +332,7 @@ async fn looping_process_payload(backend: &lash::Backend) -> serde_json::Value {
         environment: &environment,
     })
     .expect("the looping module compiles");
-    lashlang::LashlangArtifacts::of_backend(backend)
+    lash_vm::LashVmArtifacts::of_backend(backend)
         .publish_module_artifact(
             &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
                 lash_core::HostArtifactPin::mint(),
@@ -342,7 +342,7 @@ async fn looping_process_payload(backend: &lash::Backend) -> serde_json::Value {
         )
         .await
         .expect("the looping module publishes");
-    serde_json::to_value(lash_lashlang_runtime::LashlangProcessInput {
+    serde_json::to_value(lash_vm_runtime::LashVmProcessInput {
         module_ref: output.module_ref.clone(),
         process_ref: output
             .artifact
@@ -356,7 +356,7 @@ async fn looping_process_payload(backend: &lash::Backend) -> serde_json::Value {
     .expect("the input encodes")
 }
 
-/// A host starts a lashlang process on the creating deployment under an
+/// A host starts a lash_vm process on the creating deployment under an
 /// environment with no RLM namespace: its row records that deployment's
 /// behaviour, and the redeploying deployment's node runs it under the
 /// recorded behaviour, so its loop finishes where the running deployment's
@@ -396,7 +396,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
         .start(
             lash_core::ProcessStartRequest::new(
                 lash_core::ProcessInput::Engine {
-                    kind: lash_lashlang_runtime::LASHLANG_ENGINE_KIND.to_owned(),
+                    kind: lash_vm_runtime::LASH_VM_ENGINE_KIND.to_owned(),
                     payload,
                 },
                 lash_core::ProcessOriginator::host(),

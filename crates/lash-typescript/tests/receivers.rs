@@ -3,7 +3,7 @@
 //! function's. Every row below answered `undefined` (or was refused) before
 //! receivers existed, and each answer is Node v25.2.1's.
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
     RuntimeError, State, Value, Vm, VmContinuation, VmRunOutcome,
 };
@@ -28,7 +28,7 @@ impl ExecutionHost for Host {
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
     let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("TypeScript should compile: {source}: {error}"));
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
 }
 
 fn finished_json(source: &str) -> String {
@@ -241,7 +241,7 @@ fn top_level_this_is_refused_even_through_an_arrow() {
 async fn resident_and_restored(source: &str) -> (Value, Value) {
     let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("TypeScript should compile: {source}: {error}"));
-    let resident = match lashlang::execute(&program, &mut State::new(), &Host)
+    let resident = match lash_vm::execute(&program, &mut State::new(), &Host)
         .await
         .unwrap_or_else(|error| panic!("{source}: {error}"))
     {
@@ -258,7 +258,7 @@ async fn resident_and_restored(source: &str) -> (Value, Value) {
     let continuation = vm.suspend().expect("the parked turn must be capturable");
     drop(vm);
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation = lashlang::VmInstance::pristine()
+    let restored: VmContinuation = lash_vm::VmInstance::pristine()
         .open_continuation(&bytes)
         .expect("continuation should deserialize");
     let host = Host;

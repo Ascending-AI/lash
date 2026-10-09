@@ -19,11 +19,11 @@ impl Default for RlmPromptFeatures {
 /// The leading double underscore is the repository's reserved-namespace marker
 /// (the TypeScript lowerer's generated bindings share it), so this is a rule
 /// about a namespace rather than a list of names to keep in sync. It exists
-/// because `lashlang_host_environment_from_tool_catalog` binds
-/// `__lashlang_runtime` — how a front end reaches the journaled clock and
+/// because `lash_vm_host_environment_from_tool_catalog` binds
+/// `__lash_vm_runtime` — how a front end reaches the journaled clock and
 /// random source (TypeScript's `Date.now()`/`Math.random()`) — into *every*
 /// host, and this section once advertised it: a reader was handed
-/// `await __lashlang_runtime.now(any)? -> float`, an internal name no cell
+/// `await __lash_vm_runtime.now(any)? -> float`, an internal name no cell
 /// writes.
 ///
 /// The module is the substrate's, not a reader's, so it is hidden rather than
@@ -57,9 +57,9 @@ pub(crate) enum HostSurfaceConstructorOutput {
 }
 
 pub(crate) fn host_surface_inventory(
-    surface: &lashlang::LashlangHostEnvironment,
+    surface: &lash_vm::LashVmHostEnvironment,
 ) -> HostSurfaceInventory {
-    // Operations with real Lashlang types (host primitives)
+    // Operations with real Lash VM types (host primitives)
     // are listed here. Tool-catalog operations are bridged with placeholder
     // `any` types and documented in full under **Tools**, so they are skipped to
     // avoid an uninformative `any -> any` duplicate of that section.
@@ -71,7 +71,7 @@ pub(crate) fn host_surface_inventory(
         if let Some(resource_type) =
             surface
                 .resources
-                .resolve_alias(&lashlang::ResourceRefExpr::resolved(
+                .resolve_alias(&lash_vm::ResourceRefExpr::resolved(
                     module
                         .path
                         .iter()
@@ -82,16 +82,16 @@ pub(crate) fn host_surface_inventory(
                 ))
         {
             for (operation, binding) in &resource_type.operations {
-                if matches!(binding.input_ty, lashlang::TypeExpr::Any)
-                    && matches!(binding.output_ty, lashlang::TypeExpr::Any)
+                if matches!(binding.input_ty, lash_vm::TypeExpr::Any)
+                    && matches!(binding.output_ty, lash_vm::TypeExpr::Any)
                 {
                     continue;
                 }
                 operations.push(HostSurfaceOperation {
                     alias: module.alias.clone(),
                     operation: operation.clone(),
-                    input: lashlang::type_expr_to_schema_shape(&binding.input_ty),
-                    output: lashlang::type_expr_to_schema_shape(&binding.output_ty),
+                    input: lash_vm::type_expr_to_schema_shape(&binding.input_ty),
+                    output: lash_vm::type_expr_to_schema_shape(&binding.output_ty),
                 });
             }
         }
@@ -103,7 +103,7 @@ pub(crate) fn host_surface_inventory(
         .map(|(_, data_type)| {
             (
                 data_type.name().to_string(),
-                lashlang::type_expr_to_schema_shape(data_type.ty()),
+                lash_vm::type_expr_to_schema_shape(data_type.ty()),
             )
         })
         .collect();
@@ -113,9 +113,9 @@ pub(crate) fn host_surface_inventory(
         .filter(|(_, constructor)| !module_is_runtime_internal(&constructor.path))
         .map(|(_, constructor)| HostSurfaceConstructor {
             path: constructor.path.join("."),
-            input: lashlang::type_expr_to_schema_shape(&constructor.input_ty),
+            input: lash_vm::type_expr_to_schema_shape(&constructor.input_ty),
             output: HostSurfaceConstructorOutput::Shape(Box::new(
-                lashlang::type_expr_to_schema_shape(&constructor.output_ty),
+                lash_vm::type_expr_to_schema_shape(&constructor.output_ty),
             )),
         })
         .collect();

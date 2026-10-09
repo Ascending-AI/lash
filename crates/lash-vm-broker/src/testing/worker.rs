@@ -373,23 +373,20 @@ impl FakeWorker {
                 Step::Aggregate(members) => {
                     return self.request(
                         EffectKind::ResourceOperationBatch,
-                        OperationRequest::ResourceOperationBatch(
-                            lashlang::ResourceOperationBatch {
-                                leaves: members
-                                    .into_iter()
-                                    .map(|member| {
-                                        let OperationRequest::ResourceOperation(op) =
-                                            member.request()
-                                        else {
-                                            unreachable!()
-                                        };
-                                        lashlang::ResourceOperationBatchLeaf::Operation(*op)
-                                    })
-                                    .collect(),
-                                consumer: lashlang::AggregateConsumer::All,
-                                settled_value_after: None,
-                            },
-                        )
+                        OperationRequest::ResourceOperationBatch(lash_vm::ResourceOperationBatch {
+                            leaves: members
+                                .into_iter()
+                                .map(|member| {
+                                    let OperationRequest::ResourceOperation(op) = member.request()
+                                    else {
+                                        unreachable!()
+                                    };
+                                    lash_vm::ResourceOperationBatchLeaf::Operation(*op)
+                                })
+                                .collect(),
+                            consumer: lash_vm::AggregateConsumer::All,
+                            settled_value_after: None,
+                        })
                         .encode(),
                     );
                 }
@@ -404,15 +401,15 @@ impl FakeWorker {
                         .to_string();
                     return self.request(
                         EffectKind::Await,
-                        OperationRequest::Await(lashlang::Value::String(handle.into())).encode(),
+                        OperationRequest::Await(lash_vm::Value::String(handle.into())).encode(),
                     );
                 }
                 Step::Sleep(millis) => {
                     return self.request(
                         EffectKind::Sleep,
-                        OperationRequest::Sleep(lashlang::Sleep {
-                            value: lashlang::Value::Number(millis as f64),
-                            kind: lashlang::SleepKind::For,
+                        OperationRequest::Sleep(lash_vm::Sleep {
+                            value: lash_vm::Value::Number(millis as f64),
+                            kind: lash_vm::SleepKind::For,
                             call_site: None,
                         })
                         .encode(),

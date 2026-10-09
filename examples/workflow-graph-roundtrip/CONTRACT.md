@@ -184,7 +184,7 @@ The editable surface is:
   recomputed after save and must not carry a description.
 - `data.fields` literal values.
 - `data.binding`, `data.target`, `data.expression`, `data.condition`,
-  `data.iterable`, and `data.clauses` canonical Lashlang text where present.
+  `data.iterable`, and `data.clauses` canonical Lash VM text where present.
 - Opaque `data.source`.
 - `nodes`, `edges`, `roots`, and `children[].nodeIds` for delete/reorder edits.
 

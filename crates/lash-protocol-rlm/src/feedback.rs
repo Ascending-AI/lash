@@ -23,10 +23,9 @@
 use lash_core::{CellFailure, CellFailureKind};
 
 /// Renders runtime evidence while its call paths and spans are still typed.
-pub(crate) fn render_runtime_failure(source: &str, failure: &lashlang::RuntimeFailure) -> String {
-    lash_lashlang_runtime::host_lifetime_failure_message(&failure.error).unwrap_or_else(|| {
-        lashlang::format_runtime_diagnostic(source, &failure.error, failure.span)
-    })
+pub(crate) fn render_runtime_failure(source: &str, failure: &lash_vm::RuntimeFailure) -> String {
+    lash_vm_runtime::host_lifetime_failure_message(&failure.error)
+        .unwrap_or_else(|| lash_vm::format_runtime_diagnostic(source, &failure.error, failure.span))
 }
 
 /// Renders typed failure evidence followed by kind-specific recovery guidance.

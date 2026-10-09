@@ -31,7 +31,7 @@ lash-core-store = { workspace = true, features = ["testing"] }
 lash-durable = { workspace = true }
 lash-durable-test = { workspace = true }
 lash-llm-transport = { workspace = true }
-lash-lashlang-runtime = { workspace = true }
+lash-vm-runtime = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
 lash-provider-anthropic = { workspace = true }
@@ -43,7 +43,7 @@ lash-protocol-standard = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
-lashlang = { workspace = true, features = ["testing"] }
+lash-vm = { workspace = true, features = ["testing"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

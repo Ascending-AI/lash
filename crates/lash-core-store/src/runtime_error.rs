@@ -496,13 +496,13 @@ runtime_error_codes! {
         // engine interaction failed; the engine redrives the invocation.
         EngineEffectController = "engine_effect_controller" => Redrivable,
         // the re-executed program no longer issues its recorded commands; only the build that wrote the journal serves it.
-        /// A re-executed lashlang run — a code cell or a process body — issued a
+        /// A re-executed lash_vm run — a code cell or a process body — issued a
         /// command that is not the one its journal recorded at that issue
         /// ordinal, or issued one while the journal still held entries at or
         /// beyond it (FIG-3586). Nothing was dispatched; the run stopped and the
         /// turn parks until an operator redeploys the build that wrote the
         /// journal, cancels, or forks.
-        LashlangCellReplayDivergence = "lashlang_cell_replay_divergence" => Parked,
+        LashVmCellReplayDivergence = "lash_vm_cell_replay_divergence" => Parked,
         // the turn was admitted under another executable generation; only a build of it serves it.
         /// A turn was redriven under another executable generation than the one
         /// its admission recorded (FIG-3571): the build running the redrive would
@@ -515,7 +515,7 @@ runtime_error_codes! {
         /// set names, and the live tool for it is now missing or changed
         /// (FIG-3587). The binding is served only from recorded results: a call
         /// that would reach the live tool refuses, before anything is claimed.
-        LashlangCellBindingDrift = "lashlang_cell_binding_drift" => Parked,
+        LashVmCellBindingDrift = "lash_vm_cell_binding_drift" => Parked,
         // the turn was admitted under another executable generation; only a build of it serves it.
         /// Unfinished work requires a declared plugin revision this build cannot execute.
         PluginRevisionUnavailable = "plugin_revision_unavailable" => Parked,
@@ -766,15 +766,15 @@ impl RuntimeErrorCode {
         matches!(
             self,
             |Self::EngineProcessJournalIdentityDrift| Self::EffectReplayDivergence
-                | Self::LashlangCellReplayDivergence
+                | Self::LashVmCellReplayDivergence
                 | Self::RetiredGeneration
                 | Self::PluginRevisionUnavailable
-                | Self::LashlangCellBindingDrift
+                | Self::LashVmCellBindingDrift
         )
     }
 
     /// Whether this code parks the turn it fails (FIG-3586): a re-executed
-    /// lashlang run refused a replay it cannot serve, nothing was dispatched,
+    /// lash_vm run refused a replay it cannot serve, nothing was dispatched,
     /// and the turn neither fails nor retries live — its claims stay held and
     /// it waits for an operator.
     pub fn parks_turn(&self) -> bool {

@@ -175,7 +175,7 @@
     "peak_bytes": 107343872,
     "samples": 27
   },
-  "lash-internal-lashlang-runtime/lash_lashlang_runtime": {
+  "lash-internal-vm-runtime/lash_vm_runtime": {
     "cpu_count": 1,
     "memory_kb": 786432,
     "p95_cores": 1.07,
@@ -183,7 +183,7 @@
     "peak_bytes": 335880192,
     "samples": 29
   },
-  "lash-internal-lashlang/append_cost": {
+  "lash-internal-vm/append_cost": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.07,
@@ -191,7 +191,7 @@
     "peak_bytes": 69099520,
     "samples": 39
   },
-  "lash-internal-lashlang/benchmark": {
+  "lash-internal-vm/benchmark": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.06,
@@ -199,7 +199,7 @@
     "peak_bytes": 142557184,
     "samples": 93
   },
-  "lash-internal-lashlang/benchmark_contract": {
+  "lash-internal-vm/benchmark_contract": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.06,
@@ -207,7 +207,7 @@
     "peak_bytes": 131334144,
     "samples": 98
   },
-  "lash-internal-lashlang/diagnostic_locations": {
+  "lash-internal-vm/diagnostic_locations": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.09,
@@ -215,7 +215,7 @@
     "peak_bytes": 65929216,
     "samples": 34
   },
-  "lash-internal-lashlang/dialect_cost": {
+  "lash-internal-vm/dialect_cost": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.05,
@@ -223,7 +223,7 @@
     "peak_bytes": 130682880,
     "samples": 100
   },
-  "lash-internal-lashlang/function_perf": {
+  "lash-internal-vm/function_perf": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.06,
@@ -231,7 +231,7 @@
     "peak_bytes": 132239360,
     "samples": 87
   },
-  "lash-internal-lashlang/integration": {
+  "lash-internal-vm/integration": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.06,
@@ -239,7 +239,7 @@
     "peak_bytes": 167350272,
     "samples": 113
   },
-  "lash-internal-lashlang/lashlang": {
+  "lash-internal-vm/lash_vm": {
     "cpu_count": 1,
     "memory_kb": 2097152,
     "p95_cores": 1.05,
@@ -247,7 +247,7 @@
     "peak_bytes": 1116995584,
     "samples": 24
   },
-  "lash-internal-lashlang/observation_cost": {
+  "lash-internal-vm/observation_cost": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.06,
@@ -255,7 +255,7 @@
     "peak_bytes": 114847744,
     "samples": 37
   },
-  "lash-internal-lashlang/perf": {
+  "lash-internal-vm/perf": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.05,
@@ -263,7 +263,7 @@
     "peak_bytes": 137031680,
     "samples": 87
   },
-  "lash-internal-lashlang/profile": {
+  "lash-internal-vm/profile": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.05,
@@ -271,7 +271,7 @@
     "peak_bytes": 136019968,
     "samples": 88
   },
-  "lash-internal-lashlang/property": {
+  "lash-internal-vm/property": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.06,
@@ -279,7 +279,7 @@
     "peak_bytes": 219389952,
     "samples": 70
   },
-  "lash-internal-lashlang/stack_budget": {
+  "lash-internal-vm/stack_budget": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.05,
@@ -287,7 +287,7 @@
     "peak_bytes": 76427264,
     "samples": 40
   },
-  "lash-internal-lashlang/workflow_schema_generator": {
+  "lash-internal-vm/workflow_schema_generator": {
     "cpu_count": 1,
     "memory_kb": 524288,
     "p95_cores": 1.07,

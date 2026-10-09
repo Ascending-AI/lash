@@ -47,7 +47,7 @@ parse and compile each cell. The profiler reference uses f0's `State` and `execu
 original source workload and a current-thread executor created outside timing; historical f0 numbers remain context, not a matched control.
 Resumed segments use the current owned VM interface on both sides.
 The worker enforces its configured limits and serializes state across cells.
-The optimized workspace graph enables worker/client/lashlang testing features;
+The optimized workspace graph enables worker/client/lash_vm testing features;
 these workloads invoke no test frontend, hook or continuation probe. The SDK
 helper is packaged and verified separately without testing features.
 Cold means new exec, prewarming and execution, with executable/page caches allowed

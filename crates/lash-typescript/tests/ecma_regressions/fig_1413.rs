@@ -415,7 +415,7 @@ fn pushing_past_the_memory_budget_is_a_clean_refusal() {
     ));
     assert!(
         matches!(
-            futures::executor::block_on(lashlang::execute(
+            futures::executor::block_on(lash_vm::execute(
                 &program,
                 &mut State::new(),
                 &environment
@@ -466,7 +466,7 @@ impl ExecutionHost for ProtoToolHost {
     async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
         match op {
             AbilityOp::ResourceOperation(_) => {
-                let mut record = lashlang::Record::new();
+                let mut record = lash_vm::Record::new();
                 record.insert("__proto__".to_string(), Value::Number(1.0));
                 Ok(AbilityOutcome::Value(Value::Record(std::sync::Arc::new(
                     record,
@@ -483,21 +483,21 @@ impl ExecutionHost for ProtoToolHost {
 /// another route, and a record built from it is the same unreadable key.
 #[test]
 fn a_prototype_chain_key_refuses_when_a_tool_result_carries_it() {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation_contract(
             ["web"],
             "Web",
             "fetch",
             "tool:web/fetch",
-            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+            &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("web binding");
-    let environment = lashlang::LashlangHostEnvironment::new(catalog);
+    let environment = lash_vm::LashVmHostEnvironment::new(catalog);
     let linked = lash_typescript::link(r#"finish(await web.fetch({ url: "u" }));"#, &environment)
         .expect("TypeScript should link");
-    let error = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let error = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &ProtoToolHost,
     ))

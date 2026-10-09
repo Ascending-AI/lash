@@ -46,7 +46,7 @@ SUBSTRATE_PATHS = (
     "crates/lash-core-store",
     "crates/lash-durable",
     "crates/lash-durable-test",
-    "crates/lash-lashlang-runtime",
+    "crates/lash-vm-runtime",
     "crates/lash-postgres-store",
     "crates/lash-protocol-rlm",
     "crates/lash-sansio",
@@ -54,7 +54,7 @@ SUBSTRATE_PATHS = (
     "crates/lash-store-sql",
     "crates/lash-vm-broker",
     "crates/lash-vm-client",
-    "crates/lashlang",
+    "crates/lash-vm",
 )
 
 # The facade's compile-time witnesses type-check signatures with `todo!()`

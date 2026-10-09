@@ -94,7 +94,7 @@ cell. Submit the two registration turns concurrently.
 
 Pin the process label too, or expect the lift name. A trigger target defined inline is a
 **lifted** process and is named by content hash — `LIFTED_PROCESS_NAME_PREFIX = "__process_"`
-(`crates/lashlang/src/ast.rs:554`) — so the rail renders
+(`crates/lash-vm/src/ast.rs:554`) — so the rail renders
 `__process_<hash> ← ui.button.pressed`, not `mirror_job`. (Process identifiers cannot contain
 hyphens, which is why the name has no hyphen, but that does not mean the identifier survives
 the lift.) To gate on the literal label `mirror_job`, the pinned cell must call

@@ -139,7 +139,7 @@ fn token_usage_sample() -> LlmUsage {
     }
 }
 
-fn lashlang_identity() -> TraceLanguageExecutionIdentity {
+fn lash_vm_identity() -> TraceLanguageExecutionIdentity {
     TraceLanguageExecutionIdentity {
         scope: TraceRuntimeScope::new("s1"),
         subject: TraceRuntimeSubject::Process {
@@ -457,10 +457,10 @@ fn event_samples() -> Vec<TraceEvent> {
             payload: json!({ "code": "print 1" }),
         },
         TraceEvent::LanguageExecution {
-            language: "lashlang".to_string(),
+            language: "lashvm".to_string(),
             event: TraceLanguageExecution {
                 event_key: "process:p1:finished".to_string(),
-                identity: lashlang_identity(),
+                identity: lash_vm_identity(),
                 payload: TraceLanguageExecutionPayload::ExecutionFinished {
                     status: TraceLanguageExecutionStatus::Completed,
                     error: None,
@@ -486,7 +486,7 @@ fn event_samples() -> Vec<TraceEvent> {
 fn trace_event_vocabulary_names_no_seam_implementation() {
     const IMPLEMENTATIONS: &[&str] = &[
         "rlm",
-        "lashlang",
+        "lashvm",
         "temporal",
         "sqlite",
         "postgres",
@@ -719,10 +719,10 @@ fn language_execution_records() -> Vec<TraceRecord> {
             fixture_record(
                 TraceContext::default().for_session("s1"),
                 TraceEvent::LanguageExecution {
-                    language: "lashlang".to_string(),
+                    language: "lashvm".to_string(),
                     event: TraceLanguageExecution {
                         event_key: format!("process:p1:{index}"),
-                        identity: lashlang_identity(),
+                        identity: lash_vm_identity(),
                         payload,
                     },
                 },
@@ -888,10 +888,10 @@ fn content_bearing_events() -> Vec<TraceEvent> {
         }])
     };
     let language = |payload| TraceEvent::LanguageExecution {
-        language: "lashlang".to_string(),
+        language: "lashvm".to_string(),
         event: TraceLanguageExecution {
             event_key: "process:p1:event".to_string(),
-            identity: lashlang_identity(),
+            identity: lash_vm_identity(),
             payload,
         },
     };

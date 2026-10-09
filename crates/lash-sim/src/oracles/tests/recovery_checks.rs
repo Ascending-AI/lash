@@ -524,7 +524,7 @@ fn rlm_mini_oracle_rejects_exec_without_runtime_effect_outcome() {
         ),
     ];
 
-    let verdict = mini_rlm_lashlang_cell_exec_continues(&events);
+    let verdict = mini_rlm_lash_vm_cell_exec_continues(&events);
 
     assert_eq!(verdict.status, crate::trace::OracleStatus::Failed);
     assert_eq!(verdict.oracle_id, SCENARIO_MINI_RLM_CELL_EXEC_ORACLE);
@@ -580,7 +580,7 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
             ),
         ),
     ] {
-        let verdict = mini_rlm_lashlang_cell_exec_continues(&[exec.clone(), event]);
+        let verdict = mini_rlm_lash_vm_cell_exec_continues(&[exec.clone(), event]);
         assert_eq!(verdict.status, crate::trace::OracleStatus::Failed, "{name}");
         assert_eq!(verdict.oracle_id, SCENARIO_MINI_RLM_CELL_EXEC_ORACLE);
     }
@@ -593,7 +593,7 @@ fn rlm_mini_oracle_requires_provider_after_same_actor_exec() {
         json!({"runtime_completion": runtime_completion(RuntimeCompletionFamily::ProviderTurnCompletion, 2)}),
         json!({"provider_output": "continued"}),
     );
-    let verdict = mini_rlm_lashlang_cell_exec_continues(&[exec, continued]);
+    let verdict = mini_rlm_lash_vm_cell_exec_continues(&[exec, continued]);
     assert_eq!(verdict.status, crate::trace::OracleStatus::Passed);
 }
 

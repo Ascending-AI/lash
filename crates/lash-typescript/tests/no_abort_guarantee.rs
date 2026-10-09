@@ -579,14 +579,14 @@ fn regexp_size_depth_and_giant_quantifiers_fail_without_aborting() {
 fn guest_named_allocations_fail_without_aborting() {
     struct UnboundedHost;
 
-    impl lashlang::ExecutionHost for UnboundedHost {
+    impl lash_vm::ExecutionHost for UnboundedHost {
         async fn perform(
             &self,
-            op: lashlang::AbilityOp,
-        ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
+            op: lash_vm::AbilityOp,
+        ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
             match op {
-                lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityOutcome::Value(value)),
-                _ => Err(lashlang::ExecutionHostError::new("unsupported ability")),
+                lash_vm::AbilityOp::Finish(value) => Ok(lash_vm::AbilityOutcome::Value(value)),
+                _ => Err(lash_vm::ExecutionHostError::new("unsupported ability")),
             }
         }
     }
@@ -612,9 +612,9 @@ fn guest_named_allocations_fail_without_aborting() {
             let Ok(program) = lash_typescript::testing::compile(&source) else {
                 continue;
             };
-            let outcome = futures::executor::block_on(lashlang::execute(
+            let outcome = futures::executor::block_on(lash_vm::execute(
                 &program,
-                &mut lashlang::State::new(),
+                &mut lash_vm::State::new(),
                 &UnboundedHost,
             ));
             if let Err(error) = outcome {

@@ -4,7 +4,7 @@
 //! and [`lash_core::ProcessExecutionEnvStore`] (process-execution-env blobs).
 //!
 //! Both ports live in the execution kernel, but the module-artifact laws live in
-//! lashlang, which builds the modules they publish. This crate depends on both,
+//! lash_vm, which builds the modules they publish. This crate depends on both,
 //! so the cross-namespace isolation case — which requires a single store viewed
 //! through both ports — lives here. Per-port behavior is delegated to each
 //! owner's suite so there is one source of truth for every contract.
@@ -13,9 +13,9 @@ use std::sync::Arc;
 
 use crate::ReopenableProcessExecutionEnvStore;
 use lash_core::ProcessExecutionEnvStore;
-use lashlang::ModuleArtifact;
-use lashlang::testing::ast_builders as b;
-use lashlang::testing::conformance::ReopenableLashlangArtifactStore;
+use lash_vm::ModuleArtifact;
+use lash_vm::testing::ast_builders as b;
+use lash_vm::testing::conformance::ReopenableLashVmArtifactStore;
 use pretty_assertions::assert_eq;
 
 /// A durable store accessed through both artifact-store traits over the same
@@ -45,8 +45,8 @@ fn sample_module_artifact(process_name: &str) -> ModuleArtifact {
     let program = b::module(
         vec![b::process_returning(
             process_name,
-            vec![b::param("root", lashlang::TypeExpr::Str)],
-            lashlang::TypeExpr::Str,
+            vec![b::param("root", lash_vm::TypeExpr::Str)],
+            lash_vm::TypeExpr::Str,
             b::finish(b::var("root")),
         )],
         Vec::new(),
@@ -54,77 +54,77 @@ fn sample_module_artifact(process_name: &str) -> ModuleArtifact {
     ModuleArtifact::from_program(program).expect("build sample module artifact")
 }
 
-pub async fn lashlang_artifact_store_fresh_instances<F>(make: F)
+pub async fn lash_vm_artifact_store_fresh_instances<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
     let make_store = || make().open.artifacts;
-    lashlang::testing::conformance::lashlang_artifact_store_fresh_instances(&make_store).await;
+    lash_vm::testing::conformance::lash_vm_artifact_store_fresh_instances(&make_store).await;
 }
 
-pub async fn lashlang_artifact_store_reports_durable<F>(make: F)
+pub async fn lash_vm_artifact_store_reports_durable<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::lashlang_artifact_store_durability_tier(
+    lash_vm::testing::conformance::lash_vm_artifact_store_durability_tier(
         make().open.artifacts,
         lash_core::DurabilityTier::Durable,
     )
     .await;
 }
 
-pub async fn lashlang_last_referrer_reclaims_module<F>(make: F)
+pub async fn lash_vm_last_referrer_reclaims_module<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::last_referrer_reclaims_module(make().open.artifacts).await;
+    lash_vm::testing::conformance::last_referrer_reclaims_module(make().open.artifacts).await;
 }
 
-pub async fn lashlang_abandoned_start_reclaims_module<F>(make: F)
+pub async fn lash_vm_abandoned_start_reclaims_module<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::abandoned_start_reclaims_module(make().open.artifacts).await;
+    lash_vm::testing::conformance::abandoned_start_reclaims_module(make().open.artifacts).await;
 }
 
-pub async fn lashlang_carry_preserves_module<F>(make: F)
+pub async fn lash_vm_carry_preserves_module<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::carry_preserves_module(make().open.artifacts).await;
+    lash_vm::testing::conformance::carry_preserves_module(make().open.artifacts).await;
 }
 
-pub async fn lashlang_ended_referrer_fences_late_publication<F>(make: F)
+pub async fn lash_vm_ended_referrer_fences_late_publication<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::ended_referrer_fences_late_publication(make().open.artifacts)
+    lash_vm::testing::conformance::ended_referrer_fences_late_publication(make().open.artifacts)
         .await;
 }
 
-pub async fn lashlang_hostile_module_references_are_rejected<F>(make: F)
+pub async fn lash_vm_hostile_module_references_are_rejected<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::hostile_module_references_are_rejected(make().open.artifacts)
+    lash_vm::testing::conformance::hostile_module_references_are_rejected(make().open.artifacts)
         .await;
 }
 
-pub async fn lashlang_alpha_variants_publish_distinct_refs<F>(make: F)
+pub async fn lash_vm_alpha_variants_publish_distinct_refs<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::alpha_variants_publish_distinct_refs(make().open.artifacts)
+    lash_vm::testing::conformance::alpha_variants_publish_distinct_refs(make().open.artifacts)
         .await;
 }
 
-pub async fn lashlang_artifact_survives_reopen<F>(make: F)
+pub async fn lash_vm_artifact_survives_reopen<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
     let handles = make();
     let reopen = Arc::clone(&handles.reopen);
-    lashlang::testing::conformance::survives_reopen(ReopenableLashlangArtifactStore {
+    lash_vm::testing::conformance::survives_reopen(ReopenableLashVmArtifactStore {
         open: handles.open.artifacts,
         reopen: Arc::new(move || (reopen)().artifacts),
     })

@@ -41,16 +41,16 @@ pub mod worker_limit;
 mod workflow;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// Identity version mixed into every Lashlang and TypeScript module-artifact hash.
+/// Identity version mixed into every Lash VM and TypeScript module-artifact hash.
 ///
-/// v16: the builtin registry gains `__lashlang_pending_timer`, and
-/// `__lashlang_await_array` names its aggregate by method (ADR 0099 §11).
+/// v16: the builtin registry gains `__lash_vm_pending_timer`, and
+/// `__lash_vm_await_array` names its aggregate by method (ADR 0099 §11).
 ///
 /// v17 (FIG-3571): module artifacts carry the shared carrier IR — structural
 /// roles, process origins, binding visibility, source identity v4 and the
 /// canonical number rule — so every artifact hash moves.
 ///
-/// v18 (FIG-3620): the builtin registry gains `__lashlang_global_get`, the
+/// v18 (FIG-3620): the builtin registry gains `__lash_vm_global_get`, the
 /// live root-global read every `globalThis.name` read lowers to.
 ///
 /// v19 (FIG-3627): the standard-library dispatch gains `Lash.Apply`, which a
@@ -68,8 +68,8 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// it did.
 ///
 /// v22 (FIG-3707): the TypeScript builtin vocabulary gains the binding-cell
-/// intrinsics (`__lashlang_cell_new`, `__lashlang_cell_get`,
-/// `__lashlang_cell_set`), and a closure's capture of a binding something
+/// intrinsics (`__lash_vm_cell_new`, `__lash_vm_cell_get`,
+/// `__lash_vm_cell_set`), and a closure's capture of a binding something
 /// assigns means that shared binding, not a copy.
 ///
 /// v23 (FIG-3728, FIG-3745): the TypeScript lowerer converts a computed
@@ -88,23 +88,26 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// use neutral names; module identities change while evaluation is unchanged.
 ///
 /// version_guard(
-///     roots(path = "crates/lashlang/src/builtins.rs", Builtin, Arity),
-///     items(path = "crates/lashlang/src/ast_number.rs", canonical_bits),
+///     roots(path = "crates/lash-vm/src/builtins.rs", Builtin, Arity),
+///     items(path = "crates/lash-vm/src/ast_number.rs", canonical_bits),
 ///     items(
-///         path = "crates/lashlang/src/artifact.rs", hash_host_requirements,
+///         path = "crates/lash-vm/src/artifact.rs", hash_host_requirements,
 ///         process_component_hash, write_exports, write_host_requirements, write_program,
 ///         write_declaration, write_function, write_process, write_type, write_expr,
 ///     ),
-///     items(path = "crates/lashlang/src/builtins.rs", SOURCE_BUILTINS, IR_INTRINSICS),
+///     items(path = "crates/lash-vm/src/builtins.rs", SOURCE_BUILTINS, IR_INTRINSICS),
 ///     file(
-///         path = "crates/lash-typescript/src/lower/**", path = "crates/lashlang/src/ast_roles.rs",
+///         path = "crates/lash-typescript/src/lower/**", path = "crates/lash-vm/src/ast_roles.rs",
 ///         cover("impl Lowerer", CollectionTransformParts),
 ///     ),
-///     items(path = "crates/lashlang/src/artifact_identity.rs", module_ref),
+///     items(path = "crates/lash-vm/src/artifact_identity.rs", module_ref),
 /// )
 /// version_surface = "coexist"
 /// format_manifest = "ModuleArtifact"
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v25";
+pub const LASH_VM_SEMANTIC_HASH_VERSION: &str = "lash-vm-semantic-v25";
+
+/// The stock VM engine's stored kind, shared by definitions and registration.
+pub const LASH_VM_ENGINE_KIND: &str = "lashvm";
 
 pub use append_vec::AppendVec;
 pub use attachment::{

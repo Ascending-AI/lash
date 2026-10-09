@@ -88,20 +88,20 @@ impl DurableHost {
     }
 
     /// The module store a cell's artifacts live in: the backend's.
-    pub(crate) fn artifacts(&self) -> lashlang::LashlangArtifacts {
-        lashlang::LashlangArtifacts::of_backend(&self.backend)
+    pub(crate) fn artifacts(&self) -> lash_vm::LashVmArtifacts {
+        lash_vm::LashVmArtifacts::of_backend(&self.backend)
     }
 
     /// Every port of the host's backend, its claimed context serving the
-    /// effects, and the lashlang process engine over the backend's module
+    /// effects, and the lash_vm process engine over the backend's module
     /// store.
     pub(crate) fn ports(&self) -> lash_core::testing::TestExecutionPorts {
         let mut ports = lash_core::testing::TestExecutionPorts::lent(&self.backend, self.context());
         ports.process_engines = lash_core::ProcessEngineRegistry::new().with_registration(
-            lash_lashlang_runtime::lashlang_process_engine_registration(
-                lash_lashlang_runtime::LashlangProcessEngine::new(
-                    lashlang::LashlangArtifacts::of_backend(&self.backend),
-                    lash_lashlang_runtime::LashlangSurface::default(),
+            lash_vm_runtime::lash_vm_process_engine_registration(
+                lash_vm_runtime::LashVmProcessEngine::new(
+                    lash_vm::LashVmArtifacts::of_backend(&self.backend),
+                    lash_vm_runtime::LashVmSurface::default(),
                 ),
             ),
         );

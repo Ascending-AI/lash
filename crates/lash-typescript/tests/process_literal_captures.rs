@@ -28,8 +28,8 @@ fn a_lifted_body_captures_immutable_cell_locals_and_refuses_mutable_ones() {
         .main
         .children()
         .find_map(|child| match child {
-            lashlang::Expr::Assign { expr, .. } => match expr.as_ref() {
-                lashlang::Expr::ProcessLiteral(literal) => Some(literal),
+            lash_vm::Expr::Assign { expr, .. } => match expr.as_ref() {
+                lash_vm::Expr::ProcessLiteral(literal) => Some(literal),
                 _ => None,
             },
             found => panic!("expected the const-bound literal, got {found:?}"),

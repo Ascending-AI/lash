@@ -8,8 +8,8 @@ use lash_core::plugin::{
     PluginError, PluginFactory, PluginRegistrar, PluginSessionContext,
     ProcessEngineContributionContext, SessionAuthorityContext, SessionPlugin,
 };
-use lash_lashlang_runtime::{
-    LashlangArtifacts, LashlangHostEnvironment, LashlangProcessEngine, LashlangSurface,
+use lash_vm_runtime::{
+    LashVmArtifacts, LashVmHostEnvironment, LashVmProcessEngine, LashVmSurface,
     SharedDeferredToolResolver,
 };
 
@@ -19,11 +19,11 @@ use super::{
 };
 use crate::dialect::{Dialect, RlmDialectServices, SessionDialect};
 
-/// Build the process engine's Lashlang surface under the host's language features.
-pub fn rlm_lashlang_surface(config: &RlmProtocolPluginConfig) -> LashlangSurface {
-    LashlangSurface::new(
-        config.lashlang_language_features.into_engine(),
-        lashlang::LashlangHostCatalog::new(),
+/// Build the process engine's Lash VM surface under the host's language features.
+pub fn rlm_lash_vm_surface(config: &RlmProtocolPluginConfig) -> LashVmSurface {
+    LashVmSurface::new(
+        config.lash_vm_language_features.into_engine(),
+        lash_vm::LashVmHostCatalog::new(),
     )
 }
 
@@ -33,9 +33,9 @@ pub struct RlmProtocolPluginFactory {
     /// parses, spells tools and prompts in it, and records its language id.
     dialect: Arc<dyn Dialect>,
     workers: lash_vm_client::service::Service,
-    segment_policy: lash_lashlang_runtime::VmSegmentPolicy,
+    segment_policy: lash_vm_runtime::VmSegmentPolicy,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
-    artifact_store: LashlangArtifacts,
+    artifact_store: LashVmArtifacts,
     /// The binding identity of the backend `artifact_store` belongs to: a
     /// runtime over any other backend refuses this factory.
     artifact_backend: Arc<str>,
@@ -43,7 +43,7 @@ pub struct RlmProtocolPluginFactory {
 
 impl RlmProtocolPluginFactory {
     /// An RLM protocol in `dialect` over `backend`, the substrate its
-    /// Lashlang module artifacts live in (ADR 0102, D2).
+    /// Lash VM module artifacts live in (ADR 0102, D2).
     ///
     /// `dialect` is the host's selection of the language its models write
     /// (ADR 0096): cells, `processes.create` sources, compiled modules and
@@ -66,9 +66,9 @@ impl RlmProtocolPluginFactory {
             config,
             dialect,
             workers,
-            segment_policy: lash_lashlang_runtime::VmSegmentPolicy::standard(),
+            segment_policy: lash_vm_runtime::VmSegmentPolicy::standard(),
             deferred_tool_resolver: None,
-            artifact_store: LashlangArtifacts::of_backend(backend),
+            artifact_store: LashVmArtifacts::of_backend(backend),
             artifact_backend: Arc::from(backend.binding_identity().as_str()),
         }
     }
@@ -80,7 +80,7 @@ impl RlmProtocolPluginFactory {
         self
     }
     /// Set the VM segment policy used by this factory's process engine.
-    pub fn with_segment_policy(mut self, policy: lash_lashlang_runtime::VmSegmentPolicy) -> Self {
+    pub fn with_segment_policy(mut self, policy: lash_vm_runtime::VmSegmentPolicy) -> Self {
         self.segment_policy = policy;
         self
     }
@@ -89,8 +89,8 @@ impl RlmProtocolPluginFactory {
         &self.workers
     }
 
-    /// Wire a host-provided [`DeferredToolResolver`](lash_lashlang_runtime::DeferredToolResolver)
-    /// that resolves each link's batch of Lashlang call-paths absent from the
+    /// Wire a host-provided [`DeferredToolResolver`](lash_vm_runtime::DeferredToolResolver)
+    /// that resolves each link's batch of Lash VM call-paths absent from the
     /// host environment into per-path Tool Grants or unavailable outcomes.
     /// Most hosts ship none.
     pub fn with_deferred_tool_resolver(mut self, resolver: SharedDeferredToolResolver) -> Self {
@@ -98,7 +98,7 @@ impl RlmProtocolPluginFactory {
         self
     }
 
-    pub fn artifact_store(&self) -> LashlangArtifacts {
+    pub fn artifact_store(&self) -> LashVmArtifacts {
         self.artifact_store.clone()
     }
 
@@ -130,11 +130,11 @@ impl RlmProtocolPluginFactory {
 
     /// Operation over the factory and a plugin host: the caller supplies a plugin
     /// host containing this protocol factory plus any tool plugins to resolve.
-    pub fn lashlang_compile_surface(
+    pub fn lash_vm_compile_surface(
         &self,
         plugin_host: &PluginHost,
-        request: LashlangCompileSurfaceRequest,
-    ) -> Result<LashlangCompileSurface, PluginError> {
+        request: LashVmCompileSurfaceRequest,
+    ) -> Result<LashVmCompileSurface, PluginError> {
         let behaviour = self.session_behaviour(
             &request.execution_env_spec.plugin_config.config,
             lash_core::plugin::PluginSessionMaterialization::Creation,
@@ -149,39 +149,39 @@ impl RlmProtocolPluginFactory {
         ))?;
         let tool_catalog = plugins.resolved_tool_catalog()?;
         let config = self.config.clone().under_recorded_behaviour(&behaviour);
-        let surface = rlm_lashlang_surface(&config)
+        let surface = rlm_lash_vm_surface(&config)
             .with_plugin_extensions(plugin_host.extensions())
             .and_then(|surface| surface.with_plugin_extensions(plugins.session_extensions()))
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         let host_environment = surface
             .host_environment(&tool_catalog)
             .map_err(|err| PluginError::Registration(err.to_string()))?;
-        Ok(LashlangCompileSurface {
+        Ok(LashVmCompileSurface {
             host_environment,
             tool_catalog,
             surface,
         })
     }
 
-    /// Compile a Lashlang module against the compile-time surface in a worker.
+    /// Compile a Lash VM module against the compile-time surface in a worker.
     #[allow(
         clippy::result_large_err,
-        reason = "boxing LashlangModuleCompileError would change this public compile API"
+        reason = "boxing LashVmModuleCompileError would change this public compile API"
     )]
-    pub async fn compile_lashlang_module(
+    pub async fn compile_lash_vm_module(
         &self,
         plugin_host: &PluginHost,
-        request: LashlangModuleCompileRequest,
-    ) -> Result<ModuleCompileOutput, LashlangModuleCompileError> {
+        request: LashVmModuleCompileRequest,
+    ) -> Result<ModuleCompileOutput, LashVmModuleCompileError> {
         let surface = self
-            .lashlang_compile_surface(
+            .lash_vm_compile_surface(
                 plugin_host,
-                LashlangCompileSurfaceRequest {
+                LashVmCompileSurfaceRequest {
                     session_id: request.session_id,
                     execution_env_spec: request.execution_env_spec,
                 },
             )
-            .map_err(LashlangModuleCompileError::Surface)?;
+            .map_err(LashVmModuleCompileError::Surface)?;
         match self
             .workers
             .request_accounted(lash_vm_client::service::Request::CompileModule {
@@ -190,11 +190,11 @@ impl RlmProtocolPluginFactory {
                 cell: false,
             })
             .await
-            .map_err(LashlangModuleCompileError::Worker)?
+            .map_err(LashVmModuleCompileError::Worker)?
         {
             lash_vm_client::service::Response::Module(module) => Ok(*module),
             lash_vm_client::service::Response::CompileRefused { error, .. } => Err(error.into()),
-            _ => Err(LashlangModuleCompileError::Worker(
+            _ => Err(LashVmModuleCompileError::Worker(
                 lash_vm_client::PoolError::breach(
                     lash_vm_protocol::SequenceFault::UnexpectedServiceResponse,
                 ),
@@ -230,7 +230,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         )
     }
 
-    /// The backend this factory's Lashlang artifacts live in: a runtime over
+    /// The backend this factory's Lash VM artifacts live in: a runtime over
     /// another backend would resume sessions whose modules it cannot find and
     /// sweep an artifact store nobody wrote.
     fn bound_backend(&self) -> Option<&str> {
@@ -242,22 +242,22 @@ impl PluginFactory for RlmProtocolPluginFactory {
         ctx: &ProcessEngineContributionContext<'_>,
     ) -> Result<Vec<lash_core::ProcessEngineRegistration>, PluginError> {
         let config = self.config.clone();
-        let surface = rlm_lashlang_surface(&config)
+        let surface = rlm_lash_vm_surface(&config)
             .with_plugin_extensions(ctx.extensions())
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         let recorder = Arc::new(RlmProcessSettingsRecorder {
             deployment_config: self.config.clone(),
             plugin_host: ctx.plugin_host().clone(),
         });
-        let engine = LashlangProcessEngine::new(self.artifact_store.clone(), surface)
+        let engine = LashVmProcessEngine::new(self.artifact_store.clone(), surface)
             .with_segment_policy(self.segment_policy)
             .with_trace_runtime(ctx.trace_runtime().clone())
             .with_worker_service(self.workers.clone())
             .with_execution_bounds(config.execution_bounds().into_engine())
             .with_run_settings_recorder(recorder);
-        Ok(vec![
-            lash_lashlang_runtime::lashlang_process_engine_registration(engine),
-        ])
+        Ok(vec![lash_vm_runtime::lash_vm_process_engine_registration(
+            engine,
+        )])
     }
 
     /// The session's plugin runs under the behaviour the session recorded:
@@ -276,9 +276,9 @@ impl PluginFactory for RlmProtocolPluginFactory {
             self.dialect.language_id(),
             ctx.materialization,
         )?;
-        let lashlang_surface = LashlangSurface::new(
-            config.lashlang_language_features.into_engine(),
-            lashlang::LashlangHostCatalog::new(),
+        let lash_vm_surface = LashVmSurface::new(
+            config.lash_vm_language_features.into_engine(),
+            lash_vm::LashVmHostCatalog::new(),
         )
         .with_plugin_extensions(&ctx.extensions)
         .map_err(|err| PluginError::Registration(err.to_string()))?;
@@ -293,7 +293,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         };
         let dialect = Arc::new(SessionDialect::new(
             Arc::clone(&self.dialect),
-            lashlang_surface,
+            lash_vm_surface,
             services,
         ));
         if config.channel == super::RlmChannel::NativeTool {
@@ -330,11 +330,11 @@ struct RlmProcessSettingsRecorder {
     plugin_host: PluginHost,
 }
 
-impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRecorder {
+impl lash_vm_runtime::LashVmRunSettingsRecorder for RlmProcessSettingsRecorder {
     fn record(
         &self,
         environment: &lash_core::ProcessExecutionEnvSpec,
-    ) -> Result<lash_lashlang_runtime::LashlangRecordedSettings, PluginError> {
+    ) -> Result<lash_vm_runtime::LashVmRecordedSettings, PluginError> {
         let plugin_config = &environment.plugin_config;
         let captured = plugin_config
             .decode::<RlmRecordedConfig>(RLM_PROTOCOL_PLUGIN_ID)
@@ -349,7 +349,7 @@ impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRe
             .deployment_config
             .clone()
             .under_recorded_behaviour(&behaviour);
-        let mut surface = rlm_lashlang_surface(&config)
+        let mut surface = rlm_lash_vm_surface(&config)
             .with_plugin_extensions(self.plugin_host.extensions())
             .map_err(|error| PluginError::Registration(error.to_string()))?;
         let context = PluginSessionContext {
@@ -369,20 +369,20 @@ impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRe
                 .with_plugin_extensions(&extensions)
                 .map_err(|error| PluginError::Registration(error.to_string()))?;
         }
-        Ok(lash_lashlang_runtime::LashlangRecordedSettings::new(
+        Ok(lash_vm_runtime::LashVmRecordedSettings::new(
             surface,
             config.execution_bounds().into_engine(),
         ))
     }
 }
 
-/// Request for [`RlmProtocolPluginFactory::lashlang_compile_surface`].
-pub struct LashlangCompileSurfaceRequest {
+/// Request for [`RlmProtocolPluginFactory::lash_vm_compile_surface`].
+pub struct LashVmCompileSurfaceRequest {
     pub session_id: SessionId,
     pub execution_env_spec: lash_core::ProcessExecutionEnvSpec,
 }
 
-impl LashlangCompileSurfaceRequest {
+impl LashVmCompileSurfaceRequest {
     pub fn new(
         session_id: impl Into<SessionId>,
         execution_env_spec: lash_core::ProcessExecutionEnvSpec,
@@ -394,14 +394,14 @@ impl LashlangCompileSurfaceRequest {
     }
 }
 
-/// Request for [`RlmProtocolPluginFactory::compile_lashlang_module`].
-pub struct LashlangModuleCompileRequest {
+/// Request for [`RlmProtocolPluginFactory::compile_lash_vm_module`].
+pub struct LashVmModuleCompileRequest {
     pub session_id: SessionId,
     pub source: String,
     pub execution_env_spec: lash_core::ProcessExecutionEnvSpec,
 }
 
-impl LashlangModuleCompileRequest {
+impl LashVmModuleCompileRequest {
     pub fn new(
         session_id: impl Into<SessionId>,
         source: impl Into<String>,
@@ -415,17 +415,17 @@ impl LashlangModuleCompileRequest {
     }
 }
 
-pub struct LashlangCompileSurface {
-    pub host_environment: LashlangHostEnvironment,
+pub struct LashVmCompileSurface {
+    pub host_environment: LashVmHostEnvironment,
     pub tool_catalog: Arc<lash_core::ToolCatalog>,
-    pub surface: LashlangSurface,
+    pub surface: LashVmSurface,
 }
 
 /// A compile diagnostic, worker fault, or failure to assemble the host surface.
 #[derive(Clone, Debug, thiserror::Error)]
-pub enum LashlangModuleCompileError {
+pub enum LashVmModuleCompileError {
     #[error(transparent)]
-    Compile(#[from] lashlang::ModuleCompileError),
+    Compile(#[from] lash_vm::ModuleCompileError),
     #[error(transparent)]
     Worker(lash_vm_client::PoolError),
     #[error(transparent)]
@@ -450,7 +450,7 @@ impl SessionPlugin for RlmProtocolPlugin {
 
 #[cfg(test)]
 mod label_annotation_tests {
-    use super::rlm_lashlang_surface;
+    use super::rlm_lash_vm_surface;
     use crate::plugin::{InstructionBound, MemoryBound, RlmProtocolPluginConfig};
 
     fn base_config() -> RlmProtocolPluginConfig {
@@ -461,8 +461,8 @@ mod label_annotation_tests {
             .build()
     }
 
-    fn rendered_surface(config: RlmProtocolPluginConfig) -> lashlang::LashlangHostEnvironment {
-        rlm_lashlang_surface(&config)
+    fn rendered_surface(config: RlmProtocolPluginConfig) -> lash_vm::LashVmHostEnvironment {
+        rlm_lash_vm_surface(&config)
             .host_environment(&lash_core::ToolCatalog::from_tool_definitions(Vec::new()))
             .expect("host environment")
     }
@@ -470,8 +470,8 @@ mod label_annotation_tests {
     /// `@label(title: "Answer") finish "ok"` — a label annotation has no
     /// TypeScript form, so the witness states the AST the host feature gate
     /// rejects.
-    fn labelled_program() -> lashlang::Program {
-        use lashlang::testing::ast_builders as b;
+    fn labelled_program() -> lash_vm::Program {
+        use lash_vm::testing::ast_builders as b;
 
         b::program(vec![b::labelled(
             b::label("Answer", None),
@@ -484,16 +484,16 @@ mod label_annotation_tests {
         // Toolbench's shape (examples/toolbench/src/runtime.rs): every optional
         // language feature spelled off.
         let mut config = base_config();
-        config.lashlang_language_features.label_annotations = false;
+        config.lash_vm_language_features.label_annotations = false;
         let host_environment = rendered_surface(config);
 
         assert!(!host_environment.language_features.label_annotations);
-        let err = lashlang::LinkedModule::link(labelled_program(), &host_environment)
+        let err = lash_vm::LinkedModule::link(labelled_program(), &host_environment)
             .expect_err("label syntax must be rejected when the host disabled the feature");
         assert!(
             matches!(
                 err,
-                lashlang::LinkError::FeatureDisabled {
+                lash_vm::LinkError::FeatureDisabled {
                     feature: "label annotations",
                     ..
                 }
@@ -507,7 +507,7 @@ mod label_annotation_tests {
         let host_environment = rendered_surface(base_config());
 
         assert!(host_environment.language_features.label_annotations);
-        lashlang::LinkedModule::link(labelled_program(), &host_environment)
+        lash_vm::LinkedModule::link(labelled_program(), &host_environment)
             .expect("default surface links label annotations");
     }
 
@@ -536,9 +536,9 @@ mod label_annotation_tests {
         );
         let source = "process 42oops() { finish \"x\" }";
         let err = factory
-            .compile_lashlang_module(
+            .compile_lash_vm_module(
                 &plugin_host,
-                crate::LashlangModuleCompileRequest::new(
+                crate::LashVmModuleCompileRequest::new(
                     "factory-test",
                     source,
                     lash_core::ProcessExecutionEnvSpec::new(
@@ -555,7 +555,7 @@ mod label_annotation_tests {
             .await
             .expect_err("invalid typescript must fail to parse");
 
-        let super::LashlangModuleCompileError::Compile(lashlang::ModuleCompileError::Parse(
+        let super::LashVmModuleCompileError::Compile(lash_vm::ModuleCompileError::Parse(
             diagnostic,
         )) = err
         else {
@@ -574,21 +574,21 @@ mod label_annotation_tests {
             "memory_limit": { "bounded": 67_108_864 }
         }))
         .expect("rlm config");
-        assert!(config.lashlang_language_features.label_annotations);
+        assert!(config.lash_vm_language_features.label_annotations);
 
         let config: RlmProtocolPluginConfig = serde_json::from_value(serde_json::json!({
             "channel": "cell",
             "instruction_limit": { "bounded": 1_000_000 },
             "memory_limit": { "bounded": 67_108_864 },
-            "lashlang_language_features": { "label_annotations": false }
+            "lash_vm_language_features": { "label_annotations": false }
         }))
         .expect("rlm config");
-        assert!(!config.lashlang_language_features.label_annotations);
+        assert!(!config.lash_vm_language_features.label_annotations);
     }
 }
 
 /// FIG-4398, ported by FIG-5310 from the deleted
-/// `recorded_inheritance_tests.rs`: a lashlang process records one engine
+/// `recorded_inheritance_tests.rs`: a lash_vm process records one engine
 /// shape at creation, from the RLM namespace its environment captured, not
 /// from the factory of the deployment that installs the engine.
 #[cfg(test)]
@@ -619,21 +619,21 @@ mod process_settings_tests {
             .memory_limit(MemoryBound::mebibytes(1))
             .build();
         config.prompt_features.decomposition = false;
-        config.lashlang_language_features.label_annotations = false;
+        config.lash_vm_language_features.label_annotations = false;
         config.max_output_chars = 100;
         config.continue_as_soft_warn_tokens = None;
         config
     }
 
-    fn resources() -> lashlang::LashlangHostCatalog {
-        let mut resources = lashlang::LashlangHostCatalog::new();
+    fn resources() -> lash_vm::LashVmHostCatalog {
+        let mut resources = lash_vm::LashVmHostCatalog::new();
         resources
             .add_named_data_type(
-                lashlang::NamedDataType::object(
+                lash_vm::NamedDataType::object(
                     "settings.Record",
-                    vec![lashlang::TypeField {
+                    vec![lash_vm::TypeField {
                         name: "value".into(),
-                        ty: lashlang::TypeExpr::Str,
+                        ty: lash_vm::TypeExpr::Str,
                         optional: false,
                     }],
                 )
@@ -643,7 +643,7 @@ mod process_settings_tests {
         resources
     }
 
-    /// A plugin contributing [`resources`] to the lashlang surface.
+    /// A plugin contributing [`resources`] to the lash_vm surface.
     fn resource_factory(
         observed: Arc<std::sync::Mutex<Vec<lash_core::SessionToolAccess>>>,
     ) -> Arc<dyn PluginFactory> {
@@ -656,9 +656,9 @@ mod process_settings_tests {
                     .push(context.tool_access.clone());
                 Ok(
                     lash_core::plugin::PluginSpec::new().with_extension_contribution(
-                        lash_lashlang_runtime::lashlang_surface_extension(
-                            &lash_lashlang_runtime::LashlangSurfaceContribution::new(
-                                lashlang::LashlangLanguageFeatures::default(),
+                        lash_vm_runtime::lash_vm_surface_extension(
+                            &lash_vm_runtime::LashVmSurfaceContribution::new(
+                                lash_vm::LashVmLanguageFeatures::default(),
                                 resources(),
                             ),
                         )
@@ -732,8 +732,8 @@ mod process_settings_tests {
         );
         let record = runtime_host
             .process_engines
-            .require(lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
-            .expect("the lashlang engine is installed")
+            .require(lash_vm_runtime::LASH_VM_ENGINE_KIND)
+            .expect("the lash_vm engine is installed")
             .creation_config(&environment)
             .expect("the settings record")
             .expect("captured settings are mapped into the process row");
@@ -767,10 +767,10 @@ mod process_settings_tests {
                 "process record contains unused RLM field {unused}"
             );
         }
-        let hand_built = lash_lashlang_runtime::LashlangProcessEngine::new(
+        let hand_built = lash_vm_runtime::LashVmProcessEngine::new(
             creating_factory.artifact_store(),
-            lash_lashlang_runtime::LashlangSurface::new(
-                lashlang::LashlangLanguageFeatures::default().with_label_annotations(),
+            lash_vm_runtime::LashVmSurface::new(
+                lash_vm::LashVmLanguageFeatures::default().with_label_annotations(),
                 resources(),
             ),
         )

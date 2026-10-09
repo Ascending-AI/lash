@@ -399,11 +399,11 @@ impl ParkReason {
             });
         }
         match error.code {
-            RuntimeErrorCode::LashlangCellReplayDivergence => {
+            RuntimeErrorCode::LashVmCellReplayDivergence => {
                 Some(Self::ReplayDivergence { message })
             }
             RuntimeErrorCode::RetiredGeneration => Some(Self::of_retired_generation(error)),
-            RuntimeErrorCode::LashlangCellBindingDrift => Some(Self::BindingDrift { message }),
+            RuntimeErrorCode::LashVmCellBindingDrift => Some(Self::BindingDrift { message }),
             RuntimeErrorCode::PluginRevisionUnavailable => match &error.cause {
                 Some(crate::RuntimeErrorCause::PluginExecution { refusal }) => {
                     Some(Self::PluginRevisionUnavailable {

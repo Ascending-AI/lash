@@ -76,24 +76,24 @@ async fn testing_facade_run_tool_granted_honors_the_granted_source_binding() {
 #[tokio::test]
 async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
     use crate::process::{ArgsMismatch, ArgsMode};
-    use lashlang::testing::ast_builders as b;
+    use lash_vm::testing::ast_builders as b;
     let backend = sqlite_memory_store_backend().await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .build(crate::testing::runtime_lease_owner())
         .expect("the core builds");
-    let environment = lash_lashlang_runtime::LashlangSurface::default()
+    let environment = lash_vm_runtime::LashVmSurface::default()
         .host_environment(&lash_core::ToolCatalog::default())
         .unwrap();
-    let compiled = lashlang::compile_module(lashlang::ModuleCompileRequest {
+    let compiled = lash_vm::compile_module(lash_vm::ModuleCompileRequest {
         source: "args-check",
         program: b::module(
             vec![b::process_returning(
                 "handler",
                 vec![
-                    b::param("event", lashlang::TypeExpr::Str),
-                    b::param("count", lashlang::TypeExpr::Int),
+                    b::param("event", lash_vm::TypeExpr::Str),
+                    b::param("count", lash_vm::TypeExpr::Int),
                 ],
-                lashlang::TypeExpr::Str,
+                lash_vm::TypeExpr::Str,
                 b::finish(b::var("event")),
             )],
             Vec::new(),
@@ -107,7 +107,7 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
         .await
         .unwrap();
     let draft =
-        lashlang::ProcessDefinitionIdentity::from_artifact_export(&compiled.artifact, "handler")
+        lash_vm::ProcessDefinitionIdentity::from_artifact_export(&compiled.artifact, "handler")
             .unwrap()
             .draft()
             .unwrap();

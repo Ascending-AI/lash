@@ -24,7 +24,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "agent.started_process_tool_call_graph",
         ),
         fact: "agent_started_process_tool_call_graph_execution",
-        assertion: "Agent facade starts a Lashlang process that executes app_lookup and records a completed labeled process graph",
+        assertion: "Agent facade starts a Lash VM process that executes app_lookup and records a completed labeled process graph",
         check: check_agent_started_process_tool_call_graph,
         extras_before: &[],
         extras_after: &[ExtraFact::ToolReentry {
@@ -52,7 +52,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "agent.started_process_child_spawn",
         ),
         fact: "agent_started_process_child_spawn_execution",
-        assertion: "Agent facade starts a Lashlang process that spawns a default subagent, preserves the labeled child-session graph, and returns the typed child value",
+        assertion: "Agent facade starts a Lash VM process that spawns a default subagent, preserves the labeled child-session graph, and returns the typed child value",
         check: check_agent_started_process_child_spawn,
         extras_before: &[],
         extras_after: &[],
@@ -68,7 +68,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
     ContractFactSpec {
         spec: contract_spec(AGENT_SCENARIO_CONTRACTS, "agent.nested_process_start_await"),
         fact: "agent_nested_process_start_await_execution",
-        assertion: "Agent facade starts a parent Lashlang process that starts and awaits a child process with connected graph evidence",
+        assertion: "Agent facade starts a parent Lash VM process that starts and awaits a child process with connected graph evidence",
         check: check_agent_nested_process_start_await,
         extras_before: &[],
         extras_after: &[],
@@ -98,7 +98,7 @@ pub(super) const AGENT_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "agent.tuple_values_finish_as_json_arrays",
         ),
         fact: "agent_tuple_values_finish_json_arrays_execution",
-        assertion: "Agent facade preserves Lashlang tuple projections as JSON arrays in final-value and runtime outcome evidence",
+        assertion: "Agent facade preserves Lash VM tuple projections as JSON arrays in final-value and runtime outcome evidence",
         check: check_agent_tuple_values_finish_as_json_arrays,
         extras_before: &[],
         extras_after: &[],
@@ -262,7 +262,7 @@ fn check_agent_nested_process_start_await(
     require_agent_min_u64(result, "/process_facts/process_count", 2, contract)?;
     require_agent_min_u64(
         result,
-        "/process_facts/completed_lashlang_process_count",
+        "/process_facts/completed_lash_vm_process_count",
         2,
         contract,
     )?;

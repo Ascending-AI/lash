@@ -4,10 +4,10 @@
 //! that reaches the observation has to describe the value. JavaScript's own
 //! string coercion answers `"[object Object]"` for every plain object and
 //! comma-joins arrays, which is exactly the case a cell reaches for. Objects and
-//! arrays therefore render as JSON — the same shape Lashlang's `print` shows —
+//! arrays therefore render as JSON — the same shape LashVm's `print` shows —
 //! while every other value keeps JavaScript's coercion.
 
-use lashlang::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
+use lash_vm::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
 
 #[derive(Default)]
 struct PrintHost(std::sync::Mutex<Vec<String>>);
@@ -33,7 +33,7 @@ impl ExecutionHost for PrintHost {
 fn printed(source: &str) -> Vec<String> {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     let host = PrintHost::default();
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &host))
         .expect("TypeScript should execute");
     let lines = host.0.lock().expect("print lock");
     lines.clone()
@@ -57,7 +57,7 @@ impl ExecutionHost for RawPrintHost {
 fn printed_values(source: &str) -> Vec<Value> {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     let host = RawPrintHost::default();
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &host))
         .expect("TypeScript should execute");
     let values = host.0.lock().expect("print lock");
     values.clone()
@@ -173,7 +173,7 @@ fn cyclic_objects_are_refused_before_they_can_be_printed() {
         lash_typescript::testing::compile("const a: any = {}; a.self = a; console.log(a);")
             .expect("compile");
     let host = PrintHost::default();
-    let error = futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+    let error = futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &host))
         .expect_err("a cyclic object never reaches the observation");
     assert!(
         format!("{error:?}").contains("Cyclic"),
@@ -258,12 +258,12 @@ fn a_shared_object_graph_refuses_at_the_byte_budget_instead_of_expanding() {
     )
     .expect("compile");
     let host = PrintHost::default();
-    let error = futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+    let error = futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &host))
         .expect_err("a shared graph that renders past the byte budget is refused");
     assert!(
         matches!(
             error,
-            lashlang::RuntimeError::MemoryLimitExceeded { limit, attempted }
+            lash_vm::RuntimeError::MemoryLimitExceeded { limit, attempted }
                 if limit == 8 * 1024 * 1024 && attempted <= limit + 64
         ),
         "expected a byte-budget refusal raised as soon as the budget was passed, got {error:?}"
@@ -286,10 +286,10 @@ fn the_byte_budget_covers_every_argument_together() {
     )
     .expect("compile");
     let host = PrintHost::default();
-    let error = futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+    let error = futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &host))
         .expect_err("two arguments that together pass the budget are refused");
     assert!(
-        matches!(error, lashlang::RuntimeError::MemoryLimitExceeded { .. }),
+        matches!(error, lash_vm::RuntimeError::MemoryLimitExceeded { .. }),
         "expected a byte-budget refusal, got {error:?}"
     );
 }

@@ -18,11 +18,11 @@ doctest = false
 
 [features]
 default = []
-testing = ["dep:lash-vm-worker", "lash-vm-client/testing", "lashlang/testing", "lash-core/testing"]
+testing = ["dep:lash-vm-worker", "lash-vm-client/testing", "lash-vm/testing", "lash-core/testing"]
 # Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
 # constants it moves, and the store's lift and pin tables they rely on. Only
 # lash-upgrade-harness enables it; no production build does.
-synthetic-next = ["lash-core/synthetic-next", "lashlang/synthetic-next", "lash-vm-client/synthetic-next", "lash-vm-worker?/synthetic-next"]
+synthetic-next = ["lash-core/synthetic-next", "lash-vm/synthetic-next", "lash-vm-client/synthetic-next", "lash-vm-worker?/synthetic-next"]
 
 [lints]
 workspace = true
@@ -35,9 +35,9 @@ lash-vm-protocol = { workspace = true }
 lash-trace = { workspace = true }
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
-lash-lashlang-runtime = { workspace = true }
+lash-vm-runtime = { workspace = true }
 lash-typescript = { workspace = true }
-lashlang = { workspace = true }
+lash-vm = { workspace = true }
 lash-rlm-types = { workspace = true }
 lash-render = { workspace = true }
 async-trait = { workspace = true }
@@ -54,7 +54,7 @@ lash-conformance = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 # The guarded-surface laws (FIG-3802) this crate runs over its own decoders.
 lash-core-store = { workspace = true, features = ["testing"] }
-lashlang = { workspace = true, features = ["testing"] }
+lash-vm = { workspace = true, features = ["testing"] }
 lash-sansio = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 insta = "1"

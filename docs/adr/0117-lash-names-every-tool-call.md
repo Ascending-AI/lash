@@ -76,7 +76,7 @@ and completion order do not renumber members.
 | Process-body command | Process admission, code opener, command ordinal, and aggregate index for a leaf |
 | Host submission | Submission admission and any content position assigned by its caller |
 
-`CodeCallIdentities` owns the code derivation shared by the Lashlang hosts and
+`CodeCallIdentities` owns the code derivation shared by the Lash VM hosts and
 worker broker. VM snapshots preserve the whole-program ordinal (ADR 0132 §8).
 Provider ids, arguments, tool names, attempt numbers, scheduling order and
 user labels are absent from the preimage.

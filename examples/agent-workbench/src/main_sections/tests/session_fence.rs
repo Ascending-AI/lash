@@ -427,13 +427,13 @@ async fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict()
             ),
         ),
         (
-            "GET /api/lashlang-graphs",
-            Box::pin(list_lashlang_graphs(State(state.clone()), Query(query())).map_ok(drop)),
+            "GET /api/lash-vm-graphs",
+            Box::pin(list_lash_vm_graphs(State(state.clone()), Query(query())).map_ok(drop)),
         ),
         (
-            "GET /api/lashlang-graph/{key}",
+            "GET /api/lash-vm-graph/{key}",
             Box::pin(
-                lashlang_graph(
+                lash_vm_graph(
                     AxumPath("any-graph".to_string()),
                     State(state.clone()),
                     Query(query()),

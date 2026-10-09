@@ -1,13 +1,13 @@
 use super::json_to_flow_value;
 use std::collections::BTreeSet;
 
-pub(super) fn process_handle_names(globals: &lashlang::Record) -> BTreeSet<String> {
+pub(super) fn process_handle_names(globals: &lash_vm::Record) -> BTreeSet<String> {
     globals
         .iter()
         .filter_map(|(name, value)| {
             value
                 .as_record()
-                .is_some_and(lashlang::is_process_handle)
+                .is_some_and(lash_vm::is_process_handle)
                 .then_some(name.to_string())
         })
         .collect()
@@ -24,7 +24,7 @@ pub(super) async fn apply_global_defaults(
     for key in patch.set_default.keys() {
         if is_reserved_global_name(key) || protected_names.contains(key) {
             return Err(lash_core::SessionError::Protocol(format!(
-                "`{key}` is a read-only projected host binding; choose a different Lashlang variable name for `set_default`"
+                "`{key}` is a read-only projected host binding; choose a different Lash VM variable name for `set_default`"
             )));
         }
     }

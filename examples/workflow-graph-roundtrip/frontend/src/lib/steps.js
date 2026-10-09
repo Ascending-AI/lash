@@ -8,7 +8,7 @@ import { editableKind, editableText } from './editableValue.js';
 // (no Svelte, no DOM) so the label mapping, the token-vs-static decision, the
 // nesting builder, and the diagnostic→row mapping are all unit-testable.
 //
-// It NEVER re-parses Lashlang: value classification consumes the facets the
+// It NEVER re-parses LashVm: value classification consumes the facets the
 // backend already attached (availableVars / expectedArgTypes), exactly like
 // lib/facets.js. Vocabulary here is deliberately soft ("Save X as", "Only if")
 // and will iterate.
@@ -336,7 +336,7 @@ export function humanizeIdent(ident) {
 // A value that is exactly an in-scope variable (a value produced by an earlier step) becomes a
 // colored TOKEN chip carrying its type; a bare literal becomes plain STATIC text (humanized);
 // anything compound stays an EXPRESSION pill.
-// Consumes the facet `availableVars` — never re-parses Lashlang beyond the trivial literal
+// Consumes the facet `availableVars` — never re-parses LashVm beyond the trivial literal
 // shapes lib/fields.js already recognizes.
 export function describeValue(text, availableVars = []) {
   const raw = text ?? '';
@@ -379,7 +379,7 @@ export function humanizeLiteral(lit) {
 // A one-line, plain-language gist of a step's key configuration, shown on a COLLAPSED
 // action/effect card so a reader understands what it does without expanding it (the main
 // density fix).
-// Consumes the node's typed `data.fields` (host-owned) and NEVER re-parses Lashlang — an
+// Consumes the node's typed `data.fields` (host-owned) and NEVER re-parses LashVm — an
 // expression-valued arg is shown as its stored text.
 // Caps at the first three set fields so a wide action stays a single calm line.
 export function stepSummary(node) {

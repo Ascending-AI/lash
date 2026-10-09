@@ -32,7 +32,7 @@ pub(crate) struct AppState {
     pub(crate) messages: Arc<Mutex<Vec<ChatMessage>>>,
     pub(crate) selected_llm_profile: Arc<Mutex<LlmProfileSelection>>,
     pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
-    pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
+    pub(crate) lash_vm_execution: Arc<TraceLashlangGraphStore>,
     pub(crate) event_tx: SessionEventRegistry,
     pub(crate) mail_world: mail::MailWorld,
     pub(crate) active_turns: ActiveTurns,

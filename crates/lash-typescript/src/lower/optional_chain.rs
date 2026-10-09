@@ -61,7 +61,7 @@ impl Lowerer {
                 Self::temp_assignment(
                     &next,
                     LashExpr::BuiltinCall {
-                        name: "__lashlang_call_method_dynamic".into(),
+                        name: "__lash_vm_call_method_dynamic".into(),
                         args: vec![
                             Self::variable(&receiver),
                             Self::variable(&callee),
@@ -187,7 +187,7 @@ impl Lowerer {
                 Self::temp_assignment(
                     &next,
                     LashExpr::BuiltinCall {
-                        name: "__lashlang_call_method_dynamic".into(),
+                        name: "__lash_vm_call_method_dynamic".into(),
                         args: vec![current.clone(), Self::variable(&callee), arguments],
                     },
                 ),

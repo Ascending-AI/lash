@@ -20,15 +20,15 @@
 
 use std::collections::BTreeSet;
 
-use lashlang::{AssignTarget, Expr as LashExpr};
+use lash_vm::{AssignTarget, Expr as LashExpr};
 
 use super::{Binding, LOWERED_BINDING_PREFIX, Lowerer};
 
-const CELL_NEW: &str = "__lashlang_cell_new";
-const CELL_GET: &str = "__lashlang_cell_get";
-const CELL_SET: &str = "__lashlang_cell_set";
-const GLOBAL_GET: &str = "__lashlang_global_get";
-const GLOBAL_SET: &str = "__lashlang_global_set";
+const CELL_NEW: &str = "__lash_vm_cell_new";
+const CELL_GET: &str = "__lash_vm_cell_get";
+const CELL_SET: &str = "__lash_vm_cell_set";
+const GLOBAL_GET: &str = "__lash_vm_global_get";
+const GLOBAL_SET: &str = "__lash_vm_global_set";
 
 fn builtin(name: &str, args: Vec<LashExpr>) -> LashExpr {
     LashExpr::BuiltinCall {

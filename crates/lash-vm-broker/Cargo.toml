@@ -18,7 +18,7 @@ doctest = false
 workspace = true
 
 [features]
-synthetic-next = ["lash-vm-protocol/synthetic-next", "lashlang/synthetic-next"]
+synthetic-next = ["lash-vm-protocol/synthetic-next", "lash-vm/synthetic-next"]
 # The in-process fake worker the broker's laws run behind the protocol types.
 testing = []
 
@@ -32,7 +32,7 @@ lash-core-execution = { workspace = true }
 lash-core-store = { workspace = true }
 lash-durable = { workspace = true }
 lash-sansio = { workspace = true }
-lashlang = { workspace = true }
+lash-vm = { workspace = true }
 lash-vm-protocol = { workspace = true }
 async-trait = { workspace = true }
 blake3 = { workspace = true }

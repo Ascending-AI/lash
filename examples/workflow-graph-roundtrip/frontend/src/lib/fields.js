@@ -126,7 +126,7 @@ export function parseLiteral(text) {
   return { type: 'expression', value: t };
 }
 
-// Encode a builder value back into canonical Lashlang literal text.
+// Encode a builder value back into canonical LashVm literal text.
 export function encodeLiteral(type, value) {
   switch (type) {
     case 'number': {
@@ -218,7 +218,7 @@ export function parseList(text) {
   return { items };
 }
 
-// Encode scalar items back into a canonical Lashlang list literal.
+// Encode scalar items back into a canonical LashVm list literal.
 export function encodeList(items) {
   return `[${(items ?? []).map((it) => encodeLiteral(it.type, it.value)).join(', ')}]`;
 }

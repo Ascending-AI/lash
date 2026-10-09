@@ -61,10 +61,10 @@ kiln gate lash "$LASH_MCP_NAMING_FORK" -- \
 ```
 
 Expect exactly five tests and `5 passed; 0 failed`. A TypeScript cell and a
-shared Lashlang IR cell call `docs.delete` and a hashed collision path through
+shared Lash VM IR cell call `docs.delete` and a hashed collision path through
 a real MCP peer. TypeScript still refuses `docs.then`. The recorded bare
 binding restores its original durable id after a collision rename or a
-foreign occupant. Its required live call yields `LashlangCellBindingDrift`,
+foreign occupant. Its required live call yields `LashVmCellBindingDrift`,
 which parks the turn. A process artifact requiring the old operation fails
 host-requirement admission. The runtime's existing replay and process-admission
 laws cover journaled outcomes and the `ProcessHostEnvironmentIncompatible`

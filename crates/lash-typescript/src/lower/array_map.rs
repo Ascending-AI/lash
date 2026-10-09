@@ -6,7 +6,7 @@
 //! it. This lowers to the VM's own map driver instead, which means it also
 //! owns the arity reasoning that decides which callback shapes can run at all.
 
-use lashlang::{
+use lash_vm::{
     AssignTarget, CatchClause, Expr as LashExpr, ExprFolder, FunctionExpr, TryExpr,
     fold_expr_children,
 };
@@ -93,7 +93,7 @@ impl Lowerer {
             };
             if !guard {
                 return Ok(LashExpr::BuiltinCall {
-                    name: "__lashlang_async_map".into(),
+                    name: "__lash_vm_async_map".into(),
                     args: vec![items, callback],
                 });
             }
@@ -108,7 +108,7 @@ impl Lowerer {
                 },
                 LashExpr::If {
                     condition: Box::new(LashExpr::BuiltinCall {
-                        name: "__lashlang_stdlib".into(),
+                        name: "__lash_vm_stdlib".into(),
                         args: vec![
                             LashExpr::String("Lash.OwnMethod".into()),
                             variable(),
@@ -117,11 +117,11 @@ impl Lowerer {
                     }),
                     then_block: Box::new(LashExpr::MethodCall {
                         receiver: Box::new(variable()),
-                        method: lashlang::MethodKey::Field("map".into()),
+                        method: lash_vm::MethodKey::Field("map".into()),
                         args: vec![lowered],
                     }),
                     else_block: Box::new(LashExpr::BuiltinCall {
-                        name: "__lashlang_async_map".into(),
+                        name: "__lash_vm_async_map".into(),
                         args: vec![variable(), callback],
                     }),
                 },
@@ -136,7 +136,7 @@ impl Lowerer {
                 // Pair each item with its index, then unpack in a generated
                 // one-parameter wrapper so the driver's arity still matches.
                 let pairs = LashExpr::BuiltinCall {
-                    name: "__lashlang_stdlib".into(),
+                    name: "__lash_vm_stdlib".into(),
                     args: vec![LashExpr::String("__enumerate".into()), items],
                 };
                 let pair = self.generated_binding("pair");
@@ -209,7 +209,7 @@ impl ExprFolder for SettleReturns {
 fn settle_async_callback(mut callback: LashExpr, reason: String) -> LashExpr {
     let function = match spans::unmarked_mut(&mut callback) {
         LashExpr::Function(function) => function.as_mut(),
-        LashExpr::BuiltinCall { name, args } if name.as_str() == "__lashlang_closure" => {
+        LashExpr::BuiltinCall { name, args } if name.as_str() == "__lash_vm_closure" => {
             let Some(LashExpr::Function(function)) = args.first_mut() else {
                 unreachable!("closure intrinsic starts with a function")
             };

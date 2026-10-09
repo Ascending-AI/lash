@@ -325,7 +325,7 @@ impl EffectOpener {
     /// else.
     ///
     /// Every surface that must name the owner of durable work — the lifecycle
-    /// parent a child start declares, the host identities the Lashlang bridges
+    /// parent a child start declares, the host identities the Lash VM bridges
     /// mint, the recorded attempt a tool body runs inside — derives through
     /// here. There is deliberately no registry parameter: the admitted scope
     /// already names its owner, and a process scope names the minted id of

@@ -438,7 +438,7 @@
       <span class="mark">◧</span>
       <div class="brand-text">
         <div class="brand-title">Workflow Graph Studio</div>
-        <div class="brand-sub">lashlang · code ⇄ graph ⇄ live run</div>
+        <div class="brand-sub">lash_vm · code ⇄ graph ⇄ live run</div>
       </div>
     </div>
 
@@ -475,7 +475,7 @@
             class="mode-btn"
             class:is-active={mode.power}
             onclick={() => mode.set('power')}
-            title="Raw Lashlang inputs, any node kind, and a live editable source pane"
+            title="Raw LashVm inputs, any node kind, and a live editable source pane"
           >
             Power
           </button>
@@ -570,7 +570,7 @@
         <div class="canvas-hint">
           {mode.simplified
             ? 'drag to reorder within a scope · use the ⤴ menu to move between scopes'
-            : 'power mode · raw Lashlang everywhere · edit the source pane to reshape the graph'}
+            : 'power mode · raw LashVm everywhere · edit the source pane to reshape the graph'}
         </div>
       {/if}
     </section>

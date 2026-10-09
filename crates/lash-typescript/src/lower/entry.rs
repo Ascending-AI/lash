@@ -5,7 +5,7 @@
 //! workflow-graph fragment — and they differ only in the ambient root scope
 //! they install beneath the program's own.
 
-use lashlang::{Expr as LashExpr, Program as LashProgram};
+use lash_vm::{Expr as LashExpr, Program as LashProgram};
 
 use super::{Binding, BindingKind, BindingRole, Lowerer, Scope, StatementScope};
 use crate::adapter;
@@ -25,7 +25,7 @@ pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnosti
 ///
 /// The RLM session model is that top-level bindings persist across cells: cell
 /// A writes `const findings = ...`, and cell B reads `findings` while the
-/// prompt lists it under `=== BOUND VARIABLES ===` with its value. Lashlang
+/// prompt lists it under `=== BOUND VARIABLES ===` with its value. Lash VM
 /// parses permissively and resolves those names at *link*, where the live
 /// session globals are known. This lowerer resolves every name at parse against
 /// source-local scopes, so cell B rejected with `TS_UNKNOWN_BINDING` for a name
@@ -243,14 +243,14 @@ fn lower_pass(
         .into_iter()
         .map(|name| LashExpr::If {
             condition: Box::new(super::constructs::js_unary(
-                lashlang::CoercingUnaryOp::Not,
+                lash_vm::CoercingUnaryOp::Not,
                 LashExpr::BuiltinCall {
-                    name: "__lashlang_global_has".into(),
+                    name: "__lash_vm_global_has".into(),
                     args: vec![LashExpr::String(name.clone().into())],
                 },
             )),
             then_block: Box::new(LashExpr::Assign {
-                target: lashlang::AssignTarget::variable(name.as_str().into()),
+                target: lash_vm::AssignTarget::variable(name.as_str().into()),
                 expr: Box::new(Lowerer::stdlib_call(
                     "Lash.Builtin",
                     vec![LashExpr::String(name.into())],

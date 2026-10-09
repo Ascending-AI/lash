@@ -36,8 +36,8 @@ constant_path = "crates/lash-perf/src/main.rs"
 reason = "mirrors the package version"
 
 [[unregistered]]
-constant = "LASHLANG_COMPILER_VERSION"
-constant_path = "crates/lashlang/src/artifact.rs"
+constant = "LASH_VM_COMPILER_VERSION"
+constant_path = "crates/lash-vm/src/artifact.rs"
 reason = "mirrors the package version"
 
 [[unregistered]]
@@ -67,7 +67,7 @@ reason = "versions a generated test artifact"
 
 [[unregistered]]
 constant = "SOURCE_CACHE_VERSION"
-constant_path = "crates/lashlang/src/runtime/cache.rs"
+constant_path = "crates/lash-vm/src/runtime/cache.rs"
 reason = "identifies a process-local cache rather than a serialized shape"
 
 [[unregistered]]
@@ -190,7 +190,7 @@ reason = "FIG-3571: source identity digests the admitted program, never printed 
 
 [[retired_hash_domain]]
 name = "lashlang-process-start/v2"
-reason = "superseded Lashlang child-process id"
+reason = "superseded Lash VM child-process id"
 
 [[retired_hash_domain]]
 name = "lashlang-process-start/v3"
@@ -207,3 +207,19 @@ reason = "FIG-5224: a cell names its commands by the broker's admitted ordinal; 
 [[retired_hash_domain]]
 name = "lash-google-upload-credential-scope/v2"
 reason = "FIG-5444: provider-file scope uses the host credential identity directly, replacing the credential hash"
+
+[[retired_hash_domain]]
+name = "lash-lashlang-cell-generation/v1"
+reason = "FIG-5571: the pre-1.0 substrate cutover uses the Lash VM namespace"
+
+[[retired_hash_domain]]
+name = "lash-lashlang-content/v2"
+reason = "FIG-5571: the pre-1.0 substrate cutover uses the Lash VM namespace"
+
+[[retired_hash_domain]]
+name = "lash-lashlang-executable/v1"
+reason = "FIG-5571: the pre-1.0 substrate cutover uses the Lash VM namespace"
+
+[[retired_hash_domain]]
+name = "lash-lashlang-program/v3"
+reason = "FIG-5571: the pre-1.0 substrate cutover uses the Lash VM namespace"

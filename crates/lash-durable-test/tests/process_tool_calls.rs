@@ -3,7 +3,7 @@
 //! `tool_call_identity/admission.rs` and `tool_batch_parallelism/limit.rs`
 //! process laws).
 //!
-//! An RLM turn's cell starts Lashlang processes; the core's node runs each
+//! An RLM turn's cell starts Lash VM processes; the core's node runs each
 //! process's `vm_run` steps and the catalog tool steps its body issues, on
 //! the production process steps, and the cell awaits their terminals.
 

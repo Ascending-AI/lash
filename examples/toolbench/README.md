@@ -276,8 +276,8 @@ channel, and the two rows for the retired language are historical only:
 | Cohort (channel/language) | First-call prompt before | First-call prompt after | Change |
 |---|---:|---:|---:|
 | standard/none | 1064 | 1064 | 0 |
-| cell/lashlang (retired) | 5114 | 4467 | -647 |
-| native/lashlang (retired) | 5143 | 4506 | -637 |
+| cell/lash_vm (retired) | 5114 | 4467 | -647 |
+| native/lash_vm (retired) | 5143 | 4506 | -637 |
 | cell/typescript | 4527 | 4527 | 0 |
 | native/typescript | 4590 | 4590 | 0 |
 

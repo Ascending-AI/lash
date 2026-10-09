@@ -216,7 +216,7 @@ impl crate::ModuleArtifactStore for UnavailableModuleArtifacts {
         _: &str,
         _: &[u8],
     ) -> Result<(), crate::ArtifactStoreError> {
-        StoreLawStores::no_second_substrate("Lashlang artifact store")
+        StoreLawStores::no_second_substrate("Lash VM artifact store")
     }
 
     async fn acquire_module_artifact(
@@ -224,21 +224,21 @@ impl crate::ModuleArtifactStore for UnavailableModuleArtifacts {
         _: &crate::ReferrerClaim,
         _: &str,
     ) -> Result<(), crate::ArtifactStoreError> {
-        StoreLawStores::no_second_substrate("Lashlang artifact store")
+        StoreLawStores::no_second_substrate("Lash VM artifact store")
     }
 
     async fn end_module_referrer(
         &self,
         _: &crate::ResolvedArtifactCleanup,
     ) -> Result<(), crate::ArtifactStoreError> {
-        StoreLawStores::no_second_substrate("Lashlang artifact store")
+        StoreLawStores::no_second_substrate("Lash VM artifact store")
     }
 
     async fn get_module_artifact(
         &self,
         _: &str,
     ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
-        StoreLawStores::no_second_substrate("Lashlang artifact store")
+        StoreLawStores::no_second_substrate("Lash VM artifact store")
     }
 }
 

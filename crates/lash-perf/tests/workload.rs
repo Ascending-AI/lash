@@ -358,14 +358,14 @@ fn streams_and_retry_ids_are_independent_and_shared_blobs_have_two_owners() {
     panic!("no shared attachment fixture");
 }
 
-fn provider_host() -> anyhow::Result<lashlang::LashlangHostEnvironment> {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+fn provider_host() -> anyhow::Result<lash_vm::LashVmHostEnvironment> {
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog.add_module_operation_contract(
         ["tools"],
         "Tools",
         "synthetic",
         "synthetic",
-        &lashlang::OperationContract::new(
+        &lash_vm::OperationContract::new(
             lash_perf::workload::tool_schema(),
             lash_perf::workload::tool_result_schema(),
         ),
@@ -379,15 +379,12 @@ fn provider_host() -> anyhow::Result<lashlang::LashlangHostEnvironment> {
             "Tools",
             name,
             name,
-            &lashlang::OperationContract::new(arguments, json!({"type": "object"})),
+            &lash_vm::OperationContract::new(arguments, json!({"type": "object"})),
         )?;
     }
     use lash_plugin_process_controls::{ProcessControlTool, process_tool_definition};
     for (name, definition) in [
-        (
-            "create",
-            lash_lashlang_runtime::process_create_tool_definition(),
-        ),
+        ("create", lash_vm_runtime::process_create_tool_definition()),
         ("start", process_tool_definition(ProcessControlTool::Start)),
         ("await", process_tool_definition(ProcessControlTool::Await)),
     ] {
@@ -397,20 +394,20 @@ fn provider_host() -> anyhow::Result<lashlang::LashlangHostEnvironment> {
             "Processes",
             name,
             name,
-            &lashlang::OperationContract::new(
+            &lash_vm::OperationContract::new(
                 contract.input_schema.canonical().clone(),
                 contract.output_schema.canonical().clone(),
             ),
         )?;
     }
-    Ok(lashlang::LashlangHostEnvironment::new(catalog))
+    Ok(lash_vm::LashVmHostEnvironment::new(catalog))
 }
 
-fn created_process_source(expr: &lashlang::Expr) -> Option<&str> {
-    if let lashlang::Expr::Record(fields) = expr {
+fn created_process_source(expr: &lash_vm::Expr) -> Option<&str> {
+    if let lash_vm::Expr::Record(fields) = expr {
         for (name, value) in fields {
             if name.as_str() == "source"
-                && let lashlang::Expr::String(source) = value
+                && let lash_vm::Expr::String(source) = value
             {
                 return Some(source.as_str());
             }
@@ -478,7 +475,7 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
                     .declarations
                     .iter()
                     .find_map(|declaration| {
-                        if let lashlang::Declaration::Process(process) = declaration {
+                        if let lash_vm::Declaration::Process(process) = declaration {
                             Some(process)
                         } else {
                             None
@@ -512,7 +509,7 @@ fn provider_cells_and_durable_bodies_parse_and_stream_to_the_sampled_latency() {
                 .declarations
                 .iter()
                 .filter_map(|declaration| match declaration {
-                    lashlang::Declaration::Process(process) => Some(process),
+                    lash_vm::Declaration::Process(process) => Some(process),
                     _ => None,
                 })
                 .collect();
@@ -850,38 +847,38 @@ fn smoke_workload_covers_every_durable_operation_class_in_its_first_turns() {
 
 struct PaddingHost;
 
-impl lashlang::ExecutionHost for PaddingHost {
+impl lash_vm::ExecutionHost for PaddingHost {
     async fn perform(
         &self,
-        op: lashlang::AbilityOp,
-    ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
+        op: lash_vm::AbilityOp,
+    ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
         match op {
-            lashlang::AbilityOp::Finish(value) => Ok(lashlang::AbilityOutcome::Value(value)),
-            lashlang::AbilityOp::ResourceOperation(op) if op.operation == "synthetic" => {
+            lash_vm::AbilityOp::Finish(value) => Ok(lash_vm::AbilityOutcome::Value(value)),
+            lash_vm::AbilityOp::ResourceOperation(op) if op.operation == "synthetic" => {
                 let bytes = op
                     .args
                     .first()
-                    .and_then(lashlang::Value::as_record)
+                    .and_then(lash_vm::Value::as_record)
                     .and_then(|argument| argument.get("record"))
-                    .and_then(lashlang::Value::as_record)
+                    .and_then(lash_vm::Value::as_record)
                     .and_then(|record| record.get("result_bytes"));
-                let Some(lashlang::Value::Number(bytes)) = bytes else {
-                    return Err(lashlang::ExecutionHostError::new("missing result bytes"));
+                let Some(lash_vm::Value::Number(bytes)) = bytes else {
+                    return Err(lash_vm::ExecutionHostError::new("missing result bytes"));
                 };
-                Ok(lashlang::AbilityOutcome::Value(lashlang::from_json(
+                Ok(lash_vm::AbilityOutcome::Value(lash_vm::from_json(
                     json!({"record":{"kind":"synthetic"},"payload":"x".repeat(*bytes as usize)}),
                 )))
             }
-            _ => Err(lashlang::ExecutionHostError::new(
+            _ => Err(lash_vm::ExecutionHostError::new(
                 "padding probe only finishes",
             )),
         }
     }
 
-    fn execution_bounds(&self) -> lashlang::ExecutionBounds {
-        lashlang::ExecutionBounds::new(
-            lashlang::ExecutionBound::instructions(1_000_000),
-            lashlang::ExecutionBounds::memory_bounded_default().memory_limit,
+    fn execution_bounds(&self) -> lash_vm::ExecutionBounds {
+        lash_vm::ExecutionBounds::new(
+            lash_vm::ExecutionBound::instructions(1_000_000),
+            lash_vm::ExecutionBounds::memory_bounded_default().memory_limit,
         )
     }
 }
@@ -963,18 +960,14 @@ async fn an_admitted_turn_and_an_earlier_queued_input_keep_every_tool_plan() {
         }
         probe.push_str("finish(out);");
         let linked = lash_typescript::link(&probe, &host).unwrap();
-        let program = lashlang::compile(
-            &linked.artifact,
-            lashlang::Entry::Main,
-            Some(linked.spans()),
-        )
-        .unwrap();
-        let outcome = lashlang::execute(&program, &mut lashlang::State::new(), &PaddingHost)
+        let program =
+            lash_vm::compile(&linked.artifact, lash_vm::Entry::Main, Some(linked.spans())).unwrap();
+        let outcome = lash_vm::execute(&program, &mut lash_vm::State::new(), &PaddingHost)
             .await
             .unwrap();
         assert_eq!(
             outcome,
-            lashlang::ExecutionOutcome::Finished(lashlang::from_json(json!(expected)))
+            lash_vm::ExecutionOutcome::Finished(lash_vm::from_json(json!(expected)))
         );
     }
 }

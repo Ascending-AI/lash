@@ -1,2 +1,2 @@
 # kind	name	status	reason	probe
-typescript	reserved-identifiers	rejected	TS_RESERVED_IDENTIFIER	const __lashlang_x = 1;
+typescript	reserved-identifiers	rejected	TS_RESERVED_IDENTIFIER	const __lash_vm_x = 1;

@@ -15,7 +15,7 @@ async fn a_started_process_reads_as_its_graph_and_canonical_source() {
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .build(crate::testing::runtime_lease_owner())
         .expect("the core builds");
-    let environment = lash_lashlang_runtime::LashlangSurface::default()
+    let environment = lash_vm_runtime::LashVmSurface::default()
         .host_environment(&lash_core::ToolCatalog::default())
         .expect("the default surface has an environment");
     let artifact = lash_typescript::link(GREETER, &environment)
@@ -34,7 +34,7 @@ async fn a_started_process_reads_as_its_graph_and_canonical_source() {
         .next()
         .expect("the greeter exports its process")
         .clone();
-    let draft = lashlang::ProcessDefinitionIdentity::from_artifact_export(&artifact, &entry)
+    let draft = lash_vm::ProcessDefinitionIdentity::from_artifact_export(&artifact, &entry)
         .expect("the export names a process")
         .draft()
         .expect("the definition descriptor");
@@ -88,7 +88,7 @@ async fn a_started_process_reads_as_its_graph_and_canonical_source() {
         .await
         .expect("the process's workflow reads")
     else {
-        panic!("a retained lashlang process has a workflow");
+        panic!("a retained lash_vm process has a workflow");
     };
     let process = core
         .processes()

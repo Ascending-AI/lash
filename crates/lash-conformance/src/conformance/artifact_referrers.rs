@@ -10,8 +10,8 @@ use lash_core::{
     ArtifactStoreId, FrameEnvironmentId, HostArtifactPin, ModuleArtifactStore, ReferrerClaim,
     ReferrerGuard, ResolvedArtifactCleanup,
 };
-use lashlang::testing::ast_builders as b;
-use lashlang::{ModuleArtifact, TypeExpr};
+use lash_vm::testing::ast_builders as b;
+use lash_vm::{ModuleArtifact, TypeExpr};
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -316,7 +316,7 @@ where
         referrer: source.clone(),
         carries: vec![ArtifactCarry {
             artifact: ArtifactName {
-                store: ArtifactStoreId::LashlangModule,
+                store: ArtifactStoreId::VmModule,
                 artifact_ref: key.to_owned(),
             },
             to: destination.clone(),

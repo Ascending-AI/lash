@@ -278,7 +278,7 @@ fn operational_cases_for_evidence(evidence: &str) -> &'static [&'static str] {
         "tool_result" => &["tool-boundary", "tool-loop"],
         "max_turn_stop" => &["tool-boundary", "max-turn-stop"],
         "final_value" => &["semantic-final-value", "final-value-event"],
-        "exec_code" => &["exec-boundary", "rlm-lashlang-exec"],
+        "exec_code" => &["exec-boundary", "rlm-lash-vm-exec"],
         "durable_effect" => &["durable-effect", "crash-reopen-effect-replay"],
         "provider_mutation" => &[
             "provider-failure",
@@ -310,9 +310,9 @@ fn operational_cases_for_semantic(semantic_oracle: &str) -> &'static [&'static s
         "standard.native_tool_loop_reenters_model"
         | "standard.tool_failure_feedback_reenters_model"
         | "standard.parallel_tool_results_checkpoint_once" => &["tool-loop"],
-        "rlm.lashlang_cell_exec_continues" => &["rlm-lashlang-exec"],
-        "rlm.streamed_lashlang_cell_exec_persists_trajectory" => {
-            &["rlm-lashlang-exec", "scheduler-owned-provider-events"]
+        "rlm.lash_vm_cell_exec_continues" => &["rlm-lash-vm-exec"],
+        "rlm.streamed_lash_vm_cell_exec_persists_trajectory" => {
+            &["rlm-lash-vm-exec", "scheduler-owned-provider-events"]
         }
         "rlm.typed_schema_mismatch_repair_loop" | "rlm.typed_schema_any_of_mismatch" => {
             &["provider-failure", "repair-loop"]
@@ -392,9 +392,9 @@ fn scenario_transition_kind(contract: &ScenarioContractSpec) -> &'static str {
             "standard.streamed-text-duplicate-free-finalization-transition"
         }
         "standard.initial_request_projection" => "standard.initial-request-projection-transition",
-        "rlm.lashlang_cell_exec_continues" => "rlm.lashlang-cell-exec-continue-transition",
-        "rlm.streamed_lashlang_cell_exec_persists_trajectory" => {
-            "rlm.streamed-lashlang-cell-exec-trajectory-transition"
+        "rlm.lash_vm_cell_exec_continues" => "rlm.lash-vm-cell-exec-continue-transition",
+        "rlm.streamed_lash_vm_cell_exec_persists_trajectory" => {
+            "rlm.streamed-lash-vm-cell-exec-trajectory-transition"
         }
         "rlm.exec_error_max_turn_stop" => "rlm.exec-error-max-turn-stop-transition",
         "rlm.exec_tool_control_frame_switch_terminal" => {
@@ -489,8 +489,8 @@ fn scenario_negative_fixture_for_contract(
         "rlm.empty_options_natural_default" => {
             return scenario_negative_fixture("rlm_empty_options_default_mode_broken");
         }
-        "rlm.lashlang_cell_exec_continues" => {
-            return scenario_negative_fixture("rlm_lashlang_cell_missing_continuation");
+        "rlm.lash_vm_cell_exec_continues" => {
+            return scenario_negative_fixture("rlm_lash_vm_cell_missing_continuation");
         }
         "agent.tuple_values_finish_as_json_arrays" => {
             return scenario_negative_fixture("agent_tuple_json_array_shape_broken");
@@ -517,7 +517,7 @@ fn scenario_negative_fixture_for_contract(
     }
 
     if has("exec_code") || contract.suite == "rlm" {
-        return scenario_negative_fixture("rlm_lashlang_cell_missing_continuation");
+        return scenario_negative_fixture("rlm_lash_vm_cell_missing_continuation");
     }
     if contract.suite == "standard" {
         return scenario_negative_fixture("standard_provider_error_missing_parser_matrix");
@@ -554,10 +554,10 @@ fn scenario_negative_fixture(fixture_id: &str) -> ScenarioNegativeFixture {
             expected_oracle_id: "sim.oracle.scenario.standard-contract.v1:standard_protocol_scenario_max_turns_terminates_after_tool_result",
             expected_reason_contains: "fixed-source replay validation",
         },
-        "rlm_lashlang_cell_missing_continuation" => ScenarioNegativeFixture {
-            fixture_id: "rlm-lashlang-cell-missing-continuation",
-            fixture_path: "crates/lash-sim/failure-fixtures/rlm-lashlang-cell-missing-continuation.json",
-            expected_oracle_id: "sim.oracle.scenario-mini.rlm.lashlang-cell-exec-continues.v1",
+        "rlm_lash_vm_cell_missing_continuation" => ScenarioNegativeFixture {
+            fixture_id: "rlm-lash-vm-cell-missing-continuation",
+            fixture_path: "crates/lash-sim/failure-fixtures/rlm-lash-vm-cell-missing-continuation.json",
+            expected_oracle_id: "sim.oracle.scenario-mini.rlm.lash-vm-cell-exec-continues.v1",
             expected_reason_contains: "did not continue after exec",
         },
         "rlm_typed_finish_terminal_event_missing" => ScenarioNegativeFixture {

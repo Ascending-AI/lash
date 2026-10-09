@@ -2,7 +2,7 @@
 //! a context claims exactly the scope its lent controller admits, and an
 //! empty aggregate is the program's defect.
 
-use lash_lashlang_runtime::ToolDefinitionBindingExt as _;
+use lash_vm_runtime::ToolDefinitionBindingExt as _;
 
 fn echo_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
@@ -14,7 +14,7 @@ fn echo_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["echo"], "say"))
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["echo"], "say"))
 }
 
 struct EchoToolProvider;
@@ -56,11 +56,11 @@ async fn run_cell(
             code: code.to_string(),
         },
         host.artifacts(),
-        lash_lashlang_runtime::LashlangSurface::default(),
+        lash_vm_runtime::LashVmSurface::default(),
         None,
         crate::projection::RlmProjectedBindings::default(),
         None,
-        lashlang::ExecutionBounds::unbounded(),
+        lash_vm::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
         crate::render::CodeRendererSlot::default(),
     )

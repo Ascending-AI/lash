@@ -1,4 +1,4 @@
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, RuntimeError,
     State, Value, Vm, VmRunOutcome,
 };
@@ -18,7 +18,7 @@ impl ExecutionHost for Host {
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
     let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("compile `{source}`: {error}"));
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
 }
 
 fn finished(source: &str) -> Value {
@@ -306,7 +306,7 @@ fn global_last_index_survives_a_real_park_between_exec_calls() {
         );
         let continuation = vm.suspend().expect("suspend between exec calls");
         let wire = serde_json::to_vec(&continuation).expect("encode continuation");
-        let restored = lashlang::VmInstance::pristine()
+        let restored = lash_vm::VmInstance::pristine()
             .open_continuation(&wire)
             .expect("restore continuation");
         let mut resumed = Vm::resume_from(restored, &program, &Host).expect("resume VM");
@@ -385,7 +385,7 @@ fn regexp_fuel_is_deterministic_and_uncatchable() {
     assert!(matches!(
         execute(&source),
         Err(RuntimeError::RegExpBudgetExceeded { limit })
-            if limit == lashlang::REGEXP_EXECUTION_FUEL
+            if limit == lash_vm::REGEXP_EXECUTION_FUEL
     ));
 }
 
@@ -408,10 +408,10 @@ impl ExecutionHost for BudgetedHost {
         }
     }
 
-    fn execution_bounds(&self) -> lashlang::ExecutionBounds {
-        lashlang::ExecutionBounds::new(
-            lashlang::ExecutionBound::Bounded(self.instructions),
-            lashlang::ExecutionBound::Bounded(lashlang::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
+    fn execution_bounds(&self) -> lash_vm::ExecutionBounds {
+        lash_vm::ExecutionBounds::new(
+            lash_vm::ExecutionBound::Bounded(self.instructions),
+            lash_vm::ExecutionBound::Bounded(lash_vm::DEFAULT_HOST_MEMORY_LIMIT_BYTES),
         )
     }
 }
@@ -422,7 +422,7 @@ fn execute_budgeted(source: &str, instructions: u64) -> Result<ExecutionOutcome,
     let host = BudgetedHost {
         instructions: std::num::NonZeroU64::new(instructions).expect("nonzero budget"),
     };
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &host))
 }
 
 #[test]
@@ -471,7 +471,7 @@ fn a_regexp_heavy_loop_exhausts_the_instruction_budget() {
 /// two runs of the same program spend the same budget on every replay.
 #[test]
 fn the_regexp_charge_is_the_documented_ratio() {
-    let per_call = lashlang::REGEXP_EXECUTION_FUEL / lashlang::REGEXP_FUEL_PER_INSTRUCTION;
+    let per_call = lash_vm::REGEXP_EXECUTION_FUEL / lash_vm::REGEXP_FUEL_PER_INSTRUCTION;
     let source = "finish(/ab+c/.test('xxabbbc'));";
     // One call costs its charge plus the handful of instructions the cell's own
     // opcodes cost, and cannot cost less than the charge.

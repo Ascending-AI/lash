@@ -1,5 +1,5 @@
 use super::*;
-use lash_lashlang_runtime::TraceLanguageExecutionFailure;
+use lash_vm_runtime::TraceLanguageExecutionFailure;
 
 #[test]
 fn printed_cell_refuses_missing_or_mismatched_recorded_renderer() {
@@ -20,11 +20,11 @@ fn printed_cell_refuses_missing_or_mismatched_recorded_renderer() {
                     code: "print('value');".to_string(),
                 },
                 handler.artifacts(),
-                LashlangSurface::default(),
+                LashVmSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
                 None,
-                lashlang::ExecutionBounds::unbounded(),
+                lash_vm::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
                 crate::render::CodeRendererSlot::default(),
             )
@@ -52,7 +52,7 @@ impl crate::render::CodeRenderer for JournalPrintRenderer {
 
     fn print(
         &self,
-        value: &lashlang::Value,
+        value: &lash_vm::Value,
         params: &lash_render::RenderParams,
     ) -> lash_render::Rendered<String> {
         self.calls.fetch_add(1, Ordering::SeqCst);
@@ -79,11 +79,11 @@ fn bounded_test_entry_uses_the_recorded_params_and_supplied_renderer() {
                 code: "print('abcdefgh');".into(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             None,
             RlmProjectedBindings::default(),
             None,
-            lashlang::ExecutionBounds::unbounded(),
+            lash_vm::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
             crate::render::CodeRendererSlot(Arc::new(JournalPrintRenderer {
                 calls: Arc::clone(&calls),
@@ -111,10 +111,7 @@ fn approval_request_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(
-        ["approval"],
-        "request",
-    ))
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["approval"], "request"))
     .with_execution_policy(lash_core::ExecutionPolicy::repeatable(
         std::num::NonZeroU32::new(3).expect("nonzero attempt bound"),
         10,
@@ -197,11 +194,11 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
                 .to_string(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             None,
             RlmProjectedBindings::default(),
             None,
-            lashlang::ExecutionBounds::unbounded(),
+            lash_vm::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
         .await;
@@ -257,11 +254,11 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                     )),
                 ExecRequest { code: code.into() },
                 handler.artifacts(),
-                LashlangSurface::default(),
+                LashVmSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
                 Some(test_trace(sink.clone())),
-                lashlang::ExecutionBounds::unbounded(),
+                lash_vm::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             ).await;
             assert!(response.error().is_some(), "the effect must fail: {code}");
@@ -326,7 +323,7 @@ while (final_ids.length < 2 && pool_i < candidate_pools.length) {
 finish(final_ids);"#;
 
     let program = lash_typescript::parse(source).expect("while should parse");
-    lashlang::testing::harness::try_compile_program(&program).expect("while should compile");
+    lash_vm::testing::harness::try_compile_program(&program).expect("while should compile");
 }
 
 async fn execute_typescript_test_cell(
@@ -341,11 +338,11 @@ async fn execute_typescript_test_cell(
             code: code.to_string(),
         },
         handler.artifacts(),
-        LashlangSurface::default(),
+        LashVmSurface::default(),
         None,
         RlmProjectedBindings::default(),
         None,
-        lashlang::ExecutionBounds::unbounded(),
+        lash_vm::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
     .await;
@@ -458,7 +455,7 @@ fn echo_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["echo"], "say"))
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["echo"], "say"))
 }
 
 struct EchoToolProvider;
@@ -498,11 +495,11 @@ async fn pending_handle_cell(code: &str) -> (lash_core::ExecResponse, usize) {
         context,
         ExecRequest { code: code.into() },
         handler.artifacts(),
-        LashlangSurface::default(),
+        LashVmSurface::default(),
         None,
         RlmProjectedBindings::default(),
         None,
-        lashlang::ExecutionBounds::unbounded(),
+        lash_vm::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
     .await;
@@ -636,11 +633,11 @@ fn code_mode_receives_the_structured_tool_value_and_ignores_its_view() {
                 code: "finish(await echo.say({ text: 'structured' }));".to_string(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             None,
             RlmProjectedBindings::default(),
             None,
-            lashlang::ExecutionBounds::unbounded(),
+            lash_vm::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
         .await;
@@ -657,7 +654,7 @@ fn code_mode_receives_the_structured_tool_value_and_ignores_its_view() {
 /// The aggregate sits in a function declaration, which is where an aggregate
 /// ordinarily sits once a cell factors its work into helpers, and which is the
 /// case the compiler describes with no execution site at all:
-/// `lashlang_execution_paths` walks `program.main`. With no site, every leaf
+/// `lash_vm_execution_paths` walks `program.main`. With no site, every leaf
 /// used to fall back to its position inside the batch, so the second call of
 /// `pair` re-minted the first call's two identities and the batch re-minted the
 /// first batch's content hash — one effect replay key for two aggregates, and
@@ -693,11 +690,11 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
                 .to_string(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             None,
             RlmProjectedBindings::default(),
             None,
-            lashlang::ExecutionBounds::unbounded(),
+            lash_vm::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
         .await;
@@ -724,7 +721,7 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
         // Each aggregate is one command with its own issue ordinal, and each
         // leaf's id is derived from that ordinal and its position in the
         // aggregate (FIG-3586, ADR 0117): the derivation is pinned by
-        // `LashlangHostIdentities`' own laws.
+        // `LashVmHostIdentities`' own laws.
     });
 }
 
@@ -803,7 +800,7 @@ fn widened_contract_definition() -> lash_core::ToolDefinition {
             { "type":"object", "properties": {"text":{}}, "additionalProperties":false }
         ]
     }), serde_json::json!({"type":"string"})).expect("valid declared tool schemas").with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["bounded"], "say"))
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["bounded"], "say"))
 }
 
 struct WidenedContractProvider(Arc<AtomicUsize>);
@@ -836,7 +833,7 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
     block_on(async {
         let catalog =
             lash_core::ToolCatalog::from_tool_definitions(vec![widened_contract_definition()]);
-        let environment = LashlangSurface::default()
+        let environment = LashVmSurface::default()
             .host_environment(&catalog)
             .expect("bridge contract");
         for (arguments, expected, dispatches) in [
@@ -867,7 +864,7 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
                     .expected_arguments
                     .iter()
                     .any(|slot| slot.slot.to_string() == "arg[0]"
-                        && slot.ty == lashlang::TypeExpr::Any),
+                        && slot.ty == lash_vm::TypeExpr::Any),
                 "the multi-allOf schema widens: {facets:?}"
             );
             let calls = Arc::new(AtomicUsize::new(0));
@@ -884,11 +881,11 @@ fn runtime_schema_validation_uses_declared_contract_after_inference_widens() {
                 context,
                 ExecRequest { code },
                 handler.artifacts(),
-                LashlangSurface::default(),
+                LashVmSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
                 None,
-                lashlang::ExecutionBounds::unbounded(),
+                lash_vm::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             )
             .await;
@@ -941,11 +938,11 @@ fn l21_scalar_and_aggregate_record_attempts_in_the_opener() {
                 .into(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             None,
             RlmProjectedBindings::default(),
             None,
-            lashlang::ExecutionBounds::unbounded(),
+            lash_vm::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
         )
         .await;

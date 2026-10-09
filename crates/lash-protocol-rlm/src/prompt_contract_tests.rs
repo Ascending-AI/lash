@@ -5,7 +5,7 @@
 
 use crate::dialect::SessionDialect;
 
-use lash_lashlang_runtime::{LashlangSurface, ToolBinding, ToolDefinitionBindingExt};
+use lash_vm_runtime::{LashVmSurface, ToolBinding, ToolDefinitionBindingExt};
 
 fn catalog() -> lash_core::ToolCatalog {
     lash_core::ToolCatalog::from_tool_definitions(catalog_definitions())
@@ -53,13 +53,13 @@ fn process_catalog() -> lash_core::ToolCatalog {
 }
 
 fn dialect(enabled: bool) -> SessionDialect {
-    let surface = LashlangSurface {
+    let surface = LashVmSurface {
         language_features: if enabled {
-            lashlang::LashlangLanguageFeatures::default().with_label_annotations()
+            lash_vm::LashVmLanguageFeatures::default().with_label_annotations()
         } else {
-            lashlang::LashlangLanguageFeatures::default()
+            lash_vm::LashVmLanguageFeatures::default()
         },
-        ..LashlangSurface::default()
+        ..LashVmSurface::default()
     };
     crate::dialect::SessionDialect::prompt_only(
         std::sync::Arc::new(crate::dialect::TypescriptDialect),

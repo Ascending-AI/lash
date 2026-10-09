@@ -162,7 +162,7 @@ async fn concurrent_host_appends_settle_through_the_command_lane_exactly_once() 
 }
 
 /// Deleting a session other than the selected one leaves the selected
-/// session's rows, Lashlang graphs and mail accounts as they were.
+/// session's rows, Lash VM graphs and mail accounts as they were.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
     let workbench = Workbench::silent().await;
@@ -191,7 +191,7 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
         .expect("add selected-session mail account");
     let messages_before = serde_json::to_value(state.messages_snapshot())
         .expect("serialize selected-session messages");
-    let graphs_before = state.lashlang_execution.graphs();
+    let graphs_before = state.lash_vm_execution.graphs();
     let mail_before = serde_json::to_value(state.mail_world.account_summaries())
         .expect("serialize selected-session mail accounts");
 
@@ -210,7 +210,7 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
         serde_json::to_value(state.messages_snapshot()).expect("serialize messages after delete"),
         messages_before
     );
-    assert_eq!(state.lashlang_execution.graphs(), graphs_before);
+    assert_eq!(state.lash_vm_execution.graphs(), graphs_before);
     assert_eq!(
         serde_json::to_value(state.mail_world.account_summaries())
             .expect("serialize mail accounts after delete"),

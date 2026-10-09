@@ -2,7 +2,7 @@
 //! `async` arrow the lowerer's process wrapper comes from, and the type
 //! annotations on its parameters and settled output.
 
-use lashlang::{Expr, ProcessDecl, ProcessLiteralExpr, TypeExpr};
+use lash_vm::{Expr, ProcessDecl, ProcessLiteralExpr, TypeExpr};
 
 use super::{
     Printed, Printer, TypeScriptSourceError, label_comment, property_name, string_literal,
@@ -50,7 +50,7 @@ impl<'p> Printer<'p> {
 
     /// A process parameter with the annotation its declared type lowers
     /// from, so a typed parameter keeps its type through a re-admission.
-    pub(super) fn process_param(&self, param: &lashlang::ProcessParam) -> Printed {
+    pub(super) fn process_param(&self, param: &lash_vm::ProcessParam) -> Printed {
         let name = self.identifier("process parameter", param.name.as_str())?;
         Ok(match type_annotation(&param.ty)? {
             Some(annotation) => format!("{name}: {annotation}"),
@@ -61,10 +61,10 @@ impl<'p> Printer<'p> {
 
 /// A process's authored parameters: a lifted literal's hidden start arguments
 /// are not among them.
-pub(super) fn authored_params(process: &ProcessDecl) -> &[lashlang::ProcessParam] {
+pub(super) fn authored_params(process: &ProcessDecl) -> &[lash_vm::ProcessParam] {
     let hidden = match &process.origin {
-        lashlang::ProcessOrigin::Lifted { hidden_params, .. } => *hidden_params as usize,
-        lashlang::ProcessOrigin::Declared => 0,
+        lash_vm::ProcessOrigin::Lifted { hidden_params, .. } => *hidden_params as usize,
+        lash_vm::ProcessOrigin::Declared => 0,
     };
     &process.params[..process.params.len().saturating_sub(hidden)]
 }

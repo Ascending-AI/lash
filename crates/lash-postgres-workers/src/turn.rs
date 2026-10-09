@@ -209,7 +209,7 @@ fn metadata() -> lash_core::LlmProfileMetadata {
 
 /// The dialect's worker service with its run deadlines off the clock: a
 /// held tool call keeps its cell waiting for as long as the case holds it.
-fn untimed_workers() -> lash::rlm::WorkerService {
+fn untimed_workers() -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::rlm::TypescriptDialect
         .worker_service()
@@ -218,7 +218,7 @@ fn untimed_workers() -> lash::rlm::WorkerService {
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
-    lash::rlm::WorkerService::new(config)
+    lash::vm::WorkerService::new(config)
 }
 
 /// The runbook's deployment over `backend`, as `witness` writes to the

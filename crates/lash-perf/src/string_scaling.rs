@@ -5,7 +5,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use anyhow::{Context, bail};
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionEnvironment, ExecutionHost, ExecutionHostError,
     ExecutionOutcome, State, Value,
 };
@@ -115,18 +115,18 @@ struct Report {
     scaling: Vec<ScalingResult>,
 }
 
-fn compile(source: &str) -> anyhow::Result<lashlang::CompiledProgram> {
+fn compile(source: &str) -> anyhow::Result<lash_vm::CompiledProgram> {
     let program = lash_typescript::parse_with_globals(source, &BTreeSet::new())
         .map_err(|error| anyhow::anyhow!("parse TypeScript: {error}"))?;
     let spans = program.spans.clone();
-    let artifact = lashlang::ModuleArtifact::from_program(program)
+    let artifact = lash_vm::ModuleArtifact::from_program(program)
         .map_err(|error| anyhow::anyhow!("create module artifact: {error}"))?;
-    lashlang::compile(&artifact, lashlang::Entry::Main, Some(&spans))
+    lash_vm::compile(&artifact, lash_vm::Entry::Main, Some(&spans))
         .map_err(|error| anyhow::anyhow!("compile TypeScript: {error}"))
 }
 
 async fn execute(
-    compiled: &lashlang::CompiledProgram,
+    compiled: &lash_vm::CompiledProgram,
     workload: Workload,
     iterations: usize,
     expected: f64,
@@ -139,7 +139,7 @@ async fn execute(
     } else {
         ExecutionEnvironment::new(&host)
     };
-    let outcome = lashlang::execute(compiled, &mut state, &env).await?;
+    let outcome = lash_vm::execute(compiled, &mut state, &env).await?;
     match outcome {
         ExecutionOutcome::Finished(Value::Number(value)) if value == expected => {}
         other => bail!("{} at {iterations} returned {other:?}", workload.name()),

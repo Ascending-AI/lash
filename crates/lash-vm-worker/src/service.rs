@@ -1,10 +1,10 @@
 use lash_core_execution::FleetFormat;
+use lash_vm::VmInstance;
 use lash_vm_client::{
     PoolError,
     service::{Capture, CompiledModule, Request, Response, StateAction, StateMetadata, StateView},
 };
 use lash_vm_protocol::{Detail, EncodedPayload, PayloadKind, RunInput, RunRefusal, VmStateKind};
-use lashlang::VmInstance;
 
 pub(crate) fn perform(
     frontend: &dyn crate::Frontend,
@@ -16,7 +16,7 @@ pub(crate) fn perform(
     let response = match request {
         Request::VerifyArtifact { bytes } => {
             use lash_vm_client::service::ArtifactVerification;
-            let verification = match lashlang::ModuleArtifact::from_store_bytes(&bytes) {
+            let verification = match lash_vm::ModuleArtifact::from_store_bytes(&bytes) {
                 Ok(_) => ArtifactVerification::Match,
                 Err(error) => ArtifactVerification::Refused(error.into()),
             };
@@ -41,27 +41,27 @@ pub(crate) fn perform(
             environment,
         } => match compile_module(frontend, &source, &environment, false)? {
             Response::Module(module) => {
-                let artifact = lashlang::ModuleArtifact::from_store_bytes(&module.artifact.bytes)
+                let artifact = lash_vm::ModuleArtifact::from_store_bytes(&module.artifact.bytes)
                     .map_err(undecodable_artifact)?;
                 let mut processes = artifact.exports().processes.keys();
                 match (processes.next(), processes.next()) {
                     (Some(name), None) => {
-                        let identity = lashlang::ProcessDefinitionIdentity::from_artifact_export(
+                        let identity = lash_vm::ProcessDefinitionIdentity::from_artifact_export(
                             &artifact, name,
                         )
                         .ok_or_else(|| inconsistent_artifact("missing process export"))?;
                         let signature = lash_core_execution::ProcessSignature::known(
-                            lashlang::type_expr_to_json_schema(
+                            lash_vm::type_expr_to_json_schema(
                                 &identity
                                     .resolve_process_type(&artifact)
                                     .map_err(inconsistent_artifact)?,
                             ),
                         );
                         let draft = lash_core_execution::ProcessDefinitionDraft::new(
-                            "lashlang",
+                            "lashvm",
                             identity.to_process_value(),
                             [lash_core_execution::ArtifactName {
-                                store: lash_core_execution::ArtifactStoreId::LashlangModule,
+                                store: lash_core_execution::ArtifactStoreId::VmModule,
                                 artifact_ref: artifact.module_ref().to_string(),
                             }],
                         )
@@ -94,10 +94,10 @@ pub(crate) fn perform(
             environment,
         } => linked_module(&source, program, &environment, false)?,
         Request::CompileAst { program, .. } => {
-            match lashlang::ModuleArtifact::from_program(program) {
+            match lash_vm::ModuleArtifact::from_program(program) {
                 Ok(artifact) => {
                     let introspection = artifact.introspect().map_err(inconsistent_artifact)?;
-                    Response::Module(compiled_output(lashlang::ModuleCompileOutput {
+                    Response::Module(compiled_output(lash_vm::ModuleCompileOutput {
                         module_ref: artifact.module_ref().clone(),
                         host_requirements_ref: artifact.host_requirements_ref().clone(),
                         artifact,
@@ -123,10 +123,10 @@ pub(crate) fn perform(
                 .operand_stack
                 .iter_mut()
                 .chain(continuation.slots.iter_mut().flatten())
-                .find(|value| matches!(value, lashlang::Value::Ref(_)));
+                .find(|value| matches!(value, lash_vm::Value::Ref(_)));
             let closure_root = root.is_some();
             if remove_first_reference && let Some(root) = root {
-                *root = lashlang::Value::Null;
+                *root = lash_vm::Value::Null;
             }
             parked.vm = EncodedPayload(
                 continuation
@@ -152,7 +152,7 @@ pub(crate) fn perform(
             },
         },
         Request::References { source } => match frontend.parse(&source, None) {
-            Ok(program) => Response::References(lashlang::referenced_receiver_call_paths(&program)),
+            Ok(program) => Response::References(lash_vm::referenced_receiver_call_paths(&program)),
             Err(error) => refusal(error),
         },
         Request::CompileModule {
@@ -164,7 +164,7 @@ pub(crate) fn perform(
             let snapshot = vm
                 .open_snapshot(&snapshot)
                 .map_err(|error| undecodable_state(VmStateKind::Snapshot, error))?;
-            vm.replace_state(lashlang::State::from_snapshot(snapshot));
+            vm.replace_state(lash_vm::State::from_snapshot(snapshot));
             Response::OpaqueBindings(vm.state().opaque_bindings_with(&config))
         }
         Request::State { snapshot, action } => {
@@ -172,7 +172,7 @@ pub(crate) fn perform(
                 let snapshot = vm
                     .open_snapshot(&snapshot)
                     .map_err(|error| undecodable_state(VmStateKind::Snapshot, error))?;
-                vm.replace_state(lashlang::State::from_snapshot(snapshot));
+                vm.replace_state(lash_vm::State::from_snapshot(snapshot));
             }
             match action {
                 StateAction::Inspect => {}
@@ -228,7 +228,7 @@ pub(crate) fn perform(
             let snapshot = vm
                 .open_snapshot(&snapshot)
                 .map_err(|error| undecodable_state(VmStateKind::Snapshot, error))?;
-            vm.replace_state(lashlang::State::from_snapshot(snapshot));
+            vm.replace_state(lash_vm::State::from_snapshot(snapshot));
             Response::Captured(capture(vm, &baseline, fleet)?)
         }
     };
@@ -268,7 +268,7 @@ fn refusal(error: crate::FrontendRefusal) -> Response {
 fn compile_module(
     frontend: &dyn crate::Frontend,
     source: &str,
-    environment: &lashlang::LashlangHostEnvironment,
+    environment: &lash_vm::LashVmHostEnvironment,
     cell: bool,
 ) -> Result<Response, PoolError> {
     match frontend.parse(source, cell.then_some(environment)) {
@@ -278,16 +278,16 @@ fn compile_module(
 }
 fn linked_module(
     source: &str,
-    program: lashlang::Program,
-    environment: &lashlang::LashlangHostEnvironment,
+    program: lash_vm::Program,
+    environment: &lash_vm::LashVmHostEnvironment,
     cell: bool,
 ) -> Result<Response, PoolError> {
-    match lashlang::LinkedModule::link(program, environment) {
+    match lash_vm::LinkedModule::link(program, environment) {
         Ok(linked) => {
             let artifact = linked.artifact;
             let introspection = artifact.introspect().map_err(inconsistent_artifact)?;
             Ok(Response::Module(compiled_output(
-                lashlang::ModuleCompileOutput {
+                lash_vm::ModuleCompileOutput {
                     module_ref: artifact.module_ref().clone(),
                     host_requirements_ref: artifact.host_requirements_ref().clone(),
                     artifact,
@@ -298,13 +298,13 @@ fn linked_module(
         Err(error) => {
             let policy = matches!(
                 error,
-                lashlang::LinkError::BareToolCall { .. }
-                    | lashlang::LinkError::FeatureDisabled { .. }
-                    | lashlang::LinkError::OpaqueHostDescriptorAccess { .. }
-                    | lashlang::LinkError::ProcessLifecycleOutsideProcess { .. }
+                lash_vm::LinkError::BareToolCall { .. }
+                    | lash_vm::LinkError::FeatureDisabled { .. }
+                    | lash_vm::LinkError::OpaqueHostDescriptorAccess { .. }
+                    | lash_vm::LinkError::ProcessLifecycleOutsideProcess { .. }
             );
-            let mut diagnostic = lashlang::format_link_diagnostic(source, &error);
-            if cell && let lashlang::LinkError::BareToolCall { suggestion, .. } = &error {
+            let mut diagnostic = lash_vm::format_link_diagnostic(source, &error);
+            if cell && let lash_vm::LinkError::BareToolCall { suggestion, .. } = &error {
                 let suffix = diagnostic
                     .find('\n')
                     .map(|i| &diagnostic[i..])
@@ -317,7 +317,7 @@ fn linked_module(
                 }
             }
             Ok(Response::CompileRefused {
-                error: lashlang::ModuleCompileError::Link(lashlang::ModuleCompileDiagnostic {
+                error: lash_vm::ModuleCompileError::Link(lash_vm::ModuleCompileDiagnostic {
                     message: error.to_string(),
                     span: error.span(),
                     diagnostic: Some(diagnostic),
@@ -362,16 +362,16 @@ fn capture(
         .fragments
         .into_iter()
         .map(|(name, fragment)| match fragment {
-            lashlang::DurableFragment::Changed(bytes) => {
+            lash_vm::DurableFragment::Changed(bytes) => {
                 let digest = blake3::hash(&bytes).to_hex().to_string();
                 let unchanged = since.get(&name) == Some(&digest);
                 baseline.insert(name.clone(), digest);
                 (
                     name,
                     if unchanged {
-                        lashlang::DurableFragment::Unchanged
+                        lash_vm::DurableFragment::Unchanged
                     } else {
-                        lashlang::DurableFragment::Changed(bytes)
+                        lash_vm::DurableFragment::Changed(bytes)
                     },
                 )
             }
@@ -388,13 +388,13 @@ fn capture(
 
 /// The artifact `bytes` decode to, when it is the one stored under `module_ref`.
 fn verified(
-    module_ref: &lashlang::ModuleRef,
+    module_ref: &lash_vm::ModuleRef,
     bytes: &[u8],
-) -> Result<lashlang::ModuleArtifact, lashlang::ModuleArtifactRefusal> {
-    let artifact = lashlang::ModuleArtifact::from_store_bytes(bytes)?;
+) -> Result<lash_vm::ModuleArtifact, lash_vm::ModuleArtifactRefusal> {
+    let artifact = lash_vm::ModuleArtifact::from_store_bytes(bytes)?;
     if artifact.module_ref() != module_ref {
-        return Err(lashlang::ModuleArtifactRefusal::Corrupt(
-            lashlang::ModuleArtifactCorruption::StorageKeyMismatch {
+        return Err(lash_vm::ModuleArtifactRefusal::Corrupt(
+            lash_vm::ModuleArtifactCorruption::StorageKeyMismatch {
                 expected: module_ref.to_string(),
                 actual: artifact.module_ref().to_string(),
             },
@@ -403,9 +403,7 @@ fn verified(
     Ok(artifact)
 }
 
-fn compiled_output(
-    output: lashlang::ModuleCompileOutput,
-) -> Result<Box<CompiledModule>, PoolError> {
+fn compiled_output(output: lash_vm::ModuleCompileOutput) -> Result<Box<CompiledModule>, PoolError> {
     Ok(Box::new(CompiledModule {
         module_ref: output.module_ref,
         host_requirements_ref: output.host_requirements_ref,
@@ -414,7 +412,7 @@ fn compiled_output(
     }))
 }
 fn inspect(
-    artifact: &lashlang::ModuleArtifact,
+    artifact: &lash_vm::ModuleArtifact,
 ) -> Result<lash_vm_client::InspectedArtifact, PoolError> {
     let mut processes = std::collections::BTreeMap::new();
     for name in artifact.exports().processes.keys() {
@@ -443,6 +441,6 @@ fn inspect(
         exports: artifact.exports().clone(),
         source_identity: artifact.source_identity(),
         processes,
-        graph: lashlang::workflow_graph_from_artifact(artifact, &lashlang::NoStatementText),
+        graph: lash_vm::workflow_graph_from_artifact(artifact, &lash_vm::NoStatementText),
     })
 }

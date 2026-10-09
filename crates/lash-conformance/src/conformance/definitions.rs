@@ -63,7 +63,7 @@ impl crate::ProcessEngine for ModuleDefinitionEngine {
         payload: &serde_json::Value,
     ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
         Ok(vec![crate::ArtifactName {
-            store: crate::ArtifactStoreId::LashlangModule,
+            store: crate::ArtifactStoreId::VmModule,
             artifact_ref: module_of(payload)?,
         }])
     }
@@ -268,7 +268,7 @@ impl World {
             DEFINITION_ENGINE,
             serde_json::json!({ "module": module_ref }),
             [crate::ArtifactName {
-                store: crate::ArtifactStoreId::LashlangModule,
+                store: crate::ArtifactStoreId::VmModule,
                 artifact_ref: module_ref.clone(),
             }],
         )

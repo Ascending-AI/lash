@@ -2,7 +2,7 @@
 // validating builders: its fields are private, so no struct literal can pair
 // a raw program with refs that do not describe it.
 
-use lash::rlm::lang::{ModuleArtifact, Program};
+use lash::vm::{ir::Program, ModuleArtifact};
 
 fn no_struct_literal(artifact: &ModuleArtifact, ir: Program) -> ModuleArtifact {
     ModuleArtifact {

@@ -424,7 +424,7 @@ impl Checkout {
             && let Err(error) = state.check(&StateExpectation {
                 kind,
                 owner: &start.owner,
-                reads: &lashlang::vm_contract_reads(),
+                reads: &lash_vm::vm_contract_reads(),
                 max_bytes: self.pool.config.protocol.max_vm_state_bytes,
             })
         {
@@ -864,7 +864,7 @@ impl Checkout {
                                 owner: self.owner.as_ref().ok_or_else(|| {
                                     PoolError::breach(SequenceFault::MissingOwner)
                                 })?,
-                                reads: &lashlang::vm_contract_reads(),
+                                reads: &lash_vm::vm_contract_reads(),
                                 max_bytes: self.pool.config.protocol.max_vm_state_bytes,
                             })
                             .map_err(InfrastructureOutcome::output_state)?;

@@ -147,8 +147,8 @@ Configuration is read from `.env` or the process environment:
   isolated.
 - `AGENT_WORKBENCH_TRACE`: JSONL trace path, default
   `.agent-workbench/trace.jsonl`.
-- `AGENT_WORKBENCH_LASHLANG_EXECUTION_TRACE`: JSONL Lashlang execution graph
-  trace path, default `.agent-workbench/lashlang-execution.jsonl`.
+- `AGENT_WORKBENCH_LASH_VM_EXECUTION_TRACE`: JSONL Lash VM execution graph
+  trace path, default `.agent-workbench/lash-vm-execution.jsonl`.
 - `AGENT_WORKBENCH_OPEN`: set to `0` to skip opening the browser.
 - `AGENT_WORKBENCH_TOKIO_STACK_BYTES`: Tokio worker thread stack for the
   workbench process, default `8388608`. Override only when diagnosing stack
@@ -289,7 +289,7 @@ reference invokes it before snapshot/observation, turn enqueue, turn-input
 enqueue, and cancellation. Its local default is intentionally allow-all; a
 production host replaces `AllowAllWorkbenchAuthorizer` with its identity and
 policy adapter. Lash does not define product-specific auth.
-The Lashlang graph panel is backed by `TraceLashlangGraphStore`, a public
+The Lash VM graph panel is backed by `TraceLashlangGraphStore`, a public
 trace-derived observation store for foreground blocks, durable process runs,
 and child execution links; command operations still go through the session's
 `SessionProcessAdmin` facade.

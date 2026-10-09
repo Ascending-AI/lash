@@ -71,7 +71,7 @@ the model's surrounding prose.
 - HTTP truth: `GET /healthz` and `GET /api/state?session_id=<S>`.
 - Disk truth: `<data-dir>/deferred-tool-grants.db`, the SQLite session graph in
   `<data-dir>/lash-sessions.db`, `<data-dir>/trace.jsonl`, and
-  `<data-dir>/lashlang-execution.jsonl`.
+  `<data-dir>/lash-vm-execution.jsonl`.
 - Teardown: `bash scripts/agent-workbench-dev.sh down --port <port>` with the same run/data variables, then
   verify the Workbench process is gone.
 
@@ -102,7 +102,7 @@ order:
 
 1. The completed `search_tools` result in `trace.jsonl` names `text.sha256` in its
    observation. Save the exact record(s) as `01-search-observation.json`.
-2. `lashlang-execution.jsonl` shows the search and deferred call in distinct foreground
+2. `lash-vm-execution.jsonl` shows the search and deferred call in distinct foreground
    cells, in that order. Save the matching records as `01-two-blocks.json`.
 3. A completed raw `workbench_deferred_text_sha256` tool call exists after the search
    observation. Save it as `01-deferred-call.json`.

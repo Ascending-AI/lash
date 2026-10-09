@@ -90,7 +90,7 @@ runs ([guide §1](durable-hosting.md#no-engine-server)).
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
-| [ ] | `apps/lash-runtime/src/engine.rs:317` | `RuntimeAwareLashlangProcessEngine` implements `ProcessEngine` with `validate_start`, `run`, `identity` and `durability_tier`. `run` loads the process's env, rebuilds a `LashlangProcessEngine` with product-specific event declarations (`materialize`, `:282`) and runs it. | Delete the wrapper. The RLM protocol plugin factory registers lash's lashlang engine, whose `advance` answers `Steps([vm_run])` ([guide §4](durable-hosting.md#4-host-process-engines)). The process log contains closed lifecycle facts only. Product events use host deferring tools; Figments selects each started process's tools and pins its definition explicitly (ADR 0137). | contract change |
+| [ ] | `apps/lash-runtime/src/engine.rs:317` | `RuntimeAwareLashVmProcessEngine` implements `ProcessEngine` with `validate_start`, `run`, `identity` and `durability_tier`. `run` loads the process's env, rebuilds a `LashVmProcessEngine` with product-specific event declarations (`materialize`, `:282`) and runs it. | Delete the wrapper. The RLM protocol plugin factory registers lash's lash_vm engine, whose `advance` answers `Steps([vm_run])` ([guide §4](durable-hosting.md#4-host-process-engines)). The process log contains closed lifecycle facts only. Product events use host deferring tools; Figments selects each started process's tools and pins its definition explicitly (ADR 0137). | contract change |
 | [ ] | `apps/lash-runtime/src/engine.rs:28` | `RuntimeAwareRlmProtocolPluginFactory` wraps the RLM factory to pass the artifact and env stores to the engine. | The stores come from the backend; keep the wrapper only for its surface contribution. | contract change |
 
 This is the only `ProcessEngine` implementation in Figments.
@@ -104,7 +104,7 @@ a VM sees is plain data, so decision 7 ("every live host object maps to a
 
 | Done | Site | Today | On 1.0 | Mark |
 | --- | --- | --- | --- | --- |
-| [ ] | `apps/lash-runtime/src/triggers/mod.rs:266` | Decodes a trigger source with `lashlang::HostDescriptor::decode`, which is plain data. | Keep the source descriptor as Figments data; registration, input mapping validation, provisioning and routing belong to the host (ADR 0137). | contract change |
+| [ ] | `apps/lash-runtime/src/triggers/mod.rs:266` | Decodes a trigger source with `lash_vm::HostDescriptor::decode`, which is plain data. | Keep the source descriptor as Figments data; registration, input mapping validation, provisioning and routing belong to the host (ADR 0137). | contract change |
 | [ ] | `apps/control-plane/crates/chat/src/turn_runtime.rs:90` | Maps `ToolArgumentProjectionPolicy` to its remote form. | Keep the policy; define Figments' own transport projection around it. Lash supplies no wire DTO or conversion (ADR 0136). | mechanical |
 
 A future Figments projection is a `ProjectionProvider` registered on the

@@ -26,9 +26,9 @@ snapshots. Process lifetime and identity follow
 [ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md) and
 [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md).
 
-Evidence: `crates/lash-lashlang-runtime/src/process_create_tool.rs`,
-`crates/lashlang/src/runtime/vm/continuation.rs`, and
-`crates/lashlang/src/linker/`.
+Evidence: `crates/lash-vm-runtime/src/process_create_tool.rs`,
+`crates/lash-vm/src/runtime/vm/continuation.rs`, and
+`crates/lash-vm/src/linker/`.
 
 ### Contracts say `Process` through one tagged keyword
 
@@ -40,10 +40,10 @@ is a claim; engine resolution supplies authority and refuses mismatches before
 registration, under
 [ADR 0090](0090-named-process-signatures-are-authoritative.md).
 
-Evidence: `crates/lashlang/src/json_schema.rs`,
-`crates/lash-lashlang-runtime/src/process/schema.rs`,
+Evidence: `crates/lash-vm/src/json_schema.rs`,
+`crates/lash-vm-runtime/src/process/schema.rs`,
 `crates/lash-core-execution/src/runtime/process/definition.rs`, and
-`crates/lashlang/src/linker/catalog.rs`.
+`crates/lash-vm/src/linker/catalog.rs`.
 
 ### Definitions are immutable values
 
@@ -95,7 +95,7 @@ Both a definition value and its tagged id can retain the closure in a frame;
 Evidence: `crates/lash-core-execution/src/runtime/process/definition.rs`,
 `crates/lash-sansio/src/definition_id.rs`,
 `crates/lash-core-execution/src/runtime/process/definition_store.rs`, and
-`crates/lash-lashlang-runtime/src/process_create_tool.rs`.
+`crates/lash-vm-runtime/src/process_create_tool.rs`.
 The independent golden vectors and laws live in
 `crates/lash-core-execution/src/runtime/process/definition_tests.rs`.
 
@@ -111,7 +111,7 @@ structural node id and occurrence are telemetry.
 
 Evidence: `crates/lash-core-execution/src/runtime/process/model/start_request.rs`,
 `crates/lash-core-store/src/process_identity.rs`, and
-`crates/lash-lashlang-runtime/src/host_identity.rs`.
+`crates/lash-vm-runtime/src/host_identity.rs`.
 
 ### Literals lift syntactically, and are accepted type-directed
 
@@ -122,7 +122,7 @@ Immutable, durably representable captured locals become hidden parameters.
 Host callbacks and approvals are deferring tool calls with checked schemas
 under ADR 0137. No call-site marker owns literal lifting.
 
-Evidence: `crates/lashlang/src/linker/process_literal.rs`, and `crates/lash-typescript/src/lower`.
+Evidence: `crates/lash-vm/src/linker/process_literal.rs`, and `crates/lash-typescript/src/lower`.
 
 ### One handle kind, and await is a Durable Wait
 
@@ -144,7 +144,7 @@ canonical `ProcessAwaitOutput`, including process failure or cancellation;
 `Cancelled` is cancellation of the observing wait. No source timeout exists.
 
 Evidence: `crates/lash-sansio/src/handle.rs`,
-`crates/lashlang/src/runtime/vm/pending_tools.rs`, and
+`crates/lash-vm/src/runtime/vm/pending_tools.rs`, and
 `crates/lash-core-execution/src/runtime/effect/executor/process_local.rs`.
 [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)
 owns Run settlement, and
@@ -154,8 +154,8 @@ owns Run settlement, and
 
 A process start projects as a call; a literal projects as a process container.
 The code-graph-code lens follows
-[ADR 0037](0037-lashlang-workflows-use-a-code-graph-code-lens.md).
-Evidence: `crates/lashlang/src/workflow_graph/projection.rs`.
+[ADR 0037](0037-lash-vm-workflows-use-a-code-graph-code-lens.md).
+Evidence: `crates/lash-vm/src/workflow_graph/projection.rs`.
 
 ## Alternatives considered
 

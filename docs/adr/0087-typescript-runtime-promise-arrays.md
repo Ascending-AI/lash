@@ -77,7 +77,7 @@ phase or cancellation grace from being used inside an aggregate.
 ## Code references
 
 - `crates/lash-typescript/src/lower/constructs.rs` defines aggregate operand await depth.
-- `crates/lashlang/src/runtime/vm/pending_tools.rs-260` classifies values and builds one deduplicated batch.
+- `crates/lash-vm/src/runtime/vm/pending_tools.rs-260` classifies values and builds one deduplicated batch.
 - `crates/lash-typescript/tests/runtime_promises.rs` covers runtime arrays and invalid handle repairs.
 - `crates/lash-typescript/tests/agent_surface.rs` covers the dialect's agent surface.
 - Durable round settlement is implemented in `crates/lash-core-execution/src/runtime/actor/round/lifecycle.rs`; the former settlement-latency test registration is retired.

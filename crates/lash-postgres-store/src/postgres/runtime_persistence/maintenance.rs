@@ -15,8 +15,8 @@ impl StoreMaintenance for PostgresStore {
     /// Checkpoint-rooted mark/sweep over `lash_blobs`, mirroring the SQLite
     /// store's semantics ([`GcReport`] fields match). PostgreSQL stores each
     /// checkpoint as one manifest plus separately addressed tool, plugin, and
-    /// execution-state components. The Lashlang artifact namespaces live
-    /// in a separate, upsert-in-place table (`lash_lashlang_artifacts`).
+    /// execution-state components. The Lash VM artifact namespaces live
+    /// in a separate, upsert-in-place table (`lash_lash_vm_artifacts`).
     /// Those artifact rows are retained service roots, so GC does not touch
     /// this table.
     async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {

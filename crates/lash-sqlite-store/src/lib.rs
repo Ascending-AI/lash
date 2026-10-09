@@ -165,7 +165,7 @@ use queued_work::*;
 use schema::{apply_pragmas, ensure_versioned_schema};
 
 /// SQLite-backed store for checkpoint blobs, runtime session state, and
-/// Lashlang artifacts.
+/// Lash VM artifacts.
 ///
 /// This is the first-party local implementation of the runtime store traits.
 /// Internally it holds one writer connection and a fixed pool of readers.
@@ -445,7 +445,7 @@ fn process_encode_json<T: serde::Serialize>(
 pub enum PersistedArtifactKind {
     CheckpointManifest,
     CheckpointComponent,
-    LashlangModule,
+    VmModule,
     ProcessExecutionEnv,
     ProcessDefinition,
     ToolMaterial,
@@ -488,7 +488,7 @@ impl BlobArtifactDescriptor {
         ])
     }
 
-    pub fn lashlang_module() -> Self {
+    pub fn lash_vm_module() -> Self {
         Self::new(vec![
             BlobStorageHint::Compressible,
             BlobStorageHint::LargePayload,

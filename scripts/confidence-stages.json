@@ -232,22 +232,22 @@
             "shards": 2
           },
           {
-            "package": "lash-internal-lashlang",
+            "package": "lash-internal-vm",
             "shard": 1,
             "shards": 4
           },
           {
-            "package": "lash-internal-lashlang",
+            "package": "lash-internal-vm",
             "shard": 2,
             "shards": 4
           },
           {
-            "package": "lash-internal-lashlang",
+            "package": "lash-internal-vm",
             "shard": 3,
             "shards": 4
           },
           {
-            "package": "lash-internal-lashlang",
+            "package": "lash-internal-vm",
             "shard": 4,
             "shards": 4
           },

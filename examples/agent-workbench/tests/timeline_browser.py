@@ -184,7 +184,7 @@ def handler_for(bench: Workbench):
                                 "current_session_id": SESSION})
             elif url.path in ("/api/work", "/api/queued-work", "/api/approvals", "/api/triggers", "/api/accounts"):
                 self.send_json([])
-            elif url.path == "/api/lashlang-graphs":
+            elif url.path == "/api/lash-vm-graphs":
                 self.send_json({"graphs": [], "lineage_edges": []})
             else:
                 self.send_json({"error": "not scripted"}, 404)

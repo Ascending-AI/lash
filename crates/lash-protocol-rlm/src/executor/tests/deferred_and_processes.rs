@@ -17,16 +17,16 @@ pub(super) fn deferred_fetch_definition() -> lash_core::ToolDefinition {
     )
     .expect("valid declared tool schemas")
     .with_execution(std::time::Duration::from_secs(120))
-    .with_tool_binding(lash_lashlang_runtime::ToolBinding::new(["web"], "fetch"))
+    .with_tool_binding(lash_vm_runtime::ToolBinding::new(["web"], "fetch"))
 }
 
 #[async_trait::async_trait]
-impl lash_lashlang_runtime::DeferredToolResolver for CountingDeferredResolver {
+impl lash_vm_runtime::DeferredToolResolver for CountingDeferredResolver {
     async fn resolve(
         &self,
-        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        _cx: &lash_vm_runtime::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    ) -> BTreeMap<String, lash_vm_runtime::Resolution> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         self.batches
             .lock_recover()
@@ -35,12 +35,12 @@ impl lash_lashlang_runtime::DeferredToolResolver for CountingDeferredResolver {
             .iter()
             .map(|path| {
                 let resolution = if *path == "web.fetch" {
-                    lash_lashlang_runtime::Resolution::Resolved(Box::new(
-                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition())
+                    lash_vm_runtime::Resolution::Resolved(Box::new(
+                        lash_vm_runtime::ToolGrant::new(deferred_fetch_definition())
                             .with_source_id(lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID),
                     ))
                 } else {
-                    lash_lashlang_runtime::Resolution::NotAvailable
+                    lash_vm_runtime::Resolution::NotAvailable
                 };
                 ((*path).to_string(), resolution)
             })
@@ -50,8 +50,8 @@ impl lash_lashlang_runtime::DeferredToolResolver for CountingDeferredResolver {
     fn install_recorded_grant(
         &self,
         path: &str,
-        _grant: &lash_lashlang_runtime::ToolGrant,
-    ) -> Result<(), lash_lashlang_runtime::RecordedGrantInstallError> {
+        _grant: &lash_vm_runtime::ToolGrant,
+    ) -> Result<(), lash_vm_runtime::RecordedGrantInstallError> {
         assert_eq!(path, "web.fetch");
         self.installed.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -166,19 +166,19 @@ pub(super) struct BindingDeferredResolver {
 }
 
 #[async_trait::async_trait]
-impl lash_lashlang_runtime::DeferredToolResolver for BindingDeferredResolver {
+impl lash_vm_runtime::DeferredToolResolver for BindingDeferredResolver {
     async fn resolve(
         &self,
-        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        _cx: &lash_vm_runtime::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    ) -> BTreeMap<String, lash_vm_runtime::Resolution> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         paths
             .iter()
             .map(|path| {
                 let resolution = if *path == "web.fetch" {
-                    lash_lashlang_runtime::Resolution::Resolved(Box::new(
-                        lash_lashlang_runtime::ToolGrant::new(deferred_fetch_definition())
+                    lash_vm_runtime::Resolution::Resolved(Box::new(
+                        lash_vm_runtime::ToolGrant::new(deferred_fetch_definition())
                             .with_source_id(lash_core::facade_support::PLUGIN_TOOL_SOURCE_ID)
                             .with_execution_binding(serde_json::json!({
                                 "kind": "test",
@@ -186,7 +186,7 @@ impl lash_lashlang_runtime::DeferredToolResolver for BindingDeferredResolver {
                             })),
                     ))
                 } else {
-                    lash_lashlang_runtime::Resolution::NotAvailable
+                    lash_vm_runtime::Resolution::NotAvailable
                 };
                 ((*path).to_string(), resolution)
             })
@@ -206,7 +206,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
         let calls = Arc::new(AtomicUsize::new(0));
         let batches = Arc::new(std::sync::Mutex::new(Vec::new()));
         let installed = Arc::new(AtomicUsize::new(0));
-        let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+        let resolver: lash_vm_runtime::SharedDeferredToolResolver =
             Arc::new(CountingDeferredResolver {
                 calls: Arc::clone(&calls),
                 batches: Arc::clone(&batches),
@@ -243,7 +243,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
             first_ctx.clone(),
             deferred_matrix_request(),
             turn_1.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
             None,
@@ -258,7 +258,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
                 .as_ref()
                 .expect("active link")
                 .get("web.fetch"),
-            Some(lash_lashlang_runtime::Resolution::Resolved(_))
+            Some(lash_vm_runtime::Resolution::Resolved(_))
         ));
         assert!(matches!(
             state
@@ -266,7 +266,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
                 .as_ref()
                 .expect("active link")
                 .get("mystery.x"),
-            Some(lash_lashlang_runtime::Resolution::NotAvailable)
+            Some(lash_vm_runtime::Resolution::NotAvailable)
         ));
         assert!(first_ctx.tool_catalog().tools.is_empty());
 
@@ -308,7 +308,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
             second_ctx.clone(),
             deferred_matrix_request(),
             turn_1.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
             None,
@@ -337,7 +337,7 @@ pub(super) fn deferred_link_is_scoped_to_the_exec_code_link() {
             next_turn_ctx.clone(),
             deferred_matrix_request(),
             turn_1.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
             None,
@@ -375,7 +375,7 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
         let executions = Arc::new(AtomicUsize::new(0));
         let observed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
         let enumerations = Arc::new(AtomicUsize::new(0));
-        let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+        let resolver: lash_vm_runtime::SharedDeferredToolResolver =
             Arc::new(BindingDeferredResolver {
                 calls: Arc::clone(&resolver_calls),
             });
@@ -386,13 +386,13 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
                 enumerations: Arc::clone(&enumerations),
             });
         let handler = crate::testing::DurableHost::open(restricted_empty_deferred_scope(
-            "restricted-empty-lashlang-deferred",
+            "restricted-empty-lash-vm-deferred",
         ))
         .await;
         let (ctx, registry) = restricted_empty_deferred_context(
             &handler,
             provider,
-            "restricted-empty-lashlang-deferred",
+            "restricted-empty-lash-vm-deferred",
         )
         .await;
         let enumerations_after_catalog = enumerations.load(Ordering::SeqCst);
@@ -410,7 +410,7 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
                 .to_string(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
             None,
@@ -449,7 +449,7 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
                 .as_ref()
                 .expect("active link")
                 .get("web.fetch"),
-            Some(lash_lashlang_runtime::Resolution::Resolved(_))
+            Some(lash_vm_runtime::Resolution::Resolved(_))
         ));
         assert!(
             lash_core::ToolProvider::resolve_manifest_by_id(
@@ -474,7 +474,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
         let executions = Arc::new(AtomicUsize::new(0));
         let observed_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
         let enumerations = Arc::new(AtomicUsize::new(0));
-        let resolver: lash_lashlang_runtime::SharedDeferredToolResolver =
+        let resolver: lash_vm_runtime::SharedDeferredToolResolver =
             Arc::new(BindingDeferredResolver {
                 calls: Arc::clone(&resolver_calls),
             });
@@ -516,7 +516,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
                 .to_string(),
             },
             handler.artifacts(),
-            LashlangSurface::default(),
+            LashVmSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
             None,

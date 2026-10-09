@@ -9,7 +9,7 @@ annotations must not become a second language representation.
 ## Decision
 
 Value types are derived, read-only workflow facets. The TypeScript projection
-and Lashlang linker share the host operation contracts and resolved IR under
+and Lash VM linker share the host operation contracts and resolved IR under
 ADRs 0037, 0091, and 0100.
 
 ### D1: Type diagnostics and draft policy
@@ -85,13 +85,13 @@ or identify an admitted artifact by itself.
 
 ## Code references
 
-- `crates/lashlang/src/linker/` defines assignability.
-- `crates/lash-lashlang-runtime/src/lib.rs:492-534` preserves tool contracts.
-- `crates/lashlang/src/linker/catalog.rs:60-82` imports operation schemas.
-- `crates/lashlang/src/linker/pass_setup.rs:330-379` resolves closed schema witnesses.
-- `crates/lashlang/src/linker/type_helpers.rs:61-98` joins and widens local bindings.
+- `crates/lash-vm/src/linker/` defines assignability.
+- `crates/lash-vm-runtime/src/lib.rs:492-534` preserves tool contracts.
+- `crates/lash-vm/src/linker/catalog.rs:60-82` imports operation schemas.
+- `crates/lash-vm/src/linker/pass_setup.rs:330-379` resolves closed schema witnesses.
+- `crates/lash-vm/src/linker/type_helpers.rs:61-98` joins and widens local bindings.
 - `crates/lash-typescript/src/workflow_graph/mod.rs:44-114` distinguishes draft and artifact projections.
-- `crates/lashlang/src/workflow_graph/facets.rs:12-45,389-430` defines and derives facets.
-- `crates/lashlang/src/workflow_graph.rs:174-184` discards incompatible facet data.
+- `crates/lash-vm/src/workflow_graph/facets.rs:12-45,389-430` defines and derives facets.
+- `crates/lash-vm/src/workflow_graph.rs:174-184` discards incompatible facet data.
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

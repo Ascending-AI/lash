@@ -57,7 +57,7 @@ pub(super) const RLM_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "rlm.finish_required_diagnostic_counts",
         ),
         fact: "rlm_finish_required_diagnostic_counts",
-        assertion: "finish-required prose diagnostic records exact prose/code/reasoning/lashlang counts",
+        assertion: "finish-required prose diagnostic records exact prose/code/reasoning/lash_vm counts",
         check: check_rlm_finish_required_diagnostic_counts,
         extras_before: &[],
         extras_after: &[],
@@ -68,7 +68,7 @@ pub(super) const RLM_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "rlm.natural_diagnostic_counts",
         ),
         fact: "rlm_natural_diagnostic_counts",
-        assertion: "natural prose diagnostic records exact prose/code/reasoning/lashlang counts",
+        assertion: "natural prose diagnostic records exact prose/code/reasoning/lash_vm counts",
         check: check_rlm_natural_diagnostic_counts,
         extras_before: &[],
         extras_after: &[],
@@ -79,7 +79,7 @@ pub(super) const RLM_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "rlm.cell_diagnostic_counts",
         ),
         fact: "rlm_cell_diagnostic_counts",
-        assertion: "mixed reasoning/prose/lashlang diagnostic records one cell and the concrete executed code",
+        assertion: "mixed reasoning/prose/lash_vm diagnostic records one cell and the concrete executed code",
         check: check_rlm_cell_diagnostic_counts,
         extras_before: &[],
         extras_after: &[ExtraFact::Exec {
@@ -90,42 +90,42 @@ pub(super) const RLM_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
     ContractFactSpec {
         spec: contract_spec(
             RLM_PROTOCOL_SCENARIO_CONTRACTS,
-            "rlm.retired_marker_plain_lashlang_text",
+            "rlm.retired_marker_plain_lash_vm_text",
         ),
-        fact: "rlm_retired_marker_plain_lashlang_text",
-        assertion: "retired percent LashLang marker inside a source block remains plain source text and executes as one cell",
-        check: check_rlm_retired_marker_plain_lashlang_text,
+        fact: "rlm_retired_marker_plain_lash_vm_text",
+        assertion: "retired percent Lash VM marker inside a source block remains plain source text and executes as one cell",
+        check: check_rlm_retired_marker_plain_lash_vm_text,
         extras_before: &[],
         extras_after: &[ExtraFact::Exec {
-            fact: "rlm_retired_marker_plain_lashlang_text",
+            fact: "rlm_retired_marker_plain_lash_vm_text",
             requirement: ExecFactRequirement::NoToolCallReplay,
         }],
     },
     ContractFactSpec {
         spec: contract_spec(
             RLM_PROTOCOL_SCENARIO_CONTRACTS,
-            "rlm.lashlang_cell_exec_continues",
+            "rlm.lash_vm_cell_exec_continues",
         ),
-        fact: "rlm_lashlang_cell_exec_continues",
-        assertion: "LashLang cell execution records concrete output, checkpoints after work, and re-enters the model loop",
-        check: check_rlm_lashlang_cell_exec_continues,
+        fact: "rlm_lash_vm_cell_exec_continues",
+        assertion: "Lash VM cell execution records concrete output, checkpoints after work, and re-enters the model loop",
+        check: check_rlm_lash_vm_cell_exec_continues,
         extras_before: &[],
         extras_after: &[ExtraFact::Exec {
-            fact: "rlm_lashlang_cell_exec_continues",
+            fact: "rlm_lash_vm_cell_exec_continues",
             requirement: ExecFactRequirement::ReentersProvider,
         }],
     },
     ContractFactSpec {
         spec: contract_spec(
             RLM_PROTOCOL_SCENARIO_CONTRACTS,
-            "rlm.streamed_lashlang_cell_exec_persists_trajectory",
+            "rlm.streamed_lash_vm_cell_exec_persists_trajectory",
         ),
-        fact: "rlm_streamed_lashlang_cell_exec_persists_trajectory",
-        assertion: "streamed LashLang cell execution records concrete output, checkpoints after work, and preserves trajectory evidence before re-entering the model loop",
-        check: check_rlm_streamed_lashlang_cell_exec_persists_trajectory,
+        fact: "rlm_streamed_lash_vm_cell_exec_persists_trajectory",
+        assertion: "streamed Lash VM cell execution records concrete output, checkpoints after work, and preserves trajectory evidence before re-entering the model loop",
+        check: check_rlm_streamed_lash_vm_cell_exec_persists_trajectory,
         extras_before: &[],
         extras_after: &[ExtraFact::Exec {
-            fact: "rlm_streamed_lashlang_cell_exec_persists_trajectory",
+            fact: "rlm_streamed_lash_vm_cell_exec_persists_trajectory",
             requirement: ExecFactRequirement::ReentersProvider,
         }],
     },
@@ -191,7 +191,7 @@ pub(super) const RLM_CONTRACT_FACT_SPECS: &[ContractFactSpec] = &[
             "rlm.typed_finish_emits_outcome_and_done",
         ),
         fact: "rlm_typed_finish_emits_outcome_and_done",
-        assertion: "typed RLM finish executes LashLang, emits a concrete final-value TurnOutcome, and marks the turn done without a final message event",
+        assertion: "typed RLM finish executes Lash VM, emits a concrete final-value TurnOutcome, and marks the turn done without a final message event",
         check: check_rlm_typed_finish_emits_outcome_and_done,
         extras_before: &[],
         extras_after: &[],
@@ -415,11 +415,11 @@ fn check_rlm_cell_diagnostic_counts(
     }))
 }
 
-fn check_rlm_retired_marker_plain_lashlang_text(
+fn check_rlm_retired_marker_plain_lash_vm_text(
     result: &Value,
     contract: &'static str,
 ) -> Result<Value, String> {
-    let code = "const text = \"%%lashlang is just source here\";\nprint(text);";
+    let code = "const text = \"%%lash_vm is just source here\";\nprint(text);";
     let diagnostic = require_rlm_diagnostic(result, "execute_typescript", "natural", contract)?;
     require_rlm_count(diagnostic, "typescript_cell_count", 1, contract)?;
     require_rlm_exec_code(result, code, contract)?;
@@ -432,7 +432,7 @@ fn check_rlm_retired_marker_plain_lashlang_text(
     }))
 }
 
-fn check_rlm_lashlang_cell_exec_continues(
+fn check_rlm_lash_vm_cell_exec_continues(
     result: &Value,
     contract: &'static str,
 ) -> Result<Value, String> {
@@ -451,7 +451,7 @@ fn check_rlm_lashlang_cell_exec_continues(
     }))
 }
 
-fn check_rlm_streamed_lashlang_cell_exec_persists_trajectory(
+fn check_rlm_streamed_lash_vm_cell_exec_persists_trajectory(
     result: &Value,
     contract: &'static str,
 ) -> Result<Value, String> {

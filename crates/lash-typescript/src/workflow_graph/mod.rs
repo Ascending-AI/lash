@@ -1,7 +1,7 @@
 //! The workflow-graph lens: projection, validation, and the canonical
 //! TypeScript text surface.
 //!
-//! The graph's value types live in `lashlang`, which names no source syntax.
+//! The graph's value types live in `lash_vm`, which names no source syntax.
 //! Everything that renders or parses text lives here, because TypeScript is
 //! the only cell language and the lens's canonical text is TypeScript.
 //!
@@ -16,8 +16,8 @@
 
 use std::collections::BTreeSet;
 
-use lashlang::{
-    AssignTarget, Declaration, Expr, LabelMetadata, LashlangHostEnvironment, ProcessDecl, Program,
+use lash_vm::{
+    AssignTarget, Declaration, Expr, LabelMetadata, LashVmHostEnvironment, ProcessDecl, Program,
     WorkflowContainer, WorkflowDeclaration, WorkflowGraph, WorkflowGraphProjector,
     WorkflowGraphVersionRefusal, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
     WorkflowNodeNameSource, WorkflowProcess, WorkflowStatementText, WorkflowSubgraph,
@@ -44,7 +44,7 @@ pub use printer::{
 /// Parse source, canonicalize it, and project it into a deterministic graph,
 /// with optional host-derived, non-authoritative type facets.
 ///
-/// The projection itself is `lashlang`'s ([`WorkflowGraphProjector`]); this
+/// The projection itself is `lash_vm`'s ([`WorkflowGraphProjector`]); this
 /// dialect contributes the canonical text the node spans address and the text
 /// of opaque statements. With no environment the result is the draft: it
 /// claims no runtime identity and carries no facets. With one, the source is
@@ -56,7 +56,7 @@ pub use printer::{
 /// identity.
 pub fn workflow_graph_from_source_with_facets(
     src: &str,
-    environment: Option<&LashlangHostEnvironment>,
+    environment: Option<&LashVmHostEnvironment>,
 ) -> Result<WorkflowGraph, WorkflowGraphBuildError> {
     let parsed = crate::parse(src)?;
     let canonical = typescript_program_source(&parsed)?;
@@ -78,7 +78,7 @@ pub fn workflow_graph_from_source_with_facets(
 
 fn draft_graph(
     program: &Program,
-    analysis: Option<&lashlang::WorkflowLinkAnalysis>,
+    analysis: Option<&lash_vm::WorkflowLinkAnalysis>,
 ) -> WorkflowGraph {
     let mut projector = WorkflowGraphProjector::new(program).with_spans(program.spans.clone());
     if let Some(analysis) = analysis {
@@ -96,15 +96,15 @@ fn draft_graph(
 /// The artifact's program is printed and reparsed, and each canonical span is
 /// carried to the artifact path it describes: a lifted process's body sits
 /// under its literal's site in the text and under its declaration in the
-/// artifact ([`lashlang::ProcessOrigin::Lifted`]). A program with no
+/// artifact ([`lash_vm::ProcessOrigin::Lifted`]). A program with no
 /// TypeScript spelling projects with no spans.
-pub fn workflow_graph_from_artifact(artifact: &lashlang::ModuleArtifact) -> WorkflowGraph {
+pub fn workflow_graph_from_artifact(artifact: &lash_vm::ModuleArtifact) -> WorkflowGraph {
     artifact_graph(artifact, None)
 }
 
 fn artifact_graph(
-    artifact: &lashlang::ModuleArtifact,
-    analysis: Option<&lashlang::WorkflowLinkAnalysis>,
+    artifact: &lash_vm::ModuleArtifact,
+    analysis: Option<&lash_vm::WorkflowLinkAnalysis>,
 ) -> WorkflowGraph {
     let mut projector = WorkflowGraphProjector::new(artifact.ir())
         .with_source_identity(artifact.source_identity())
@@ -129,8 +129,8 @@ fn artifact_graph(
 /// the same form as the text's node there, so a path the printing and the
 /// linking do not share can never carry another node's span.
 fn canonical_artifact_spans(
-    artifact: &lashlang::ModuleArtifact,
-) -> Option<std::collections::BTreeMap<lashlang::AstPath, lashlang::Span>> {
+    artifact: &lash_vm::ModuleArtifact,
+) -> Option<std::collections::BTreeMap<lash_vm::AstPath, lash_vm::Span>> {
     let ir = artifact.ir();
     let canonical = typescript_program_source(ir).ok()?;
     let draft = crate::parse(&canonical).ok()?;
@@ -140,14 +140,14 @@ fn canonical_artifact_spans(
         .iter()
         .filter_map(|(path, span)| {
             let (path, span) = (path.clone(), *span);
-            let artifact_path = if path.root == lashlang::AstRoot::Main {
+            let artifact_path = if path.root == lash_vm::AstRoot::Main {
                 bodies
                     .iter()
                     .filter_map(|(index, body)| {
                         let rest = path.steps.strip_prefix(body.as_slice())?;
                         Some((
                             body.len(),
-                            lashlang::AstPath::declaration(*index, rest.to_vec()),
+                            lash_vm::AstPath::declaration(*index, rest.to_vec()),
                         ))
                     })
                     .max_by_key(|(depth, _)| *depth)
@@ -200,7 +200,7 @@ fn process_body_text_paths(ir: &Program) -> Vec<(u32, Vec<u32>)> {
             let (
                 Ok(index),
                 Declaration::Process(ProcessDecl {
-                    origin: lashlang::ProcessOrigin::Lifted { site, .. },
+                    origin: lash_vm::ProcessOrigin::Lifted { site, .. },
                     ..
                 }),
             ) = (u32::try_from(index), declaration)
@@ -211,8 +211,8 @@ fn process_body_text_paths(ir: &Program) -> Vec<(u32, Vec<u32>)> {
                 continue;
             }
             let base = match site.root {
-                lashlang::AstRoot::Main => Some(Vec::new()),
-                lashlang::AstRoot::Declaration(parent) => bodies.get(&parent).cloned(),
+                lash_vm::AstRoot::Main => Some(Vec::new()),
+                lash_vm::AstRoot::Declaration(parent) => bodies.get(&parent).cloned(),
             };
             if let Some(mut body) = base {
                 body.extend_from_slice(&site.steps);
@@ -228,10 +228,10 @@ fn process_body_text_paths(ir: &Program) -> Vec<(u32, Vec<u32>)> {
     bodies.into_iter().collect()
 }
 
-fn expr_at<'p>(program: &'p Program, path: &lashlang::AstPath) -> Option<&'p Expr> {
+fn expr_at<'p>(program: &'p Program, path: &lash_vm::AstPath) -> Option<&'p Expr> {
     let mut expr = match path.root {
-        lashlang::AstRoot::Main => &program.main,
-        lashlang::AstRoot::Declaration(index) => match program.declarations.get(index as usize)? {
+        lash_vm::AstRoot::Main => &program.main,
+        lash_vm::AstRoot::Declaration(index) => match program.declarations.get(index as usize)? {
             Declaration::Process(process) => &process.body,
             Declaration::Function(function) => &function.body,
         },
@@ -461,7 +461,7 @@ mod validation_tests {
 /// The TypeScript text of an opaque statement node.
 ///
 /// This is the dialect half of the projection (ADR 0100 R8): the projector in
-/// `lashlang` decides structure, and TypeScript supplies the source text a
+/// `lash_vm` decides structure, and TypeScript supplies the source text a
 /// host shows for a statement the graph does not decompose.
 pub struct TypeScriptStatementText;
 
@@ -476,20 +476,20 @@ impl WorkflowStatementText for TypeScriptStatementText {
 /// The graph shows the authored body; the wrapper that turns an uncaught error
 /// into process failure is structure the lowerer owns, so it is rebuilt by the
 /// lowerer's one builder rather than stored.
-fn authored_return_type(origin: &lashlang::ProcessOrigin) -> Option<&lashlang::TypeExpr> {
+fn authored_return_type(origin: &lash_vm::ProcessOrigin) -> Option<&lash_vm::TypeExpr> {
     match origin {
         // TypeScript authors literals. A native declaration has always rendered
         // without a TypeScript return annotation, with its output inferred again.
-        lashlang::ProcessOrigin::Declared => None,
-        lashlang::ProcessOrigin::Lifted {
+        lash_vm::ProcessOrigin::Declared => None,
+        lash_vm::ProcessOrigin::Lifted {
             declared_return_ty, ..
         } => declared_return_ty.as_ref(),
     }
 }
 
-fn process_wrapper(params: &[lashlang::ProcessParam], body: Expr) -> Expr {
+fn process_wrapper(params: &[lash_vm::ProcessParam], body: Expr) -> Expr {
     crate::lower::process_run_wrapper(
-        Expr::Function(Box::new(lashlang::FunctionExpr {
+        Expr::Function(Box::new(lash_vm::FunctionExpr {
             name: None,
             js_name: None,
             receiver: None,
@@ -541,28 +541,28 @@ fn validate_process_origin(process: &WorkflowProcess) -> Result<(), GraphRenderE
         })
     };
     match &process.origin {
-        lashlang::ProcessOrigin::Declared
+        lash_vm::ProcessOrigin::Declared
             if process
                 .name
-                .starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX) =>
+                .starts_with(lash_vm::LIFTED_PROCESS_NAME_PREFIX) =>
         {
             mismatch("a declared process cannot take a lifted process's name")
         }
-        lashlang::ProcessOrigin::Lifted { .. }
+        lash_vm::ProcessOrigin::Lifted { .. }
             if !process
                 .name
-                .starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX) =>
+                .starts_with(lash_vm::LIFTED_PROCESS_NAME_PREFIX) =>
         {
             mismatch("a lifted process is named by its literal's digest")
         }
-        lashlang::ProcessOrigin::Lifted { hidden_params, .. }
+        lash_vm::ProcessOrigin::Lifted { hidden_params, .. }
             if *hidden_params as usize > process.params.len() =>
         {
             mismatch("a lifted process has more hidden parameters than parameters")
         }
         // TypeScript declares no processes, so the lens has no spelling for
         // a literal lifted out of a declared process's body.
-        lashlang::ProcessOrigin::Lifted { site, .. } if site.root != lashlang::AstRoot::Main => {
+        lash_vm::ProcessOrigin::Lifted { site, .. } if site.root != lash_vm::AstRoot::Main => {
             mismatch("the TypeScript lens renders only literals lifted from main")
         }
         _ => Ok(()),
@@ -815,7 +815,7 @@ impl<'a> LiftedBodies<'a> {
     /// literal's current position.
     fn take_for_literal(
         &mut self,
-        literal: &lashlang::ProcessLiteralExpr,
+        literal: &lash_vm::ProcessLiteralExpr,
         path: &[u32],
         unlabelled: &[u32],
     ) -> Result<Option<&'a WorkflowProcess>, GraphRenderError> {
@@ -823,8 +823,8 @@ impl<'a> LiftedBodies<'a> {
             .by_name
             .values()
             .filter_map(|process| match &process.origin {
-                lashlang::ProcessOrigin::Lifted { site, .. }
-                    if lashlang::lifted_process_identity(&literal.body, &site.steps)
+                lash_vm::ProcessOrigin::Lifted { site, .. }
+                    if lash_vm::lifted_process_identity(&literal.body, &site.steps)
                         == process.name =>
                 {
                     Some((site.steps.as_slice(), process.name.clone()))
@@ -891,7 +891,7 @@ fn splice_at(
         };
         statements.push(Expr::Absent);
         let body = Expr::Role {
-            role: lashlang::StructuralRole::Completion,
+            role: lash_vm::StructuralRole::Completion,
             expr: Box::new(Expr::Block(statements)),
         };
         literal.params = process.params.clone();
@@ -911,7 +911,7 @@ fn splice_at(
         // declaration; the rendered program holds the literal itself, rebuilt
         // from the declaration: its authored parameters, the captures its
         // hidden parameters carry, and the rendered body.
-        let lashlang::ProcessOrigin::Lifted { hidden_params, .. } = &process.origin else {
+        let lash_vm::ProcessOrigin::Lifted { hidden_params, .. } = &process.origin else {
             unreachable!("only lifted processes are spliced")
         };
         let authored = process
@@ -936,10 +936,10 @@ fn splice_at(
         };
         statements.push(Expr::Absent);
         let body = Expr::Role {
-            role: lashlang::StructuralRole::Completion,
+            role: lash_vm::StructuralRole::Completion,
             expr: Box::new(Expr::Block(statements)),
         };
-        *expr = Expr::ProcessLiteral(Box::new(lashlang::ProcessLiteralExpr {
+        *expr = Expr::ProcessLiteral(Box::new(lash_vm::ProcessLiteralExpr {
             params: params.to_vec(),
             hidden_args: hidden.to_vec(),
             return_ty: authored_return_type(&process.origin).cloned(),
@@ -1011,7 +1011,7 @@ fn node_to_expr(node: &WorkflowNode, context: RenderContext<'_>) -> Result<Expr,
                 binding,
                 expression,
             } => {
-                if !lashlang::is_pure_expr(expression) {
+                if !lash_vm::is_pure_expr(expression) {
                     return invalid_payload(node, "data expression is effectful");
                 }
                 with_assignment_ir(binding, expression.clone())

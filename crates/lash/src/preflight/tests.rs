@@ -291,19 +291,19 @@ async fn a_store_this_build_wrote_is_ready_with_an_empty_drain_list() {
 #[cfg(feature = "rlm")]
 async fn a_future_module_artifact_refusal_names_recompile_and_republish() {
     let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../lashlang/tests/fixtures/module-artifact-old.json"
+        "../../../lash-vm/tests/fixtures/module-artifact-old.json"
     ))
     .expect("frozen fixture should be JSON");
     raw["compilation_dialect"] = serde_json::json!("future_dialect");
     raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
     let enveloped = serde_json::json!({
-        "family": lashlang::LASHLANG_SEMANTIC_HASH_VERSION,
+        "family": lash_vm::LASH_VM_SEMANTIC_HASH_VERSION,
         "encoding": 1,
         "artifact": raw,
     });
     let item = DurableItem {
         surface: DurableSurface::ModuleArtifact,
-        cursor: "lashlang:v1:sha256:future".to_string(),
+        cursor: "lash_vm:v1:sha256:future".to_string(),
         process_id: None,
         session_id: None,
         status: None,
@@ -646,7 +646,7 @@ async fn a_carried_format_inherits_its_carriers_verdict_in_both_directions() {
     let healthy = probe_store(&healthy_store(), PreflightOptions::deep())
         .await
         .expect("the probe reads the store");
-    let snapshot = component(&healthy, DurableFormat::LashlangSnapshot);
+    let snapshot = component(&healthy, DurableFormat::LashVmSnapshot);
     assert_eq!(
         snapshot.evidence,
         FormatEvidence::CarriedBy(DurableFormat::RlmSnapshotEnvelope.name())
@@ -661,7 +661,7 @@ async fn a_carried_format_inherits_its_carriers_verdict_in_both_directions() {
         .await
         .expect("the probe reads the store");
     assert_eq!(
-        component(&refused, DurableFormat::LashlangSnapshot).verdict,
+        component(&refused, DurableFormat::LashVmSnapshot).verdict,
         ComponentVerdict::Refused,
         "a refused carrier refuses everything it carries"
     );

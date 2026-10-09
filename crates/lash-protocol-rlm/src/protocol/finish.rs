@@ -154,7 +154,7 @@ pub(super) fn invalid_cell_message(
 /// The retry copy a model reads after the output limit truncated its answer.
 ///
 /// Vocabulary-taking so the walker can render it in both dialects: "per cell"
-/// is TypeScript's noun for a unit of code, and a Lashlang reader has only ever
+/// is TypeScript's noun for a unit of code, and a Lash VM reader has only ever
 /// been shown blocks.
 pub(crate) fn output_limit_retry_copy(
     vocabulary: crate::dialect::DialectPromptVocabulary,

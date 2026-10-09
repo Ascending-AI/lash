@@ -34,12 +34,12 @@ The allocation recipe selects the inventory's `dhat-heap` feature target and
 uses the symbolized profiling platform. The default runtime instrument retains
 its stats_alloc counters. Allocation profiles cover the measured window.
 
-## Lashlang
+## LashVm
 
 ```sh
-python3 scripts/profile_lashlang.py --scenario baseline --mode one_shot \
+python3 scripts/profile_lash_vm.py --scenario baseline --mode one_shot \
   --iterations 1 --profile-scenario baseline --profile-iterations 1 \
-  --build-report "$E/lashlang-build.json" --out "$E/lashlang.json"
+  --build-report "$E/lash-vm-build.json" --out "$E/lash_vm.json"
 ```
 
 The script resolves `perf`, `profile` and `function_perf` independently from

@@ -16,7 +16,7 @@ use crate::ids::ActorKind;
 /// One durable format: its id and the version a build writes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FormatSurface {
-    /// The format's id, e.g. `turn-checkpoint` or `engine/lashlang`.
+    /// The format's id, e.g. `turn-checkpoint` or `engine/lash_vm`.
     pub id: String,
     /// The version this build writes and reads.
     pub version: u32,

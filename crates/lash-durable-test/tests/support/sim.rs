@@ -58,7 +58,7 @@ pub fn backend(stores: Arc<dyn StoreSet>) -> Backend {
 
 /// The dialect's worker service with its run deadlines off the clock: a
 /// cell's guest is bounded by its instruction and memory budgets.
-pub fn untimed_workers() -> lash::rlm::WorkerService {
+pub fn untimed_workers() -> lash::vm::WorkerService {
     use lash::rlm::Dialect as _;
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::rlm::TypescriptDialect
@@ -68,12 +68,12 @@ pub fn untimed_workers() -> lash::rlm::WorkerService {
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
-    lash::rlm::WorkerService::new(config)
+    lash::vm::WorkerService::new(config)
 }
 
 /// [`untimed_workers`] for a simulation on `clock`: each worker call holds
 /// the clock while it is in flight.
-pub fn workers(clock: &Arc<SimClock>) -> lash::rlm::WorkerService {
+pub fn workers(clock: &Arc<SimClock>) -> lash::vm::WorkerService {
     let clock = Arc::clone(clock);
     untimed_workers().with_call_hold(Arc::new(move || Box::new(clock.hold())))
 }

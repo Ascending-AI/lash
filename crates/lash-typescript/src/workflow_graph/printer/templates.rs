@@ -1,7 +1,7 @@
 //! The template literal's shape in the lowered IR: the quasi/hole chain it
 //! lowers to, and the raw-text escapes a quasi's spelling needs.
 
-use lashlang::{CoercingBinaryOp, CoercingUnaryOp, Expr};
+use lash_vm::{CoercingBinaryOp, CoercingUnaryOp, Expr};
 
 /// A template literal's text and holes, from the chain it lowers to:
 /// `q0 + ToString(e0) + q1 + … + ToString(en) + qn+1`, left-nested, a string

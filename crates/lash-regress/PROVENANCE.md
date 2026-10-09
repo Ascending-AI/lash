@@ -6,7 +6,7 @@
 - Upstream commit: `7e64ad5e6807b5503e5cc97a79e0f129b23c556b`
 - Upstream author: ridiculous_fish (Cory Doras)
 - Local purpose: deterministic fuel/step-budget instrumentation and the
-  anchored-matching API used by Lashlang
+  anchored-matching API used by Lash VM
 
 The upstream `LICENSE-MIT` and `LICENSE-APACHE` files are preserved verbatim.
 Upstream copyright and modification notices remain in the carried source and

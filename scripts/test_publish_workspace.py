@@ -26,7 +26,7 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-core-worker": "lash-internal-core-worker",
     "lash-durable": "lash-internal-durable",
     "lash-http-transport": "lash-internal-http-transport",
-    "lash-lashlang-runtime": "lash-internal-lashlang-runtime",
+    "lash-vm-runtime": "lash-internal-vm-runtime",
     "lash-llm-tools": "lash-internal-llm-tools",
     "lash-llm-transport": "lash-internal-llm-transport",
     "lash-plugin-mcp": "lash-internal-plugin-mcp",
@@ -51,7 +51,7 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-vm-protocol": "lash-internal-vm-protocol",
     "lash-vm-worker": "lash-internal-vm-worker",
     "lash-typescript": "lash-internal-typescript",
-    "lashlang": "lash-internal-lashlang",
+    "lash-vm": "lash-internal-vm",
 }
 
 
@@ -248,7 +248,7 @@ class PublishWorkspaceTest(unittest.TestCase):
         layers = publish_workspace.compute_layers(packages)
         self.assertEqual(layers, [["a", "b"], ["top"]])
 
-    def test_lash_regress_publishes_before_lashlang(self) -> None:
+    def test_lash_regress_publishes_before_lash_vm(self) -> None:
         publish_workspace = load_publish_workspace_module()
         packages = {
             "lash-regress": {
@@ -257,15 +257,15 @@ class PublishWorkspaceTest(unittest.TestCase):
                 "version": "1",
                 "workspace_dependencies": set(),
             },
-            "lashlang": {
-                "id": "lashlang",
-                "name": "lash-internal-lashlang",
+            "lash-vm": {
+                "id": "lash-vm",
+                "name": "lash-internal-vm",
                 "version": "1",
                 "workspace_dependencies": {"lash-regress"},
             },
         }
         layers = publish_workspace.compute_layers(packages)
-        self.assertEqual(layers, [["lash-regress"], ["lashlang"]])
+        self.assertEqual(layers, [["lash-regress"], ["lash-vm"]])
 
     def test_compute_layers_skips_already_completed_crates(self) -> None:
         # A resumed run seeds the already-visible crate as completed, so the
@@ -311,14 +311,14 @@ class PublishWorkspaceTest(unittest.TestCase):
         # one-at-a-time planner must gate the layered planner: the store
         # publishes in a later layer than the runtime it dev-depends on.
         publish_workspace = load_publish_workspace_module()
-        runtime_dir = str(ROOT / "crates" / "lash-lashlang-runtime")
+        runtime_dir = str(ROOT / "crates" / "lash-vm-runtime")
         store_dir = str(ROOT / "crates" / "lash-postgres-store")
         metadata = {
             "workspace_members": ["runtime-id", "store-id"],
             "packages": [
                 {
                     "id": "runtime-id",
-                    "name": "lash-internal-lashlang-runtime",
+                    "name": "lash-internal-vm-runtime",
                     "version": "0.0.1",
                     "publish": None,
                     "manifest_path": f"{runtime_dir}/Cargo.toml",
@@ -332,8 +332,8 @@ class PublishWorkspaceTest(unittest.TestCase):
                     "manifest_path": f"{store_dir}/Cargo.toml",
                     "dependencies": [
                         {
-                            "name": "lash-internal-lashlang-runtime",
-                            "rename": "lash-lashlang-runtime",
+                            "name": "lash-internal-vm-runtime",
+                            "rename": "lash-vm-runtime",
                             "path": runtime_dir,
                             "kind": "dev",
                             "req": "=0.0.1",
@@ -351,18 +351,18 @@ class PublishWorkspaceTest(unittest.TestCase):
         # A workspace-versioned dev-dependency survives into the published
         # manifest and must resolve on the index when cargo packages the
         # crate (this partially failed the v0.1.0-alpha.81 publish when
-        # lash-postgres-store's conformance dev-dep on lash-lashlang-runtime
+        # lash-postgres-store's conformance dev-dep on lash-vm-runtime
         # was packaged before that crate was visible). Versioned dev-deps are
         # ordering edges; version-less path dev-deps stay excluded.
         publish_workspace = load_publish_workspace_module()
-        runtime_dir = str(ROOT / "crates" / "lash-lashlang-runtime")
+        runtime_dir = str(ROOT / "crates" / "lash-vm-runtime")
         store_dir = str(ROOT / "crates" / "lash-postgres-store")
         metadata = {
             "workspace_members": ["runtime-id", "store-id"],
             "packages": [
                 {
                     "id": "runtime-id",
-                    "name": "lash-internal-lashlang-runtime",
+                    "name": "lash-internal-vm-runtime",
                     "version": "0.0.1",
                     "publish": None,
                     "manifest_path": f"{runtime_dir}/Cargo.toml",
@@ -376,8 +376,8 @@ class PublishWorkspaceTest(unittest.TestCase):
                     "manifest_path": f"{store_dir}/Cargo.toml",
                     "dependencies": [
                         {
-                            "name": "lash-internal-lashlang-runtime",
-                            "rename": "lash-lashlang-runtime",
+                            "name": "lash-internal-vm-runtime",
+                            "rename": "lash-vm-runtime",
                             "path": runtime_dir,
                             "kind": "dev",
                             "req": "=0.0.1",

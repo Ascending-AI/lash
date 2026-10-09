@@ -4,7 +4,7 @@
 //! TypeScript and these are the lens laws over it: GetPut (rendering a
 //! projected graph reproduces its canonical source), PutGet (reprojecting
 //! rendered source reproduces the graph), and the canonical fixpoint. The
-//! estate this file replaces was authored in the retired Lashlang surface
+//! estate this file replaces was authored in the retired Lash VM surface
 //! (FIG-3033); every property it proved is proved here over TypeScript.
 
 use std::collections::BTreeSet;
@@ -15,8 +15,8 @@ use lash_typescript::workflow_graph::{
     typescript_expression_source, typescript_program_source, validate, workflow_graph_from_source,
     workflow_graph_from_source_with_facets, workflow_graph_to_source,
 };
-use lashlang::{
-    LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField, VariableVersion,
+use lash_vm::{
+    LashVmHostCatalog, LashVmHostEnvironment, TypeExpr, TypeField, VariableVersion,
     WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION, WorkflowArgument,
     WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind,
     WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide, WorkflowNode,
@@ -28,7 +28,7 @@ use lashlang::{
 ///
 /// A process literal's declaration is named by the linker's lift digest, so a
 /// fixture pins "the process this module lifted", never a spelled-out name.
-fn only_process(graph: &WorkflowGraph) -> &lashlang::WorkflowProcess {
+fn only_process(graph: &WorkflowGraph) -> &lash_vm::WorkflowProcess {
     let mut processes = graph.declarations.iter().filter_map(|declaration| {
         let WorkflowDeclaration::Process(process) = declaration else {
             return None;
@@ -48,7 +48,7 @@ fn canonical(source: &str) -> String {
         .expect("a parsed fixture prints back as TypeScript")
 }
 
-fn ir(text: &str) -> lashlang::Expr {
+fn ir(text: &str) -> lash_vm::Expr {
     let globals = [
         "state",
         "started",
@@ -309,14 +309,14 @@ fn workflow_graph_decode_refuses_unknown_fields_in_nested_non_facet_payloads() {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
         source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
-        declarations: vec![WorkflowDeclaration::Function(lashlang::FunctionDecl {
+        declarations: vec![WorkflowDeclaration::Function(lash_vm::FunctionDecl {
             name: "describe".into(),
-            params: vec![lashlang::FunctionParam {
+            params: vec![lash_vm::FunctionParam {
                 name: "name".into(),
                 ty: TypeExpr::Str,
             }],
             return_ty: TypeExpr::Str,
-            body: lashlang::Expr::Variable("name".into()),
+            body: lash_vm::Expr::Variable("name".into()),
         })],
         main: WorkflowSubgraph::default(),
     };
@@ -350,7 +350,7 @@ fn workflow_graph_decode_refuses_unknown_fields_in_nested_non_facet_payloads() {
 
 #[test]
 fn source_identity_is_the_admitted_artifacts_and_ignores_input_formatting() {
-    let environment = lashlang::testing::harness::labeled_test_environment();
+    let environment = lash_vm::testing::harness::labeled_test_environment();
     let admitted = |source: &str| {
         workflow_graph_from_source_with_facets(source, Some(&environment))
             .expect("source projects")
@@ -384,13 +384,12 @@ fn a_draft_claims_no_runtime_identity_and_identity_never_depends_on_printing() {
     let draft = workflow_graph_from_source("const value = 1;\n").expect("draft projects");
     assert_eq!(draft.source_identity, None);
 
-    let artifact = lashlang::ModuleArtifact::from_program(lashlang::Program::block(vec![
-        lashlang::Expr::Call {
-            function: Box::new(lashlang::Expr::Block(vec![lashlang::Expr::Absent])),
+    let artifact =
+        lash_vm::ModuleArtifact::from_program(lash_vm::Program::block(vec![lash_vm::Expr::Call {
+            function: Box::new(lash_vm::Expr::Block(vec![lash_vm::Expr::Absent])),
             args: vec![],
-        },
-    ]))
-    .expect("a non-sourceable program still forms an artifact");
+        }]))
+        .expect("a non-sourceable program still forms an artifact");
     assert!(typescript_program_source(artifact.ir()).is_err());
     let graph = lash_typescript::workflow_graph::workflow_graph_from_artifact(&artifact);
     assert_eq!(graph.source_identity, Some(artifact.source_identity()));
@@ -410,7 +409,7 @@ fn reconcile_pairs_inserted_nodes_by_structural_location() {
             name_source: WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Computation {
                 binding: None,
-                expression: lashlang::Expr::Number(2.0),
+                expression: lash_vm::Expr::Number(2.0),
             },
             available_variables: Vec::new(),
             type_facets: None,
@@ -540,11 +539,11 @@ fn workflow_graph_refuses_unknown_type_expr_variant() {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
         source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
-        declarations: vec![WorkflowDeclaration::Function(lashlang::FunctionDecl {
+        declarations: vec![WorkflowDeclaration::Function(lash_vm::FunctionDecl {
             name: "name".into(),
             params: vec![],
             return_ty: TypeExpr::Str,
-            body: lashlang::Expr::String("result".into()),
+            body: lash_vm::Expr::String("result".into()),
         })],
         main: WorkflowSubgraph::default(),
     };
@@ -563,7 +562,7 @@ fn workflow_graph_refuses_unknown_fields_inside_type_expr_payloads() {
         schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
         source_identity: Some("fixture".to_string()),
         facet_schema_version: None,
-        declarations: vec![WorkflowDeclaration::Function(lashlang::FunctionDecl {
+        declarations: vec![WorkflowDeclaration::Function(lash_vm::FunctionDecl {
             name: "record".into(),
             params: vec![],
             return_ty: TypeExpr::Object(vec![TypeField {
@@ -571,7 +570,7 @@ fn workflow_graph_refuses_unknown_fields_inside_type_expr_payloads() {
                 ty: TypeExpr::Str,
                 optional: false,
             }]),
-            body: lashlang::Expr::String("result".into()),
+            body: lash_vm::Expr::String("result".into()),
         })],
         main: WorkflowSubgraph::default(),
     };
@@ -679,7 +678,7 @@ fn validate_and_render_agree_on_every_graph_failure_class() {
             _ => None,
         })
         .expect("fixture contains a data node");
-    *expression = lashlang::Expr::SleepFor(Box::new(lashlang::Expr::Number(1.0)));
+    *expression = lash_vm::Expr::SleepFor(Box::new(lash_vm::Expr::Number(1.0)));
 
     let mut invalid_opaque_source = fixture();
     invalid_opaque_source.main.nodes[0].kind = WorkflowNodeKind::Opaque {
@@ -710,7 +709,7 @@ fn validate_and_render_agree_on_every_graph_failure_class() {
             _ => None,
         })
         .expect("fixture contains a terminal node");
-    *terminal = lashlang::Expr::FunctionReturn(Box::new(lashlang::Expr::Number(1.0)));
+    *terminal = lash_vm::Expr::FunctionReturn(Box::new(lash_vm::Expr::Number(1.0)));
 
     let cases = [
         ("unsupported_schema_version", unsupported_schema),
@@ -1043,7 +1042,7 @@ fn cloned_do_while_conditions_keep_provenance_for_every_destination_path() {
 #[test]
 fn artifact_projection_rebuilds_canonical_spans_for_lifted_processes() {
     let authored = "const worker=async()=>{await sleep(1);return 1;};";
-    let linked = lash_typescript::link(authored, &lashlang::testing::harness::test_environment())
+    let linked = lash_typescript::link(authored, &lash_vm::testing::harness::test_environment())
         .expect("compact process source links");
     let canonical =
         typescript_program_source(linked.artifact.ir()).expect("the artifact prints canonically");
@@ -1085,8 +1084,8 @@ fn artifact_projection_rebuilds_canonical_spans_for_lifted_processes() {
     );
 }
 
-fn facet_environment() -> LashlangHostEnvironment {
-    let mut catalog = LashlangHostCatalog::new();
+fn facet_environment() -> LashVmHostEnvironment {
+    let mut catalog = LashVmHostCatalog::new();
     catalog
         .add_module_operation(
             ["tools"],
@@ -1105,11 +1104,11 @@ fn facet_environment() -> LashlangHostEnvironment {
             }]),
         )
         .expect("host catalog operation must not conflict");
-    LashlangHostEnvironment::new(catalog)
+    LashVmHostEnvironment::new(catalog)
 }
 
-fn slot_path_environment() -> LashlangHostEnvironment {
-    let mut catalog = LashlangHostCatalog::new();
+fn slot_path_environment() -> LashVmHostEnvironment {
+    let mut catalog = LashVmHostCatalog::new();
     catalog
         .add_module_operation(
             ["tools"],
@@ -1221,7 +1220,7 @@ fn slot_path_environment() -> LashlangHostEnvironment {
             TypeExpr::Str,
         )
         .expect("pair-text operation is unique");
-    LashlangHostEnvironment::new(catalog)
+    LashVmHostEnvironment::new(catalog)
 }
 
 #[test]
@@ -1589,7 +1588,7 @@ fn label_doc_comments_name_nodes_through_every_lens_law() {
         process
             .name
             .as_str()
-            .starts_with(lashlang::LIFTED_PROCESS_NAME_PREFIX)
+            .starts_with(lash_vm::LIFTED_PROCESS_NAME_PREFIX)
     );
     assert_eq!(process.name_source, WorkflowNodeNameSource::Derived);
     assert_eq!(
@@ -1670,8 +1669,8 @@ fn an_edit_inside_a_process_container_survives_the_round_trip() {
     let [WorkflowArgument::Named { fields }] = arguments.as_mut_slice() else {
         panic!("the call has one named argument record");
     };
-    assert_eq!(fields[0].1, lashlang::Expr::String("before".into()));
-    fields[0].1 = lashlang::Expr::String("after".into());
+    assert_eq!(fields[0].1, lash_vm::Expr::String("before".into()));
+    fields[0].1 = lash_vm::Expr::String("after".into());
 
     let saved = workflow_graph_to_source(&graph).expect("the edited graph renders");
     assert_eq!(
@@ -1692,7 +1691,7 @@ fn an_edit_inside_a_process_container_survives_the_round_trip() {
     let [WorkflowArgument::Named { fields }] = arguments.as_slice() else {
         panic!("the call has one named argument record");
     };
-    assert_eq!(fields[0].1, lashlang::Expr::String("after".into()));
+    assert_eq!(fields[0].1, lash_vm::Expr::String("after".into()));
     assert_eq!(
         workflow_graph_to_source(&reprojected).expect("the reprojection renders"),
         saved,

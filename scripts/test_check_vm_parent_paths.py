@@ -21,12 +21,12 @@ class ParentPaths(unittest.TestCase):
             return CHECK.check(root)
 
     def test_qualified_frontends_are_refused(self):
-        for entry in ["lash_typescript::parse", "lash_typescript::parse_with_globals", "lash_typescript::parse_workflow_fragment", "lashlang::compile_program"]:
+        for entry in ["lash_typescript::parse", "lash_typescript::parse_with_globals", "lash_typescript::parse_workflow_fragment", "lash_vm::compile_program"]:
             with self.subTest(entry=entry):
                 self.assertTrue(self.problems(f"fn run() {{ {entry}(source); }}"))
 
     def test_imported_aliases_are_refused(self):
-        for source in ["use lash_typescript::{parse as parse_guest}; fn run() { parse_guest(source); }", "use lashlang::VmInstance as GuestVm; fn run() { GuestVm::pristine(); }"]:
+        for source in ["use lash_typescript::{parse as parse_guest}; fn run() { parse_guest(source); }", "use lash_vm::VmInstance as GuestVm; fn run() { GuestVm::pristine(); }"]:
             with self.subTest(source=source):
                 self.assertTrue(self.problems(source))
 

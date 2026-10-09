@@ -104,7 +104,7 @@ to null would hide capture failures, so unsupported values fail at the writer.
 
 - [Root and persisted-value shapes](../../crates/lash-protocol-rlm/src/executor/state.rs#L22).
 - [Capture and leaf assembly](../../crates/lash-protocol-rlm/src/executor/state.rs#L818).
-- [Heap partition](../../crates/lashlang/src/runtime/heap/partition.rs#L1).
+- [Heap partition](../../crates/lash-vm/src/runtime/heap/partition.rs#L1).
 - [Threshold](../../crates/lash-core-execution/src/plugin/protocol.rs#L239).
 - [Component descriptors and hydration](../../crates/lash-core-store/src/store/checkpoint.rs#L131).
 - [Budget measurement](../../crates/lash-core-store/src/store/commit_budget.rs#L267).

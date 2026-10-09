@@ -332,8 +332,8 @@ mod walk {
         let store = SqliteStore::open_file_for_testing(&core)
             .await
             .expect("provision durable core");
-        let artifact = lashlang::ModuleArtifact::from_program(lashlang::Program::block(vec![
-            lashlang::Expr::Finish(Box::new(lashlang::Expr::String("done".into()))),
+        let artifact = lash_vm::ModuleArtifact::from_program(lash_vm::Program::block(vec![
+            lash_vm::Expr::Finish(Box::new(lash_vm::Expr::String("done".into()))),
         ]))
         .expect("a one-statement module forms an artifact");
         lash_core_execution::ModuleArtifactStore::publish_module_artifact(

@@ -1,0 +1,907 @@
+//! Bytecode instruction set + the inert data types that flow from the
+//! compiler to the VM: `Chunk`, `Name`, `Instruction`, `IntrinsicOp`, the
+//! profile-tag enums and accumulator, and the format-template / assign-path
+//! shapes.
+//!
+//! Everything here is internal to the runtime crate — the visibility is
+//! `pub(crate)` because compiler.rs produces these structures and vm.rs
+//! consumes them. None of these types are part of the lash_vm public API.
+
+use std::sync::{Arc, OnceLock};
+
+use crate::ast::{CoercingBinaryOp, CoercingUnaryOp};
+use crate::span::Span;
+use crate::tracking::LashVmExecutionSite;
+
+use super::record::Symbol;
+use super::schema::ValidationPlan;
+use super::{FormatError, ProfileReport, ProfileStat, Value};
+
+#[derive(Clone)]
+pub(crate) struct Chunk {
+    pub(crate) code: Vec<Instruction>,
+    pub(crate) spans: Vec<Option<Span>>,
+    pub(crate) lash_vm_execution_sites: Vec<Option<LashVmExecutionSite>>,
+    pub(crate) constants: Vec<Value>,
+    pub(crate) names: Vec<Name>,
+    pub(crate) slot_names: Vec<Name>,
+    /// Which root slots hold a private binding ([`crate::BindingVisibility`]),
+    /// aligned with `slot_names`. A private slot is never imported from or
+    /// exported to the session's globals. Empty when no binding is private.
+    pub(crate) private_slots: Vec<bool>,
+    pub(crate) key_lists: Vec<Box<[usize]>>,
+    pub(crate) format_templates: Vec<CompiledFormatTemplate>,
+    pub(crate) compiled_schemas: Vec<ValidationPlan>,
+    pub(crate) assign_paths: Vec<CompiledAssignPath>,
+    pub(crate) resource_operation_batches: Vec<CompiledResourceOperationBatch>,
+    pub(crate) functions: Vec<CompiledFunction>,
+    /// Every structured-exception scope the compiler emitted a `PushHandler`
+    /// for, sorted by handler target. It is what makes an impossible durable
+    /// handler stack unrepresentable: a restored handler must name one of
+    /// these scopes, and consecutive handlers in one frame must be a strictly
+    /// nested chain of them.
+    pub(crate) handler_scopes: Vec<HandlerScopeExtent>,
+    /// The expected durable handler chain, recorded as the breakpoints at which
+    /// it changes: entry `(ip, digest)` means every instruction from `ip` until
+    /// the next breakpoint expects `digest`. Handler validity is flow-sensitive
+    /// — the same `try` region is protected on the normal path and unprotected
+    /// while its own `finally` body runs — which is exactly what the extents
+    /// above cannot express, so the chain a restored handler stack must hash to
+    /// is recorded where it is known: at lowering.
+    pub(crate) handler_chain_digests: Vec<(usize, u64)>,
+    pub(crate) root_code_len: usize,
+}
+
+/// The digest of an empty handler chain, and the seed every chain folds from.
+pub(crate) const EMPTY_HANDLER_CHAIN_DIGEST: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// Folds one more handler onto a chain digest, innermost last. A scope's
+/// `PushHandler` site is its identity: no two scopes share one.
+pub(crate) fn extend_handler_chain_digest(digest: u64, push_ip: usize) -> u64 {
+    let mut digest = digest;
+    for byte in (push_ip as u64).to_le_bytes() {
+        digest = (digest ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    digest
+}
+
+/// The bytecode extent of one `try` scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct HandlerScopeExtent {
+    /// The `PushHandler` that installs the scope.
+    pub(crate) push_ip: usize,
+    /// Where a throw transfers to: the catch entry, or the finally entry for a
+    /// cleanup-only scope.
+    pub(crate) handler_ip: usize,
+    /// The scope's `finally` entry, when it has one.
+    pub(crate) finally_ip: Option<usize>,
+    pub(crate) catches: bool,
+    /// One past the last instruction the scope protects.
+    pub(crate) end_ip: usize,
+}
+
+impl Chunk {
+    /// Records which root slots hold one of `main`'s private bindings.
+    pub(crate) fn mark_private_slots(
+        &mut self,
+        private_bindings: &std::collections::BTreeSet<crate::AstString>,
+    ) {
+        if private_bindings.is_empty() {
+            self.private_slots.clear();
+            return;
+        }
+        self.private_slots = self
+            .slot_names
+            .iter()
+            .map(|name| private_bindings.contains(name.text.as_ref()))
+            .collect();
+    }
+
+    /// Looks up the scope a durable handler record names. The handler target is
+    /// the scope's identity: no two scopes share one, so a record that does not
+    /// match exactly names no scope the compiler emitted.
+    pub(crate) fn handler_scope(
+        &self,
+        handler_ip: usize,
+        finally_ip: Option<usize>,
+        catches: bool,
+    ) -> Option<&HandlerScopeExtent> {
+        let index = self
+            .handler_scopes
+            .binary_search_by_key(&handler_ip, |scope| scope.handler_ip)
+            .ok()?;
+        let scope = &self.handler_scopes[index];
+        (scope.finally_ip == finally_ip && scope.catches == catches).then_some(scope)
+    }
+
+    /// The handler chain a frame sitting at `ip` must have installed, as the
+    /// digest of the scopes open just before the instruction at `ip` runs.
+    pub(crate) fn handler_chain_digest_at(&self, ip: usize) -> u64 {
+        match self
+            .handler_chain_digests
+            .binary_search_by_key(&ip, |(start, _)| *start)
+        {
+            Ok(index) => self.handler_chain_digests[index].1,
+            Err(0) => EMPTY_HANDLER_CHAIN_DIGEST,
+            Err(index) => self.handler_chain_digests[index - 1].1,
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledFunction {
+    pub(crate) entry_ip: usize,
+    pub(crate) end_ip: usize,
+    pub(crate) parameter_count: usize,
+    pub(crate) parameter_model: ClosureParameterModel,
+    pub(crate) capture_count: usize,
+    /// The ECMA-262 `name` own property every closure of this function
+    /// materializes — the declared or `SetFunctionName`-inferred name, empty
+    /// when no naming context reached the function.
+    pub(crate) js_name: Arc<str>,
+    pub(crate) self_slot: Option<usize>,
+    /// The slot the call's receiver is bound to ([`crate::FunctionExpr::receiver`]).
+    pub(crate) receiver_slot: Option<usize>,
+    pub(crate) parameter_slots: Box<[usize]>,
+    pub(crate) capture_slots: Box<[usize]>,
+    pub(crate) slot_names: Box<[Name]>,
+}
+
+impl CompiledFunction {
+    /// ECMA-262's ExpectedArgumentCount: the parameters before the first
+    /// default or rest parameter — the `length` own property's value.
+    pub(crate) fn expected_argument_count(&self) -> usize {
+        match self.parameter_model {
+            ClosureParameterModel::Exact => self.parameter_count,
+            ClosureParameterModel::Permissive { required_count, .. } => required_count,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ClosureParameterModel {
+    /// Lash VM closures retain the language's declared-count-is-exact rule.
+    Exact,
+    /// Permissive call entry: absent fixed arguments are
+    /// `undefined`, surplus arguments are ignored, and an optional final rest
+    /// slot receives a fresh list. `required_count` is emitted by the lowerer
+    /// for the declaration's pre-default prefix (and therefore Function.length
+    /// semantics); it does not make missing arguments a call-time error.
+    Permissive {
+        required_count: usize,
+        accepts_rest: bool,
+    },
+}
+
+#[derive(Clone)]
+pub(crate) struct Name {
+    pub(crate) symbol: Symbol,
+    pub(crate) text: Arc<str>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledFormatTemplate {
+    pub(crate) parts: Box<[CompiledFormatPart]>,
+    pub(crate) argc: usize,
+    pub(crate) min_capacity: usize,
+    pub(crate) error: Option<FormatError>,
+    pub(crate) one_arg: Option<CompiledFormatOneArg>,
+}
+
+#[derive(Clone)]
+pub(crate) enum CompiledFormatPart {
+    Literal(Arc<str>),
+    Arg(usize),
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledFormatOneArg {
+    pub(crate) prefix: Option<Arc<str>>,
+    pub(crate) suffix: Option<Arc<str>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledAssignPath {
+    pub(crate) steps: Box<[CompiledAssignPathStep]>,
+    pub(crate) dynamic_index_count: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum CompiledAssignPathStep {
+    Field(usize),
+    Index,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledResourceOperationBatch {
+    pub(crate) leaves: Box<[CompiledResourceOperationBatchLeaf]>,
+    pub(crate) shape: CompiledAggregateAwaitShape,
+    pub(crate) stack_value_count: usize,
+    pub(crate) aggregate_unwrap: bool,
+    /// How the aggregate consumes its leaves' settlements (ADR 0099 §10 L1),
+    /// recorded per batch at lowering rather than inferred at run time.
+    ///
+    /// The TypeScript dialect's `Promise.*` aggregates carry their ECMA mode.
+    /// LashVm's own aggregates — the literal batch and the list-comprehension
+    /// batch — are [`AggregateConsumer::AllSettled`]: they wait for every
+    /// result and report the first *written* unwrapped rejection (§10 L7).
+    pub(crate) consumer: super::AggregateConsumer,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompiledResourceOperationBatchLeaf {
+    /// A timer leaf from an unawaited `sleep(ms)`: `argc` is zero, `operation`
+    /// is unused, and the value at `receiver_stack_index` is the duration.
+    pub(crate) timer: bool,
+    pub(crate) operation: usize,
+    pub(crate) argc: usize,
+    pub(crate) receiver_stack_index: usize,
+    pub(crate) unwrap: bool,
+    pub(crate) site: Option<LashVmExecutionSite>,
+    pub(crate) source_span: Option<Span>,
+}
+
+#[derive(Clone)]
+pub(crate) enum CompiledAggregateAwaitShape {
+    BatchLeaf(usize),
+    Value(usize),
+    List(Box<[CompiledAggregateAwaitShape]>),
+    Record {
+        keys: usize,
+        values: Box<[CompiledAggregateAwaitShape]>,
+    },
+}
+
+pub(crate) struct ResultWrapperNames {
+    pub(crate) ok: Name,
+    pub(crate) value: Name,
+    pub(crate) error: Name,
+}
+
+impl Name {
+    /// A name and its symbol share one allocation, so a record entry keyed by
+    /// this name compares against it by pointer.
+    pub(crate) fn new(name: &str) -> Self {
+        let text: Arc<str> = Arc::from(name);
+        Self {
+            symbol: Symbol::from_text(text.clone()),
+            text,
+        }
+    }
+}
+
+pub(crate) fn transient_name(name: &str) -> Name {
+    Name::new(name)
+}
+
+pub(crate) fn result_wrapper_names() -> &'static ResultWrapperNames {
+    static NAMES: OnceLock<ResultWrapperNames> = OnceLock::new();
+    NAMES.get_or_init(|| ResultWrapperNames {
+        ok: transient_name("ok"),
+        value: transient_name("value"),
+        error: transient_name("error"),
+    })
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Instruction {
+    PushConst(usize),
+    PushNull,
+    PushUndefined,
+    PushBool(bool),
+    PushNumber(f64),
+    LoadName(usize),
+    Duplicate,
+    StoreName(usize),
+    BuildHeapList(usize),
+    BuildHeapRecord(usize),
+    LoadField {
+        slot: usize,
+        field: usize,
+    },
+    LoadFieldUnwrap {
+        slot: usize,
+        field: usize,
+    },
+    Field(usize),
+    Index,
+    PathAssign {
+        slot: usize,
+        path: usize,
+    },
+    HeapPathAssign {
+        slot: usize,
+        path: usize,
+    },
+    ResultUnwrap,
+    CoercingUnary(CoercingUnaryOp),
+    CoercingBinary(CoercingBinaryOp),
+    IsNullish,
+    ToBool,
+    Jump(usize),
+    JumpIfFalse(usize),
+    JumpIfTrue(usize),
+    ResourceCall {
+        operation: usize,
+        argc: usize,
+    },
+    ResourceCallUnwrap {
+        operation: usize,
+        argc: usize,
+    },
+    PendingTool {
+        operation: usize,
+        argc: usize,
+    },
+    /// Mint a pending timer handle from the duration on top of the stack —
+    /// an unawaited `sleep(ms)` (ADR 0099 §11).
+    PendingTimer,
+    AwaitArray {
+        consumer: super::AggregateConsumer,
+    },
+    AwaitPending,
+    ResourceOperationBatch(usize),
+    AwaitHandle,
+    SleepFor,
+    AwaitHandleUnwrap,
+    Intrinsic(IntrinsicOp),
+    MakeClosure {
+        function: usize,
+        captures: usize,
+    },
+    Call {
+        argc: usize,
+    },
+    /// Calls with an explicit receiver: the stack holds `[receiver, function,
+    /// args..]`, and the callee's receiver slot, when it has one, is bound to
+    /// `receiver`.
+    CallMethod {
+        argc: usize,
+    },
+    CallDynamic,
+    /// [`Self::CallDynamic`] with a receiver beneath the callee: the stack
+    /// holds `[receiver, function, arguments]`.
+    CallMethodDynamic,
+    Map,
+    AsyncMap,
+    Return,
+    PushHandler {
+        handler: usize,
+        finally: Option<usize>,
+        catches: bool,
+    },
+    PopHandler,
+    EnterFinally {
+        finally: usize,
+        resume: usize,
+    },
+    EndFinally,
+    /// Discards the pending completion of the `finally` body being left by an
+    /// abrupt completion (`break` / `continue`), per ECMA-262 completion
+    /// replacement.
+    AbandonFinally,
+    /// Replaces the pending completion while preserving the return value that
+    /// was evaluated before the `finally` body was left.
+    AbandonFinallyKeepValue,
+    Throw,
+    /// `s = s + rhs` under ECMA-262 `+` rules: the operand stack carries
+    /// `CoercingBinary`'s pair — the accumulator read, then the right
+    /// operand — and the instruction fuses the store, so a uniquely owned
+    /// accumulator appends in place.
+    CoercingAddAssign(usize),
+    Print,
+    Finish,
+    ProcessFail,
+    ObserveStep,
+    Pop,
+    BeginIter(usize),
+    BeginRangeIter {
+        binding: usize,
+        argc: usize,
+    },
+    IterNext {
+        jump_to: usize,
+    },
+    EndIter,
+    WrapHostDescriptor(usize),
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum UriCodec {
+    EncodeComponent,
+    DecodeComponent,
+    EncodeUri,
+    DecodeUri,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum IntrinsicOp {
+    Len,
+    Empty,
+    Keys,
+    Values,
+    Contains,
+    Find(usize),
+    GrepText,
+    StartsWith,
+    EndsWith,
+    Split,
+    Join,
+    TextSplit,
+    TextJoin,
+    IntrinsicDispatch(usize),
+    HeapConstruct(usize),
+    HeapInstanceOf,
+    HeapDeleteMember,
+    RegExpIntrinsic(usize),
+    GlobalDelete,
+    GlobalGet,
+    GlobalHas,
+    GlobalSet,
+    UriCodec(UriCodec),
+    /// A fresh binding cell holding the value on top of the stack (FIG-3707).
+    BindingCellNew,
+    /// The value the binding cell on top of the stack holds.
+    BindingCellGet,
+    /// Stores the top value in the binding cell beneath it, leaving the value.
+    BindingCellSet,
+    Trim,
+    Slice,
+    ToString,
+    ToInt,
+    ToFloat,
+    JsonParse,
+    Format(usize),
+    Validate,
+    Range(usize),
+    CeilDiv,
+    FloorDiv,
+    Push,
+    Sort,
+    SortBy,
+    Sum,
+    Min,
+    Max,
+    Replace,
+    Lower,
+    Upper,
+    Unique,
+    Reverse,
+    InvalidArity {
+        name: usize,
+        argc: usize,
+    },
+    Unknown {
+        name: usize,
+        argc: usize,
+    },
+    ValidateCompiled(usize),
+    PushAssign(usize),
+    FormatCompiled(usize),
+    // Retained after measurement: projected_operations and formatting-heavy
+    // surfaces lost more than the allowed gate without these direct paths.
+    FormatCompiledSlotNumber {
+        template: usize,
+        slot: usize,
+    },
+}
+
+impl Instruction {
+    pub(crate) fn profile_tag(self) -> InstructionProfileTag {
+        match self {
+            Instruction::PushConst(_)
+            | Instruction::PushNull
+            | Instruction::PushUndefined
+            | Instruction::PushBool(_)
+            | Instruction::PushNumber(_) => InstructionProfileTag::PushConst,
+            Instruction::LoadName(_) | Instruction::Duplicate => InstructionProfileTag::LoadName,
+            Instruction::StoreName(_)
+            | Instruction::PathAssign { .. }
+            | Instruction::HeapPathAssign { .. } => InstructionProfileTag::StoreName,
+            Instruction::BuildHeapList(_) => InstructionProfileTag::BuildList,
+            Instruction::BuildHeapRecord(_) => InstructionProfileTag::BuildRecord,
+            Instruction::LoadField { .. } | Instruction::Field(_) => InstructionProfileTag::Field,
+            Instruction::Index => InstructionProfileTag::Index,
+            Instruction::ResultUnwrap | Instruction::LoadFieldUnwrap { .. } => {
+                InstructionProfileTag::ResultUnwrap
+            }
+            Instruction::CoercingUnary(_) => InstructionProfileTag::Unary,
+            Instruction::CoercingBinary(_) => InstructionProfileTag::Binary,
+            Instruction::ToBool | Instruction::IsNullish => InstructionProfileTag::ToBool,
+            Instruction::Jump(_) => InstructionProfileTag::Jump,
+            Instruction::JumpIfFalse(_) => InstructionProfileTag::JumpIfFalse,
+            Instruction::JumpIfTrue(_) => InstructionProfileTag::JumpIfTrue,
+            Instruction::ResourceCall { .. } | Instruction::ResourceCallUnwrap { .. } => {
+                InstructionProfileTag::ResourceCall
+            }
+            Instruction::PendingTool { .. }
+            | Instruction::PendingTimer
+            | Instruction::AwaitArray { .. }
+            | Instruction::AwaitPending
+            | Instruction::ResourceOperationBatch(_) => InstructionProfileTag::ResourceCall,
+            Instruction::AwaitHandle | Instruction::AwaitHandleUnwrap => {
+                InstructionProfileTag::AwaitHandle
+            }
+
+            Instruction::SleepFor => InstructionProfileTag::Sleep,
+            Instruction::Intrinsic(_) => InstructionProfileTag::Intrinsic,
+            Instruction::MakeClosure { .. } => InstructionProfileTag::MakeClosure,
+            Instruction::Call { .. }
+            | Instruction::CallMethod { .. }
+            | Instruction::CallDynamic
+            | Instruction::CallMethodDynamic => InstructionProfileTag::Call,
+            Instruction::Map | Instruction::AsyncMap => InstructionProfileTag::Callback,
+            Instruction::Return => InstructionProfileTag::Return,
+            Instruction::PushHandler { .. }
+            | Instruction::PopHandler
+            | Instruction::EnterFinally { .. }
+            | Instruction::EndFinally
+            | Instruction::AbandonFinally
+            | Instruction::AbandonFinallyKeepValue
+            | Instruction::Throw => InstructionProfileTag::Exception,
+            Instruction::CoercingAddAssign(_) => InstructionProfileTag::AddAssign,
+            Instruction::Print => InstructionProfileTag::Print,
+            Instruction::Finish => InstructionProfileTag::Finish,
+            Instruction::ProcessFail => InstructionProfileTag::SessionProcessAdmin,
+            Instruction::ObserveStep => InstructionProfileTag::ObserveStep,
+            Instruction::Pop => InstructionProfileTag::Pop,
+            Instruction::BeginIter(_) | Instruction::BeginRangeIter { .. } => {
+                InstructionProfileTag::BeginIter
+            }
+            Instruction::IterNext { .. } => InstructionProfileTag::IterNext,
+            Instruction::EndIter => InstructionProfileTag::EndIter,
+            Instruction::WrapHostDescriptor(_) => InstructionProfileTag::WrapHostDescriptor,
+        }
+    }
+}
+
+impl IntrinsicOp {
+    pub(crate) fn fixed_argc(self) -> Option<usize> {
+        Some(match self {
+            IntrinsicOp::Len
+            | IntrinsicOp::Empty
+            | IntrinsicOp::Keys
+            | IntrinsicOp::Values
+            | IntrinsicOp::Trim
+            | IntrinsicOp::ToString
+            | IntrinsicOp::ToInt
+            | IntrinsicOp::ToFloat
+            | IntrinsicOp::JsonParse
+            | IntrinsicOp::Sort
+            | IntrinsicOp::Sum
+            | IntrinsicOp::Min
+            | IntrinsicOp::Max
+            | IntrinsicOp::Lower
+            | IntrinsicOp::Upper
+            | IntrinsicOp::Unique
+            | IntrinsicOp::Reverse
+            | IntrinsicOp::ValidateCompiled(_)
+            | IntrinsicOp::PushAssign(_)
+            | IntrinsicOp::GlobalDelete
+            | IntrinsicOp::GlobalGet
+            | IntrinsicOp::GlobalHas
+            | IntrinsicOp::UriCodec(_)
+            | IntrinsicOp::BindingCellNew
+            | IntrinsicOp::BindingCellGet => 1,
+            IntrinsicOp::Contains
+            | IntrinsicOp::GrepText
+            | IntrinsicOp::StartsWith
+            | IntrinsicOp::EndsWith
+            | IntrinsicOp::Split
+            | IntrinsicOp::Join
+            | IntrinsicOp::TextSplit
+            | IntrinsicOp::TextJoin
+            | IntrinsicOp::HeapInstanceOf
+            | IntrinsicOp::GlobalSet
+            | IntrinsicOp::BindingCellSet
+            | IntrinsicOp::HeapDeleteMember
+            | IntrinsicOp::Validate
+            | IntrinsicOp::CeilDiv
+            | IntrinsicOp::FloorDiv
+            | IntrinsicOp::Push
+            | IntrinsicOp::SortBy => 2,
+            IntrinsicOp::Slice | IntrinsicOp::Replace => 3,
+            IntrinsicOp::Find(argc)
+            | IntrinsicOp::Format(argc)
+            | IntrinsicOp::Range(argc)
+            | IntrinsicOp::IntrinsicDispatch(argc)
+            | IntrinsicOp::HeapConstruct(argc)
+            | IntrinsicOp::RegExpIntrinsic(argc)
+            | IntrinsicOp::InvalidArity { argc, .. }
+            | IntrinsicOp::Unknown { argc, .. } => argc,
+            IntrinsicOp::FormatCompiled(_) | IntrinsicOp::FormatCompiledSlotNumber { .. } => {
+                return None;
+            }
+        })
+    }
+
+    pub(crate) fn profile_tag(self) -> BuiltinProfileTag {
+        match self {
+            IntrinsicOp::Len => BuiltinProfileTag::Len,
+            IntrinsicOp::Empty => BuiltinProfileTag::Empty,
+            IntrinsicOp::Keys => BuiltinProfileTag::Keys,
+            IntrinsicOp::Values => BuiltinProfileTag::Values,
+            IntrinsicOp::Contains => BuiltinProfileTag::Contains,
+            IntrinsicOp::Find(_) => BuiltinProfileTag::Find,
+            IntrinsicOp::GrepText => BuiltinProfileTag::GrepText,
+            IntrinsicOp::StartsWith => BuiltinProfileTag::StartsWith,
+            IntrinsicOp::EndsWith => BuiltinProfileTag::EndsWith,
+            IntrinsicOp::Split => BuiltinProfileTag::Split,
+            IntrinsicOp::Join => BuiltinProfileTag::Join,
+            IntrinsicOp::TextSplit => BuiltinProfileTag::Split,
+            IntrinsicOp::TextJoin => BuiltinProfileTag::Join,
+            IntrinsicOp::IntrinsicDispatch(_) => BuiltinProfileTag::IntrinsicDispatch,
+            IntrinsicOp::HeapConstruct(_) => BuiltinProfileTag::IntrinsicDispatch,
+            IntrinsicOp::HeapInstanceOf
+            | IntrinsicOp::HeapDeleteMember
+            | IntrinsicOp::RegExpIntrinsic(_)
+            | IntrinsicOp::GlobalDelete
+            | IntrinsicOp::GlobalGet
+            | IntrinsicOp::GlobalHas
+            | IntrinsicOp::GlobalSet
+            | IntrinsicOp::UriCodec(_)
+            | IntrinsicOp::BindingCellNew
+            | IntrinsicOp::BindingCellGet
+            | IntrinsicOp::BindingCellSet => BuiltinProfileTag::IntrinsicDispatch,
+            IntrinsicOp::Trim => BuiltinProfileTag::Trim,
+            IntrinsicOp::Slice => BuiltinProfileTag::Slice,
+            IntrinsicOp::ToString => BuiltinProfileTag::ToString,
+            IntrinsicOp::ToInt => BuiltinProfileTag::ToInt,
+            IntrinsicOp::ToFloat => BuiltinProfileTag::ToFloat,
+            IntrinsicOp::JsonParse => BuiltinProfileTag::JsonParse,
+            IntrinsicOp::Format(_)
+            | IntrinsicOp::FormatCompiled(_)
+            | IntrinsicOp::FormatCompiledSlotNumber { .. } => BuiltinProfileTag::Format,
+            IntrinsicOp::Validate | IntrinsicOp::ValidateCompiled(_) => BuiltinProfileTag::Validate,
+            IntrinsicOp::Range(_) => BuiltinProfileTag::Range,
+            IntrinsicOp::CeilDiv => BuiltinProfileTag::CeilDiv,
+            IntrinsicOp::FloorDiv => BuiltinProfileTag::FloorDiv,
+            IntrinsicOp::Push | IntrinsicOp::PushAssign(_) => BuiltinProfileTag::Push,
+            IntrinsicOp::Sort => BuiltinProfileTag::Sort,
+            IntrinsicOp::SortBy => BuiltinProfileTag::SortBy,
+            IntrinsicOp::Sum => BuiltinProfileTag::Sum,
+            IntrinsicOp::Min => BuiltinProfileTag::Min,
+            IntrinsicOp::Max => BuiltinProfileTag::Max,
+            IntrinsicOp::Replace => BuiltinProfileTag::Replace,
+            IntrinsicOp::Lower => BuiltinProfileTag::Lower,
+            IntrinsicOp::Upper => BuiltinProfileTag::Upper,
+            IntrinsicOp::Unique => BuiltinProfileTag::Unique,
+            IntrinsicOp::Reverse => BuiltinProfileTag::Reverse,
+            IntrinsicOp::InvalidArity { .. } | IntrinsicOp::Unknown { .. } => {
+                BuiltinProfileTag::Unknown
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+#[repr(usize)]
+pub(crate) enum InstructionProfileTag {
+    PushConst,
+    LoadName,
+    StoreName,
+    BuildList,
+    BuildRecord,
+    Field,
+    Index,
+    ResultUnwrap,
+    Unary,
+    Binary,
+    ToBool,
+    Jump,
+    JumpIfFalse,
+    JumpIfTrue,
+    ResourceCall,
+    AwaitHandle,
+    Intrinsic,
+    AddAssign,
+    Print,
+    Finish,
+    Sleep,
+    SessionProcessAdmin,
+    ObserveStep,
+    Pop,
+    BeginIter,
+    IterNext,
+    EndIter,
+    WrapHostDescriptor,
+    MakeClosure,
+    Call,
+    Callback,
+    Return,
+    Exception,
+}
+
+const INSTRUCTION_PROFILE_COUNT: usize = InstructionProfileTag::Exception as usize + 1;
+
+#[derive(Clone, Copy)]
+#[repr(usize)]
+pub(crate) enum BuiltinProfileTag {
+    Len,
+    Empty,
+    Keys,
+    Values,
+    Contains,
+    Find,
+    GrepText,
+    StartsWith,
+    EndsWith,
+    Split,
+    Join,
+    Trim,
+    Slice,
+    ToString,
+    ToInt,
+    ToFloat,
+    JsonParse,
+    Format,
+    Validate,
+    Range,
+    CeilDiv,
+    FloorDiv,
+    Push,
+    Sort,
+    SortBy,
+    Sum,
+    Min,
+    Max,
+    Replace,
+    Lower,
+    Upper,
+    Unique,
+    Reverse,
+    IntrinsicDispatch,
+    Unknown,
+}
+
+const BUILTIN_PROFILE_COUNT: usize = BuiltinProfileTag::Unknown as usize + 1;
+
+pub(crate) struct ProfileAccumulator {
+    pub(crate) instruction_counts: [u64; INSTRUCTION_PROFILE_COUNT],
+    pub(crate) instruction_times: [u128; INSTRUCTION_PROFILE_COUNT],
+    pub(crate) builtin_counts: [u64; BUILTIN_PROFILE_COUNT],
+    pub(crate) builtin_times: [u128; BUILTIN_PROFILE_COUNT],
+}
+
+impl Default for ProfileAccumulator {
+    fn default() -> Self {
+        Self {
+            instruction_counts: [0; INSTRUCTION_PROFILE_COUNT],
+            instruction_times: [0; INSTRUCTION_PROFILE_COUNT],
+            builtin_counts: [0; BUILTIN_PROFILE_COUNT],
+            builtin_times: [0; BUILTIN_PROFILE_COUNT],
+        }
+    }
+}
+
+impl ProfileAccumulator {
+    pub(crate) fn finish(self) -> ProfileReport {
+        ProfileReport {
+            instruction_stats: build_stats(
+                &INSTRUCTION_PROFILE_NAMES,
+                &self.instruction_counts,
+                &self.instruction_times,
+            ),
+            builtin_stats: build_stats(
+                &BUILTIN_PROFILE_NAMES,
+                &self.builtin_counts,
+                &self.builtin_times,
+            ),
+        }
+    }
+}
+
+const INSTRUCTION_PROFILE_NAMES: [&str; INSTRUCTION_PROFILE_COUNT] = [
+    "push_const",
+    "load_name",
+    "store_name",
+    "build_list",
+    "build_record",
+    "field",
+    "index",
+    "result_unwrap",
+    "unary",
+    "binary",
+    "to_bool",
+    "jump",
+    "jump_if_false",
+    "jump_if_true",
+    "resource_call",
+    "await_handle",
+    "intrinsic",
+    "add_assign",
+    "print",
+    "finish",
+    "sleep",
+    "processes",
+    "observe_step",
+    "pop",
+    "begin_iter",
+    "iter_next",
+    "end_iter",
+    "wrap_host_descriptor",
+    "make_closure",
+    "call",
+    "callback",
+    "return",
+    "exception",
+];
+
+const BUILTIN_PROFILE_NAMES: [&str; BUILTIN_PROFILE_COUNT] = [
+    "len",
+    "empty",
+    "keys",
+    "values",
+    "contains",
+    "find",
+    "grep_text",
+    "starts_with",
+    "ends_with",
+    "split",
+    "join",
+    "trim",
+    "slice",
+    "to_string",
+    "to_int",
+    "to_float",
+    "json_parse",
+    "format",
+    "validate",
+    "range",
+    "ceil_div",
+    "floor_div",
+    "push",
+    "sort",
+    "sort_by",
+    "sum",
+    "min",
+    "max",
+    "replace",
+    "lower",
+    "upper",
+    "unique",
+    "reverse",
+    "intrinsic_dispatch",
+    "unknown",
+];
+
+fn build_stats<const N: usize>(
+    names: &[&'static str; N],
+    counts: &[u64; N],
+    times: &[u128; N],
+) -> Vec<ProfileStat> {
+    let mut stats = names
+        .iter()
+        .enumerate()
+        .filter_map(|(index, name)| {
+            let count = counts[index];
+            (count > 0).then_some(ProfileStat {
+                name,
+                count,
+                total_ns: times[index],
+            })
+        })
+        .collect::<Vec<_>>();
+    stats.sort_by(|a, b| {
+        b.total_ns
+            .cmp(&a.total_ns)
+            .then_with(|| b.count.cmp(&a.count))
+    });
+    stats
+}
+
+pub(crate) fn merge_stats(target: &mut Vec<ProfileStat>, source: &[ProfileStat]) {
+    for stat in source {
+        if let Some(existing) = target.iter_mut().find(|entry| entry.name == stat.name) {
+            existing.count += stat.count;
+            existing.total_ns += stat.total_ns;
+        } else {
+            target.push(stat.clone());
+        }
+    }
+    target.sort_by(|a, b| {
+        b.total_ns
+            .cmp(&a.total_ns)
+            .then_with(|| b.count.cmp(&a.count))
+    });
+}

@@ -145,7 +145,7 @@ class JudgedRunbookMatrixTests(unittest.TestCase):
         labels = {row["label"] for row in MATRIX.rows(config)}
         self.assertEqual(labels, {"typescript", "standard"})
         self.assertNotIn("dialects", config)
-        self.assertNotIn("lashlang", MATRIX.MATRIX.read_text())
+        self.assertNotIn("lashvm", MATRIX.MATRIX.read_text())
 
     def test_the_matrix_lists_no_scenario_twice(self) -> None:
         # A scenario in two groups is invisible to a per-group check while the

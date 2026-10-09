@@ -135,7 +135,7 @@ impl CellDetector {
     fn new() -> Self {
         Self::with_dialect(Arc::new(SessionDialect::prompt_only(
             std::sync::Arc::new(crate::dialect::TypescriptDialect),
-            lash_lashlang_runtime::LashlangSurface::default(),
+            lash_vm_runtime::LashVmSurface::default(),
         )))
     }
 
@@ -662,7 +662,7 @@ mod tests {
         let mut elsewhere = CellDetector::from_recorded(
             Arc::new(SessionDialect::prompt_only(
                 std::sync::Arc::new(crate::dialect::TypescriptDialect),
-                lash_lashlang_runtime::LashlangSurface::default(),
+                lash_vm_runtime::LashVmSurface::default(),
             )),
             journaled,
         )

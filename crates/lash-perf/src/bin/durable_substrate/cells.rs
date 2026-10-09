@@ -102,7 +102,7 @@ pub async fn create_session(core: &lash::LashCore, session: &SessionId) -> Resul
 
 /// The dialect's worker service with its run deadlines off the clock: the
 /// bench measures the cell, not a deadline.
-fn untimed_workers() -> lash::rlm::WorkerService {
+fn untimed_workers() -> lash::vm::WorkerService {
     const OFF_THE_CLOCK: Duration = Duration::from_secs(365 * 24 * 60 * 60);
     let mut config = lash::rlm::TypescriptDialect
         .worker_service()
@@ -111,7 +111,7 @@ fn untimed_workers() -> lash::rlm::WorkerService {
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
-    lash::rlm::WorkerService::new(config)
+    lash::vm::WorkerService::new(config)
 }
 
 fn metadata() -> Result<lash_core::LlmProfileMetadata> {

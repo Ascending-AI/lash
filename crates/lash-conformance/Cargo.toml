@@ -14,12 +14,12 @@ doctest = false
 workspace = true
 
 [features]
-# Lashlang artifact-store laws, enabled only by the store crates that certify
-# a Lashlang artifact store.
-lashlang = ["lashlang/testing"]
+# Lash VM artifact-store laws, enabled only by the store crates that certify
+# a Lash VM artifact store.
+lash-vm = ["lash-vm/testing"]
 
 [dependencies]
-lashlang.workspace = true
+lash-vm.workspace = true
 lash-core = { workspace = true, features = ["testing"] }
 # Enable the worker testing surface in the workspace feature graph.
 lash-core-worker = { workspace = true, features = ["testing"] }

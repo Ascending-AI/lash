@@ -6,11 +6,11 @@ use lash_rlm_types::RlmRenderPatch;
 pub trait CodeRenderer: Send + Sync {
     fn id(&self) -> &str;
 
-    fn print(&self, value: &lashlang::Value, params: &RenderParams) -> Rendered<String> {
+    fn print(&self, value: &lash_vm::Value, params: &RenderParams) -> Rendered<String> {
         render(value, params)
     }
 
-    fn variable_preview(&self, value: &lashlang::Value, params: &RenderParams) -> Rendered<String> {
+    fn variable_preview(&self, value: &lash_vm::Value, params: &RenderParams) -> Rendered<String> {
         render(value, params)
     }
 }
@@ -22,9 +22,9 @@ impl CodeRenderer for BuiltinCodeRenderer {
         "lash.ax.v1"
     }
 
-    fn variable_preview(&self, value: &lashlang::Value, params: &RenderParams) -> Rendered<String> {
+    fn variable_preview(&self, value: &lash_vm::Value, params: &RenderParams) -> Rendered<String> {
         let mut rendered = render(value, params);
-        if matches!(value, lashlang::Value::String(_)) {
+        if matches!(value, lash_vm::Value::String(_)) {
             rendered.body =
                 serde_json::to_string(&rendered.body).unwrap_or_else(|_| "\"\"".to_string());
             rendered.cuts.original_chars = rendered.body.chars().count();
@@ -103,7 +103,7 @@ impl ResolvedRlmRender {
 
 pub(crate) fn rendered_print(
     renderer: &dyn CodeRenderer,
-    value: &lashlang::Value,
+    value: &lash_vm::Value,
     params: &RenderParams,
     history_index: usize,
     print_index: usize,
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn print_keeps_typed_value_and_places_cut_header_outside_body_budget() {
-        let value = lashlang::Value::String("abcdef".into());
+        let value = lash_vm::Value::String("abcdef".into());
         let params = RenderParams {
             max_chars: 3,
             ..RenderParams::default()

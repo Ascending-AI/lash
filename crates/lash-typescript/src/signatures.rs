@@ -2,10 +2,10 @@ use crate::{Diagnostic, DiagnosticCode};
 use lash_sansio::{ExtraKeys, ObjectShape, SchemaShape, ShapeKind};
 
 /// The dialect contract lives with the runtime that implements it:
-/// `lashlang` owns the signature rows and derives the VM's normalization
+/// `lash_vm` owns the signature rows and derives the VM's normalization
 /// arities from their prose, so this crate's lowering, rendering, and
 /// receiver-kind answers are projections rather than a second statement.
-pub(crate) use lashlang::{
+pub(crate) use lash_vm::{
     INSTANCE_STDLIB_SIGNATURES, LiteralReceivers, STATIC_STDLIB_SIGNATURES, StdlibSignature,
 };
 
@@ -140,14 +140,14 @@ pub fn ensure_tool_call_path_addressable(call_path: &str) -> Result<(), Diagnost
     ))
 }
 
-fn addresses_tool(expr: &lashlang::Expr, modules: &[&str], operation: &str) -> bool {
+fn addresses_tool(expr: &lash_vm::Expr, modules: &[&str], operation: &str) -> bool {
     match expr {
-        lashlang::Expr::ReceiverCall {
+        lash_vm::Expr::ReceiverCall {
             receiver,
             operation: called,
             ..
         } if called.as_str() == operation => match receiver.as_ref() {
-            lashlang::Expr::ResourceRef(resource) => resource
+            lash_vm::Expr::ResourceRef(resource) => resource
                 .path
                 .iter()
                 .map(|segment| segment.as_str())
@@ -344,7 +344,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use lashlang::{TypeExpr, TypeField};
+    use lash_vm::{TypeExpr, TypeField};
     use serde_json::Value;
 
     fn render_schema(schema: &Value) -> String {
@@ -352,14 +352,14 @@ mod tests {
     }
 
     fn render_type(ty: &TypeExpr) -> String {
-        render_schema(&lashlang::type_expr_to_json_schema(ty))
+        render_schema(&lash_vm::type_expr_to_json_schema(ty))
     }
 
     #[test]
     fn inferred_process_signature_matches_schema_typescript_and_artifact() {
         let linked = crate::link(
             "const worker = async (query: string, retries: number): Promise<boolean> => { return true; }; finish(worker);",
-            &lashlang::LashlangHostEnvironment::default(),
+            &lash_vm::LashVmHostEnvironment::default(),
         ).expect("link typed process");
         let process = linked
             .artifact
@@ -367,21 +367,21 @@ mod tests {
             .declarations
             .iter()
             .find_map(|declaration| {
-                if let lashlang::Declaration::Process(process) = declaration {
+                if let lash_vm::Declaration::Process(process) = declaration {
                     Some(process)
                 } else {
                     None
                 }
             })
             .expect("compiled process declaration");
-        let expected = TypeExpr::Process(lashlang::ProcessType::known(
-            lashlang::ProcessSignature::try_new(
+        let expected = TypeExpr::Process(lash_vm::ProcessType::known(
+            lash_vm::ProcessSignature::try_new(
                 vec![
-                    lashlang::ProcessParam {
+                    lash_vm::ProcessParam {
                         name: "query".into(),
                         ty: TypeExpr::Str,
                     },
-                    lashlang::ProcessParam {
+                    lash_vm::ProcessParam {
                         name: "retries".into(),
                         ty: TypeExpr::Float,
                     },
@@ -395,16 +395,16 @@ mod tests {
             .process_type(&process.name)
             .expect("inferred output");
         assert_eq!(inferred, expected);
-        let schema = lashlang::type_expr_to_json_schema(&inferred);
+        let schema = lash_vm::type_expr_to_json_schema(&inferred);
         assert_eq!(
-            lashlang::json_schema_to_type_expr(&schema).expect("schema signature"),
+            lash_vm::json_schema_to_type_expr(&schema).expect("schema signature"),
             expected
         );
         assert_eq!(
             render_schema(&schema),
             "Process<[query: string, retries: number], boolean>"
         );
-        let retained = lashlang::ModuleArtifact::from_store_bytes(
+        let retained = lash_vm::ModuleArtifact::from_store_bytes(
             &linked.artifact.to_store_bytes().expect("encode artifact"),
         )
         .expect("decode retained artifact");
@@ -420,7 +420,7 @@ mod tests {
             source,
             output,
             schema,
-            &lashlang::LashlangHostEnvironment::default(),
+            &lash_vm::LashVmHostEnvironment::default(),
         );
     }
 
@@ -428,7 +428,7 @@ mod tests {
         source: &str,
         output: TypeExpr,
         schema: Value,
-        environment: &lashlang::LashlangHostEnvironment,
+        environment: &lash_vm::LashVmHostEnvironment,
     ) {
         let linked = crate::link(source, environment).expect("link async process");
         let process = linked
@@ -437,12 +437,12 @@ mod tests {
             .declarations
             .iter()
             .find_map(|declaration| match declaration {
-                lashlang::Declaration::Process(process) => Some(process),
+                lash_vm::Declaration::Process(process) => Some(process),
                 _ => None,
             })
             .expect("lifted process");
-        let expected = TypeExpr::Process(lashlang::ProcessType::known(
-            lashlang::ProcessSignature::try_new(vec![], output.clone()).expect("signature"),
+        let expected = TypeExpr::Process(lash_vm::ProcessType::known(
+            lash_vm::ProcessSignature::try_new(vec![], output.clone()).expect("signature"),
         ));
         let inferred = linked
             .artifact
@@ -450,9 +450,9 @@ mod tests {
             .expect("process type");
         assert_eq!(inferred, expected);
         assert_eq!(process.return_ty, Some(output.clone()));
-        let process_schema = lashlang::type_expr_to_json_schema(&inferred);
+        let process_schema = lash_vm::type_expr_to_json_schema(&inferred);
         assert_eq!(process_schema["x-lash"]["signature"]["output"], schema);
-        let retained = lashlang::ModuleArtifact::from_store_bytes(
+        let retained = lash_vm::ModuleArtifact::from_store_bytes(
             &linked.artifact.to_store_bytes().expect("encode artifact"),
         )
         .expect("decode artifact");
@@ -514,7 +514,7 @@ mod tests {
                 }]),
             ),
         ] {
-            let environment = lashlang::LashlangHostEnvironment::default();
+            let environment = lash_vm::LashVmHostEnvironment::default();
             let linked = crate::link(source, &environment).expect("link process");
             for graph in [
                 crate::workflow_graph::workflow_graph_from_source(source).expect("source graph"),
@@ -530,7 +530,7 @@ mod tests {
                     .declarations
                     .iter()
                     .find_map(|declaration| match declaration {
-                        lashlang::Declaration::Process(process) => Some(process),
+                        lash_vm::Declaration::Process(process) => Some(process),
                         _ => None,
                     })
                     .expect("rendered process");
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn async_process_awaited_tool_signature_and_schema() {
-        let mut catalog = lashlang::LashlangHostCatalog::new();
+        let mut catalog = lash_vm::LashVmHostCatalog::new();
         catalog
             .add_module_operation(
                 ["tools"],
@@ -552,7 +552,7 @@ mod tests {
                 TypeExpr::Bool,
             )
             .expect("tool catalogue");
-        let environment = lashlang::LashlangHostEnvironment::new(catalog);
+        let environment = lash_vm::LashVmHostEnvironment::new(catalog);
         assert_async_output_in_environment(
             "const worker = async () => { return await tools.check({}); }; finish(worker);",
             TypeExpr::Bool,
@@ -610,7 +610,7 @@ mod tests {
     fn async_process_rejects_incompatible_return_annotation() {
         let error = crate::link(
             "const worker = async (): Promise<boolean> => { return 42; }; finish(worker);",
-            &lashlang::LashlangHostEnvironment::default(),
+            &lash_vm::LashVmHostEnvironment::default(),
         )
         .expect_err("incompatible output");
         assert!(error.message.contains("bool"), "{error:?}");
@@ -687,12 +687,12 @@ mod tests {
 
     #[test]
     fn renders_named_and_unknown_process_types_without_fabricating_a_signature() {
-        let process = |params: Vec<lashlang::ProcessParam>| {
-            TypeExpr::Process(lashlang::ProcessType::known(
-                lashlang::ProcessSignature::try_new(params, TypeExpr::Bool).unwrap(),
+        let process = |params: Vec<lash_vm::ProcessParam>| {
+            TypeExpr::Process(lash_vm::ProcessType::known(
+                lash_vm::ProcessSignature::try_new(params, TypeExpr::Bool).unwrap(),
             ))
         };
-        let param = |name: &str, ty| lashlang::ProcessParam {
+        let param = |name: &str, ty| lash_vm::ProcessParam {
             name: name.into(),
             ty,
         };
@@ -721,7 +721,7 @@ mod tests {
             "Process<[left: string, right: number], boolean>"
         );
         assert_eq!(
-            render_type(&TypeExpr::Process(lashlang::ProcessType::unknown())),
+            render_type(&TypeExpr::Process(lash_vm::ProcessType::unknown())),
             "Process"
         );
     }

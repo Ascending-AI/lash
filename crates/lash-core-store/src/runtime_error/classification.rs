@@ -42,7 +42,7 @@ pub enum TurnFailureCause {
     /// aborted direct turn returns its acceptance receipt; a queued run stays
     /// pending for its retry budget.
     LiveFault,
-    /// A re-executed lashlang run refused to replay a journal it cannot serve
+    /// A re-executed lash_vm run refused to replay a journal it cannot serve
     /// (FIG-3586): its commands no longer match the recorded ones, or the
     /// journal predates this build's key grammar. Nothing was dispatched and
     /// nothing is recorded as the turn's outcome. The invocation aborts with

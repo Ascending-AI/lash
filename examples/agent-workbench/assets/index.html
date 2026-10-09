@@ -2660,7 +2660,7 @@
         <div id="timelineFooter" class="timeline-footer" aria-label="Waiting for a turn"></div>
       </section>
 
-      <section id="executionExplorer" class="execution-explorer" aria-label="Lashlang execution explorer" hidden>
+      <section id="executionExplorer" class="execution-explorer" aria-label="Lash VM execution explorer" hidden>
         <header class="execution-head">
           <div class="execution-heading">
             <div class="execution-title-row">
@@ -2868,7 +2868,7 @@
     const workCount = document.getElementById("workCount");
     const workFilterProcess = document.getElementById("filterProcess");
     const workFilterForeground = document.getElementById("filterForeground");
-    // Processes are the durable, interesting work; foreground Lashlang is every
+    // Processes are the durable, interesting work; foreground Lash VM is every
     // turn's inline code and floods the rail, so it starts hidden.
     const workFilters = { process: true, foreground: false };
     let lastWorkItems = [];
@@ -5611,12 +5611,12 @@
     /* The work rail is a union of two backend surfaces that name the same
        process differently. `/api/work` keys it by incarnation
        (`process:<id>:incarnation:<n>`, the workbench's `process_graph_key`) because the
-       incarnation is part of that surface's identity; `/api/lashlang-graphs`
+       incarnation is part of that surface's identity; `/api/lash-vm-graphs`
        keys it `process:<id>` (TraceRuntimeSubject::graph_key), and a trace
        subject has no incarnation to add. The two strings can never be equal, so
        matching on them de-duplicated nothing and every running process rendered
        twice: once with its declared label and a cancel button, and once with the
-       engine-derived Lashlang lift digest `__process_<hash>` and no cancel
+       engine-derived Lash VM lift digest `__process_<hash>` and no cancel
        control. The process id is what both surfaces do agree on, so the rail
        de-duplicates on that (FIG-3145). */
     function processIdFromGraphKey(graphKey) {
@@ -5823,7 +5823,7 @@
       const summary = graphIndexByKey.get(graph.graph_key);
       if (summary?.title) return summary.title;
       if (graph.entry_name && graph.entry_name !== "main") return graph.entry_name;
-      return graph.graph_key ? "Lashlang " + shortId(graph.graph_key) : "Execution Explorer";
+      return graph.graph_key ? "Lash VM " + shortId(graph.graph_key) : "Execution Explorer";
     }
 
     function normalizedDiagramNodes(graph) {
@@ -6390,13 +6390,13 @@
       };
       const out = [];
       out.push(`<?xml version="1.0" encoding="UTF-8"?>`);
-      out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${dimensions.width}" height="${dimensions.height}" viewBox="0 0 ${dimensions.width} ${dimensions.height}" role="img" aria-label="${escapeXml(state.title || "Lashlang graph")}">`);
+      out.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${dimensions.width}" height="${dimensions.height}" viewBox="0 0 ${dimensions.width} ${dimensions.height}" role="img" aria-label="${escapeXml(state.title || "Lash VM graph")}">`);
       out.push(`<defs><pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M 24 0 L 0 0 0 24" fill="none" stroke="rgba(239, 226, 194, 0.06)" stroke-width="1"/></pattern></defs>`);
       out.push(`<rect width="${dimensions.width}" height="${dimensions.height}" fill="${colors.deep}"/>`);
       out.push(`<rect y="${diagramY}" width="${dimensions.width}" height="${dimensions.height - diagramY}" fill="url(#grid)"/>`);
       out.push(`<rect width="${dimensions.width}" height="${diagramY}" fill="${colors.form}"/>`);
       out.push(`<line x1="0" y1="${diagramY}" x2="${dimensions.width}" y2="${diagramY}" stroke="${colors.line}" stroke-width="1"/>`);
-      out.push(`<text x="${dimensions.pad}" y="38" fill="${colors.chalk}" font-family="Big Shoulders Display, Helvetica Neue, Arial, sans-serif" font-size="28" font-weight="700">${escapeXml(state.title || "Lashlang graph")}</text>`);
+      out.push(`<text x="${dimensions.pad}" y="38" fill="${colors.chalk}" font-family="Big Shoulders Display, Helvetica Neue, Arial, sans-serif" font-size="28" font-weight="700">${escapeXml(state.title || "Lash VM graph")}</text>`);
       out.push(`<text x="${dimensions.pad}" y="64" fill="${colors.ashText}" font-family="Chivo Mono, ui-monospace, monospace" font-size="12">${escapeXml(state.meta || state.status || "")}</text>`);
       out.push(`<text x="${dimensions.width - dimensions.pad}" y="42" text-anchor="end" fill="${colors.ashText}" font-family="Chivo Mono, ui-monospace, monospace" font-size="12" letter-spacing="1">${escapeXml(state.status || "")}</text>`);
       out.push(`<g transform="translate(${dimensions.pad}, ${diagramY})">`);
@@ -6574,7 +6574,7 @@
       if (!graphKey || executionExplorer.hidden) return;
       const generation = workRefreshGeneration;
       try {
-        const response = await fetch("/api/lashlang-graph/" + encodeURIComponent(graphKey));
+        const response = await fetch("/api/lash-vm-graph/" + encodeURIComponent(graphKey));
         if (!response.ok) throw new Error("graph unavailable");
         const graph = await response.json();
         if (generation !== workRefreshGeneration || activeExecutionGraphKey !== graphKey) return;
@@ -6593,7 +6593,7 @@
       try {
         const [workResponse, graphResponse] = await Promise.all([
           fetch("/api/work"),
-          fetch("/api/lashlang-graphs")
+          fetch("/api/lash-vm-graphs")
         ]);
         if (!workResponse.ok) throw new Error("work request failed");
         if (!graphResponse.ok) throw new Error("graph index request failed");

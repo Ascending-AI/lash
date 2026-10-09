@@ -1,5 +1,5 @@
 //! The PostgreSQL retained tool-material store (FIG-4889): bundles in
-//! `lash_lashlang_artifacts` under the `tool_material` namespace, leased by
+//! `lash_lash_vm_artifacts` under the `tool_material` namespace, leased by
 //! Run-segment and source edges and fenced like every other referrer, on the
 //! same referrer-then-artifact lock order as the other artifact writers.
 
@@ -81,7 +81,7 @@ fn missing(reference: &MaterialRef) -> MaterialRetentionError {
 }
 
 #[async_trait::async_trait]
-impl ToolMaterialStore for PostgresLashlangArtifactStore {
+impl ToolMaterialStore for PostgresLashVmArtifactStore {
     async fn retain_material(
         &self,
         holder: &MaterialHolder,
@@ -99,7 +99,7 @@ impl ToolMaterialStore for PostgresLashlangArtifactStore {
             });
         }
         lock_bundle_tx(&mut tx, artifact_ref).await?;
-        sqlx::query(artifact_sql().lashlang_artifacts.insert_bytes.sql())
+        sqlx::query(artifact_sql().lash_vm_artifacts.insert_bytes.sql())
             .bind(TOOL_MATERIAL_NAMESPACE)
             .bind(artifact_ref)
             .bind(bundle.bytes())
@@ -107,7 +107,7 @@ impl ToolMaterialStore for PostgresLashlangArtifactStore {
             .await
             .map_err(store_sqlx_error)?;
         let stored: Vec<u8> =
-            sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+            sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                 .bind(TOOL_MATERIAL_NAMESPACE)
                 .bind(artifact_ref)
                 .fetch_one(&mut **tx)
@@ -156,7 +156,7 @@ impl ToolMaterialStore for PostgresLashlangArtifactStore {
             });
         }
         lock_bundle_tx(&mut tx, artifact_ref).await?;
-        let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+        let exists: bool = sqlx::query_scalar(artifact_sql().lash_vm_artifacts.exists.sql())
             .bind(TOOL_MATERIAL_NAMESPACE)
             .bind(artifact_ref)
             .fetch_one(&mut **tx)
@@ -216,7 +216,7 @@ impl ToolMaterialStore for PostgresLashlangArtifactStore {
             return Err(missing(reference));
         }
         let bytes: Vec<u8> =
-            sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+            sqlx::query_scalar(artifact_sql().lash_vm_artifacts.select_bytes.sql())
                 .bind(TOOL_MATERIAL_NAMESPACE)
                 .bind(&artifact.artifact_ref)
                 .fetch_one(&mut *tx)

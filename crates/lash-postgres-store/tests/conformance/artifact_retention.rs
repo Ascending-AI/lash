@@ -55,7 +55,7 @@ lash_conformance::artifact_referrer_tests!({
                 .await
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
-                artifacts: Arc::new(open_storage.lashlang_artifact_store())
+                artifacts: Arc::new(open_storage.lash_vm_artifact_store())
                     as Arc<dyn lash_core::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store())
                     as Arc<dyn ProcessExecutionEnvStore>,
@@ -73,7 +73,7 @@ lash_conformance::artifact_referrer_tests!({
                             .expect("construct post-write Postgres artifact pool")
                     });
                     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
-                        artifacts: Arc::new(reopened.lashlang_artifact_store())
+                        artifacts: Arc::new(reopened.lash_vm_artifact_store())
                             as Arc<dyn lash_core::ModuleArtifactStore>,
                         process_env: Arc::new(reopened.process_env_store())
                             as Arc<dyn ProcessExecutionEnvStore>,

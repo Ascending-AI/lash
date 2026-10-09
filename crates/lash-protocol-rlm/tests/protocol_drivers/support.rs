@@ -1030,7 +1030,7 @@ impl RlmProtocolRun {
     }
 }
 
-/// A storage-only backend for the plugin's Lashlang artifacts, opened on a
+/// A storage-only backend for the plugin's Lash VM artifacts, opened on a
 /// runtime of its own thread so a synchronous scenario can build one.
 #[expect(
     clippy::expect_used,

@@ -8,11 +8,11 @@ struct RlmPromptHistoryFocusedCheck {
 }
 
 const TEXT_ONLY_CELL_TRAJECTORY: RlmPromptHistoryFocusedCheck = RlmPromptHistoryFocusedCheck {
-    display_name: "text-only lashlang cell trajectory",
+    display_name: "text-only lash_vm cell trajectory",
 };
 
 const MARKDOWN_BEFORE_CELL: RlmPromptHistoryFocusedCheck = RlmPromptHistoryFocusedCheck {
-    display_name: "markdown block remains visible prose before lashlang cell",
+    display_name: "markdown block remains visible prose before lash_vm cell",
 };
 const EXEC_ERROR_EXACT_HISTORY: RlmPromptHistoryFocusedCheck = RlmPromptHistoryFocusedCheck {
     display_name: "exec error keeps reasoning prose and code",
@@ -48,7 +48,7 @@ fn rlm_prompt_history_text_only_cell_records_code_without_reasoning_or_prose() {
 }
 
 #[test]
-fn rlm_prompt_history_markdown_code_block_remains_visible_prose_before_real_lashlang_cell() {
+fn rlm_prompt_history_markdown_code_block_remains_visible_prose_before_real_lash_vm_cell() {
     RlmProtocolScenario::new(MARKDOWN_BEFORE_CELL.display_name)
         .termination(RlmTermination::FinishRequired { schema: None })
         .llm_response(vec![text_part(&typescript_block_with_prose(

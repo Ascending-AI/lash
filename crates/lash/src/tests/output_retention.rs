@@ -507,7 +507,7 @@ fn archive_reader_cell() -> &'static str {
     r#"
 for (let i = 0; i < history.length; i++) {
   const step = history[i];
-  if (step.kind === "lashlang_step" && step.output_archive) {
+  if (step.kind === "lash_vm_step" && step.output_archive) {
     finish(await control.read_output({ archive: step.output_archive.attachment }));
   }
 }
@@ -592,7 +592,7 @@ async fn step_archive_refetch_survives_cold_reopen_branch_and_continue_as_on_sql
             typescript_block(r#"
 for (let i = 0; i < history.length; i++) {
   const step = history[i];
-  if (step.kind === "lashlang_step" && step.output_archive) {
+  if (step.kind === "lash_vm_step" && step.output_archive) {
     await control.continue_as({ task: "read shared archive in fresh frame", seed: { archive: step.output_archive.attachment } });
   }
 }

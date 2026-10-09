@@ -296,7 +296,7 @@ serial = true
 [[rule]]
 packages = ["lash-runtime", "lash-internal-sqlite-store"]
 kinds = ["unit-test"]
-compile_data = ["//crates/lashlang:old_module_fixture"]
+compile_data = ["//crates/lash-vm:old_module_fixture"]
 
 # The Node session oracle (FIG-3599) runs the dialect's session corpora through
 # the RLM executor; the corpora, their Node answers and the census the
@@ -334,7 +334,7 @@ serial = true
 
 # These cost laws read a process-global counting allocator.
 [[rule]]
-packages = ["lash-internal-lashlang"]
+packages = ["lash-internal-vm"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["append_cost", "dialect_cost"]
 serial = true
@@ -377,7 +377,7 @@ compile_data = ["//:host_schemas"]
 # It holds the dialect to the corpus's own checked-in budget by reading the
 # budget file with `include_str!`, the way lash-perf does.
 [[rule]]
-packages = ["lash-internal-lashlang"]
+packages = ["lash-internal-vm"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["dialect_cost"]
 compile_data = ["//:perf_guard_budgets"]
@@ -392,7 +392,7 @@ compile_data = ["//crates/lash-core:durable_read_fixture_source"]
 packages = ["lash-internal-postgres-store"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["preflight_durable_walk"]
-compile_data = ["//crates/lashlang:old_module_fixture"]
+compile_data = ["//crates/lash-vm:old_module_fixture"]
 
 # Architecture lints that read sibling crates' sources at run time. A library's
 # runfiles carry only its declared non-Rust inputs, so a test that scans
@@ -550,7 +550,7 @@ provider-wire-fixtures = ["//crates/lash-sim:package_files"]
 [filegroups.lash-internal-core]
 durable_read_fixture_source = { srcs = ["tests/support/durable_read_fixture.rs"] }
 
-[filegroups.lash-internal-lashlang]
+[filegroups.lash-internal-vm]
 old_module_fixture = { srcs = ["tests/fixtures/module-artifact-old.json"] }
 
 [filegroups.lash-internal-typescript]

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use lash_core::{SessionAppendNode, ToolArgumentProjectionPolicy};
 use lash_rlm_types::{PROJECTED_JSON_TAG, RlmProjectedSeedEntry};
-use lashlang::{ImageValue, Record as FlowRecord, Value as FlowValue};
+use lash_vm::{ImageValue, Record as FlowRecord, Value as FlowValue};
 use serde_json::Value;
 
 #[derive(Debug, thiserror::Error)]
@@ -431,7 +431,7 @@ mod tests {
 
         assert_eq!(
             recovered, plain,
-            "plain reserved-key records must survive lashlang-to-host-to-lashlang"
+            "plain reserved-key records must survive lash-vm-to-host-to-lash_vm"
         );
     }
 

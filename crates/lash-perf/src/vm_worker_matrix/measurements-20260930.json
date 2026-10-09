@@ -78,7 +78,7 @@
     "raw_samples_sha256": "740701fafcdf58fa5030fa4ed56824a971cb2c2a9bdec369cfc5b7e9a5f64c92",
     "raw_sample_count": 2871800,
     "summary_metric_count": 269,
-    "feature_graph": "Canonical optimized workspace graph; testing enabled for worker/client/lashlang. Echo workloads invoke no test frontend, hook or continuation probe. Packaged helper separately verified with testing disabled."
+    "feature_graph": "Canonical optimized workspace graph; testing enabled for worker/client/lash_vm. Echo workloads invoke no test frontend, hook or continuation probe. Packaged helper separately verified with testing disabled."
   },
   "summaries": [
     {

@@ -1,0 +1,116 @@
+//! Building blocks for programs that have no TypeScript spelling.
+//!
+//! ADR 0096 makes TypeScript the sole authored RLM dialect; lash_vm names the
+//! IR and the VM. A few of the facts these suites pin outlive the surface that
+//! used to spell them — the `format` builtin's placeholder rules, the numeric
+//! `range`/`ceil_div`/`floor_div` helpers, tuple values — because they are
+//! properties of the IR rather than of any dialect. Those tests build the IR
+//! directly instead of authoring source, so they keep pinning the VM without
+//! naming a retired syntax.
+
+use lash_vm::{Expr, Program};
+
+/// A program whose body is `expressions`, run in order.
+pub fn program(expressions: Vec<Expr>) -> Program {
+    Program::block(expressions)
+}
+
+/// A single-expression program that finishes with `expr`.
+pub fn finish_program(expr: Expr) -> Program {
+    program(vec![finish(expr)])
+}
+
+pub fn finish(expr: Expr) -> Expr {
+    Expr::Finish(Box::new(expr))
+}
+
+pub fn call(name: &str, args: Vec<Expr>) -> Expr {
+    Expr::BuiltinCall {
+        name: name.into(),
+        args,
+    }
+}
+
+pub fn string(value: &str) -> Expr {
+    Expr::String(value.into())
+}
+
+pub fn number(value: f64) -> Expr {
+    Expr::Number(value)
+}
+
+pub fn list(items: Vec<Expr>) -> Expr {
+    Expr::List(items)
+}
+
+pub fn var(name: &str) -> Expr {
+    Expr::Variable(name.into())
+}
+
+pub fn assign(name: &str, expr: Expr) -> Expr {
+    Expr::Assign {
+        target: lash_vm::AssignTarget::variable(name.into()),
+        expr: Box::new(expr),
+    }
+}
+
+/// `<root><steps> = <expr>`, for a write through a path.
+pub fn assign_path(root: &str, steps: Vec<lash_vm::AssignPathStep>, expr: Expr) -> Expr {
+    Expr::Assign {
+        target: lash_vm::AssignTarget {
+            root: root.into(),
+            steps,
+        },
+        expr: Box::new(expr),
+    }
+}
+
+pub fn field_step(name: &str) -> lash_vm::AssignPathStep {
+    lash_vm::AssignPathStep::Field(name.into())
+}
+
+pub fn index_step(index: Expr) -> lash_vm::AssignPathStep {
+    lash_vm::AssignPathStep::Index(index)
+}
+
+pub fn field(target: Expr, name: &str) -> Expr {
+    Expr::Field {
+        target: Box::new(target),
+        field: name.into(),
+    }
+}
+
+pub fn index(target: Expr, index: Expr) -> Expr {
+    Expr::Index {
+        target: Box::new(target),
+        index: Box::new(index),
+    }
+}
+
+pub fn add(left: Expr, right: Expr) -> Expr {
+    Expr::CoercingBinary {
+        op: lash_vm::CoercingBinaryOp::Add,
+        left: Box::new(left),
+        right: Box::new(right),
+    }
+}
+
+pub fn record(fields: Vec<(&str, Expr)>) -> Expr {
+    Expr::Record(
+        fields
+            .into_iter()
+            .map(|(name, value)| (name.into(), value))
+            .collect(),
+    )
+}
+
+/// `for <binding> in range(0, <end>) { <body> }`
+pub fn for_range(binding: &str, end: f64, body: Vec<Expr>) -> Expr {
+    Expr::For {
+        authored_binding: None,
+        binding: binding.into(),
+        iterable: Box::new(call("range", vec![number(0.0), number(end)])),
+        bind: None,
+        body: Box::new(Expr::Block(body)),
+    }
+}

@@ -1106,11 +1106,11 @@ mod tests {
     fn stop_sequences_reach_the_messages_request() {
         let provider = AnthropicProvider::new("key");
         let mut req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
-        req.generation.stop_sequences = vec!["</lashlang>".to_string()];
+        req.generation.stop_sequences = vec!["</lash_vm>".to_string()];
 
         let (body, receipt) = provider.build_request(&req).expect("body");
 
-        assert_eq!(body["stop_sequences"], json!(["</lashlang>"]));
+        assert_eq!(body["stop_sequences"], json!(["</lash_vm>"]));
         assert_eq!(
             receipt.stop_sequences,
             lash_core::GenerationOptionOutcome::Applied

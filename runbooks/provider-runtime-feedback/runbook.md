@@ -49,7 +49,7 @@ it does not substitute for the judged browser row.
    `env.sh` first); poll `/healthz` and the rendered compose form.
    Expect the judged host, and confirm the served model from the host's own
    `agent_workbench.startup` record. That record carries `addr`, `data_dir`,
-   `dev_provider_scenario`, `dialect`, `lashlang_execution_path`, `model`,
+   `dev_provider_scenario`, `dialect`, `lash_vm_execution_path`, `model`,
    `store_backend` and `trace_path`. Read the
    served dialect from its `dialect` field and require `typescript`;
    `composition_changed.rendered_system_prompt` carries the dialect the prompt was rendered

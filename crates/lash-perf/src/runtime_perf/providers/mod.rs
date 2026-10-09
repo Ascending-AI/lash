@@ -19,8 +19,8 @@ use lash_core::{
     ToolOutputContract, ToolProvider, facade_support::DirectJsonSchema,
     facade_support::DirectRequest,
 };
-use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use lash_sansio::sync::MutexExt;
+use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
 use super::scenarios::RuntimePerfScenario;
 

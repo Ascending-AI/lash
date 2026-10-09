@@ -9,8 +9,8 @@ use lash_core::sansio::ContextProjector;
 use lash_core::{
     LlmRequest, ProjectorContext, ProtocolBuildInput, TurnDriverConfig, TurnDriverPreamble,
 };
-use lash_lashlang_runtime::LashlangSurface;
 use lash_rlm_types::RlmTermination;
+use lash_vm_runtime::LashVmSurface;
 
 use crate::dialect::SessionDialect;
 #[cfg(test)]
@@ -26,7 +26,7 @@ use history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 pub struct RlmProjectorConfig {
     pub dialect: Arc<dyn crate::dialect::Dialect>,
     pub max_output_chars: usize,
-    pub lashlang_surface: LashlangSurface,
+    pub lash_vm_surface: LashVmSurface,
 }
 
 pub(crate) struct RlmPreambleConfig {
@@ -39,7 +39,7 @@ impl RlmProjectorConfig {
         Self {
             dialect,
             max_output_chars: 10_000,
-            lashlang_surface: LashlangSurface::default(),
+            lash_vm_surface: LashVmSurface::default(),
         }
     }
 }
@@ -50,7 +50,7 @@ pub fn build_rlm_preamble(
 ) -> TurnDriverPreamble {
     let dialect: Arc<SessionDialect> = Arc::new(SessionDialect::prompt_only(
         Arc::clone(&config.dialect),
-        config.lashlang_surface.clone(),
+        config.lash_vm_surface.clone(),
     ));
     build_rlm_preamble_with_dialect(
         input,
@@ -183,7 +183,7 @@ pub(crate) fn render_conformance_history_message(
 ) -> Result<LlmMessage, String> {
     let dialect = SessionDialect::prompt_only(
         Arc::new(crate::dialect::TypescriptDialect),
-        LashlangSurface::default(),
+        LashVmSurface::default(),
     );
     let events = [lash_core::SessionHistoryRecord::Conversation(
         lash_core::session_model::ConversationRecord::from_message(message),

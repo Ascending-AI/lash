@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use lash_core::SessionError;
 use lash_core::plugin::ExecutionLeafName;
-use lashlang::{
+use lash_vm::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
     SnapshotDecodeError, Value as FlowValue, validate_canonical_messagepack_structure,
 };
@@ -24,11 +24,11 @@ use super::snapshot::{RLM_SNAPSHOT_VERSION, RlmSnapshotError};
 pub(super) struct RlmSnapshotRoot {
     version: u32,
     engine: String,
-    /// The Lashlang durable header: its format version and heap counters.
+    /// The Lash VM durable header: its format version and heap counters.
     #[serde(with = "serde_bytes")]
     state_header: Vec<u8>,
-    /// One Lashlang durable fragment per binding: the binding's value and the
-    /// heap objects it carries (`lashlang::DurableParts`).
+    /// One Lash VM durable fragment per binding: the binding's value and the
+    /// heap objects it carries (`lash_vm::DurableParts`).
     globals: BTreeMap<String, PersistedValue>,
 }
 
@@ -48,7 +48,7 @@ include!(concat!(env!("OUT_DIR"), "/rlm_snapshot_fields.rs"));
 
 // Serialized field order of the snapshot's dependency-owned nodes.
 //
-// These types live in `lash-sansio` and `lash-lashlang-runtime`, and the build
+// These types live in `lash-sansio` and `lash-vm-runtime`, and the build
 // script used to derive each list by serializing an all-fields-set witness.
 // That put both crates -- and every first-party crate beneath them -- into
 // Buck2's exec configuration, compiled a second time at `opt-level=3` for an
@@ -89,10 +89,10 @@ fn validate_canonical_root(data: &[u8]) -> Result<(), RlmSnapshotError> {
         }
         error @ (SnapshotDecodeError::VersionMismatch { .. }
         | SnapshotDecodeError::HeaplessSnapshotContainsReference { .. }) => {
-            RlmSnapshotError::Lashlang(error)
+            RlmSnapshotError::LashVm(error)
         }
-        // Preserve future decoder failures as typed Lashlang errors; never accept the envelope.
-        _ => RlmSnapshotError::Lashlang(error),
+        // Preserve future decoder failures as typed Lash VM errors; never accept the envelope.
+        _ => RlmSnapshotError::LashVm(error),
     })
 }
 
@@ -403,10 +403,10 @@ pub struct RlmExecutionState {
     /// The modules the current frame holds an edge of (ADR 0113 §3.1). A
     /// cache for one frame: a module first bound in a new frame acquires
     /// that frame's edge, and a cold restore starts it empty and re-acquires.
-    frame_held_modules: Option<(lash_core::FrameEnvironmentId, BTreeSet<lashlang::ModuleRef>)>,
+    frame_held_modules: Option<(lash_core::FrameEnvironmentId, BTreeSet<lash_vm::ModuleRef>)>,
     /// A transient projection of the active link's journaled tool outcomes.
     /// A cold restore clears it; re-execution reads the journaled effect.
-    pub(super) deferred_link: Option<lash_lashlang_runtime::DeferredLink>,
+    pub(super) deferred_link: Option<lash_vm_runtime::DeferredLink>,
     /// The body each binding's fragment was last captured as, and the
     /// baseline those bodies stand for. The two move together: a capture
     /// installs both, and a rollback or checkpoint restore rewinds both.
@@ -461,7 +461,7 @@ impl RlmExecutionState {
     pub(super) fn frame_holds(
         &self,
         frame: &lash_core::FrameEnvironmentId,
-        module_ref: &lashlang::ModuleRef,
+        module_ref: &lash_vm::ModuleRef,
     ) -> bool {
         self.frame_held_modules
             .as_ref()
@@ -472,7 +472,7 @@ impl RlmExecutionState {
 
     /// The modules the current frame is known to hold.
     #[cfg(test)]
-    pub(super) fn frame_held_module_refs(&self) -> impl Iterator<Item = &lashlang::ModuleRef> {
+    pub(super) fn frame_held_module_refs(&self) -> impl Iterator<Item = &lash_vm::ModuleRef> {
         self.frame_held_modules
             .iter()
             .flat_map(|(_, modules)| modules.iter())
@@ -483,7 +483,7 @@ impl RlmExecutionState {
     pub(super) fn record_frame_hold(
         &mut self,
         frame: &lash_core::FrameEnvironmentId,
-        module_ref: lashlang::ModuleRef,
+        module_ref: lash_vm::ModuleRef,
     ) {
         match &mut self.frame_held_modules {
             Some((held_frame, modules)) if held_frame == frame => {
@@ -680,10 +680,10 @@ impl RlmExecutionState {
         };
         for (name, fragment) in parts.fragments {
             match fragment {
-                lashlang::DurableFragment::Changed(body) => {
+                lash_vm::DurableFragment::Changed(body) => {
                     capture.changed.insert(name, ByteBuf::from(body));
                 }
-                lashlang::DurableFragment::Unchanged => {
+                lash_vm::DurableFragment::Unchanged => {
                     capture.unchanged.insert(name);
                 }
             }
@@ -896,7 +896,7 @@ impl RlmExecutionState {
             .await
             .map_err(|error| match error {
                 lash_vm_client::RemoteRestoreError::Snapshot(error) => {
-                    RlmSnapshotError::Lashlang(error)
+                    RlmSnapshotError::LashVm(error)
                 }
                 lash_vm_client::RemoteRestoreError::Worker(error) => {
                     RlmSnapshotError::WorkerUnavailable(error)
@@ -991,7 +991,7 @@ impl RlmExecutionState {
     pub(crate) async fn opaque_bound_variables(
         &self,
         exclude: &BTreeSet<String>,
-        config: &lashlang::BindingSummaryConfig,
+        config: &lash_vm::BindingSummaryConfig,
     ) -> Result<Vec<(String, String)>, SessionError> {
         Ok(self
             .vm

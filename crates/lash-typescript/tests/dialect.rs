@@ -3,8 +3,8 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lashlang::testing::ast_builders as b;
-use lashlang::{
+use lash_vm::testing::ast_builders as b;
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
     Vm, VmRunOutcome,
 };
@@ -23,7 +23,7 @@ impl ExecutionHost for Host {
 
 fn run(source: &str) -> ExecutionOutcome {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
         .expect("TypeScript should execute")
 }
 
@@ -55,11 +55,11 @@ impl ExecutionHost for JournalHost {
 #[test]
 fn typescript_lowering_and_the_stated_ir_share_vm_behavior() {
     fn execute(
-        program: &lashlang::CompiledProgram,
+        program: &lash_vm::CompiledProgram,
         host: &JournalHost,
     ) -> (ExecutionOutcome, Vec<u8>) {
         let mut state = State::new();
-        let outcome = futures::executor::block_on(lashlang::execute(program, &mut state, host))
+        let outcome = futures::executor::block_on(lash_vm::execute(program, &mut state, host))
             .expect("execute equivalent program");
         let bytes = state
             .snapshot()
@@ -72,17 +72,17 @@ fn typescript_lowering_and_the_stated_ir_share_vm_behavior() {
     // print value
     // finish value == 3
     //
-    // ADR 0096 retired the Lashlang front-end, so the equivalence is stated
+    // ADR 0096 retired the Lash VM front-end, so the equivalence is stated
     // against the IR directly: what the TypeScript lowering must produce.
-    let stated = lashlang::testing::harness::try_compile_program(&b::program(vec![
+    let stated = lash_vm::testing::harness::try_compile_program(&b::program(vec![
         b::assign(
             "value",
-            b::binary(b::num(1.0), lashlang::CoercingBinaryOp::Add, b::num(2.0)),
+            b::binary(b::num(1.0), lash_vm::CoercingBinaryOp::Add, b::num(2.0)),
         ),
         b::print(b::var("value")),
         b::finish(b::binary(
             b::var("value"),
-            lashlang::CoercingBinaryOp::StrictEqual,
+            lash_vm::CoercingBinaryOp::StrictEqual,
             b::num(3.0),
         )),
     ]))
@@ -220,7 +220,7 @@ fn suspended_typescript_run(stress_gc: bool) -> (Vec<u8>, ExecutionOutcome) {
         let continuation = vm.suspend().expect("capture TypeScript continuation");
         let wire_bytes = serde_json::to_vec(&continuation).expect("encode continuation");
         let bytes = wire_bytes.clone();
-        let restored = lashlang::VmInstance::pristine()
+        let restored = lash_vm::VmInstance::pristine()
             .open_continuation(&wire_bytes)
             .expect("decode in a fresh process image");
         let mut resumed = Vm::resume_from(restored, &program, &host).expect("resume TypeScript");
@@ -259,7 +259,7 @@ fn resumed_typescript_can_capture_aliases_created_after_the_first_suspend() {
         );
 
         let encoded = serde_json::to_vec(&first).expect("encode continuation");
-        let decoded = lashlang::VmInstance::pristine()
+        let decoded = lash_vm::VmInstance::pristine()
             .open_continuation(&encoded)
             .expect("decode continuation");
         let mut resumed = Vm::resume_from(decoded, &program, &Host).expect("resume TypeScript VM");
@@ -281,8 +281,8 @@ fn resumed_typescript_can_capture_aliases_created_after_the_first_suspend() {
 }
 
 // Two refusals lived here: a continuation whose `reference_semantics` marker
-// was authored true could not be resumed under Lashlang VM semantics, and a
-// heap a TypeScript program had shared could not be re-entered by a Lashlang
+// was authored true could not be resumed under Lash VM semantics, and a
+// heap a TypeScript program had shared could not be re-entered by a Lash VM
 // program. Both cross-checked a program's dialect against the heap shape, and
 // both retired with the surface (ADR 0096): every program this build compiles
 // runs ECMA reference semantics, so there is no second semantics to refuse.
@@ -292,7 +292,7 @@ fn resumed_typescript_can_capture_aliases_created_after_the_first_suspend() {
 // _after_the_first_suspend` above.
 
 fn normalized_continuation_bytes(
-    program: &lashlang::CompiledProgram,
+    program: &lash_vm::CompiledProgram,
     host: &impl ExecutionHost,
 ) -> Vec<u8> {
     futures::executor::block_on(async {
@@ -325,7 +325,7 @@ fn normalized_continuation_bytes(
 
 #[test]
 fn typescript_lowering_and_the_stated_ir_have_identical_continuation_bytes() {
-    let stated = lashlang::testing::harness::try_compile_program(&b::program(vec![
+    let stated = lash_vm::testing::harness::try_compile_program(&b::program(vec![
         b::print(b::num(1.0)),
         b::finish(b::num(2.0)),
     ]))
@@ -412,7 +412,7 @@ mod durability {
             );
             let encoded = serde_json::to_vec(&vm.suspend().expect("suspend exotics"))
                 .expect("encode continuation");
-            let continuation = lashlang::VmInstance::pristine()
+            let continuation = lash_vm::VmInstance::pristine()
                 .open_continuation(&encoded)
                 .expect("decode continuation");
             let mut resumed =
@@ -483,7 +483,7 @@ fn a_process_suspended_inside_for_of_resumes() {
                     // Round-trip the continuation at every effect boundary.
                     let continuation = vm.suspend().expect("suspend inside the loop");
                     let encoded = serde_json::to_vec(&continuation).expect("encode");
-                    let decoded = lashlang::VmInstance::pristine()
+                    let decoded = lash_vm::VmInstance::pristine()
                         .open_continuation(&encoded)
                         .expect("decode");
                     vm = Vm::resume_from(decoded, &program, &Host).expect("resume");
@@ -526,7 +526,7 @@ fn array_mutators_survive_a_park_in_the_middle_of_the_loop() {
         );
         let continuation = vm.suspend().expect("capture the mid-loop continuation");
         let encoded = serde_json::to_vec(&continuation).expect("encode the continuation");
-        let decoded = lashlang::VmInstance::pristine()
+        let decoded = lash_vm::VmInstance::pristine()
             .open_continuation(&encoded)
             .expect("decode the continuation");
         let mut vm = Vm::resume_from(decoded, &program, &Host).expect("resume mid-loop");

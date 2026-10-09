@@ -16,7 +16,7 @@
 //! naming the field and the literal's fields. The differential table checks
 //! the same shapes against Node.
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
@@ -83,11 +83,11 @@ const USES: &[(&str, &str)] = &[
 
 /// Links `source` as a cell is admitted, then runs it.
 fn run(source: &str) -> Result<String, String> {
-    lash_typescript::link(source, &lashlang::testing::harness::test_environment())
+    lash_typescript::link(source, &lash_vm::testing::harness::test_environment())
         .map_err(|diagnostic| format!("{}: {diagnostic}", diagnostic.code.as_str()))?;
     let program = lash_typescript::testing::compile(source)
         .map_err(|diagnostic| format!("compile: {diagnostic}"))?;
-    match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host)) {
+    match futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host)) {
         Ok(ExecutionOutcome::Finished(Value::String(answer))) => Ok(answer.to_string()),
         other => Err(format!("ran to {other:?}")),
     }
@@ -95,7 +95,7 @@ fn run(source: &str) -> Result<String, String> {
 
 /// The link refusal of `source`, rendered.
 fn refusal(source: &str) -> String {
-    match lash_typescript::link(source, &lashlang::testing::harness::test_environment()) {
+    match lash_typescript::link(source, &lash_vm::testing::harness::test_environment()) {
         Ok(_) => format!("`{source}` linked"),
         Err(diagnostic) => format!("{}: {}", diagnostic.code.as_str(), diagnostic.message),
     }

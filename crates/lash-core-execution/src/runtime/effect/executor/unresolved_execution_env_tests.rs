@@ -11,14 +11,14 @@ fn a_carried_park_keeps_its_own_code_and_cause() {
         &crate::testing::process_execution_env_fixture_ref(),
         crate::runtime::ProcessExecutionEnvLoadError::Store(
             crate::PluginError::RuntimeEffectController(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::LashlangCellReplayDivergence,
+                crate::RuntimeErrorCode::LashVmCellReplayDivergence,
                 "diverged",
             )),
         ),
     );
     assert_eq!(
         parked.code,
-        crate::RuntimeErrorCode::LashlangCellReplayDivergence
+        crate::RuntimeErrorCode::LashVmCellReplayDivergence
     );
     assert_eq!(parked.turn_failure_cause(), crate::TurnFailureCause::Parked);
     assert!(

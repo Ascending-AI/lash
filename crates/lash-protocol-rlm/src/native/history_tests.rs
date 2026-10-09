@@ -64,7 +64,7 @@ fn pair(step: CellRecord) -> Vec<SessionHistoryRecord> {
 fn render(events: &[SessionHistoryRecord]) -> Vec<LlmMessage> {
     let dialect = crate::dialect::SessionDialect::prompt_only(
         std::sync::Arc::new(crate::dialect::TypescriptDialect),
-        lash_lashlang_runtime::LashlangSurface::default(),
+        lash_vm_runtime::LashVmSurface::default(),
     );
     let turn_messages = lash_core::facade_support::MessageSequence::default();
     render_history_messages(&RlmHistoryRenderInput {

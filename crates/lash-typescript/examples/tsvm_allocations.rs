@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     assert!(allocation::total() - before >= 8192);
     // The worker-side decoders, reached through a pristine instance built
     // outside every measured decode.
-    let decoder = lashlang::VmInstance::pristine();
+    let decoder = lash_vm::VmInstance::pristine();
     for case in corpus::load(&root) {
         black_box((&case.source, &case.program));
         let continuation = serde_json::to_vec(&case.continuation)?;

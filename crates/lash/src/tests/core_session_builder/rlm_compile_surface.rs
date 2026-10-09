@@ -132,7 +132,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     // extra tool plugins; the request's execution env plugin options configure
     // them (here `compile-extra-tool` resolves to `lookup`).
     let backend = sqlite_memory_store_backend().await;
-    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend.clone());
+    let artifact_store = lash_vm_runtime::LashVmArtifacts::of_backend(&backend.clone());
     let factory = Arc::new(rlm_factory(&backend));
     let plugin_host = lash_core::facade_support::PluginHost::new(
         vec![
@@ -162,7 +162,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
         );
         lash_core::AdmittedPluginConfig::new(config, 0)
     };
-    let request = crate::rlm::LashlangCompileSurfaceRequest::new(
+    let request = crate::rlm::LashVmCompileSurfaceRequest::new(
         "compile-surface",
         lash_core::ProcessExecutionEnvSpec::new(
             plugin_config(),
@@ -175,13 +175,13 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
         ),
     );
 
-    let mut restricted = crate::rlm::LashlangCompileSurfaceRequest::new(
+    let mut restricted = crate::rlm::LashVmCompileSurfaceRequest::new(
         "restricted-compile-surface",
         request.execution_env_spec.clone(),
     );
     restricted.execution_env_spec.tool_access =
         lash_core::SessionToolAccess::restricted(Vec::new()).expect("no resident tools");
-    let restricted_surface = factory.lashlang_compile_surface(&plugin_host, restricted)?;
+    let restricted_surface = factory.lash_vm_compile_surface(&plugin_host, restricted)?;
     assert!(!restricted_surface.tool_catalog.has_callable_tool("lookup"));
     assert!(
         !restricted_surface
@@ -189,7 +189,7 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
             .has_callable_tool("compile_core_tool")
     );
 
-    let surface = factory.lashlang_compile_surface(&plugin_host, request)?;
+    let surface = factory.lash_vm_compile_surface(&plugin_host, request)?;
 
     assert!(surface.tool_catalog.has_callable_tool("compile_core_tool"));
     assert!(surface.tool_catalog.has_callable_tool("lookup"));
@@ -210,9 +210,9 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
     );
 
     let compiled = factory
-        .compile_lashlang_module(
+        .compile_lash_vm_module(
             &plugin_host,
-            crate::rlm::LashlangModuleCompileRequest::new(
+            crate::rlm::LashVmModuleCompileRequest::new(
                 "compile-module",
                 r#"
 const value = await tools.lookup({});

@@ -869,7 +869,7 @@ pub trait PluginFactory: PluginMetadata + Send + Sync {
 
     /// The [`Backend::binding_identity`](crate::Backend::binding_identity) of
     /// the backend whose stores this factory keeps state in, when it keeps
-    /// any: the RLM protocol keeps its Lashlang module artifacts there.
+    /// any: the RLM protocol keeps its Lash VM module artifacts there.
     ///
     /// A runtime built over one backend refuses a factory bound to another,
     /// so no plugin writes state into a substrate the runtime does not reopen

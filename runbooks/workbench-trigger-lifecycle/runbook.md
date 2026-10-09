@@ -92,7 +92,7 @@ and work registry are.
 - Before judged execution, the deterministic companion should be green:
   `kiln test --test_output=all //examples/agent-workbench:agent-workbench__unit_test --test_arg=button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn`.
 - Also capture the deferred-link replay companion before judged execution:
-  `kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test //crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test --test_arg=deferred`. Save the
+  `kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test //crates/lash-vm-runtime:lash-vm-runtime__unit_test --test_arg=deferred`. Save the
   complete output as `00-deferred-link-replay.txt`. This companion is operator-run and
   deterministic: the judge only inspects its artifact and does not invoke a model tool,
   provider, account, subscription, process, or other host-affecting operation.
@@ -110,7 +110,7 @@ The deferred-link companion must show all of these named cases green:
   cannot silently acquire replacement authority.
 
 Also capture the dedicated deferred-trigger-definition companion:
-`kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test //crates/lash-lashlang-runtime:lash-lashlang-runtime__unit_test --test_arg=deferred_trigger --test_arg=--nocapture`. Save its
+`kiln test --test_output=all //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test //crates/lash-vm-runtime:lash-vm-runtime__unit_test --test_arg=deferred_trigger --test_arg=--nocapture`. Save its
 complete output as `00-deferred-trigger-definition.txt`. This is a deterministic,
 operator-run link test: it reads definitions from in-memory test providers but does not
 activate a provider, create a subscription, execute a provider route, call a model, or
@@ -184,7 +184,7 @@ Poll `GET /api/triggers` until it returns exactly one enabled registration named
 rail to show the target and source with the registration alias in its details/title and a
 **disable** action. The rendered name is the **process label**, not the trigger alias, and a
 target defined inline is a *lifted* process named by content hash
-(`LIFTED_PROCESS_NAME_PREFIX = "__process_"`, `crates/lashlang/src/ast.rs:554`), so the row
+(`LIFTED_PROCESS_NAME_PREFIX = "__process_"`, `crates/lash-vm/src/ast.rs:554`), so the row
 renders as `__process_<hash> ← mail.received`, not as a readable process name. The
 `trigger key` is likewise the **derived subscription key** (`derived/v3/<hash>`), not the
 alias; the alias appears as a separate `alias lifecycle-forwarder` field, and only in the

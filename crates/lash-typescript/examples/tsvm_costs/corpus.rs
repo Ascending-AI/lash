@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use lashlang::{ExecutionEnvironment, Snapshot, State, Value, Vm, VmContinuation, VmRunOutcome};
+use lash_vm::{ExecutionEnvironment, Snapshot, State, Value, Vm, VmContinuation, VmRunOutcome};
 use serde::Deserialize;
 
 use super::baseline::{Host, compile_cell, run_cell};
@@ -10,7 +10,7 @@ pub struct Case {
     pub source: String,
     pub snapshot: Snapshot,
     pub continuation: VmContinuation,
-    pub program: lashlang::CompiledProgram,
+    pub program: lash_vm::CompiledProgram,
 }
 
 fn capture(id: String, source: &str, state: &State, snapshot: Snapshot, host: &Host) -> Case {
@@ -24,7 +24,7 @@ fn capture(id: String, source: &str, state: &State, snapshot: Snapshot, host: &H
     );
     let continuation = vm.suspend().expect("corpus continuation");
     let bytes = serde_json::to_vec(&continuation).expect("continuation encode");
-    let decoder = lashlang::VmInstance::pristine();
+    let decoder = lash_vm::VmInstance::pristine();
     let restored = decoder
         .open_continuation(&bytes)
         .expect("continuation decode");

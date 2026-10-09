@@ -11,7 +11,7 @@ const SIGNED_ENGINE_KIND: &str = "signed-engine";
 
 fn module(artifact_ref: &str) -> ArtifactName {
     ArtifactName {
-        store: ArtifactStoreId::LashlangModule,
+        store: ArtifactStoreId::VmModule,
         artifact_ref: artifact_ref.to_string(),
     }
 }
@@ -177,7 +177,7 @@ fn signed_draft() -> ProcessDefinitionDraft {
 fn changed_content_changes_the_id() {
     let base = || {
         draft(
-            "lashlang",
+            "lashvm",
             serde_json::json!({"program": "scan", "limit": 1}),
             [module("module:1"), env("env:1")],
         )
@@ -185,50 +185,50 @@ fn changed_content_changes_the_id() {
     let variants = [
         base(),
         draft(
-            "lashlang-next",
+            "lash-vm-next",
             serde_json::json!({"program": "scan", "limit": 1}),
             [module("module:1"), env("env:1")],
         ),
         draft(
-            "lashlang",
+            "lashvm",
             serde_json::json!({"program": "scan", "limit": 2}),
             [module("module:1"), env("env:1")],
         ),
         draft(
-            "lashlang",
+            "lashvm",
             serde_json::json!({"program": "scan", "limit": 1.0}),
             [module("module:1"), env("env:1")],
         ),
         draft(
-            "lashlang",
+            "lashvm",
             serde_json::json!({"program": "scan", "limit": 1}),
             [module("module:2"), env("env:1")],
         ),
         draft(
-            "lashlang",
+            "lashvm",
             serde_json::json!({"program": "scan", "limit": 1}),
             [module("module:1")],
         ),
         draft(
-            "lashlang",
+            "lashvm",
             serde_json::json!({"program": "scan", "limit": 1}),
             [module("module:1"), env("env:1"), module("module:3")],
         ),
         // The same reference text in a different store is different content.
         draft(
-            "lashlang",
+            "lashvm",
             serde_json::json!({"program": "scan", "limit": 1}),
             [env("module:1"), env("env:1")],
         ),
         draft(
-            "lashlang",
+            "lashvm",
             serde_json::json!({"program": "scan", "limit": 1}),
-            [engine_blob("lashlang", "module:1"), env("env:1")],
+            [engine_blob("lashvm", "module:1"), env("env:1")],
         ),
         // Framing: moving bytes between the kind and the value must not
         // produce the same preimage.
         draft(
-            "lashlang\"",
+            "lash_vm\"",
             serde_json::json!({"program": "scan", "limit": 1}),
             [module("module:1"), env("env:1")],
         ),
@@ -400,12 +400,12 @@ fn one_definition_id_encoding_everywhere() {
 }
 
 /// Golden preimages, computed by an implementation independent of the
-/// identity encoder (SHA-256 over hand-framed bytes). A change here is a new
-/// identity family, never an edit.
+/// identity encoder (SHA-256 over hand-framed bytes), pinned to the 1.0
+/// baseline engine vocabulary and artifact tags.
 #[test]
 fn definition_id_golden_vectors_are_frozen() {
     let with_artifacts = draft(
-        "lashlang",
+        "lashvm",
         serde_json::from_str(r#"{"b":[1,-0.0],"a":"x"}"#).expect("parse value"),
         [
             module("module:1"),
@@ -424,9 +424,9 @@ fn definition_id_golden_vectors_are_frozen() {
             // "lash.process-definition-id"
             "000000000000001a",
             "6c6173682e70726f636573732d646566696e6974696f6e2d6964",
-            // engine kind "lashlang"
-            "0000000000000008",
-            "6c6173686c616e67",
+            // engine kind "lashvm"
+            "0000000000000006",
+            "6c617368766d",
             // canonical value {"a":"x","b":[1,0.0]}
             "0000000000000015",
             "7b2261223a2278222c2262223a5b312c302e305d7d",
@@ -437,7 +437,7 @@ fn definition_id_golden_vectors_are_frozen() {
             "01",
             "0000000000000005",
             "656e763a31",
-            // lashlang_module "module:1"
+            // vm_module "module:1"
             "0000000000000011",
             "02",
             "0000000000000008",
@@ -453,7 +453,7 @@ fn definition_id_golden_vectors_are_frozen() {
     );
     assert_eq!(
         with_artifacts.id().as_str(),
-        "lash.definition:sha256:2052a3fc070f8684cdac78b7254bd862320cb21669c3baa5cbcb78da060b0c57"
+        "lash.definition:sha256:52912849d4f829548407cf186037ddc9dd972ef16a1419ca9fd94a137d95bc9e"
     );
 
     let bare = draft("scripted-engine", serde_json::json!({}), []);
@@ -564,12 +564,12 @@ async fn a_manifest_that_disagrees_with_the_engine_is_refused() {
 #[test]
 fn a_descriptor_round_trips_through_its_canonical_store_bytes() {
     let first = draft(
-        "lashlang",
+        "lashvm",
         serde_json::from_str(r#"{"b":[1,-0.0],"a":"x"}"#).expect("parse value"),
         [module("module:1"), env("env:1")],
     );
     let reordered = draft(
-        "lashlang",
+        "lashvm",
         serde_json::from_str(r#"{"a":"x","b":[1,0.0]}"#).expect("parse value"),
         [env("env:1"), module("module:1"), env("env:1")],
     );
@@ -578,8 +578,8 @@ fn a_descriptor_round_trips_through_its_canonical_store_bytes() {
         String::from_utf8(first.to_store_bytes()).expect("utf-8"),
         concat!(
             r#"{"artifacts":[{"artifact_ref":"env:1","store":{"store":"process_env"}},"#,
-            r#"{"artifact_ref":"module:1","store":{"store":"lashlang_module"}}],"#,
-            r#""engine_kind":"lashlang","value":{"a":"x","b":[1,0.0]}}"#,
+            r#"{"artifact_ref":"module:1","store":{"store":"vm_module"}}],"#,
+            r#""engine_kind":"lashvm","value":{"a":"x","b":[1,0.0]}}"#,
         )
     );
     let decoded = ProcessDefinitionDraft::from_store_bytes(&first.id(), &first.to_store_bytes())
@@ -614,15 +614,11 @@ fn a_draft_refuses_empty_names_and_unknown_fields() {
         Err(ProcessDefinitionDraftError::EmptyEngineKind)
     );
     assert_eq!(
-        ProcessDefinitionDraft::new("lashlang", serde_json::json!({}), [module("")]),
+        ProcessDefinitionDraft::new("lashvm", serde_json::json!({}), [module("")]),
         Err(ProcessDefinitionDraftError::EmptyArtifactRef)
     );
     assert_eq!(
-        ProcessDefinitionDraft::new(
-            "lashlang",
-            serde_json::json!({}),
-            [engine_blob("", "blob:1")]
-        ),
+        ProcessDefinitionDraft::new("lashvm", serde_json::json!({}), [engine_blob("", "blob:1")]),
         Err(ProcessDefinitionDraftError::EmptyArtifactEngineKind)
     );
 
@@ -633,7 +629,7 @@ fn a_draft_refuses_empty_names_and_unknown_fields() {
         serde_json::json!({
             "engine_kind": SIGNED_ENGINE_KIND,
             "value": {"program": "payout"},
-            "artifacts": [{"store": {"store": "lashlang_module"}, "artifact_ref": "module:payout"}],
+            "artifacts": [{"store": {"store": "vm_module"}, "artifact_ref": "module:payout"}],
         })
     );
     assert_eq!(

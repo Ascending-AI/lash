@@ -117,7 +117,7 @@ write that ledger inside its own transaction
 #### 2.3 Cleanup records and resolved cleanups
 
 `ArtifactName` identifies an artifact and its store: `ProcessEnv`,
-`LashlangModule`, `ProcessDefinition`, or `Engine(kind)`. `ArtifactCarry`
+`VmModule`, `ProcessDefinition`, or `Engine(kind)`. `ArtifactCarry`
 names a destination referrer. `ArtifactCleanup` is the durable obligation
 body: `Ended { referrer, carries, gate }` or `Await(ReferrerGuard)`.
 Only an ended record can carry a settlement gate.
@@ -525,7 +525,7 @@ and links the source against the dispatch catalog and declares
 nothing in the tool body. Realization publishes under the execution's
 referrer and returns the definition value with its derived signature.
 The cell acquires its frame's closure edges before its result is exposed
-(`crates/lash-lashlang-runtime/src/process_create_tool.rs:1-13,271-321`,
+(`crates/lash-vm-runtime/src/process_create_tool.rs:1-13,271-321`,
 `crates/lash-core-execution/src/tool_dispatch/intent_executor.rs:621-624`,
 `crates/lash-protocol-rlm/src/executor/mod.rs:184-194`).
 

@@ -57,7 +57,7 @@ async fn hold_definitions(
 pub(super) async fn publish_cell_module(
     state: &mut RlmExecutionState,
     ctx: &RuntimeExecutionContext<'_>,
-    artifact_store: &lashlang::LashlangArtifacts,
+    artifact_store: &lash_vm::LashVmArtifacts,
     artifact: &lash_vm_client::InspectedArtifact,
 ) -> Result<(), String> {
     let frame = frame_environment(ctx);

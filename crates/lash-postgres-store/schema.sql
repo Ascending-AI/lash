@@ -709,7 +709,7 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_retired_owners (
     owner TEXT PRIMARY KEY
 );
 
-CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
+CREATE TABLE IF NOT EXISTS lash_lash_vm_artifacts (
     namespace TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
     artifact_bytes BYTEA NOT NULL,
@@ -721,7 +721,7 @@ CREATE TABLE IF NOT EXISTS lash_artifact_referrer_edges (
     referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'start', 'execution', 'host_pin', 'source')),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (char_length(referrer_id) > 0),
     PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
-    FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lashlang_artifacts(namespace, artifact_ref) ON DELETE CASCADE
+    FOREIGN KEY (namespace, artifact_ref) REFERENCES lash_lash_vm_artifacts(namespace, artifact_ref) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_lash_artifact_referrer_edges_referrer
     ON lash_artifact_referrer_edges(referrer_kind, referrer_id);
@@ -911,7 +911,7 @@ CREATE TABLE IF NOT EXISTS lash_session_scope_ends (
 );
 
 -- VM snapshots (I0, FIG-5194; statements: V0, then L7): the latest snapshot
--- of each code cell ('c/...') and lashlang process ('p/...'),
+-- of each code cell ('c/...') and lash_vm process ('p/...'),
 -- compare-and-set on rev.
 -- The operator's park feed (L6, FIG-5175): one entry per park of an actor,
 -- per redrive and per end of a parked actor.

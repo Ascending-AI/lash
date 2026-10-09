@@ -43,7 +43,7 @@ pub(super) enum Extraction {
     /// report: the identity is a hash whose preimage includes a format version,
     /// so a mismatch is a decided refusal that no integer describes.
     ///
-    /// Available when this build carries the optional Lashlang verifier.
+    /// Available when this build carries the optional Lash VM verifier.
     #[cfg(feature = "rlm")]
     IdentityMismatch {
         /// Which format the identity belongs to.
@@ -162,13 +162,13 @@ async fn module_artifact(
             }
             Ok(Response::ArtifactVerification(ArtifactVerification::Refused(refusal))) => {
                 match refusal {
-                    lashlang::ModuleArtifactRefusal::Generation(source) => {
+                    lash_vm::ModuleArtifactRefusal::Generation(source) => {
                         vec![Extraction::IdentityMismatch {
                             format,
                             detail: format!("{source}; recompile and republish the module"),
                         }]
                     }
-                    lashlang::ModuleArtifactRefusal::Corrupt(source) => {
+                    lash_vm::ModuleArtifactRefusal::Corrupt(source) => {
                         vec![Extraction::Undecodable {
                             format,
                             reason: source.to_string(),
@@ -250,21 +250,20 @@ fn started_process(payload: Payload<'_>) -> Vec<Extraction> {
 fn start_generation(record: &serde_json::Value, stamp: Option<&str>) -> Option<Extraction> {
     let format = DurableFormat::Bytecode;
     let input = record.get("input")?;
-    // Only a Lashlang engine process runs under a generation; a tool-call or
+    // Only a Lash VM engine process runs under a generation; a tool-call or
     // session-turn process has nothing to recompute and is not a gap.
     if input.get("type").and_then(serde_json::Value::as_str) != Some("engine")
         || input.get("kind").and_then(serde_json::Value::as_str)
-            != Some(lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
+            != Some(lash_vm_runtime::LASH_VM_ENGINE_KIND)
     {
         return None;
     }
     let payload = input.get("payload")?;
-    let Ok(parsed) =
-        serde_json::from_value::<lash_lashlang_runtime::LashlangProcessInput>(payload.clone())
+    let Ok(parsed) = serde_json::from_value::<lash_vm_runtime::LashVmProcessInput>(payload.clone())
     else {
         return Some(Extraction::Undecodable {
             format,
-            reason: "started process payload is not a lashlang process input".to_string(),
+            reason: "started process payload is not a lash_vm process input".to_string(),
         });
     };
     let current = parsed.executable_generation();
@@ -422,7 +421,7 @@ mod tests {
     #[cfg(feature = "rlm")]
     async fn a_frozen_predecessor_module_artifact_retains_its_generation_refusal() {
         let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../lashlang/tests/fixtures/module-artifact-old.json"
+            "../../../lash-vm/tests/fixtures/module-artifact-old.json"
         ))
         .expect("frozen fixture should be JSON");
         let object = raw.as_object_mut().expect("artifact should be an object");
@@ -456,7 +455,7 @@ mod tests {
     #[cfg(feature = "rlm")]
     async fn a_future_module_artifact_is_a_legible_identity_refusal() {
         let mut raw: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../lashlang/tests/fixtures/module-artifact-old.json"
+            "../../../lash-vm/tests/fixtures/module-artifact-old.json"
         ))
         .expect("frozen fixture should be JSON");
         raw["compilation_dialect"] = serde_json::json!("future_dialect");
@@ -465,7 +464,7 @@ mod tests {
             DurableSurface::ModuleArtifact,
             DurablePayload::Json(
                 serde_json::json!({
-                    "family": lashlang::LASHLANG_SEMANTIC_HASH_VERSION,
+                    "family": lash_vm::LASH_VM_SEMANTIC_HASH_VERSION,
                     "encoding": 1,
                     "artifact": raw,
                 })
@@ -568,11 +567,11 @@ mod tests {
     #[cfg(feature = "rlm")]
     #[tokio::test]
     async fn a_started_process_is_judged_by_its_start_stamp() {
-        let hash = lashlang::ContentHash::new("00ff");
-        let input = lash_lashlang_runtime::LashlangProcessInput {
-            module_ref: lashlang::ModuleRef::new(&hash),
-            process_ref: lashlang::ProcessRef::new(hash.clone(), 0),
-            host_requirements_ref: lashlang::HostRequirementsRef::new(&hash),
+        let hash = lash_vm::ContentHash::new("00ff");
+        let input = lash_vm_runtime::LashVmProcessInput {
+            module_ref: lash_vm::ModuleRef::new(&hash),
+            process_ref: lash_vm::ProcessRef::new(hash.clone(), 0),
+            host_requirements_ref: lash_vm::HostRequirementsRef::new(&hash),
             process_name: "worker".to_string(),
             args: serde_json::Map::new(),
         };
@@ -584,7 +583,7 @@ mod tests {
                     serde_json::json!({
                         "input": {
                             "type": "engine",
-                            "kind": lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
+                            "kind": lash_vm_runtime::LASH_VM_ENGINE_KIND,
                             "payload": serde_json::to_value(&input).expect("the input serializes"),
                         },
                         "first_started": first_started,

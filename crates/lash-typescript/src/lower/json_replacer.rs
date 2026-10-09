@@ -5,7 +5,7 @@
 //! frame; the final JSON byte rendering remains the single heap-aware runtime
 //! implementation used by ordinary stringify calls.
 
-use lashlang::{
+use lash_vm::{
     AssignPathStep, AssignTarget, CoercingBinaryOp, CoercingUnaryOp, Expr as LashExpr,
     FunctionExpr, MethodKey,
 };
@@ -276,7 +276,7 @@ impl Lowerer {
             LashExpr::If {
                 condition: Box::new(stdlib("__jsonHasCycle", vec![variable(&input)])),
                 then_block: Box::new(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                    name: "__lashlang_heap_new".into(),
+                    name: "__lash_vm_heap_new".into(),
                     args: vec![
                         LashExpr::String("TypeError".into()),
                         LashExpr::String(
@@ -317,7 +317,7 @@ impl Lowerer {
                 index: Box::new(LashExpr::Number(0.0)),
             }),
             then_block: Box::new(LashExpr::Throw(Box::new(LashExpr::BuiltinCall {
-                name: "__lashlang_heap_new".into(),
+                name: "__lash_vm_heap_new".into(),
                 args: vec![
                     LashExpr::String("TypeError".into()),
                     LashExpr::String("Converting circular structure to JSON".into()),
@@ -353,7 +353,7 @@ impl Lowerer {
             });
         }
         Ok(LashExpr::Role {
-            role: lashlang::StructuralRole::JsonTraversal,
+            role: lash_vm::StructuralRole::JsonTraversal,
             expr: Box::new(LashExpr::Block(prefix)),
         })
     }
@@ -595,7 +595,7 @@ fn sub(left: LashExpr, right: LashExpr) -> LashExpr {
 fn stdlib(method: &str, mut args: Vec<LashExpr>) -> LashExpr {
     args.insert(0, LashExpr::String(method.into()));
     LashExpr::BuiltinCall {
-        name: "__lashlang_stdlib".into(),
+        name: "__lash_vm_stdlib".into(),
         args,
     }
 }

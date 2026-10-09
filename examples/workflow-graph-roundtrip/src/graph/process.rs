@@ -1,4 +1,4 @@
-use lash::rlm::lang::{
+use lash::vm::ir::{
     ProcessParam, WorkflowNode, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowProcess,
     WorkflowSubgraph, WorkflowTerminalKind, format_type_expr,
 };
@@ -54,8 +54,8 @@ pub(super) fn seeded_process_body(process_id: &str, params: &[ProcessParam]) -> 
             name_source: WorkflowNodeNameSource::Derived,
             kind: WorkflowNodeKind::Terminal {
                 terminal: WorkflowTerminalKind::Finish,
-                expression: lash::rlm::lang::Expr::FunctionReturn(Box::new(
-                    lash::rlm::lang::Expr::Number(0.0),
+                expression: lash::vm::ir::Expr::FunctionReturn(Box::new(
+                    lash::vm::ir::Expr::Number(0.0),
                 )),
             },
             available_variables: params.iter().map(|param| param.name.to_string()).collect(),
@@ -108,7 +108,7 @@ fn editable_identifier(
         })
 }
 
-/// ADR 0096 retired the Lashlang front-end, and with it the general
+/// ADR 0096 retired the Lash VM front-end, and with it the general
 /// type-expression grammar this used to call. The vocabulary is not a loss:
 /// the graph only ever renders a process parameter schema, and the
 /// TypeScript printer can spell exactly the scalar schemas below — anything
@@ -117,15 +117,15 @@ fn editable_process_type(
     process_id: &str,
     field: &str,
     value: &str,
-) -> Result<lash::rlm::lang::TypeExpr, RenderErrorResponse> {
+) -> Result<lash::vm::ir::TypeExpr, RenderErrorResponse> {
     match value.trim() {
-        "any" => Ok(lash::rlm::lang::TypeExpr::Any),
-        "null" => Ok(lash::rlm::lang::TypeExpr::Null),
-        "str" | "string" => Ok(lash::rlm::lang::TypeExpr::Str),
+        "any" => Ok(lash::vm::ir::TypeExpr::Any),
+        "null" => Ok(lash::vm::ir::TypeExpr::Null),
+        "str" | "string" => Ok(lash::vm::ir::TypeExpr::Str),
         // TypeScript has one number type, which lowers to `float`; an `int`
         // parameter has no annotation the canonical source could carry.
-        "float" | "number" => Ok(lash::rlm::lang::TypeExpr::Float),
-        "bool" | "boolean" => Ok(lash::rlm::lang::TypeExpr::Bool),
+        "float" | "number" => Ok(lash::vm::ir::TypeExpr::Float),
+        "bool" | "boolean" => Ok(lash::vm::ir::TypeExpr::Bool),
         other => Err(RenderErrorResponse::invalid_node_payload(
             process_id,
             format!(
@@ -147,11 +147,11 @@ mod tests {
     fn process_parameter_types_are_the_ones_typescript_can_annotate() {
         let process = "process";
         for (text, expected) in [
-            ("number", lash::rlm::lang::TypeExpr::Float),
-            ("float", lash::rlm::lang::TypeExpr::Float),
-            ("string", lash::rlm::lang::TypeExpr::Str),
-            ("bool", lash::rlm::lang::TypeExpr::Bool),
-            ("any", lash::rlm::lang::TypeExpr::Any),
+            ("number", lash::vm::ir::TypeExpr::Float),
+            ("float", lash::vm::ir::TypeExpr::Float),
+            ("string", lash::vm::ir::TypeExpr::Str),
+            ("bool", lash::vm::ir::TypeExpr::Bool),
+            ("any", lash::vm::ir::TypeExpr::Any),
         ] {
             assert_eq!(
                 editable_process_type(process, "params.type", text)

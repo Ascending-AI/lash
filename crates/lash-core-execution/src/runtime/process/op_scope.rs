@@ -77,7 +77,7 @@ impl<'scope> ProcessOpScope<'scope> {
             };
             let event = lash_trace::TraceLanguageExecution {
                 event_key: format!(
-                    "lashlang_execution:{}:child:{}:{}:process:{process_id}",
+                    "lash_vm_execution:{}:child:{}:{}:process:{process_id}",
                     identity.graph_key(),
                     call.parent_node_id,
                     call.occurrence,

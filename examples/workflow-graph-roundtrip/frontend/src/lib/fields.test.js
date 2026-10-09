@@ -29,7 +29,7 @@ describe('literal parse/encode', () => {
     expect(parseLiteral('foo(1)').type).toBe('expression');
   });
 
-  it('encodes canonical Lashlang literals', () => {
+  it('encodes canonical LashVm literals', () => {
     expect(encodeLiteral('number', '7')).toBe('7');
     expect(encodeLiteral('number', '')).toBe('0');
     expect(encodeLiteral('boolean', 'true')).toBe('true');

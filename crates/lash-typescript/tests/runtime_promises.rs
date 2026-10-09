@@ -1,4 +1,4 @@
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     ResourceOperation, ResourceOperationOutcome, State, Value,
 };
@@ -22,7 +22,7 @@ impl ExecutionHost for Host {
                     batch
                         .leaves
                         .iter()
-                        .filter_map(lashlang::ResourceOperationBatchLeaf::operation)
+                        .filter_map(lash_vm::ResourceOperationBatchLeaf::operation)
                         .cloned()
                         .map(|call| ResourceOperationOutcome::from_result(echo_or_fail(call)))
                         .collect(),
@@ -34,9 +34,9 @@ impl ExecutionHost for Host {
     }
 }
 
-fn execute(source: &str) -> Result<ExecutionOutcome, lashlang::RuntimeError> {
+fn execute(source: &str) -> Result<ExecutionOutcome, lash_vm::RuntimeError> {
     let compiled = lash_typescript::testing::compile(source).expect(source);
-    futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), &Host))
+    futures::executor::block_on(lash_vm::execute(&compiled, &mut State::new(), &Host))
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn promise_aggregates_accept_runtime_arrays_and_mixed_values() {
             };
             assert_eq!(
                 execute(&source).unwrap(),
-                ExecutionOutcome::Finished(lashlang::from_json(expected)),
+                ExecutionOutcome::Finished(lash_vm::from_json(expected)),
                 "{source}"
             );
         }
@@ -105,7 +105,7 @@ fn abandoned_and_settled_handles_are_loud_errors() {
         assert!(
             matches!(
                 execute(source),
-                Err(lashlang::RuntimeError::PendingTool { .. })
+                Err(lash_vm::RuntimeError::PendingTool { .. })
             ),
             "{source}"
         );
@@ -121,14 +121,14 @@ fn nested_aggregates_unwrap_their_leaves_and_propagate_rejections() {
     assert_eq!(
         execute("finish(await web.echo({ v: await Promise.all([web.fetch({id:1}), 2]) }));")
             .unwrap(),
-        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!({"v": [{"id":1}, 2]})))
+        ExecutionOutcome::Finished(lash_vm::from_json(serde_json::json!({"v": [{"id":1}, 2]})))
     );
     let error = execute("finish(await web.echo({ v: await Promise.all([web.fail({id:1})]) }));")
         .expect_err("a rejected nested aggregate must reject the program");
     assert!(
         matches!(
             error,
-            lashlang::RuntimeError::UnwrappedModuleOperationFailed { .. }
+            lash_vm::RuntimeError::UnwrappedModuleOperationFailed { .. }
         ),
         "{error}"
     );
@@ -157,7 +157,7 @@ fn a_hand_written_handle_record_is_refused_and_steals_nothing() {
         "const p = web.fetch({{id:1}}); p; const forged = {FORGED}; finish(await forged);"
     ))
     .expect_err("a forged handle must not settle a live request");
-    let lashlang::RuntimeError::PendingTool { problem, .. } = &error else {
+    let lash_vm::RuntimeError::PendingTool { problem, .. } = &error else {
         panic!("expected the typed pending-tool refusal: {error}");
     };
     assert!(
@@ -169,7 +169,7 @@ fn a_hand_written_handle_record_is_refused_and_steals_nothing() {
             "const p = web.fetch({{id:1}}); const forged = {FORGED}; try {{ await forged; }} catch (e) {{}} finish(await p);"
         ))
         .unwrap(),
-        ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!({"id":1})))
+        ExecutionOutcome::Finished(lash_vm::from_json(serde_json::json!({"id":1})))
     );
 }
 
@@ -181,7 +181,7 @@ fn the_retired_tool_handle_spelling_is_not_a_handle() {
         "const p = web.fetch({id:1}); p; finish(await { __handle__: 'tool', id: 0, execution: '0000000000000000' });",
     )
     .expect_err("the retired spelling must not settle anything");
-    let lashlang::RuntimeError::PendingTool { problem, .. } = &error else {
+    let lash_vm::RuntimeError::PendingTool { problem, .. } = &error else {
         panic!("expected the typed pending-tool refusal: {error}");
     };
     assert!(problem.contains("plain"), "{problem}");
@@ -192,14 +192,14 @@ fn the_retired_tool_handle_spelling_is_not_a_handle() {
 #[test]
 fn await_refusals_name_what_was_awaited() {
     let plain = execute("await 42; finish(1);").expect_err("a number is not awaitable");
-    let lashlang::RuntimeError::PendingTool { problem, .. } = &plain else {
+    let lash_vm::RuntimeError::PendingTool { problem, .. } = &plain else {
         panic!("{plain}");
     };
     assert!(problem.contains("plain number value"), "{problem}");
     assert!(!problem.contains("already"), "{problem}");
     let twice = execute("const p = web.fetch({id:1}); await p; await p; finish(1);")
         .expect_err("a handle settles once");
-    let lashlang::RuntimeError::PendingTool { problem, .. } = &twice else {
+    let lash_vm::RuntimeError::PendingTool { problem, .. } = &twice else {
         panic!("{twice}");
     };
     assert!(problem.contains("already awaited"), "{problem}");
@@ -234,9 +234,9 @@ fn a_pending_handle_passed_as_a_tool_argument_is_refused_before_dispatch() {
         let host = CountingHost::default();
         let compiled = lash_typescript::testing::compile(source).expect(source);
         let error =
-            futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), &host))
+            futures::executor::block_on(lash_vm::execute(&compiled, &mut State::new(), &host))
                 .expect_err(source);
-        let lashlang::RuntimeError::PendingTool { problem, .. } = &error else {
+        let lash_vm::RuntimeError::PendingTool { problem, .. } = &error else {
             panic!("{source}: {error}");
         };
         assert!(
@@ -256,7 +256,7 @@ fn assert_unawaited_refusal(shape: &str) {
     let host = CountingHost::default();
     let result = lash_typescript::testing::compile(&source);
     if let Ok(compiled) = &result {
-        let _ = futures::executor::block_on(lashlang::execute(compiled, &mut State::new(), &host));
+        let _ = futures::executor::block_on(lash_vm::execute(compiled, &mut State::new(), &host));
     }
     assert_eq!(host.dispatched.load(Ordering::SeqCst), 0, "{shape}");
     let diagnostic = result.expect_err(shape);
@@ -323,10 +323,10 @@ fn fig_4545_runtime_only_handles_name_each_call_and_line() {
             lash_typescript::testing::compile(source).expect("uncertain consumers stay legal");
         let host = CountingHost::default();
         let error =
-            futures::executor::block_on(lashlang::execute(&compiled, &mut State::new(), &host))
+            futures::executor::block_on(lash_vm::execute(&compiled, &mut State::new(), &host))
                 .expect_err("abandoned runtime handles");
         assert_eq!(host.dispatched.load(Ordering::SeqCst), 0);
-        let lashlang::RuntimeError::PendingTool { pending, .. } = &error else {
+        let lash_vm::RuntimeError::PendingTool { pending, .. } = &error else {
             panic!("{error}")
         };
         assert_eq!(pending.len(), 2);
@@ -337,13 +337,13 @@ fn fig_4545_runtime_only_handles_name_each_call_and_line() {
             let span = call.span.expect("creation site span");
             assert_eq!(&source[span.start..span.end], expected);
         }
-        let restored: lashlang::RuntimeError =
+        let restored: lash_vm::RuntimeError =
             serde_json::from_value(serde_json::to_value(&error).unwrap()).unwrap();
         assert_eq!(
             restored, error,
             "typed call evidence survives the executor wire"
         );
-        let rendered = lashlang::format_runtime_diagnostic(source, &error, None);
+        let rendered = lash_vm::format_runtime_diagnostic(source, &error, None);
         for detail in [
             "2 tool handle(s)",
             "web.fetch",

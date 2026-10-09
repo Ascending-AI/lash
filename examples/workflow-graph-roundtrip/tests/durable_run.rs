@@ -54,7 +54,7 @@ async fn a_saved_workflow_runs_as_a_durable_process() {
         .await
         .expect("the process's workflow reads")
     else {
-        panic!("a retained lashlang process has a workflow");
+        panic!("a retained lash_vm process has a workflow");
     };
     assert_eq!(
         Some(&inspection.definition.id),

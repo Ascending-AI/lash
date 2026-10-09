@@ -1012,7 +1012,7 @@ mod tests {
             lash_core::provider::ProviderToken::new("access"),
         ));
         let mut req = request(None);
-        req.generation.stop_sequences = vec!["</lashlang>".to_string()];
+        req.generation.stop_sequences = vec!["</lash_vm>".to_string()];
 
         let (body, receipt) =
             GoogleOAuthProvider::build_request_with_receipt(&provider, &req, Vec::new(), None)
@@ -1020,7 +1020,7 @@ mod tests {
 
         assert_eq!(
             body["request"]["generationConfig"]["stopSequences"],
-            json!(["</lashlang>"])
+            json!(["</lash_vm>"])
         );
         assert_eq!(
             receipt.stop_sequences,

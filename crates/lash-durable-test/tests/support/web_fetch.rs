@@ -52,22 +52,22 @@ impl lash_core::ToolProvider for Fetch {
 pub struct GrantFetch;
 
 #[async_trait::async_trait]
-impl lash_lashlang_runtime::DeferredToolResolver for GrantFetch {
+impl lash_vm_runtime::DeferredToolResolver for GrantFetch {
     async fn resolve(
         &self,
-        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        _cx: &lash_vm_runtime::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    ) -> BTreeMap<String, lash_vm_runtime::Resolution> {
         paths
             .iter()
             .map(|path| {
                 let resolution = if *path == "web.fetch" {
-                    lash_lashlang_runtime::Resolution::Resolved(Box::new(
-                        lash_lashlang_runtime::ToolGrant::new(fetch_definition())
+                    lash_vm_runtime::Resolution::Resolved(Box::new(
+                        lash_vm_runtime::ToolGrant::new(fetch_definition())
                             .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID),
                     ))
                 } else {
-                    lash_lashlang_runtime::Resolution::NotAvailable
+                    lash_vm_runtime::Resolution::NotAvailable
                 };
                 ((*path).to_owned(), resolution)
             })

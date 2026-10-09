@@ -3,7 +3,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
@@ -204,7 +204,7 @@ fn maximum_admitted_nesting_runs_on_two_mebibyte_stack() {
             let program = lash_typescript::testing::compile(&source)
                 .expect("documented source nesting limit compiles");
             let outcome =
-                futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+                futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
                     .expect("documented source nesting limit executes");
             assert_eq!(outcome, ExecutionOutcome::Finished(Value::Number(1.0)));
 

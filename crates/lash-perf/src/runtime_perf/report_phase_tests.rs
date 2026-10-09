@@ -521,8 +521,8 @@ fn materially_different_shared_phases_use_scenario_budgets() {
     assert!(
         phase_wall_clock_budget_ms(
             RuntimePerfScenario::RlmObliqueStackMix,
-            "rlm_lashlang.execute",
-        ) > phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "rlm_lashlang.execute")
+            "rlm_lash_vm.execute",
+        ) > phase_wall_clock_budget_ms(RuntimePerfScenario::Rlm, "rlm_lash_vm.execute")
     );
     assert!(
         phase_wall_clock_budget_ms(RuntimePerfScenario::RlmLargeToolCatalog, "effect_loop")
@@ -622,7 +622,7 @@ fn turn_scenarios_require_the_typed_commit_phase_metrics() {
         RuntimePerfScenario::RlmAsyncToolCompletion,
         RuntimePerfScenario::RlmLargePrint,
         RuntimePerfScenario::RlmObliqueStackMix,
-        RuntimePerfScenario::RlmStreamedPairedLashlang,
+        RuntimePerfScenario::RlmStreamedPairedLashVm,
         RuntimePerfScenario::RlmProcessHandles,
         RuntimePerfScenario::RlmGlobals,
         RuntimePerfScenario::Standard,

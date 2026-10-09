@@ -189,7 +189,7 @@ impl lash::TurnActivitySink for DiscardedTurnActivity {
 /// A checkpoint-write observer over the session factory forwards every
 /// binding to the factory it wraps, so the backend's ports still meet each
 /// other exactly as the undecorated backend's do. The decorated backend
-/// keeps the inner backend's Lashlang artifacts.
+/// keeps the inner backend's Lash VM artifacts.
 pub struct DecoratedBackend {
     layered: lash_core::testing::runtime_helpers::LayeredBackend,
     /// The engine's session-commit observers, for a backend over a

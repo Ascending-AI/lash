@@ -7,7 +7,7 @@
 //! rejected with `TS_UNKNOWN_BINDING` for itself while the natural dotted path
 //! the catalog never mentioned worked (FIG-1444).
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 
@@ -42,7 +42,7 @@ impl ExecutionHost for ToolCallRecordingHost {
 /// registered for `modules`/`operation`, returning what the host was asked to
 /// dispatch. A call path that does not reach the binding fails here.
 fn dispatch(call_path: &str, modules: &[&str], operation: &str) -> Vec<(String, String)> {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation_contract(
             modules
@@ -52,18 +52,18 @@ fn dispatch(call_path: &str, modules: &[&str], operation: &str) -> Vec<(String, 
             "ToolModule",
             operation,
             format!("tool:test/{}", modules.join("_")),
-            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+            &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("operation binding");
-    let environment = lashlang::LashlangHostEnvironment::new(catalog);
+    let environment = lash_vm::LashVmHostEnvironment::new(catalog);
     let source = format!(r#"finish(await {call_path}({{ id: "m1" }}));"#);
     let linked = lash_typescript::link(&source, &environment)
         .unwrap_or_else(|error| panic!("`{source}` must link: {error:?}"));
     let host = ToolCallRecordingHost {
         dispatched: std::sync::Mutex::new(Vec::new()),
     };
-    let outcome = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let outcome = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &host,
     ))

@@ -5,15 +5,15 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::PoolError;
+use lash_vm::{
+    AbilityOp, AbilityOutcome, Entry, ExecutionBound, ExecutionBounds, ModuleArtifact,
+    RuntimeError, State, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
+};
 use lash_vm_client::RunContext;
 #[cfg(test)]
 use lash_vm_client::ipc::read_frame;
 use lash_vm_client::ipc::{Bootstrap, FrameSource, write_frame, write_frames};
 use lash_vm_protocol::*;
-use lashlang::{
-    AbilityOp, AbilityOutcome, Entry, ExecutionBound, ExecutionBounds, ModuleArtifact,
-    RuntimeError, State, VmExecutionStart, VmInstance, VmRequest, VmResume, VmRunConfig, VmStep,
-};
 
 #[derive(Default)]
 struct ExchangeTiming {
@@ -536,8 +536,8 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                         component,
                         position,
                     } => {
-                        process_ref = lashlang::ProcessRef::new(
-                            lashlang::ContentHash::new(component),
+                        process_ref = lash_vm::ProcessRef::new(
+                            lash_vm::ContentHash::new(component),
                             position,
                         );
                         Entry::Process(&process_ref)
@@ -545,7 +545,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                 };
                 match entry {
                     Entry::Main => {
-                        lashlang::compile(&artifact, entry, None).map_err(compile_refusal)?
+                        lash_vm::compile(&artifact, entry, None).map_err(compile_refusal)?
                     }
                     Entry::Process(process_ref) => self
                         .instance
@@ -579,7 +579,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
         config.observe_execution = context.observe_execution;
         config.trace_runtime_errors = true;
         for description in context.projected {
-            let lashlang::Value::Projected(value) = description.value else {
+            let lash_vm::Value::Projected(value) = description.value else {
                 return Err(PoolError::refused(RunRefusal::ProjectedBinding {
                     detail: Detail::new(format!(
                         "projected binding `{}` is not a projection",
@@ -618,7 +618,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
                     .owner
                     .as_ref()
                     .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?,
-                reads: &lashlang::vm_contract_reads(),
+                reads: &lash_vm::vm_contract_reads(),
                 max_bytes: self.bootstrap.state,
             })
             .map_err(|refusal| InfrastructureOutcome::input_state(refusal).into())
@@ -638,7 +638,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
             self.owner
                 .clone()
                 .ok_or_else(|| PoolError::breach(SequenceFault::MissingOwner))?,
-            lashlang::vm_contract_versions(),
+            lash_vm::vm_contract_versions(),
             bytes,
         )
         .with_definition_ids(self.instance.state().referenced_definition_ids()))
@@ -747,7 +747,7 @@ impl<'frontend, const MEASURE: bool> Server<'frontend, MEASURE> {
     /// the run's heap budget, or one alone outgrows a frame.
     fn observation_chunks(
         &self,
-        observations: &[lashlang::LashlangExecutionObservation],
+        observations: &[lash_vm::LashVmExecutionObservation],
     ) -> Result<Option<Vec<EncodedPayload>>, PoolError> {
         if observations.is_empty() {
             return Ok(Some(Vec::new()));
@@ -979,27 +979,27 @@ fn compile_refusal(error: impl std::fmt::Display) -> PoolError {
 }
 
 fn materialize_outcome(
-    outcome: lashlang::ExecutionOutcome,
-) -> Result<lashlang::ExecutionOutcome, PoolError> {
+    outcome: lash_vm::ExecutionOutcome,
+) -> Result<lash_vm::ExecutionOutcome, PoolError> {
     Ok(match outcome {
-        lashlang::ExecutionOutcome::Finished(value) => {
-            lashlang::ExecutionOutcome::Finished(materialize(value, 0)?)
+        lash_vm::ExecutionOutcome::Finished(value) => {
+            lash_vm::ExecutionOutcome::Finished(materialize(value, 0)?)
         }
-        lashlang::ExecutionOutcome::Failed(value) => {
-            lashlang::ExecutionOutcome::Failed(materialize(value, 0)?)
+        lash_vm::ExecutionOutcome::Failed(value) => {
+            lash_vm::ExecutionOutcome::Failed(materialize(value, 0)?)
         }
         other => other,
     })
 }
-fn materialize(value: lashlang::Value, depth: usize) -> Result<lashlang::Value, PoolError> {
-    use lashlang::{Record, Value};
+fn materialize(value: lash_vm::Value, depth: usize) -> Result<lash_vm::Value, PoolError> {
+    use lash_vm::{Record, Value};
     if depth > TERMINAL_VALUE_DEPTH {
         return Err(PoolError::refused(RunRefusal::ValueTooDeep {
             limit: TERMINAL_VALUE_DEPTH as u32,
         }));
     }
     Ok(match value {
-        Value::Projected(value) => Value::Projected(lashlang::ProjectedValue::scalar(
+        Value::Projected(value) => Value::Projected(lash_vm::ProjectedValue::scalar(
             value.name().to_owned(),
             materialize(
                 value
@@ -1175,7 +1175,7 @@ mod tests {
                     name: "context".into(),
                     body: EncodedPayload(
                         rmp_serde::to_vec_named(&RunContext {
-                            environment: lashlang::testing::harness::test_environment(),
+                            environment: lash_vm::testing::harness::test_environment(),
                             ..RunContext::default()
                         })
                         .expect("context"),
@@ -1198,7 +1198,7 @@ mod tests {
                             answered += 1;
                             EffectOutcome::Value(EncodedPayload(
                                 rmp_serde::to_vec_named(&AbilityOutcome::Value(
-                                    lashlang::Value::Number(1.0),
+                                    lash_vm::Value::Number(1.0),
                                 ))
                                 .expect("answer"),
                             ))

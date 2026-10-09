@@ -3027,7 +3027,7 @@ def version_at(view: TreeView, surface: Surface) -> int:
 
     The value is an integer literal, another constant of the same file that
     resolves to one, or a string whose trailing digits are the version
-    (`"lashlang-vm-abi-v14"`), or a typed plugin `FormatVersion`.
+    (`"lash-vm-abi-v14"`), or a typed plugin `FormatVersion`.
     """
     content = view.content(surface.constant_path)
     where = f"{view.label}: {surface.constant_path}"

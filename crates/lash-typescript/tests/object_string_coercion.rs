@@ -9,7 +9,7 @@
 //! function has no string the dialect keeps (its source text), so converting
 //! one refuses as `TS_FUNCTION_STRING_COERCION`.
 
-use lashlang::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
+use lash_vm::{AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, State, Value};
 
 #[derive(Default)]
 struct Host(std::sync::Mutex<Vec<String>>);
@@ -33,10 +33,10 @@ impl ExecutionHost for Host {
 fn finished(source: &str) -> Value {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     let host = Host::default();
-    match futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+    match futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &host))
         .expect("TypeScript should execute")
     {
-        lashlang::ExecutionOutcome::Finished(value) => value,
+        lash_vm::ExecutionOutcome::Finished(value) => value,
         other => panic!("expected a finished value, got {other:?}"),
     }
 }
@@ -52,7 +52,7 @@ fn finished_string(source: &str) -> String {
 fn refusal(source: &str) -> String {
     let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
     let host = Host::default();
-    let error = futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+    let error = futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &host))
         .expect_err("the coercion refuses");
     format!("{error:?}")
 }

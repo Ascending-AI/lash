@@ -16,6 +16,6 @@ Every registration records a Lifetime over its admitted Ancestry under ADR 0108.
 
 Live session binding is rejected because session changes would change recovery inputs and prevent session-independent work. An owner enum bundling execution, cleanup and host routing is rejected because those relationships have independent meanings. An ambient sessionless execution configuration is unnecessary because the process carries its environment.
 
-Processes can exist without sessions and outlive their creators when their recorded lifetime permits it. Arguments and captured specifications provide state handover; mutable creator state does not. The implementation is in [process records and lineage](../../crates/lash-core-execution/src/runtime/process/model.rs), [environment specifications](../../crates/lash-core-store/src/process_identity.rs) and [process execution](../../crates/lash-lashlang-runtime/src/process.rs).
+Processes can exist without sessions and outlive their creators when their recorded lifetime permits it. Arguments and captured specifications provide state handover; mutable creator state does not. The implementation is in [process records and lineage](../../crates/lash-core-execution/src/runtime/process/model.rs), [environment specifications](../../crates/lash-core-store/src/process_identity.rs) and [process execution](../../crates/lash-vm-runtime/src/process.rs).
 
 [ADR 0137](0137-the-host-owns-events-routing-and-scheduling.md) owns host events, routing and scheduling.

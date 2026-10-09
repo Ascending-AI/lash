@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use lashlang::{CoercingBinaryOp, Expr, FunctionExpr, OperandLogicalOp, StructuralRole};
+use lash_vm::{CoercingBinaryOp, Expr, FunctionExpr, OperandLogicalOp, StructuralRole};
 
 use super::{
     Printed, Printer, TypeScriptSourceError, is_lowered_binding, is_typescript_identifier, key,
@@ -38,7 +38,7 @@ pub(super) struct Signature<'a> {
     /// print. `None` when the function binds no arguments object.
     pub arguments: Option<String>,
     /// The leading parameters that are neither defaulted nor rest — the
-    /// arity a `__lashlang_closure` wrap records.
+    /// arity a `__lash_vm_closure` wrap records.
     pub required: usize,
 }
 
@@ -81,7 +81,7 @@ impl<'p> Printer<'p> {
     /// generated slots have no recognizable pattern keeps its block, and
     /// the slot itself names the refusal.
     ///
-    /// `accepts_rest` is the flag a `__lashlang_closure` wrap carries: the
+    /// `accepts_rest` is the flag a `__lash_vm_closure` wrap carries: the
     /// last parameter spells `...name`.
     pub(super) fn signature<'a>(
         &self,
@@ -413,7 +413,7 @@ impl<'p> Printer<'p> {
                 let [Expr::Variable(copy), Expr::Variable(deleted)] = args.as_slice() else {
                     return Ok(None);
                 };
-                if name.as_str() != "__lashlang_heap_delete_member"
+                if name.as_str() != "__lash_vm_heap_delete_member"
                     || copy.as_str() != target.root.as_str()
                     || deleted.as_str() != key.as_str()
                 {
@@ -450,7 +450,7 @@ impl<'p> Printer<'p> {
     }
 
     /// A function's spelling. `closure` is the `(required arity, accepts
-    /// rest)` a `__lashlang_closure` wrap records when the signature has
+    /// rest)` a `__lash_vm_closure` wrap records when the signature has
     /// defaults or a rest parameter; the wrap drops away once the signature
     /// spells them, and an arity the spelled signature does not reproduce
     /// is IR no authored program lowers to.
@@ -548,7 +548,7 @@ impl<'p> Printer<'p> {
         printed
     }
 
-    /// A `__lashlang_closure` wrap's recorded arity against the spelled
+    /// A `__lash_vm_closure` wrap's recorded arity against the spelled
     /// signature's: the signature's leading required parameters must be
     /// exactly the wrap's count, or the wrap belongs to IR no source
     /// re-lowers to.
@@ -658,7 +658,7 @@ fn element_index(item: &Expr, input: &str) -> Option<usize> {
 }
 
 /// The slot a function's `arguments` snapshot binds, when `statement` is
-/// the `slot = __lashlang_stdlib("Lash.Arguments")` prologue it opens
+/// the `slot = __lash_vm_stdlib("Lash.Arguments")` prologue it opens
 /// with. The slot's name is generated; the body's reads of it are the
 /// `arguments` mentions the prologue serves.
 fn arguments_prologue(statement: &Expr) -> Option<&str> {
@@ -678,7 +678,7 @@ fn arguments_prologue(statement: &Expr) -> Option<&str> {
 fn cell_wrapped(expr: &Expr) -> &Expr {
     match expr {
         Expr::BuiltinCall { name, args }
-            if name.as_str() == "__lashlang_cell_new" && args.len() == 1 =>
+            if name.as_str() == "__lash_vm_cell_new" && args.len() == 1 =>
         {
             &args[0]
         }

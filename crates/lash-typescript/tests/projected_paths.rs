@@ -21,8 +21,8 @@
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
-use lashlang::testing::projection::{TestView, reading_test_views, test_view};
-use lashlang::{
+use lash_vm::testing::projection::{TestView, reading_test_views, test_view};
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome,
     ProjectedBindings, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, RuntimeError,
     State, Value,
@@ -58,7 +58,7 @@ impl ExecutionHost for Host {
             ("missing", Value::Null),
             (
                 "row",
-                Value::Record(Arc::new(lashlang::Record::from_iter([
+                Value::Record(Arc::new(lash_vm::Record::from_iter([
                     ("kind".to_string(), Value::String("tool".into())),
                     ("id".to_string(), Value::Number(7.0)),
                 ]))),
@@ -125,10 +125,10 @@ async fn execute_with_view(
     let globals = BTreeSet::from_iter(names);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let program = lashlang::testing::harness::try_compile_program(&program)
+    let program = lash_vm::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let mut state = State::new();
-    lashlang::execute(&program, &mut state, &Host { view }).await
+    lash_vm::execute(&program, &mut state, &Host { view }).await
 }
 
 async fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
@@ -434,10 +434,10 @@ async fn finished_over_rows(source: &str) -> Value {
     let globals = BTreeSet::from_iter(["rows".to_string()]);
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
-    let program = lashlang::testing::harness::try_compile_program(&program)
+    let program = lash_vm::testing::harness::try_compile_program(&program)
         .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
     let mut state = State::new();
-    let outcome = lashlang::execute(&program, &mut state, &RowsHost)
+    let outcome = lash_vm::execute(&program, &mut state, &RowsHost)
         .await
         .unwrap_or_else(|error| panic!("`{source}` should execute: {error}"));
     let ExecutionOutcome::Finished(value) = outcome else {

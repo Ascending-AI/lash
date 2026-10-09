@@ -45,7 +45,7 @@ an incompatible compiled program.
 
 ## Code references
 
-- `crates/lashlang/src/runtime/compiler/effects.rs` compiles operation batches and list batches.
-- `crates/lashlang/src/runtime/vm/effects.rs:830-961` recursively awaits handle containers and diagnoses resolved leaves.
-- `crates/lashlang/src/runtime/error.rs:490,701` declares and classifies `AwaitExpectsHandle`.
-- `crates/lashlang/src/runtime/vm/pending_tools.rs:168-260` implements the separate Promise-array path.
+- `crates/lash-vm/src/runtime/compiler/effects.rs` compiles operation batches and list batches.
+- `crates/lash-vm/src/runtime/vm/effects.rs:830-961` recursively awaits handle containers and diagnoses resolved leaves.
+- `crates/lash-vm/src/runtime/error.rs:490,701` declares and classifies `AwaitExpectsHandle`.
+- `crates/lash-vm/src/runtime/vm/pending_tools.rs:168-260` implements the separate Promise-array path.

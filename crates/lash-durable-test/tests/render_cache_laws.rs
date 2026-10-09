@@ -464,7 +464,7 @@ impl lash::rlm::CodeRenderer for SwitchingCodeRenderer {
 
     fn print(
         &self,
-        value: &lashlang::Value,
+        value: &lash_vm::Value,
         params: &lash::rlm::RenderParams,
     ) -> lash::render::Rendered<String> {
         if self.mode.load(Ordering::SeqCst) == 0 {
@@ -488,7 +488,7 @@ impl lash::rlm::CodeRenderer for CountingCodeRenderer {
 
     fn print(
         &self,
-        value: &lashlang::Value,
+        value: &lash_vm::Value,
         params: &lash::rlm::RenderParams,
     ) -> lash::render::Rendered<String> {
         self.prints.fetch_add(1, Ordering::SeqCst);

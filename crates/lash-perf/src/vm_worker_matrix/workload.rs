@@ -1,5 +1,5 @@
 use anyhow::{Result, bail, ensure};
-use lashlang::{AbilityOp, AbilityOutcome, ExecutionHostError, ExecutionOutcome, Value};
+use lash_vm::{AbilityOp, AbilityOutcome, ExecutionHostError, ExecutionOutcome, Value};
 
 pub const AGENT: [&str; 10] = [
     "const orders = [{sku: 'A1', qty: 2, price: 3.5}, {sku: 'B2', qty: 1, price: 12.0}, {sku: 'C3', qty: 5, price: 1.0}];",
@@ -127,7 +127,7 @@ impl Host {
             AbilityOp::ResourceOperationBatch(batch) => {
                 let mut results = Vec::new();
                 for leaf in &batch.leaves {
-                    let lashlang::ResourceOperationBatchLeaf::Operation(op) = leaf else {
+                    let lash_vm::ResourceOperationBatchLeaf::Operation(op) = leaf else {
                         return Err(ExecutionHostError::new("unexpected timer"));
                     };
                     let AbilityOutcome::Value(value) =
@@ -135,7 +135,7 @@ impl Host {
                     else {
                         return Err(ExecutionHostError::new("non-value leaf"));
                     };
-                    results.push(lashlang::ResourceOperationOutcome::Value(value));
+                    results.push(lash_vm::ResourceOperationOutcome::Value(value));
                 }
                 Ok(AbilityOutcome::ResourceOperationBatch(
                     batch.answer_in_leaf_order(results),
@@ -191,7 +191,7 @@ fn ensure_echo(operation: &str) -> Result<(), ExecutionHostError> {
         Err(ExecutionHostError::new("unadmitted operation"))
     }
 }
-pub fn environment() -> lashlang::LashlangHostEnvironment {
-    lashlang::LashlangHostEnvironment::new(lashlang::LashlangHostCatalog::tool_default(["echo"]))
+pub fn environment() -> lash_vm::LashVmHostEnvironment {
+    lash_vm::LashVmHostEnvironment::new(lash_vm::LashVmHostCatalog::tool_default(["echo"]))
         .with_globals(GLOBALS)
 }

@@ -20,7 +20,7 @@ async fn published_definition_fixture(
 ) -> (
     crate::testing::DurableHost,
     lash_vm_client::service::Service,
-    lashlang::LashlangArtifacts,
+    lash_vm::LashVmArtifacts,
     lash_vm_client::service::CreatedDefinition,
 ) {
     use lash_vm_client::service::{Request, Response};
@@ -31,14 +31,14 @@ async fn published_definition_fixture(
     let Response::Definition(created) = workers
         .request_accounted(Request::CreateDefinition {
             source: "const answer = async (): Promise<number> => { return 42; };".into(),
-            environment: lashlang::LashlangHostEnvironment::default(),
+            environment: lash_vm::LashVmHostEnvironment::default(),
         })
         .await
         .expect("compile the definition")
     else {
         panic!("a compiled definition");
     };
-    let artifacts = lashlang::LashlangArtifacts::new(host.backend().module_artifacts());
+    let artifacts = lash_vm::LashVmArtifacts::new(host.backend().module_artifacts());
     let claim = lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
         lash_core::HostArtifactPin::mint(),
     ))
@@ -71,16 +71,15 @@ fn held_worker(workers: &lash_vm_client::service::Service) -> lash_vm_client::Ch
 
 fn definition_engines(
     workers: &lash_vm_client::service::Service,
-    artifacts: lashlang::LashlangArtifacts,
+    artifacts: lash_vm::LashVmArtifacts,
 ) -> lash_core::ProcessEngineRegistry {
-    let engine = lash_lashlang_runtime::LashlangProcessEngine::new(
+    let engine = lash_vm_runtime::LashVmProcessEngine::new(
         artifacts,
-        lash_lashlang_runtime::LashlangSurface::default(),
+        lash_vm_runtime::LashVmSurface::default(),
     )
     .with_worker_service(workers.clone());
-    lash_core::ProcessEngineRegistry::new().with_registration(
-        lash_lashlang_runtime::lashlang_process_engine_registration(engine),
-    )
+    lash_core::ProcessEngineRegistry::new()
+        .with_registration(lash_vm_runtime::lash_vm_process_engine_registration(engine))
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -119,7 +118,7 @@ async fn artifact_checkout_timeout_crosses_the_plugin_boundary_as_a_retryable_fa
     let artifact_error = workers
         .inspect_artifact(
             &artifacts,
-            &lashlang::ProcessDefinitionIdentity::from_process_value(
+            &lash_vm::ProcessDefinitionIdentity::from_process_value(
                 created.draft.value().as_json(),
             )
             .expect("definition identity")

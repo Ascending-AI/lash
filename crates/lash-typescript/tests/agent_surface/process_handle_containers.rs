@@ -34,8 +34,8 @@ impl ExecutionHost for ContainerHost {
     }
 }
 
-fn environment() -> lashlang::LashlangHostEnvironment {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+fn environment() -> lash_vm::LashVmHostEnvironment {
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     let handle = serde_json::json!({ "x-lash": { "kind": "process_unknown" } });
     for (operation, input, output) in [
         (
@@ -55,7 +55,7 @@ fn environment() -> lashlang::LashlangHostEnvironment {
                 "Processes",
                 operation,
                 format!("tool:processes/{operation}"),
-                &lashlang::OperationContract::new(input, output),
+                &lash_vm::OperationContract::new(input, output),
             )
             .expect("process control operation");
     }
@@ -65,10 +65,10 @@ fn environment() -> lashlang::LashlangHostEnvironment {
             "Tools",
             "ping",
             "tool:tools/ping",
-            &lashlang::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
+            &lash_vm::OperationContract::new(serde_json::json!({}), serde_json::json!({})),
         )
         .expect("ping operation");
-    lashlang::LashlangHostEnvironment::new(catalog)
+    lash_vm::LashVmHostEnvironment::new(catalog)
 }
 
 const LIST: &str = "const handles=[]; for(let i=0;i<1;i=i+1){handles.push(await processes.start({definition:child}));}";
@@ -133,10 +133,10 @@ fn law(storage: &str, access: &str, suspension: &str, replay: bool) {
     "#
     );
     let linked = lash_typescript::link(&source, &environment()).expect("container law links");
-    let compiled = lashlang::testing::harness::compile_linked_main(&linked);
+    let compiled = lash_vm::testing::harness::compile_linked_main(&linked);
     let host = ContainerHost::default();
     let mut state = State::new();
-    let execution_environment = lashlang::ExecutionEnvironment::new(&host).process();
+    let execution_environment = lash_vm::ExecutionEnvironment::new(&host).process();
     let outcomes = futures::executor::block_on(async {
         let mut vm = Vm::from_state(&compiled, &mut state, &execution_environment).expect("VM");
         let checkpoint = if replay {
@@ -154,7 +154,7 @@ fn law(storage: &str, access: &str, suspension: &str, replay: bool) {
         for _ in 0..if replay { 2 } else { 1 } {
             if let Some(bytes) = &checkpoint {
                 drop(vm);
-                let continuation = lashlang::VmInstance::pristine()
+                let continuation = lash_vm::VmInstance::pristine()
                     .open_continuation(bytes)
                     .expect("decode");
                 vm = Vm::resume_from(continuation, &compiled, &execution_environment)
@@ -183,7 +183,7 @@ fn law(storage: &str, access: &str, suspension: &str, replay: bool) {
     for outcome in outcomes {
         assert_eq!(
             outcome,
-            ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!({
+            ExecutionOutcome::Finished(lash_vm::from_json(serde_json::json!({
                 "handle": process_handle_json("container-child"), "joined": "joined"
             })))
         );

@@ -1,4 +1,4 @@
-use lashlang::{
+use lash_vm::{
     AssignPathStep, AssignTarget, CoercingBinaryOp, CoercingUnaryOp, Declaration, Expr,
     FunctionDecl, MethodKey, OperandLogicalOp, ProcessDecl, Program, StructuralRole,
 };
@@ -499,7 +499,7 @@ impl<'p> Printer<'p> {
                         // An `else if` chain lowers to a block holding the one
                         // nested `if`, so a block of that shape prints back as
                         // the chain the author wrote rather than a nested block.
-                        match lashlang::else_if_chain(other) {
+                        match lash_vm::else_if_chain(other) {
                             Some(chain) => out.push_str(
                                 self.statement(chain, level, &mut else_bound, vars)?
                                     .trim_start()
@@ -1021,7 +1021,7 @@ impl<'p> Printer<'p> {
             | Expr::MethodCall { .. }
             | Expr::Field { .. }
             | Expr::Index { .. } => self.expression(expression),
-            // A `__lashlang_closure` wrap prints as the arrow it carries,
+            // A `__lash_vm_closure` wrap prints as the arrow it carries,
             // an AssignmentExpression, so it needs parentheses as a member
             // target the same way `Expr::Function` does.
             Expr::BuiltinCall { .. } if !is_closure_wrap(expression) => self.expression(expression),
@@ -1102,7 +1102,7 @@ pub(super) fn statement_block_contents(expression: &Expr) -> Vec<&Expr> {
     match expression {
         // The unit value a missing branch is spelled as holds no statement.
         Expr::Absent => Vec::new(),
-        expression => lashlang::statement_list(expression)
+        expression => lash_vm::statement_list(expression)
             .into_iter()
             .map(|listed| listed.expr)
             .filter(|statement| !matches!(statement, Expr::Absent))
@@ -1220,12 +1220,12 @@ fn loop_header<'a>(
     })
 }
 
-/// The arguments of a `__lashlang_stdlib` call with the given selector.
+/// The arguments of a `__lash_vm_stdlib` call with the given selector.
 pub(super) fn stdlib_call<'a>(expression: &'a Expr, selector: &str) -> Option<&'a [Expr]> {
     let Expr::BuiltinCall { name, args } = expression else {
         return None;
     };
-    if name.as_str() != "__lashlang_stdlib" {
+    if name.as_str() != "__lash_vm_stdlib" {
         return None;
     }
     let [Expr::String(found), rest @ ..] = args.as_slice() else {
@@ -1236,7 +1236,7 @@ pub(super) fn stdlib_call<'a>(expression: &'a Expr, selector: &str) -> Option<&'
 
 /// The doc comment a label is spelled as, or the refusal when its text has no
 /// spelling that would read back as the same label.
-fn label_comment(label: &lashlang::LabelMetadata) -> Printed {
+fn label_comment(label: &lash_vm::LabelMetadata) -> Printed {
     render_label_comment(
         label.title.as_str(),
         label.description.as_ref().map(|text| text.as_str()),

@@ -29,7 +29,7 @@ use crate::Result;
 pub struct HostArtifacts {
     #[cfg_attr(
         not(feature = "rlm"),
-        expect(dead_code, reason = "modules are published only with lashlang")
+        expect(dead_code, reason = "modules are published only with lash_vm")
     )]
     modules: Arc<dyn ModuleArtifactStore>,
     process_env: Arc<dyn ProcessExecutionEnvStore>,
@@ -71,12 +71,12 @@ impl HostArtifacts {
 
     /// Publish `artifact` and hold it under `pin`. A released pin is refused.
     #[cfg(feature = "rlm")]
-    pub async fn publish_module<T: lashlang::ModuleArtifactBytes + ?Sized>(
+    pub async fn publish_module<T: lash_vm::ModuleArtifactBytes + ?Sized>(
         &self,
         pin: &HostArtifactPin,
         artifact: &T,
     ) -> Result<()> {
-        lashlang::LashlangArtifacts::new(Arc::clone(&self.modules))
+        lash_vm::LashVmArtifacts::new(Arc::clone(&self.modules))
             .publish_module_artifact(&claim(pin)?, artifact)
             .await
             .map_err(lash_core::PluginError::from)?;

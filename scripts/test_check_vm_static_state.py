@@ -41,14 +41,14 @@ class CheckTests(unittest.TestCase):
 
     def test_a_new_static_is_refused(self) -> None:
         self.write(
-            "crates/lashlang/src/cache.rs",
+            "crates/lash-vm/src/cache.rs",
             """\
             static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
             """,
         )
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("crates/lashlang/src/cache.rs:1: static `SEEN` (in `<module>`)", problems[0])
+        self.assertIn("crates/lash-vm/src/cache.rs:1: static `SEEN` (in `<module>`)", problems[0])
 
     def test_every_static_form_is_refused(self) -> None:
         self.write(
@@ -80,7 +80,7 @@ class CheckTests(unittest.TestCase):
 
     def test_an_allowlisted_static_passes_under_its_enclosing_fn(self) -> None:
         self.write(
-            "crates/lashlang/src/table.rs",
+            "crates/lash-vm/src/table.rs",
             """\
             pub fn methods() -> &'static [&'static str] {
                 static METHODS: LazyLock<Vec<&'static str>> = LazyLock::new(Vec::new);
@@ -88,12 +88,12 @@ class CheckTests(unittest.TestCase):
             }
             """,
         )
-        self.allow("crates/lashlang/src/table.rs::methods::METHODS  # build table\n")
+        self.allow("crates/lash-vm/src/table.rs::methods::METHODS  # build table\n")
         self.assertEqual(self.problems(), [])
 
     def test_the_entry_names_the_scope_so_a_second_same_named_static_is_refused(self) -> None:
         self.write(
-            "crates/lashlang/src/table.rs",
+            "crates/lash-vm/src/table.rs",
             """\
             fn first() {
                 static ARITIES: OnceLock<u8> = OnceLock::new();
@@ -103,26 +103,26 @@ class CheckTests(unittest.TestCase):
             }
             """,
         )
-        self.allow("crates/lashlang/src/table.rs::first::ARITIES  # build table\n")
+        self.allow("crates/lash-vm/src/table.rs::first::ARITIES  # build table\n")
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("(in `second`)", problems[0])
 
     def test_an_entry_without_a_reason_is_malformed(self) -> None:
-        self.write("crates/lashlang/src/c.rs", "static C: u8 = 0;\n")
-        self.allow("crates/lashlang/src/c.rs::<module>::C\n")
+        self.write("crates/lash-vm/src/c.rs", "static C: u8 = 0;\n")
+        self.allow("crates/lash-vm/src/c.rs::<module>::C\n")
         problems = self.problems()
         self.assertTrue(any("want `<path>::<scope>::<NAME>  # <reason>`" in p for p in problems), problems)
 
     def test_a_stale_entry_is_refused(self) -> None:
-        self.allow("crates/lashlang/src/gone.rs::<module>::GONE  # used to exist\n")
+        self.allow("crates/lash-vm/src/gone.rs::<module>::GONE  # used to exist\n")
         problems = self.problems()
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("matches no static item", problems[0])
 
     def test_lifetimes_comments_strings_and_other_trees_are_not_statics(self) -> None:
         self.write(
-            "crates/lashlang/src/quiet.rs",
+            "crates/lash-vm/src/quiet.rs",
             """\
             // static COMMENTED: u8 = 0;
             /* static BLOCK: u8 = 0; */
@@ -134,9 +134,9 @@ class CheckTests(unittest.TestCase):
             pub struct Holder { cell: std::sync::OnceLock<u8> }
             """,
         )
-        self.write("crates/lashlang/tests/fixture.rs", "static ALLOCATOR: u8 = 0;\n")
-        self.write("crates/lashlang/examples/perf.rs", "static LIVE: u8 = 0;\n")
-        self.write("crates/lashlang/benches/bench.rs", "static PEAK: u8 = 0;\n")
+        self.write("crates/lash-vm/tests/fixture.rs", "static ALLOCATOR: u8 = 0;\n")
+        self.write("crates/lash-vm/examples/perf.rs", "static LIVE: u8 = 0;\n")
+        self.write("crates/lash-vm/benches/bench.rs", "static PEAK: u8 = 0;\n")
         self.assertEqual(self.problems(), [])
 
     def test_the_tree_passes(self) -> None:

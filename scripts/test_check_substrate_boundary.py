@@ -25,8 +25,8 @@ FIXTURE_DIRS = [
     "crates/lash-core-execution/src/runtime/effect",
     "crates/lash-protocol-rlm/src/executor",
     "crates/lash-protocol-rlm/src/projection",
-    "crates/lashlang/src",
-    "crates/lash-lashlang-runtime/src",
+    "crates/lash-vm/src",
+    "crates/lash-vm-runtime/src",
 ]
 FIXTURE_FILES = [
     "crates/lash-core/src/runtime/logical_turn.rs",

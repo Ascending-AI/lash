@@ -143,18 +143,18 @@ rejection_test!(
 
 #[test]
 fn shadowed_module_root_names_the_shadowing_binding() {
-    let mut catalog = lashlang::LashlangHostCatalog::new();
+    let mut catalog = lash_vm::LashVmHostCatalog::new();
     catalog
         .add_module_operation(
             ["text"],
             "TextModule",
             "sha256",
             "tool:text/sha256",
-            lashlang::TypeExpr::Any,
-            lashlang::TypeExpr::Any,
+            lash_vm::TypeExpr::Any,
+            lash_vm::TypeExpr::Any,
         )
         .expect("text module operation");
-    let environment = lashlang::LashlangHostEnvironment::new(catalog).with_globals(["text"]);
+    let environment = lash_vm::LashVmHostEnvironment::new(catalog).with_globals(["text"]);
     let shadowed = lash_typescript::link("text.sha256({});", &environment)
         .expect_err("a session binding shadowing a real module root should explain the shadowing");
     assert_eq!(shadowed.code, Code::MethodUnsupported);
@@ -381,7 +381,7 @@ fn an_unknown_ecma_static_names_its_owner() {
     );
 }
 
-/// A rejection the model cannot locate costs it a guess. Lashlang has echoed
+/// A rejection the model cannot locate costs it a guess. Lash VM has echoed
 /// the offending line with a caret since it shipped; TypeScript dropped the
 /// span on the floor and sent `TS_CODE: message` alone.
 #[test]
@@ -536,7 +536,7 @@ rejection_test!(
 fn a_missing_field_of_a_closed_literal_is_tsc2339() {
     let error = lash_typescript::link(
         "const o = { a: 1 }; const c = o.c;",
-        &lashlang::testing::harness::test_environment(),
+        &lash_vm::testing::harness::test_environment(),
     )
     .expect_err("a closed shape refuses a field it lacks");
     assert_eq!(error.code, Code::LinkError, "{error}");

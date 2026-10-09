@@ -370,7 +370,7 @@ fn app_tool_definition() -> lash_core::ToolDefinition {
 }
 
 /// Default RLM protocol factory for tests, over `backend`, the substrate its
-/// Lashlang artifacts live in.
+/// Lash VM artifacts live in.
 #[cfg(feature = "rlm")]
 fn rlm_factory(backend: &lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -392,7 +392,7 @@ fn rlm_factory(backend: &lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPl
 /// instead, and a loaded full suite spent them on a law about retention
 /// (FIG-4751). Laws about worker deadlines set their own.
 #[cfg(feature = "rlm")]
-fn untimed_fixture_workers() -> crate::rlm::WorkerService {
+fn untimed_fixture_workers() -> crate::vm::WorkerService {
     /// Longer than any run the instruction budget admits.
     const OFF_THE_CLOCK: std::time::Duration = std::time::Duration::from_secs(365 * 24 * 60 * 60);
     let mut config =
@@ -402,7 +402,7 @@ fn untimed_fixture_workers() -> crate::rlm::WorkerService {
     config.deadlines.compute = OFF_THE_CLOCK;
     config.deadlines.serialization = OFF_THE_CLOCK;
     config.deadlines.cumulative_cpu = OFF_THE_CLOCK;
-    crate::rlm::WorkerService::new(config)
+    crate::vm::WorkerService::new(config)
 }
 
 mod absent_session_delete;

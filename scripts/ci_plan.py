@@ -266,7 +266,7 @@ def _first_party_closure(
 GATED_JOBS = {
     "check": "facade",
     "repo-gates": "tooling",
-    "lashlang-git-consumer": "rust",
+    "lash-vm-git-consumer": "rust",
     "feature-lanes": "rust",
     "workspace-tests": "rust",
     "heavy-tests": "rust",
@@ -290,7 +290,7 @@ GATED_JOBS = {
 # output gates only the lane TEST steps (`_is_feature_gate_path` holds that
 # rule); every other trusted event runs the whole lane board. The job needs
 # the pool's cache credentials, so an untrusted pull request skips it
-# entirely. `lashlang-git-consumer` stays dispatch-only, where the cut to the
+# entirely. `lash-vm-git-consumer` stays dispatch-only, where the cut to the
 # minimum PR board left it.
 FEATURE_LANES_JOB = "feature-lanes"
 
@@ -307,7 +307,7 @@ DISPATCH_ONLY_JOBS = {
     "stack-budget",
     "s3-store",
     "unicode-tests",
-    "lashlang-git-consumer",
+    "lash-vm-git-consumer",
     # The fuzz smoke stays off the pull-request critical path by design: its
     # bounded corpus run guards trunk without taxing every PR (FIG-878).
     "fuzz-smoke",
@@ -330,7 +330,7 @@ UNGATED_JOBS = {
 STORE_PR_PACKAGES = frozenset(
     {
         "crates/lash",
-        "crates/lash-lashlang-runtime",
+        "crates/lash-vm-runtime",
         "crates/lash-plugin-process-controls",
         "crates/lash-protocol-rlm",
         "crates/lash-postgres-store",

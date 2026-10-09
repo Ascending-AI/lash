@@ -355,11 +355,11 @@ impl CodexProvider {
         }
         // `tool_choice` is only meaningful when the request advertises tools.
         // In RLM mode we intentionally send `tools: []` because tools are
-        // documented in the prompt body and invoked via `lashlang`, not the
+        // documented in the prompt body and invoked via `lash_vm`, not the
         // native tool-call envelope. Sending `tool_choice: "none"` on top of
         // an empty tool list adds a second "definitely don't call any
         // function" signal that reasoning-capable Codex models take literally,
-        // causing them to refuse to emit `call` expressions in lashlang.
+        // causing them to refuse to emit `call` expressions in lash_vm.
         if !req.tools.is_empty() {
             body["tool_choice"] = json!(shared::tool_choice_value(&req.tool_choice));
         }

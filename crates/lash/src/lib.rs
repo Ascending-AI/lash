@@ -170,6 +170,9 @@ pub mod rlm;
 /// Reusable contracts for agent scenarios.
 #[cfg(feature = "testing")]
 pub mod scenario_contracts;
+#[cfg(feature = "rlm")]
+/// Integration with the Lash VM execution substrate.
+pub mod vm;
 /// Standard-lock poison recovery traits for application code.
 pub mod sync {
     pub use lash_core::sync::*;
@@ -456,8 +459,16 @@ pub mod tools {
         ToolIntentSubmissionAdmission, ToolIntentSubmissionOutcome, ToolIntentSubmissionRecord,
         ToolIntentSubmissionSettlement,
     };
+    /// The whole tool-authoring support surface: [`StaticToolProvider`] /
+    /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers
+    /// (`invalid_tool_args`, `object_schema`, `parse_optional_usize_arg`,
+    /// `ToolBinding`, `ToolDefinitionBindingExt`, `TOOL_BINDING_KEY`,
+    /// `LASH_VM_BINDINGS_ENABLED`) tools are built from. The glob keeps the
+    /// facade complete as the crate grows; where it overlaps the explicit
+    /// `rlm` re-exports above, those name the same items.
+    pub use lash_tool_support::*;
     #[cfg(feature = "rlm")]
-    pub use lash_lashlang_runtime::{
+    pub use lash_vm_runtime::{
         CataloguePreviewEntry, CataloguePreviewOptions, DEFAULT_CATALOGUE_PREVIEW_CALL_NAME_LIMIT,
         DEFAULT_CATALOGUE_PREVIEW_MODULE_LIMIT, ToolBindingResolutionExt, ToolManifestBindingExt,
         catalogue_preview, catalogue_preview_entries_from_catalog_records,
@@ -465,20 +476,12 @@ pub mod tools {
         catalogue_preview_entry_from_manifest, required_tool_binding,
     };
     #[cfg(feature = "rlm")]
-    pub use lash_lashlang_runtime::{
+    pub use lash_vm_runtime::{
         DeferredLink, DeferredLinkError, DeferredResolutionError, DeferredResolutionLinkKey,
         DeferredResolveContext, DeferredToolResolver, RecordedGrantInstallError,
         Resolution as DeferredToolResolution, SharedDeferredToolResolver,
         ToolGrant as DeferredToolGrant, compile_with_deferred_resolution,
     };
-    /// The whole tool-authoring support surface: [`StaticToolProvider`] /
-    /// [`StaticToolExecute`] for fixed-set providers plus the shared helpers
-    /// (`invalid_tool_args`, `object_schema`, `parse_optional_usize_arg`,
-    /// `ToolBinding`, `ToolDefinitionBindingExt`, `TOOL_BINDING_KEY`,
-    /// `LASHLANG_BINDINGS_ENABLED`) tools are built from. The glob keeps the
-    /// facade complete as the crate grows; where it overlaps the explicit
-    /// `rlm` re-exports above, those name the same items.
-    pub use lash_tool_support::*;
 }
 
 /// Direct protocol transport types.
@@ -670,7 +673,7 @@ pub mod persistence {
         facade_support::AttachmentGcFence, facade_support::AttachmentReclamationReport,
         facade_support::RuntimeAttachmentStore, facade_support::reclaim_unreferenced_attachments,
     };
-    /// The Lashlang module-artifact port a backend's store set supplies.
+    /// The Lash VM module-artifact port a backend's store set supplies.
     pub use lash_core::{
         ArtifactStoreError, DurabilityTier, ModuleArtifactAstRefusal, ModuleArtifactCorruption,
         ModuleArtifactGeneration, ModuleArtifactRefusal, ModuleArtifactStore,
@@ -700,7 +703,7 @@ pub mod persistence {
     };
     /// The typed view an RLM host reads and writes its module artifacts through.
     #[cfg(feature = "rlm")]
-    pub use lash_lashlang_runtime::LashlangArtifacts;
+    pub use lash_vm_runtime::LashVmArtifacts;
 }
 
 /// Prompt sections (ADR 0133): the host's plan and the records of what a
@@ -1184,8 +1187,8 @@ pub mod process {
         ProcessReplaySubscription, ProcessSequence, RetainedProcessView,
     };
     #[cfg(feature = "rlm")]
-    pub use lash_lashlang_runtime::{
-        LASHLANG_ENGINE_KIND, LashlangProcessInput, trace_lashlang_process_map,
+    pub use lash_vm_runtime::{
+        LASH_VM_ENGINE_KIND, LashVmProcessInput, trace_lashlang_process_map,
     };
 }
 

@@ -71,7 +71,7 @@ class NoSubagentTests(unittest.TestCase):
             "docs/adr/0134.md": f"lash ships no {WORD} implementation\n",
             "crates/lash-durable-test/tests/a.rs": f"// {WORD}\n",
             "crates/lash-sim/src/a.rs": f"// {WORD}\n",
-            "crates/lashlang/src/a.rs": f"// {WORD}\n",
+            "crates/lash-vm/src/a.rs": f"// {WORD}\n",
         }), [])
 
     def test_an_untracked_file_is_not_read(self) -> None:

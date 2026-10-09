@@ -93,7 +93,7 @@ fi
 ci_features="${LASH_CI_FEATURES:-}"
 critical_packages=(
   lash-internal-core
-  lash-internal-lashlang
+  lash-internal-vm
   lash-internal-protocol-rlm
   lash-internal-protocol-standard
   lash-internal-sqlite-store
@@ -110,7 +110,7 @@ else
     trigger) selected_packages=(lash-internal-core-execution) ;;
     effect-host) selected_packages=(lash-internal-core-execution lash-internal-core-effect lash-internal-conformance) ;;
     provider) selected_packages=(lash-internal-core-execution lash-internal-core-llm lash-internal-sansio) ;;
-    protocol) selected_packages=(lash-internal-lashlang lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
+    protocol) selected_packages=(lash-internal-vm lash-internal-protocol-rlm lash-internal-protocol-standard) ;;
     sim) selected_packages=(lash-sim) ;;
   esac
   case "$area" in
@@ -221,7 +221,7 @@ SIM_SEARCH_SETUP_SECONDS=1500
 # Per-leg mutant budgets for the mutation-packages-rotating stage. The stage's
 # full pass is unsharded and cannot fit the 100-minute job cap: run 35117123483
 # measured 1,641 mutants for protocol-rlm, 1,663 for postgres-store, and
-# ~7,400 for lashlang (its 1/64 smoke shard alone is 116 mutants, more than
+# ~7,400 for lash_vm (its 1/64 smoke shard alone is 116 mutants, more than
 # a leg can judge), and all three legs were cancelled at exactly 100 minutes
 # with no verdict written.
 #
@@ -248,7 +248,7 @@ SIM_SEARCH_SETUP_SECONDS=1500
 #
 #   package            legs  smoke m/m  full m/m   smoke            full
 #   core                2     ~2.5       ~4        12*2.5+8 = 38 m    5*4+12 = 32 m    95 m
-#   lashlang            4     ~0.8       ~0.8      12*0.8+4 = 14 m   48*0.8+4 = 42 m    81 m
+#   lash_vm            4     ~0.8       ~0.8      12*0.8+4 = 14 m   48*0.8+4 = 42 m    81 m
 #   protocol-rlm        4     ~1.3       ~1.3      12*1.3+8 = 24 m   20*1.3+8 = 34 m    83 m
 #   protocol-standard   1     ~0.2       ~0.2       ~6 m             all ~61 mutants   ~45 m
 #   sqlite-store        3     ~1.5       ~1.5      12*1.5+8 = 26 m   16*1.5+8 = 32 m    83 m
@@ -263,7 +263,7 @@ SIM_SEARCH_SETUP_SECONDS=1500
 MUTATION_PACKAGES_SMOKE_MUTANTS=12
 declare -A MUTATION_PACKAGES_FULL_MUTANTS=(
   [lash-internal-core]="5"
-  [lash-internal-lashlang]="48"
+  [lash-internal-vm]="48"
   [lash-internal-protocol-rlm]="20"
   [lash-internal-protocol-standard]="64"
   [lash-internal-sqlite-store]="16"
@@ -533,7 +533,7 @@ confidence_schedule_table=(
   "fast:all|process|fault-matrix|runtime state machine and durable process fault matrix|"
   "fast:all|trigger|fault-matrix|trigger delivery fault matrix|"
   "fast:all|effect-host|fault-matrix|inline await-event cancellation conformance|"
-  "fast:all|protocol|fault-matrix|Lashlang property suite|"
+  "fast:all|protocol|fault-matrix|Lash VM property suite|"
   "fast:all|provider|fault-matrix|transport properties and provider failure evidence|"
   "fast:all|store|fault-matrix|SQLite backend fault-matrix conformance|"
   "fast:all|sim|sim-unit-perf-guards|simulation unit/oracle and performance-guard identity suites|"
@@ -545,7 +545,7 @@ confidence_schedule_table=(
   "fast:fault-matrix|process|fault-matrix|runtime state machine and durable process fault matrix|"
   "fast:fault-matrix|trigger|fault-matrix|trigger delivery fault matrix|"
   "fast:fault-matrix|effect-host|fault-matrix|inline await-event cancellation conformance|"
-  "fast:fault-matrix|protocol|fault-matrix|Lashlang property suite|"
+  "fast:fault-matrix|protocol|fault-matrix|Lash VM property suite|"
   "fast:fault-matrix|provider|fault-matrix|transport properties and provider failure evidence|"
   "fast:fault-matrix|store|fault-matrix|SQLite backend fault-matrix conformance|"
   "fast:sim-unit-perf-guards|sim|sim-unit-perf-guards|simulation unit/oracle and performance-guard identity suites|"
@@ -1130,8 +1130,8 @@ run_state_machine_and_fault_matrix() {
   fi
 
   if area_selected protocol; then
-    step "Lashlang property suite"
-    run_cargo_tests -p lash-internal-lashlang --locked --test property
+    step "Lash VM property suite"
+    run_cargo_tests -p lash-internal-vm --locked --test property
   fi
 
   if area_selected provider; then
@@ -1215,7 +1215,7 @@ operational-coverage-missing-cancellation
 scheduler-owned-provider-completion-missing-evidence
 queued-input-operational-missing
 trigger-wakeup-operational-missing
-rlm-lashlang-cell-missing-continuation
+rlm-lash-vm-cell-missing-continuation
 agent-parallel-join-missing-provider-session
 standard-provider-error-missing-parser-matrix
 standard-max-turn-stop-missing
@@ -1279,7 +1279,7 @@ run_minimizer_fixture_suite() {
     "crates/lash-sim/failure-fixtures/scheduler-owned-provider-completion-missing-evidence.json",
     "crates/lash-sim/failure-fixtures/queued-input-operational-missing.json",
     "crates/lash-sim/failure-fixtures/trigger-wakeup-operational-missing.json",
-    "crates/lash-sim/failure-fixtures/rlm-lashlang-cell-missing-continuation.json",
+    "crates/lash-sim/failure-fixtures/rlm-lash-vm-cell-missing-continuation.json",
     "crates/lash-sim/failure-fixtures/agent-parallel-join-missing-provider-session.json",
     "crates/lash-sim/failure-fixtures/standard-provider-error-missing-parser-matrix.json",
     "crates/lash-sim/failure-fixtures/standard-max-turn-stop-missing.json",
@@ -1298,7 +1298,7 @@ run_minimizer_fixture_suite() {
     "scheduler_owned_provider_completion_missing_evidence": "failing-fixtures/scheduler-owned-provider-completion-missing-evidence/minimized-regression/package.json",
     "queued_input_operational_missing": "failing-fixtures/queued-input-operational-missing/minimized-regression/package.json",
     "trigger_wakeup_operational_missing": "failing-fixtures/trigger-wakeup-operational-missing/minimized-regression/package.json",
-    "rlm_lashlang_cell_missing_continuation": "failing-fixtures/rlm-lashlang-cell-missing-continuation/minimized-regression/package.json",
+    "rlm_lash_vm_cell_missing_continuation": "failing-fixtures/rlm-lash-vm-cell-missing-continuation/minimized-regression/package.json",
     "agent_parallel_join_missing_provider_session": "failing-fixtures/agent-parallel-join-missing-provider-session/minimized-regression/package.json",
     "standard_provider_error_missing_parser_matrix": "failing-fixtures/standard-provider-error-missing-parser-matrix/minimized-regression/package.json",
     "standard_max_turn_stop_missing": "failing-fixtures/standard-max-turn-stop-missing/minimized-regression/package.json",
@@ -2119,7 +2119,7 @@ EOF
     --output-path "${coverage_dir}/summary.json"
   local critical_package_regex
   critical_package_regex="$(IFS='|'; printf '%s' "${selected_packages[*]}")"
-  critical_package_regex="${critical_package_regex//lash-internal-lashlang/lashlang}"
+  critical_package_regex="${critical_package_regex//lash-internal-vm/lash_vm}"
   critical_package_regex="${critical_package_regex//lash-internal-/lash-}"
   awk -v critical_package_regex="$critical_package_regex" '
     /^SF:/ {
@@ -2155,7 +2155,7 @@ Coverage is an observation artifact, not a pass/fail percentage.
 - Critical uncovered file index: ${coverage_dir}/critical-uncovered-files.tsv
 
 Use these outputs to find unexercised contracts in critical runtime,
-Lashlang, protocol, and durable-store code.
+LashVm, protocol, and durable-store code.
 EOF
 }
 
@@ -2380,7 +2380,7 @@ run_lash_sim_runtime_completion_mutation_evidence() {
       -p lash-sim \
       --file crates/lash-sim/src/oracles/recovery_and_scheduling.rs \
       --file crates/lash-sim/src/oracles/mini_scenarios.rs \
-      --re 'scheduler_owned_runtime_completions|mini_rlm_lashlang_cell_exec_continues|mini_agent_parallel_spawn_join|mini_agent_durable_input_resolution|mini_standard_provider_error_without_checkpoint' \
+      --re 'scheduler_owned_runtime_completions|mini_rlm_lash_vm_cell_exec_continues|mini_agent_parallel_spawn_join|mini_agent_durable_input_resolution|mini_standard_provider_error_without_checkpoint' \
       --baseline run \
       --build-timeout 900 \
       --shard "$shard" \

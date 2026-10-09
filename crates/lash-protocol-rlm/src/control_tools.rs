@@ -3,7 +3,7 @@ use lash_core::{
     ToolArgumentProjectionPolicy, ToolCall, ToolContract, ToolControl, ToolDefinition,
     ToolManifest, ToolOutcome, ToolProvider,
 };
-use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
+use lash_vm_runtime::{ToolBinding, ToolDefinitionBindingExt};
 use serde_json::{Value, json};
 use std::sync::Arc;
 

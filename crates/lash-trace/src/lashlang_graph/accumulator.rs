@@ -49,7 +49,7 @@ fn insert_event(
 
 impl Default for TraceLashlangGraphAccumulator {
     fn default() -> Self {
-        Self::new(DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT)
+        Self::new(DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT)
     }
 }
 

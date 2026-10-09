@@ -100,9 +100,7 @@ async fn blank_workflow_full_authoring_round_trip_rejects_malformed_then_runs() 
     let terminal = document
         .nodes
         .iter_mut()
-        .find(|node| {
-            node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
-        })
+        .find(|node| node.data.terminal_kind() == Some(&lash::vm::ir::WorkflowTerminalKind::Finish))
         .expect("blank terminal");
     *terminal.data.expression_mut().expect("expression node") = Some("1 +".to_string());
     let terminal_id = terminal.id.clone();
@@ -263,9 +261,7 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
     let terminal = document
         .nodes
         .iter_mut()
-        .find(|node| {
-            node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
-        })
+        .find(|node| node.data.terminal_kind() == Some(&lash::vm::ir::WorkflowTerminalKind::Finish))
         .expect("blank terminal");
     assert_eq!(
         terminal.data.name,
@@ -301,9 +297,7 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
         .document
         .nodes
         .iter()
-        .find(|node| {
-            node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
-        })
+        .find(|node| node.data.terminal_kind() == Some(&lash::vm::ir::WorkflowTerminalKind::Finish))
         .expect("renamed terminal reprojected");
     assert_eq!(
         saved_terminal.data.name,
@@ -319,9 +313,7 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
     document
         .nodes
         .iter_mut()
-        .find(|node| {
-            node.data.terminal_kind() == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish)
-        })
+        .find(|node| node.data.terminal_kind() == Some(&lash::vm::ir::WorkflowTerminalKind::Finish))
         .expect("renamed terminal")
         .data
         .name = NodeName::Derived {
@@ -346,7 +338,7 @@ async fn renaming_a_node_keeps_the_authored_title_through_save_and_reprojection(
             .nodes
             .iter()
             .find(|node| node.data.terminal_kind()
-                == Some(&lash::rlm::lang::WorkflowTerminalKind::Finish))
+                == Some(&lash::vm::ir::WorkflowTerminalKind::Finish))
             .expect("terminal reprojected")
             .data
             .name,

@@ -89,7 +89,7 @@ fn postgres_logical_name(table: &str) -> Option<String> {
     Some(
         match name {
             "sessions" => "session_head",
-            "lashlang_artifacts" => "artifact_refs",
+            "lash_vm_artifacts" => "artifact_refs",
             other => other,
         }
         .to_string(),

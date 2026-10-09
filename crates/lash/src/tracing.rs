@@ -57,7 +57,7 @@ pub use lash_trace::{
 /// variant exists in every build, so its payload types are unconditional
 /// `lash-trace` re-exports rather than `rlm`-gated.
 pub use lash_trace::{
-    DEFAULT_LASHLANG_GRAPH_HISTORY_LIMIT, ExecCodeFailureReason, TRACE_SCHEMA_VERSION,
+    DEFAULT_LASH_VM_GRAPH_HISTORY_LIMIT, ExecCodeFailureReason, TRACE_SCHEMA_VERSION,
     TextProjectionMetadata, TraceAgentFrameSwitch, TraceBranchMembership, TraceDurableTimerStatus,
     TraceDurableWaitResolution, TraceExecToolCall, TraceFailureCode, TraceJournaledEffectStatus,
     TraceLanguageChildExecution, TraceLanguageExecution, TraceLanguageExecutionFailure,

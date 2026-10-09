@@ -33,7 +33,7 @@ prose and the exact TypeScript it writes are its own; gate on structural outcome
    broken: that is the finding, do not "help".
 3. **The forwarding processes are durable and visible.** After the trigger fires, the
    process registry (`GET /api/work`, the right rail) must show the concierge run, and
-   `GET /api/lashlang-graphs` must know its graph. Invisible background work is a finding.
+   `GET /api/lash-vm-graphs` must know its graph. Invisible background work is a finding.
 4. **Instruct outcomes, not code.** Ask the agent *what to do* ("register a trigger
    that forwards…"); never paste a ready-made `<typescript>` cell into the chat. The
    model authoring the process is part of what this scenario proves.
@@ -64,14 +64,14 @@ prose and the exact TypeScript it writes are its own; gate on structural outcome
   working submit. A driver following the prose alone stalls here.
 - **Backend truth**: `GET /api/state` (settings + transcript snapshot),
   `GET /api/accounts`, `GET /api/accounts/{slug}/inbox`, `GET /api/work`,
-  `GET /api/lashlang-graphs`. `GET /api/work/{process_id}/await` blocks until a
+  `GET /api/lash-vm-graphs`. `GET /api/work/{process_id}/await` blocks until a
   work item reaches a terminal state (server-side timeout-bounded) and returns
   its outcome plus the authoritative event log reconciled from the durable
   store — the host-facing wait-on-work-item seam, an alternative to polling
   `/api/work` for a terminal row.
 - The account compose form posts mail to `/api/accounts/{slug}/messages` as
   `{"title":"<title>","text":"<text>"}`; both `title` and `text` are required.
-- **Disk** — two separate trees: `trace.jsonl` and `lashlang-execution.jsonl` live in the
+- **Disk** — two separate trees: `trace.jsonl` and `lash-vm-execution.jsonl` live in the
   **data dir** (`AGENT_WORKBENCH_DATA_DIR`, default `.agent-workbench/`) and move with it
   when you override it; the dev script's pid/log/run metadata lives in its own state dir
   (`AGENT_WORKBENCH_RUN_DIR`, default `.agent-workbench/run/`) and stays at the repo
@@ -157,8 +157,8 @@ Gates, in order:
    returns immediately. Gate: a `success` outcome for the forwarding run. The
    server bounds the wait (~120s) and answers 504 for a run still going —
    re-request; do not fall back to polling.
-5. `GET /api/lashlang-graphs` includes the concierge's graph;
-   `lashlang-execution.jsonl` grew.
+5. `GET /api/lash-vm-graphs` includes the concierge's graph;
+   `lash-vm-execution.jsonl` grew.
 
 Sink freshness is **evidence, never a gate**: when a run appends non-terminal
 events, the workbench log (in the dev script's state dir — see Working material)

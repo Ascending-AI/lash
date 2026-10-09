@@ -100,7 +100,7 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             turn_index + 1,
             expected_reply()
         ),
-        RuntimePerfScenario::RlmStreamedPairedLashlang => format!(
+        RuntimePerfScenario::RlmStreamedPairedLashVm => format!(
             "Turn {} in RLM mode. Stream visible prose before a paired <typescript> block, close it, ignore any suffix after the close tag, and finish exactly: {}",
             turn_index + 1,
             expected_reply()
@@ -130,7 +130,7 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
             turn_index + 1
         ),
         RuntimePerfScenario::TraceJsonlExtended => format!(
-            "Turn {} in extended JSONL trace benchmark mode. Run the Lashlang block and finish exactly: runtime perf benchmark ok",
+            "Turn {} in extended JSONL trace benchmark mode. Run the Lash VM block and finish exactly: runtime perf benchmark ok",
             turn_index + 1
         ),
         RuntimePerfScenario::DeepTurnComposition => format!(

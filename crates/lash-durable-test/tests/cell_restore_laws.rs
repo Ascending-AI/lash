@@ -296,12 +296,12 @@ struct GrantingResolver {
 }
 
 #[async_trait::async_trait]
-impl lash_lashlang_runtime::DeferredToolResolver for GrantingResolver {
+impl lash_vm_runtime::DeferredToolResolver for GrantingResolver {
     async fn resolve(
         &self,
-        _cx: &lash_lashlang_runtime::DeferredResolveContext<'_>,
+        _cx: &lash_vm_runtime::DeferredResolveContext<'_>,
         paths: &[&str],
-    ) -> BTreeMap<String, lash_lashlang_runtime::Resolution> {
+    ) -> BTreeMap<String, lash_vm_runtime::Resolution> {
         self.world
             .resolved
             .fetch_add(paths.len(), std::sync::atomic::Ordering::SeqCst);
@@ -313,12 +313,12 @@ impl lash_lashlang_runtime::DeferredToolResolver for GrantingResolver {
             .iter()
             .map(|path| {
                 let resolution = if *path == format!("tools.{GRANTED}") && !redeployed {
-                    lash_lashlang_runtime::Resolution::Resolved(Box::new(
-                        lash_lashlang_runtime::ToolGrant::new(granted(GRANTED))
+                    lash_vm_runtime::Resolution::Resolved(Box::new(
+                        lash_vm_runtime::ToolGrant::new(granted(GRANTED))
                             .with_source_id(lash::tools::PLUGIN_TOOL_SOURCE_ID),
                     ))
                 } else {
-                    lash_lashlang_runtime::Resolution::NotAvailable
+                    lash_vm_runtime::Resolution::NotAvailable
                 };
                 ((*path).to_owned(), resolution)
             })

@@ -6,7 +6,7 @@ drives must not carry development-only self-checks. Two things drifted before
 this gate existed:
 
 * `examples/agent-workbench` enabled `lash-protocol-rlm`'s `testing` feature on
-  its *runtime* dependency, so an exhausted Lashlang execution bound — an
+  its *runtime* dependency, so an exhausted Lash VM execution bound — an
   in-contract outcome the runtime reports back as `Policy` feedback — tripped a
   test-only assertion inside the effect task and surfaced as `effect_panicked`
   → an opaque "turn could not be completed".

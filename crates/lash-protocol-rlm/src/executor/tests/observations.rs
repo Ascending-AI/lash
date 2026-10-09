@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn execute_with_host_environment(
     code: &str,
-    resources: lashlang::LashlangHostCatalog,
+    resources: lash_vm::LashVmHostCatalog,
 ) -> ExecResponse {
     execute_with_host_environment_and_archives(code, resources)
         .await
@@ -12,7 +12,7 @@ pub(super) async fn execute_with_host_environment(
 /// Run a cell and return its response and attachment store.
 pub(super) async fn execute_with_host_environment_and_archives(
     code: &str,
-    resources: lashlang::LashlangHostCatalog,
+    resources: lash_vm::LashVmHostCatalog,
 ) -> (
     ExecResponse,
     Arc<lash_core::facade_support::RuntimeAttachmentStore>,
@@ -21,7 +21,7 @@ pub(super) async fn execute_with_host_environment_and_archives(
     let handler = crate::testing::DurableHost::open(crate::testing::default_cell_scope()).await;
     let artifact_store = handler.artifacts();
     let ctx = lash_core::testing::code_execution_context(handler.ports());
-    let surface = LashlangSurface::new(lashlang::LashlangLanguageFeatures::default(), resources);
+    let surface = LashVmSurface::new(lash_vm::LashVmLanguageFeatures::default(), resources);
     let attachments = ctx.attachment_store();
     let response = execute_code_with_test_render(
         &mut state,
@@ -34,9 +34,9 @@ pub(super) async fn execute_with_host_environment_and_archives(
         None,
         RlmProjectedBindings::default(),
         None,
-        lashlang::ExecutionBounds::new(
-            lashlang::ExecutionBound::instructions(1_000_000),
-            lashlang::ExecutionBound::Unbounded,
+        lash_vm::ExecutionBounds::new(
+            lash_vm::ExecutionBound::instructions(1_000_000),
+            lash_vm::ExecutionBound::Unbounded,
         ),
         crate::plugin::RlmChannel::Cell,
     )
@@ -54,7 +54,7 @@ pub(super) fn print_observation_preserves_typed_value_and_records_cut_metadata()
         );
         let (response, attachments) = execute_with_host_environment_and_archives(
             &format!("print({record});"),
-            lashlang::LashlangHostCatalog::new(),
+            lash_vm::LashVmHostCatalog::new(),
         )
         .await;
 
@@ -92,7 +92,7 @@ pub(super) fn console_log_of_a_large_record_stops_at_the_char_cap() {
             serde_json::to_string(&large).expect("string literal")
         );
         let (response, attachments) =
-            execute_with_host_environment_and_archives(&code, lashlang::LashlangHostCatalog::new())
+            execute_with_host_environment_and_archives(&code, lash_vm::LashVmHostCatalog::new())
                 .await;
         assert!(response.error().is_none(), "{:?}", response.error());
         let archive = response.prints_retained.as_ref().expect("archive");
@@ -116,7 +116,7 @@ pub(super) fn subcap_prints_stay_fully_inline_including_empty_and_null_values() 
     block_on(async {
         let response = execute_with_host_environment(
             "print(\"\"); print(null); print({text: \"é🙂\", nested: [1, false]});",
-            lashlang::LashlangHostCatalog::new(),
+            lash_vm::LashVmHostCatalog::new(),
         )
         .await;
         assert!(response.error().is_none(), "{:?}", response.error());

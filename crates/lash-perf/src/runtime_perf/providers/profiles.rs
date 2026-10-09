@@ -185,7 +185,7 @@ finish({ len: result.value });"#,
             let text = typescript_block(r#"finish("runtime perf benchmark ok");"#);
             text_profile(text)
         }
-        RuntimePerfScenario::RlmStreamedPairedLashlang => {
+        RuntimePerfScenario::RlmStreamedPairedLashVm => {
             let full_text = concat!(
                 "Visible preface before executable code.\n",
                 "<typescript>\n",

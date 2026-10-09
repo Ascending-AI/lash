@@ -69,7 +69,7 @@ reasoning selection on the recorded model and keeps the key.
 
 Each protocol namespace also records the session's behaviour at creation
 (FIG-4398), from the creating deployment's factory configuration:
-`RlmRecordedBehaviour` (execution bounds, Lashlang abilities and language
+`RlmRecordedBehaviour` (execution bounds, Lash VM abilities and language
 features, prompt features, output limit, soft-warning threshold, discovery
 operation, configured render) and `StandardRecordedBehaviour` (discovery
 operation, `batch` choice and maximum, configured render). A child session

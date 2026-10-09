@@ -328,7 +328,7 @@ async fn run_once_inner(
         | RuntimePerfScenario::RlmLlmQuery
         | RuntimePerfScenario::RlmGlobals
         | RuntimePerfScenario::RlmLargePrint
-        | RuntimePerfScenario::RlmStreamedPairedLashlang
+        | RuntimePerfScenario::RlmStreamedPairedLashVm
         | RuntimePerfScenario::RlmLargeToolCatalog
         | RuntimePerfScenario::RlmToolCatalogCold
         | RuntimePerfScenario::RlmToolCatalogWarm
@@ -374,7 +374,7 @@ async fn run_once_inner(
             } else {
                 None
             };
-            let lashlang_trace_root = if matches!(scenario, RuntimePerfScenario::RlmObliqueStackMix)
+            let lash_vm_trace_root = if matches!(scenario, RuntimePerfScenario::RlmObliqueStackMix)
             {
                 Some(make_temp_bench_dir(
                     format!("lash-runtime-perf-{}", scenario.name()).as_str(),
@@ -382,12 +382,12 @@ async fn run_once_inner(
             } else {
                 None
             };
-            let trace_config = lashlang_trace_root
+            let trace_config = lash_vm_trace_root
                 .as_ref()
                 .map(|root| RuntimePerfTraceConfig {
                     trace_jsonl_path: matches!(scenario, RuntimePerfScenario::RlmObliqueStackMix)
                         .then(|| root.join("trace.jsonl")),
-                    lashlang_execution_jsonl_path: Some(root.join("lashlang-execution.jsonl")),
+                    lash_vm_execution_jsonl_path: Some(root.join("lash-vm-execution.jsonl")),
                     trace_level: lash::tracing::TraceLevel::Extended,
                 });
             let runtime = if let Some(root) = sqlite_root.as_ref() {

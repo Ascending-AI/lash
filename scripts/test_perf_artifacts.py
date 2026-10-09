@@ -16,7 +16,7 @@ class MaterializedProfilingOutputs(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             labels = ["//crates/lash-perf:lash-perf__bin"] + [
-                f"//crates/lashlang:{name}__example"
+                f"//crates/lash-vm:{name}__example"
                 for name in ("perf", "profile", "function_perf")
             ]
             results = {}

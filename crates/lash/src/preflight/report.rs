@@ -778,7 +778,7 @@ mod tests {
         // The honest limit made machine-readable: a gate can tell a directly
         // probed row from one whose boundary is enforced by an envelope.
         let row = FormatTally::default().into_row(
-            DurableFormat::LashlangSnapshot,
+            DurableFormat::LashVmSnapshot,
             FormatVersion::Counter(2),
             FormatProbe::Comparable,
             FormatEvidence::CarriedBy(DurableFormat::RlmSnapshotEnvelope.name()),

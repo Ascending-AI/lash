@@ -99,7 +99,7 @@ fn the_session_finishes_with_a_value_an_earlier_cell_bound() {
 /// means something inside the program that compiled it, and the exported view
 /// of the globals already dropped any binding that reached a function value, so
 /// the runtime roots now match it. See
-/// `docs/adr/0076-lashlang-durable-stores-hold-exclusively-owned-copies.md`.
+/// `docs/adr/0076-lash-vm-durable-stores-hold-exclusively-owned-copies.md`.
 #[test]
 fn a_closure_valued_binding_does_not_survive_the_cell_boundary() {
     let (session, _) = shift(

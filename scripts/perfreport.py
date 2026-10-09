@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize lash runtime/UI/Lashlang perf reports, guard reports, and dhat heap profiles.
+"""Summarize lash runtime/UI/Lash VM perf reports, guard reports, and dhat heap profiles.
 
 Usage:
   perfreport.py REPORT.json                  # human summary
@@ -301,11 +301,11 @@ def summarize_runtime_stack(report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def summarize_lashlang(report: dict[str, Any]) -> str:
+def summarize_lash_vm(report: dict[str, Any]) -> str:
     params = report.get("parameters", {})
     lines: list[str] = []
     lines.append(
-        f"# lashlang-perf report  ({report.get('created_at', '?')[:19]}, "
+        f"# lash-vm-perf report  ({report.get('created_at', '?')[:19]}, "
         f"{params.get('iterations', '?')} iterations)"
     )
     git = report.get("git", {})
@@ -514,8 +514,8 @@ def diff_runtime(baseline: dict[str, Any], current: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def diff_lashlang(baseline: dict[str, Any], current: dict[str, Any]) -> str:
-    lines = ["# lashlang-perf diff", ""]
+def diff_lash_vm(baseline: dict[str, Any], current: dict[str, Any]) -> str:
+    lines = ["# lash-vm-perf diff", ""]
     lines.append(
         f"baseline: {baseline.get('created_at', '?')[:19]}  "
         f"build={baseline.get('build_mode', '?')}"
@@ -664,7 +664,7 @@ REPORT_DISPATCH: dict[
 ] = {
     "runtime-perf": (lambda payload, _top: summarize_runtime(payload), diff_runtime),
     "runtime-stack": (lambda payload, _top: summarize_runtime_stack(payload), None),
-    "lashlang-perf": (lambda payload, _top: summarize_lashlang(payload), diff_lashlang),
+    "lash-vm-perf": (lambda payload, _top: summarize_lash_vm(payload), diff_lash_vm),
 }
 
 
@@ -684,7 +684,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "report",
         type=Path,
-        help="runtime-perf JSON, perf guard JSON, ui-perf JSON, lashlang-perf JSON, or *.dhat.json",
+        help="runtime-perf JSON, perf guard JSON, ui-perf JSON, lash-vm-perf JSON, or *.dhat.json",
     )
     parser.add_argument("--diff", type=Path, help="baseline JSON of the same report kind to diff against")
     parser.add_argument("--top", type=int, default=20, help="top-N call stacks for dhat output (default 20)")

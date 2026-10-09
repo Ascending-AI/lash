@@ -673,7 +673,7 @@ mod tests {
             owner: session("session"),
             declaration: crate::ProcessStartDeclaration::new(
                 crate::ProcessInput::Engine {
-                    kind: "lashlang".to_string(),
+                    kind: "lashvm".to_string(),
                     payload,
                 },
                 crate::ProcessOriginator::host(),

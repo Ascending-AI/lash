@@ -138,7 +138,7 @@ impl ArtifactReferrerPorts {
             .partition(|name| matches!(name.store, ArtifactStoreId::Engine(_)));
         for name in store_names {
             let acquired = match &name.store {
-                ArtifactStoreId::LashlangModule => {
+                ArtifactStoreId::VmModule => {
                     self.modules
                         .acquire_module_artifact(claim, &name.artifact_ref)
                         .await

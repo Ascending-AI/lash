@@ -5,45 +5,45 @@ pub(crate) fn validate_literal(
     flags: &str,
     span: Option<SourceSpan>,
 ) -> Result<(), Diagnostic> {
-    lashlang::validate_regexp(pattern, flags).map_err(|error| {
+    lash_vm::validate_regexp(pattern, flags).map_err(|error| {
         let (code, message, repair) = match error {
-            lashlang::RegExpValidationError::PatternTooLong => (
+            lash_vm::RegExpValidationError::PatternTooLong => (
                 DiagnosticCode::RegexPatternTooLong,
                 format!(
                     "regular-expression patterns may contain at most {} UTF-16 code units",
-                    lashlang::REGEXP_MAX_PATTERN_CODE_UNITS
+                    lash_vm::REGEXP_MAX_PATTERN_CODE_UNITS
                 ),
                 "shorten the pattern, or match in smaller steps",
             ),
-            lashlang::RegExpValidationError::PatternTooDeep => (
+            lash_vm::RegExpValidationError::PatternTooDeep => (
                 DiagnosticCode::RegexNestingLimit,
                 format!(
                     "regular-expression group nesting may not exceed {} levels",
-                    lashlang::REGEXP_MAX_NESTING
+                    lash_vm::REGEXP_MAX_NESTING
                 ),
                 "split the pattern into smaller expressions",
             ),
-            lashlang::RegExpValidationError::UnsupportedFlag('d') => (
+            lash_vm::RegExpValidationError::UnsupportedFlag('d') => (
                 DiagnosticCode::RegexIndicesFlagUnsupported,
                 "RegExp flag `d` is unsupported because match indices are not exposed".to_string(),
                 "remove `d` and use match.index plus capture lengths",
             ),
-            lashlang::RegExpValidationError::UnsupportedFlag('v') => (
+            lash_vm::RegExpValidationError::UnsupportedFlag('v') => (
                 DiagnosticCode::RegexUnicodeSetsFlagUnsupported,
                 "RegExp flag `v` is unsupported".to_string(),
                 "use `u` with ordinary Unicode character classes",
             ),
-            lashlang::RegExpValidationError::UnsupportedFlag(flag) => (
+            lash_vm::RegExpValidationError::UnsupportedFlag(flag) => (
                 DiagnosticCode::RegexFlagUnsupported,
                 format!("RegExp flag `{flag}` is unsupported"),
                 "use only the g, i, m, s, u, and y flags",
             ),
-            lashlang::RegExpValidationError::InvalidFlags => (
+            lash_vm::RegExpValidationError::InvalidFlags => (
                 DiagnosticCode::RegexInvalid,
                 "invalid or duplicate RegExp flags".to_string(),
                 "use each of g, i, m, s, u, and y at most once",
             ),
-            lashlang::RegExpValidationError::InvalidPattern => (
+            lash_vm::RegExpValidationError::InvalidPattern => (
                 DiagnosticCode::RegexInvalid,
                 "invalid ECMAScript regular-expression pattern".to_string(),
                 "escape any literal `(`, `)`, `[`, `]`, `{`, `}`, `*`, `+`, or `?`",
@@ -57,21 +57,21 @@ pub(crate) fn validate_literal_shape(
     pattern: &str,
     span: Option<SourceSpan>,
 ) -> Result<(), Diagnostic> {
-    lashlang::validate_regexp_shape(pattern).map_err(|error| {
+    lash_vm::validate_regexp_shape(pattern).map_err(|error| {
         let (code, message, repair) = match error {
-            lashlang::RegExpValidationError::PatternTooLong => (
+            lash_vm::RegExpValidationError::PatternTooLong => (
                 DiagnosticCode::RegexPatternTooLong,
                 format!(
                     "regular-expression patterns may contain at most {} UTF-16 code units",
-                    lashlang::REGEXP_MAX_PATTERN_CODE_UNITS
+                    lash_vm::REGEXP_MAX_PATTERN_CODE_UNITS
                 ),
                 "shorten the pattern, or match in smaller steps",
             ),
-            lashlang::RegExpValidationError::PatternTooDeep => (
+            lash_vm::RegExpValidationError::PatternTooDeep => (
                 DiagnosticCode::RegexNestingLimit,
                 format!(
                     "regular-expression group nesting may not exceed {} levels",
-                    lashlang::REGEXP_MAX_NESTING
+                    lash_vm::REGEXP_MAX_NESTING
                 ),
                 "split the pattern into smaller expressions",
             ),

@@ -22,7 +22,7 @@ fn math_random_draws_replay_from_the_journal_in_order() {
                 AbilityOp::ResourceOperation(operation) => {
                     assert_eq!(
                         operation.operation.as_str(),
-                        lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION
+                        lash_vm::LANGUAGE_RUNTIME_RANDOM_OPERATION
                     );
                     let mut cursor = self.served.lock().expect("journal cursor");
                     let value = *self
@@ -51,7 +51,7 @@ fn math_random_draws_replay_from_the_journal_in_order() {
             served: std::sync::Mutex::new(0),
         };
         let outcome =
-            futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
+            futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &host))
                 .expect("a journaled random sequence should execute");
         assert_eq!(
             *host.served.lock().expect("journal cursor"),

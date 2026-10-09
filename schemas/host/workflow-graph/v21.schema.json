@@ -1699,7 +1699,7 @@
       "type": "array"
     },
     "UpdateOperator": {
-      "description": "An arithmetic operator a compound attribute assignment applies to the\nattribute's current value. Named neutrally: a front end's IR decides\nwhether the operation is Lashlang's or ECMA-262's.",
+      "description": "An arithmetic operator a compound attribute assignment applies to the\nattribute's current value. Named neutrally: a front end's IR decides\nwhether the operation is LashVm's or ECMA-262's.",
       "enum": [
         "add",
         "subtract",

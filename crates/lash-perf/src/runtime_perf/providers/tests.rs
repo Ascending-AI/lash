@@ -9,7 +9,7 @@ use lash_core::{
     llm::types::{LlmMessage, LlmRole},
     test_support::ToolCatalogBuildInput,
 };
-use lash_lashlang_runtime::ToolManifestBindingExt;
+use lash_vm_runtime::ToolManifestBindingExt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -21,8 +21,8 @@ fn large_tool_catalog_fixture_matches_gmail_sized_callable_catalog() {
         let binding = def
             .manifest
             .tool_binding()
-            .expect("valid lashlang binding")
-            .expect("benchmark tool has lashlang binding");
+            .expect("valid lash_vm binding")
+            .expect("benchmark tool has lash_vm binding");
         binding.module_path == vec!["gmail".to_string()]
             && !def.contract.input_schema.canonical.as_value()["properties"]
                 .as_object()
@@ -90,7 +90,7 @@ fn rlm_large_tool_catalog_pins_each_contract_once() {
 }
 
 #[test]
-fn oblique_fixture_exposes_retrieval_judge_and_handle_tools_to_lashlang() {
+fn oblique_fixture_exposes_retrieval_judge_and_handle_tools_to_lash_vm() {
     let definitions = benchmark_oblique_tool_definitions();
     assert_eq!(definitions.len(), 3);
     let bindings = definitions
@@ -99,8 +99,8 @@ fn oblique_fixture_exposes_retrieval_judge_and_handle_tools_to_lashlang() {
             let binding = definition
                 .manifest
                 .tool_binding()
-                .expect("valid lashlang binding")
-                .expect("oblique fixture tool has lashlang binding");
+                .expect("valid lash_vm binding")
+                .expect("oblique fixture tool has lash_vm binding");
             (
                 definition.name().to_string(),
                 binding.module_path,
@@ -132,8 +132,8 @@ fn oblique_fixture_exposes_retrieval_judge_and_handle_tools_to_lashlang() {
 }
 
 #[test]
-fn streamed_paired_lashlang_profile_splits_tags_and_trailing_suffix() {
-    let profile = benchmark_stream_profile(RuntimePerfScenario::RlmStreamedPairedLashlang);
+fn streamed_paired_lash_vm_profile_splits_tags_and_trailing_suffix() {
+    let profile = benchmark_stream_profile(RuntimePerfScenario::RlmStreamedPairedLashVm);
     assert_eq!(profile.full_text.matches("<typescript>").count(), 1);
     assert_eq!(profile.full_text.matches("</typescript>").count(), 1);
     assert!(

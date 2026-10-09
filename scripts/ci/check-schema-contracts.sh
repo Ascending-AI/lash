@@ -28,7 +28,7 @@ trap 'rm -rf -- "$build_dir"' EXIT
 # Cargo reports the actual executable rather than assuming a target directory
 # or profile. Do not send compiler diagnostics into the generator's JSON.
 if [[ "$context" == untrusted ]]; then
-  cargo build --locked -p lash-internal-lashlang --bin workflow_schema_generator \
+  cargo build --locked -p lash-internal-vm --bin workflow_schema_generator \
     --message-format=json-render-diagnostics > "$build_dir/host-build.json"
 fi
 cargo build --locked -p workflow-graph-roundtrip --bin workflow_contract_schema \

@@ -1,14 +1,14 @@
 //! The process-body wrapper: the one place that builds it.
 //!
-//! An authored process literal — a top-level `async` arrow — has no lashlang
+//! An authored process literal — a top-level `async` arrow — has no lash_vm
 //! counterpart. It lowers to a process body wrapped in the language-neutral
 //! [`StructuralRole::ProcessWrapper`]: `Try(Finish(Call(run)))` with a catch
 //! that turns an uncaught error into process failure, around the authored
 //! arrow body. Every reader finds the authored body through the role
-//! ([`lashlang::process_wrapper_run_path`]), never through the catch binding's
+//! ([`lash_vm::process_wrapper_run_path`]), never through the catch binding's
 //! spelling.
 
-use lashlang::{CatchClause, Expr, StructuralRole, TryExpr};
+use lash_vm::{CatchClause, Expr, StructuralRole, TryExpr};
 
 use super::LOWERED_BINDING_PREFIX;
 
@@ -49,5 +49,5 @@ pub(crate) fn wrapped_run_body(body: &Expr) -> Option<&Expr> {
     else {
         return None;
     };
-    lashlang::process_wrapper_run_path(expr).map(|(_, body)| body)
+    lash_vm::process_wrapper_run_path(expr).map(|(_, body)| body)
 }

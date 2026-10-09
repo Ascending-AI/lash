@@ -128,7 +128,7 @@ fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
         ended: old,
         successor: next.clone(),
         carries: vec![ArtifactName {
-            store: ArtifactStoreId::LashlangModule,
+            store: ArtifactStoreId::VmModule,
             artifact_ref: "carried".into(),
         }],
         gate: lash_sansio::ExecutionScope::runtime_operation("switch")
@@ -422,7 +422,7 @@ async fn a_switch_carrying_a_module_its_frame_does_not_hold_fails_closed() {
             ended: first.clone(),
             successor: successor.clone(),
             carries: vec![ArtifactName {
-                store: ArtifactStoreId::LashlangModule,
+                store: ArtifactStoreId::VmModule,
                 artifact_ref: forged.into(),
             }],
             gate: gate(),

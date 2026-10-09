@@ -3,7 +3,7 @@
 //!
 //! The parent derives every identity: a command is named by the issue ordinal
 //! the parent gave it when it admitted the command, under the opener that
-//! admitted the run, never by anything the worker sent. Both Lashlang hosts
+//! admitted the run, never by anything the worker sent. Both Lash VM hosts
 //! and the broker mint from here, so there is one spelling of a code
 //! command's `ToolCallId`.
 

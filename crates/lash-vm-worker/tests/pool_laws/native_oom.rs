@@ -158,7 +158,7 @@ impl ParentEffects for Parent {
                     return Err(ParentFault("echo waits on nothing".into()));
                 };
                 let text = settled.output.payload().expect("echo answers a value");
-                lashlang::from_json(serde_json::from_str(text).expect("echo's value"))
+                lash_vm::from_json(serde_json::from_str(text).expect("echo's value"))
             }
             AdmittedKind::Control { payload, .. } => {
                 let OperationRequest::Finish(value) =
@@ -314,7 +314,7 @@ async fn law(phase: Phase) {
             checkpoints: &*store,
             slots: &slots,
             codec: FrameCodec::new(pool.config().protocol.decode),
-            contract: lashlang::vm_contract_reads(),
+            contract: lash_vm::vm_contract_reads(),
             bounds: BrokerBounds::standard(),
             frames: FrameFence::new(FrameEpoch(1)),
         }
@@ -387,14 +387,14 @@ async fn law(phase: Phase) {
     let BrokeredEnd::Complete { value, .. } = resumed else {
         panic!("the resumed cell completes: {resumed:?}");
     };
-    let outcome: lashlang::ExecutionOutcome = rmp_serde::from_slice(&value.0).expect("completion");
+    let outcome: lash_vm::ExecutionOutcome = rmp_serde::from_slice(&value.0).expect("completion");
     let expected = match phase {
         Phase::ComputeBeforeEffectDispatch => serde_json::json!(200000),
         Phase::RecordedEffectBeforeDelivery => serde_json::json!({"value": 7, "dispatch": 1}),
     };
     assert_eq!(
         outcome,
-        lashlang::ExecutionOutcome::Finished(lashlang::from_json(expected))
+        lash_vm::ExecutionOutcome::Finished(lash_vm::from_json(expected))
     );
     assert_eq!(
         *parent.dispatches.lock().expect("dispatches"),

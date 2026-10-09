@@ -11,25 +11,25 @@ use thiserror::Error;
 /// version_guard(
 ///     shapes(
 ///         path = "crates/lash-protocol-rlm/src/executor/state.rs",
-///         path = "crates/lash-lashlang-runtime/src/deferred.rs",
+///         path = "crates/lash-vm-runtime/src/deferred.rs",
 ///         cover(RlmSnapshotRoot),
 ///     ),
 ///     roots(path = "crates/lash-rlm-types/src/lib.rs", RlmProjectedSeedEntry),
 ///     roots(path = "crates/lash-sansio/src/causal.rs", CausalRef),
 /// )
-// v26 carries Lashlang snapshot v13 and VM continuation v25, whose heaps may
+// v26 carries Lash VM snapshot v13 and VM continuation v25, whose heaps may
 // hold a binding cell (FIG-3707). A v25 body embeds the v12/v24 substrate
 // shapes this reader does not decode, so the boundary is a version.
-// v25 carries Lashlang snapshot v12 and VM continuation v24, whose heaps may
+// v25 carries Lash VM snapshot v12 and VM continuation v24, whose heaps may
 // hold a built-in method value (`'x'.includes`, FIG-3701). A v24 body embeds
 // the v11/v23 substrate shapes this reader does not decode, so the boundary is
 // a version.
-// v24 carries Lashlang snapshot v11 and VM continuation v22, whose closures
+// v24 carries Lash VM snapshot v11 and VM continuation v22, whose closures
 // carry their own `name`/`length` metadata (FIG-3655). A v23 body embeds the
 // v10/v21 substrate shapes this reader does not decode, so the boundary is a
 // version.
 // v23 persists the session's runtime roots and heap instead of their host
-// view (FIG-3605, FIG-3606). The root carries Lashlang's durable heap header
+// view (FIG-3605, FIG-3606). The root carries LashVm's durable heap header
 // and each binding's body is a durable fragment — the binding's value and the
 // heap objects it carries — so a `Map`, `Set`, `Date`, `RegExp`, `URL` or
 // `URLSearchParams`, one object named by two bindings, and an object's
@@ -62,17 +62,17 @@ use thiserror::Error;
 // with the standard drain-or-recreate remedy.
 // v14 removes the obsolete guest scratch-file section. Older snapshots fail
 // closed with the standard drain-or-recreate remedy.
-// v13 carries Lashlang snapshot v7 and VM continuation v8: a heap error's brand
+// v13 carries Lash VM snapshot v7 and VM continuation v8: a heap error's brand
 // serializes by name, and the two substrate-minted brands are names an older
 // reader cannot decode, so the boundary has to be a version and not a decode
 // failure.
-// v12 carried Lashlang snapshot v6 and its durable RegExpMatch heap kind.
-// v11 carried Lashlang snapshot v5, whose stricter heap reference wire shape
+// v12 carried Lash VM snapshot v6 and its durable RegExpMatch heap kind.
+// v11 carried Lash VM snapshot v5, whose stricter heap reference wire shape
 // changes embedded global bytes and therefore their component identities.
-// v10 added serializable lashlang call frames and closure heap objects. v9 was
+// v10 added serializable lash_vm call frames and closure heap objects. v9 was
 // one shape carrying two changes that each claimed v8 independently:
 // the inline-versus-leaf size line applies to globals and files alike, and a
-// persisted value body is the canonical Lashlang envelope, which now carries
+// persisted value body is the canonical Lash VM envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
 #[cfg(not(feature = "synthetic-next"))]
@@ -130,8 +130,8 @@ pub(crate) enum RlmSnapshotError {
         missing: Vec<lash_core::plugin::ExecutionLeafName>,
         unexpected: Vec<lash_core::plugin::ExecutionLeafName>,
     },
-    #[error("RLM canonical Lashlang snapshot is invalid: {0}")]
-    Lashlang(#[from] lashlang::SnapshotDecodeError),
+    #[error("RLM canonical Lash VM snapshot is invalid: {0}")]
+    LashVm(#[from] lash_vm::SnapshotDecodeError),
 }
 
 impl From<RlmSnapshotError> for lash_core::SessionError {

@@ -1,8 +1,5 @@
 use crate::support::{ProtocolTurnOptions, Result};
 
-#[cfg(feature = "rlm")]
-pub use lash_lashlang_runtime::LanguageTraceHost;
-
 /// The RLM termination setters on a [`send`](crate::LashSession::send).
 #[cfg(feature = "rlm")]
 pub trait RlmSendBuilderExt: Sized {
@@ -145,18 +142,9 @@ impl RlmSessionExt for crate::LashSession {
     }
 }
 
-// RLM-specific Lashlang host vocabulary. The catalogue-preview, tool-binding,
+// RLM-specific Lash VM host vocabulary. The catalogue-preview, tool-binding,
 // and process-input names are single-homed under `lash::tools` and
 // `lash::process`; they are not re-exported here.
-pub use lash_lashlang_runtime::resolve_lashlang_module_operation;
-pub use lash_lashlang_runtime::{
-    LASHLANG_SURFACE_EXTENSION_ID, LashlangHostCatalog, LashlangHostEnvironment,
-    LashlangLanguageFeatures, LashlangProcessEngine, LashlangSurface, LashlangSurfaceContribution,
-    lashlang_surface_extension,
-};
-pub use lash_lashlang_runtime::{
-    LashlangProcessAdmissionRefusal, LashlangRuntimeError, ToolBindingError,
-};
 /// Identifies the RLM protocol's durable output by its typed message origin.
 pub use lash_protocol_rlm::is_rlm_protocol_output;
 /// The initial nodes that bind a [`RlmSeed`] in a session being created: a
@@ -164,10 +152,9 @@ pub use lash_protocol_rlm::is_rlm_protocol_output;
 pub use lash_protocol_rlm::rlm_seed_initial_nodes;
 pub use lash_protocol_rlm::{
     BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound,
-    MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmPresentationConfig,
+    MemoryBound, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmPresentationConfig,
     RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
-    RlmSessionConfigDecodeError, TypeExpr, TypeField, UnsetBound, format_type_expr,
-    rlm_protocol_event,
+    RlmSessionConfigDecodeError, UnsetBound, rlm_protocol_event,
 };
 /// The code-mode dialect seam: a host selects one [`Dialect`] where it
 /// constructs the RLM protocol; [`TypescriptDialect`] is the shipped one.
@@ -207,27 +194,15 @@ pub use lash_rlm_types::{
     RlmCreateExtras, RlmRenderPatch, RlmSessionConfig, RlmTermination, RlmTurnOptions,
 };
 pub use lash_rlm_types::{RlmProjectedSeedEntry, RlmProjectedSeedSnapshot, RlmSeedPluginBody};
-pub use lashlang::LinkedModule;
 
-/// The Lashlang compile APIs are operations over an
+/// The Lash VM compile APIs are operations over an
 /// [`RlmProtocolPluginFactory`] and a plugin host; they live in
 /// `lash-protocol-rlm` and are re-exported here.
 #[cfg(feature = "rlm")]
 pub use lash_protocol_rlm::{
-    LashlangCompileSurface, LashlangCompileSurfaceRequest, LashlangModuleCompileError,
-    LashlangModuleCompileRequest, ModuleCompileOutput,
+    LashVmCompileSurface, LashVmCompileSurfaceRequest, LashVmModuleCompileError,
+    LashVmModuleCompileRequest, ModuleCompileOutput,
 };
-
-/// The Lashlang language surface: the AST, values, compile/link requests,
-/// introspection, resource operations and artifact-store
-/// traits a host needs to author, compile and inspect Lashlang programs.
-///
-/// This is `lashlang`'s own root namespace, re-exported whole rather than
-/// item-by-item: the language vocabulary is the internal crate's root and
-/// splitting it here would give the same name two homes.
-pub mod lang {
-    pub use lashlang::*;
-}
 
 /// `current`, the RLM run options a send already states, with their
 /// termination set to `termination`. Options that are not the RLM owner's
@@ -249,57 +224,7 @@ fn rlm_termination_options(
     )?)
 }
 
-/// One shared pool for RLM cells, process bodies, and pure language work.
-///
-/// SDK releases attach `lash-sdk-worker-VERSION-TARGET.tar.gz` and its SHA256.
-/// Pass the extracted `bin/lash-vm-worker` path to [`WorkerService::subprocess`]
-/// or [`WorkerEntry::helper`]. Hosts may build the SDK from registry packages.
-/// The manifest records protocol and crate diagnostics; crate versions never
-/// decide compatibility. Pool admission refuses an unsupported wire version.
-/// [`WorkerService::default`] explicitly defaults to the helper beside the host
-/// executable and does not search PATH or a repository.
-///
-/// A single-binary host calls [`worker_entry_with_frontend`] as its first action,
-/// before runtime creation, credentials, stores or providers, and returns from
-/// main when that call returns `true`. It selects [`WorkerEntry::reexec`].
-/// `examples/worker_host.rs` proves this bootstrap with the TypeScript frontend.
-/// The child starts with an empty environment and closes inherited descriptors.
-/// The language bounds guest authority; the process contains native crashes.
-/// A native escape still has the worker user's OS access.
-pub use lash_vm_client::service::Service as WorkerService;
-/// Host-selected worker entry, pool bounds, and execution deadlines.
-pub use lash_vm_client::{
-    Deadlines as WorkerDeadlines, PoolConfig as WorkerPoolConfig, WorkerEntry, WorkerTuning,
-};
-/// The worker pool [`WorkerService::pool`] starts, which a host prewarms at
-/// startup, and the counts it reports.
-pub use lash_vm_client::{PoolStats as WorkerPoolStats, WorkerPool};
-
-/// A source frontend lives in the worker entry the dialect selects.
-pub use lash_vm_worker::{
-    Frontend as WorkerFrontend, FrontendRefusal as WorkerFrontendRefusal,
-    worker_entry_with_frontend,
-};
-
-// The vocabulary this module's signatures name (the facade-completeness rule).
-pub use lash_lashlang_runtime::{
-    LashlangProcessFailureCode, LashlangRecordedSettings, LashlangRunSettingsRecorder,
-};
-pub use lash_sansio::worker_limit::WorkerFrameKind;
-pub use lash_vm_client::service::CompiledModule;
-pub use lash_vm_client::{
-    BootstrapFault, CodecRefusal, DecodeLimits, Detail, Exchange, ExecutionClass, ExecutionLease,
-    ExecutionReceipt, FrameEpoch, HeaderRefusal, InfrastructureOutcome, InspectedArtifact,
-    OpaqueStateRefusal, OwnerEpoch, PayloadKind, PoolCounters, PoolError, PoolFault,
-    PoolMeasurements, ProcessMetadata, ProtocolBounds, ProtocolBreach, ProtocolVersionRefusal,
-    RunInput, RunRefusal, SequenceFault, SupervisorEvidence, TransportSequence,
-    VmContractComponent, VmLimits, VmOwner, VmStateKind, WorkerDeploymentFault, WorkerLimit,
-};
-
 pub use lash_protocol_rlm::recorded_extraction_decisions;
-
-/// VM segment retry/latency policy and working cadence, independent of decoder ceilings.
-pub use lash_lashlang_runtime::{LashlangEngineSteps, VmSegmentPolicy};
 
 #[cfg(all(test, feature = "sqlite", feature = "typescript"))]
 mod worker_policy_tests;

@@ -5,7 +5,7 @@
 #![allow(clippy::disallowed_methods)]
 #![allow(clippy::expect_used)]
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionOutcome, State, Value,
 };
 use std::collections::BTreeSet;
@@ -50,20 +50,20 @@ impl ExecutionHost for Host {
     }
 }
 
-pub(crate) fn compile_cell(source: &str, state: &State) -> lashlang::CompiledProgram {
+pub(crate) fn compile_cell(source: &str, state: &State) -> lash_vm::CompiledProgram {
     let globals: BTreeSet<String> = state.binding_names().map(str::to_owned).collect();
     let program = lash_typescript::parse_with_globals(source, &globals)
         .unwrap_or_else(|error| panic!("parse `{source}`: {error}"));
     let spans = program.spans.clone();
-    let artifact = lashlang::ModuleArtifact::from_program(program)
+    let artifact = lash_vm::ModuleArtifact::from_program(program)
         .unwrap_or_else(|error| panic!("artifact `{source}`: {error}"));
-    lashlang::compile(&artifact, lashlang::Entry::Main, Some(&spans))
+    lash_vm::compile(&artifact, lash_vm::Entry::Main, Some(&spans))
         .unwrap_or_else(|error| panic!("compile `{source}`: {error}"))
 }
 
 pub(crate) fn run_cell(source: &str, state: &mut State, host: &Host) -> ExecutionOutcome {
     let compiled = compile_cell(source, state);
-    futures::executor::block_on(lashlang::execute(&compiled, state, host))
+    futures::executor::block_on(lash_vm::execute(&compiled, state, host))
         .unwrap_or_else(|error| panic!("execute `{source}`: {error}"))
 }
 

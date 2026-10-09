@@ -1,0 +1,185 @@
+//! The AST nesting cap must never be tighter than the dialect front-end's.
+//!
+//! `LinkedModule::link` is the shared entry for authored *and* AST-built
+//! programs, so a single cap governs both. The front-end bounds syntactic
+//! depth, but a syntactic level does not cost one AST level: block-bodied
+//! constructs (`if`, `while`, `for`) each build an `Expr::Block` inside them
+//! and cost two. The invariant that keeps the cap honest is therefore not an
+//! arithmetic relation between two constants — it is this test: every program
+//! the front-end accepts must pass `check_ast_nesting_depth` and must link.
+//!
+//! ADR 0096 makes TypeScript the sole authored dialect, so the shapes below
+//! are TypeScript and the accepting front-end is `lash_typescript`.
+
+use lash_vm::{LashVmHostCatalog, LashVmHostEnvironment, LinkedModule, check_ast_nesting_depth};
+
+/// One nestable authored shape: a name and a generator that builds it `depth`
+/// levels deep.
+type AuthoredShape = (&'static str, fn(usize) -> String);
+
+/// The shapes a program can nest, chosen to span the per-level AST cost range:
+/// the block-bodied constructs are the expensive end, the literal and operator
+/// shapes the cheap end.
+fn authored_shape_family() -> Vec<AuthoredShape> {
+    fn nest(depth: usize, wrap: impl Fn(usize, String) -> String, leaf: &str) -> String {
+        let mut source = String::from(leaf);
+        for level in 0..depth {
+            source = wrap(level, source);
+        }
+        source
+    }
+    vec![
+        ("if", |depth| {
+            nest(
+                depth,
+                |_, s| format!("if (true) {{ {s} }} else {{ finish(0); }}"),
+                "finish(1);",
+            )
+        }),
+        ("while", |depth| {
+            format!(
+                "{}\nfinish(1);",
+                nest(
+                    depth,
+                    |_, s| format!("while (false) {{ {s} }}"),
+                    "const x = 1;"
+                )
+            )
+        }),
+        ("for", |depth| {
+            format!(
+                "{}\nfinish(1);",
+                nest(
+                    depth,
+                    |level, s| format!("for (const item{level} of [1]) {{ {s} }}"),
+                    "const x = 1;"
+                )
+            )
+        }),
+        ("object", |depth| {
+            format!(
+                "finish({});",
+                nest(depth, |_, s| format!("{{ next: {s} }}"), "0")
+            )
+        }),
+        ("array", |depth| {
+            format!("finish({});", nest(depth, |_, s| format!("[{s}]"), "0"))
+        }),
+        ("paren", |depth| {
+            format!("finish({});", nest(depth, |_, s| format!("({s})"), "0"))
+        }),
+        ("unary", |depth| {
+            format!("finish({});", nest(depth, |_, s| format!("-({s})"), "0"))
+        }),
+        ("binary", |depth| {
+            format!("finish({});", nest(depth, |_, s| format!("({s} + 1)"), "0"))
+        }),
+        ("map", |depth| {
+            format!(
+                "finish({});",
+                nest(
+                    depth,
+                    |level, s| format!("[{s}].map((n{level}) => n{level})"),
+                    "0"
+                )
+            )
+        }),
+        ("call", |depth| {
+            format!(
+                "finish({});",
+                nest(depth, |_, s| format!("[{s}].length"), "0")
+            )
+        }),
+    ]
+}
+
+fn environment() -> LashVmHostEnvironment {
+    LashVmHostEnvironment::new(LashVmHostCatalog::new())
+}
+
+/// Walks every shape up to the depth the front-end refuses, and requires each
+/// accepted program to survive both the depth check and the linker. A cap that
+/// is too tight fails here rather than in a downstream embedder.
+#[test]
+fn every_authored_shape_the_front_end_accepts_stays_inside_the_ast_cap() {
+    let mut summary = Vec::new();
+    for (name, build) in authored_shape_family() {
+        let mut deepest_accepted = 0usize;
+        for depth in 1..=128usize {
+            let source = build(depth);
+            let Ok(program) = lash_typescript::parse(&source) else {
+                break;
+            };
+            deepest_accepted = depth;
+            check_ast_nesting_depth(&program).unwrap_or_else(|error| {
+                panic!("shape `{name}` at front-end-accepted depth {depth}: {error}")
+            });
+            LinkedModule::link(program, environment()).unwrap_or_else(|error| {
+                panic!("shape `{name}` at front-end-accepted depth {depth} must link: {error}")
+            });
+        }
+        assert!(
+            deepest_accepted > 0,
+            "shape `{name}` must be accepted at depth 1; check the generator"
+        );
+        summary.push((name, deepest_accepted));
+    }
+    println!("front-end-accepted depth per shape: {summary:?}");
+}
+
+/// `break` and `continue` are AST nodes no front-end can reject out of
+/// place, so a host-built function body can carry one with no enclosing loop.
+/// That is a typed refusal at the construction entry points, not a panic in the
+/// compiler, for the same reason the depth cap lives there.
+#[test]
+fn loop_control_outside_a_loop_is_a_typed_error_not_a_panic() {
+    use lash_vm::{AssignTarget, Expr, FunctionExpr, Program};
+
+    let program = Program::block(vec![
+        Expr::Assign {
+            target: AssignTarget::variable("f".into()),
+            expr: Box::new(Expr::Function(Box::new(FunctionExpr {
+                name: None,
+                js_name: None,
+                receiver: None,
+                params: Vec::new(),
+                captures: Vec::new(),
+                body: Box::new(Expr::Break),
+            }))),
+        },
+        Expr::Finish(Box::new(Expr::Call {
+            function: Box::new(Expr::Variable("f".into())),
+            args: Vec::new(),
+        })),
+    ]);
+
+    let error = LinkedModule::link(program.clone(), environment())
+        .expect_err("linking must refuse loop control outside a loop");
+    assert!(error.to_string().contains("outside a loop"), "{error}");
+
+    let error =
+        lash_vm_compile_program(&program).expect_err("compiling must refuse it rather than panic");
+    assert!(error.to_string().contains("outside a loop"), "{error}");
+}
+
+#[test]
+fn a_bare_continue_at_the_program_root_is_a_typed_error() {
+    use lash_vm::{Expr, Program};
+
+    let program = Program::block(vec![Expr::Continue, Expr::Finish(Box::new(Expr::Null))]);
+    let error = lash_vm_compile_program(&program).expect_err("a bare continue must be refused");
+    assert!(error.to_string().contains("outside a loop"), "{error}");
+}
+
+/// Compiles an IR program as the main entry of the raw module artifact it
+/// forms, through the one public compile entry.
+fn lash_vm_compile_program(
+    program: &lash_vm::Program,
+) -> Result<lash_vm::CompiledProgram, Box<dyn std::error::Error>> {
+    let artifact = lash_vm::ModuleArtifact::from_program(program.clone())?;
+    Ok(lash_vm::compile(
+        &artifact,
+        lash_vm::Entry::Main,
+        Some(&program.spans),
+    )?)
+}

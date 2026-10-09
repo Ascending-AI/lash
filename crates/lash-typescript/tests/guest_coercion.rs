@@ -6,7 +6,7 @@
 //! answered, so every answer below is Node v25.2.1's, hook call counts
 //! included.
 
-use lashlang::{
+use lash_vm::{
     AbilityOp, AbilityOutcome, ExecutionHost, ExecutionHostError, ExecutionMode, ExecutionOutcome,
     RuntimeError, State, Value, Vm, VmContinuation, VmRunOutcome,
 };
@@ -31,7 +31,7 @@ impl ExecutionHost for Host {
 fn execute(source: &str) -> Result<ExecutionOutcome, RuntimeError> {
     let program = lash_typescript::testing::compile(source)
         .unwrap_or_else(|error| panic!("TypeScript should compile: {source}: {error}"));
-    futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &Host))
+    futures::executor::block_on(lash_vm::execute(&program, &mut State::new(), &Host))
 }
 
 fn finished_json(source: &str) -> String {
@@ -269,7 +269,7 @@ async fn conversions_around_a_park_match_the_resident_run() {
         finish(JSON.stringify([before, o + 1, `${o}`, 'abcdefghij'.slice(o)]));
     "#;
     let program = lash_typescript::testing::compile(source).expect("compiles");
-    let resident = match lashlang::execute(&program, &mut State::new(), &Host)
+    let resident = match lash_vm::execute(&program, &mut State::new(), &Host)
         .await
         .expect("resident run")
     {
@@ -290,7 +290,7 @@ async fn conversions_around_a_park_match_the_resident_run() {
     let continuation = vm.suspend().expect("capturable");
     drop(vm);
     let bytes = serde_json::to_vec(&continuation).expect("serialize");
-    let restored: VmContinuation = lashlang::VmInstance::pristine()
+    let restored: VmContinuation = lash_vm::VmInstance::pristine()
         .open_continuation(&bytes)
         .expect("deserialize");
     let host = Host;

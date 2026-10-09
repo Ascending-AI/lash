@@ -319,15 +319,15 @@ pub(super) async fn run_once_trace_jsonl(
     chat_turns: usize,
 ) -> anyhow::Result<RuntimePerfRunResult> {
     let mut run = RunRecorder::start(scenario, chat_turns);
-    let (trace_root, trace_path, lashlang_trace_path, mut runtime) = run
+    let (trace_root, trace_path, lash_vm_trace_path, mut runtime) = run
         .build(async {
             let trace_root = make_temp_bench_dir("lash-runtime-perf-trace-jsonl")?;
             let trace_path = trace_root.join("runtime-trace.jsonl");
-            let lashlang_trace_path = matches!(scenario, RuntimePerfScenario::TraceJsonlExtended)
-                .then(|| trace_root.join("lashlang-execution.jsonl"));
+            let lash_vm_trace_path = matches!(scenario, RuntimePerfScenario::TraceJsonlExtended)
+                .then(|| trace_root.join("lash-vm-execution.jsonl"));
             let trace_config = RuntimePerfTraceConfig {
                 trace_jsonl_path: Some(trace_path.clone()),
-                lashlang_execution_jsonl_path: lashlang_trace_path.clone(),
+                lash_vm_execution_jsonl_path: lash_vm_trace_path.clone(),
                 trace_level: if matches!(scenario, RuntimePerfScenario::TraceJsonlExtended) {
                     lash::tracing::TraceLevel::Extended
                 } else {
@@ -335,7 +335,7 @@ pub(super) async fn run_once_trace_jsonl(
                 },
             };
             let runtime = build_runtime(scenario, Some(trace_config)).await?;
-            Ok((trace_root, trace_path, lashlang_trace_path, runtime))
+            Ok((trace_root, trace_path, lash_vm_trace_path, runtime))
         })
         .await?;
     run.seed(async { seed_runtime_state(&mut runtime, scenario).await })
@@ -407,7 +407,7 @@ pub(super) async fn run_once_trace_jsonl(
         .await?;
     let (trace_counters, inspect_phase) =
         measure_runtime_perf_phase("trace_jsonl.inspect_files", || {
-            inspect_trace_jsonl_files(&trace_path, lashlang_trace_path.as_deref())
+            inspect_trace_jsonl_files(&trace_path, lash_vm_trace_path.as_deref())
         })?;
     let total_alloc = run.total_alloc_snapshot();
     let mut phase_profile = sum_phase_profiles(run.turns().iter().map(|turn| &turn.phase_profile));
@@ -425,12 +425,12 @@ pub(super) async fn run_once_trace_jsonl(
     }
     if matches!(scenario, RuntimePerfScenario::TraceJsonlExtended)
         && trace_counters
-            .get("lashlang_execution_trace_records")
+            .get("lash_vm_execution_trace_records")
             .copied()
             .unwrap_or_default()
             == 0
     {
-        anyhow::bail!("extended trace_jsonl scenario produced no Lashlang execution records");
+        anyhow::bail!("extended trace_jsonl scenario produced no Lash VM execution records");
     }
 
     Ok(run.finish(RunTail {
@@ -455,18 +455,18 @@ fn live_replay_text_payload(text: impl Into<String>) -> SessionObservationEventP
 
 fn inspect_trace_jsonl_files(
     trace_path: &std::path::Path,
-    lashlang_trace_path: Option<&std::path::Path>,
+    lash_vm_trace_path: Option<&std::path::Path>,
 ) -> anyhow::Result<BTreeMap<String, u64>> {
     let mut counters = BTreeMap::new();
     let (trace_bytes, trace_records) = jsonl_file_stats(trace_path)?;
     counters.insert("trace_bytes".to_string(), trace_bytes);
     counters.insert("trace_records".to_string(), trace_records);
-    if let Some(path) = lashlang_trace_path {
-        let (lashlang_bytes, lashlang_records) = jsonl_file_stats(path)?;
-        counters.insert("lashlang_execution_trace_bytes".to_string(), lashlang_bytes);
+    if let Some(path) = lash_vm_trace_path {
+        let (lash_vm_bytes, lash_vm_records) = jsonl_file_stats(path)?;
+        counters.insert("lash_vm_execution_trace_bytes".to_string(), lash_vm_bytes);
         counters.insert(
-            "lashlang_execution_trace_records".to_string(),
-            lashlang_records,
+            "lash_vm_execution_trace_records".to_string(),
+            lash_vm_records,
         );
     }
     Ok(counters)

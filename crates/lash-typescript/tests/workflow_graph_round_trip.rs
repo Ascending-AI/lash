@@ -11,7 +11,7 @@ use lash_typescript::workflow_graph::{
     typescript_program_source, workflow_graph_from_source, workflow_graph_to_source,
     workflow_graph_to_source_in_session,
 };
-use lashlang::WorkflowNodeKind;
+use lash_vm::WorkflowNodeKind;
 
 fn canonical(source: &str) -> String {
     typescript_program_source(&parse(source).expect("fixture parses"))
@@ -48,7 +48,7 @@ fn sparse_array_literals_preserve_elisions() {
 
 #[test]
 fn malformed_sparse_array_helpers_are_typed_refusals() {
-    use lashlang::Expr;
+    use lash_vm::Expr;
     let cases = [
         (vec![Expr::Absent], vec![Expr::Number(1.0)]),
         (vec![], vec![Expr::Number(0.0)]),
@@ -71,7 +71,7 @@ fn malformed_sparse_array_helpers_are_typed_refusals() {
     ];
     for (values, holes) in cases {
         let helper = Expr::BuiltinCall {
-            name: "__lashlang_stdlib".into(),
+            name: "__lash_vm_stdlib".into(),
             args: vec![
                 Expr::String("Lash.SparseArray".into()),
                 Expr::List(values),
@@ -95,7 +95,7 @@ fn malformed_sparse_array_helpers_are_typed_refusals() {
         args.extend(operands);
         assert!(matches!(
             typescript_expression_source(&Expr::BuiltinCall {
-                name: "__lashlang_stdlib".into(),
+                name: "__lash_vm_stdlib".into(),
                 args,
             }),
             Err(TypeScriptSourceError::MalformedSparseArray { .. })
@@ -105,10 +105,10 @@ fn malformed_sparse_array_helpers_are_typed_refusals() {
 
 fn assert_json_round_trip(source: &str) {
     assert_lens_laws(source);
-    let original = lashlang::ModuleArtifact::from_program(parse(source).expect("source parses"))
+    let original = lash_vm::ModuleArtifact::from_program(parse(source).expect("source parses"))
         .expect("source admits");
     let printed = typescript_program_source(original.ir()).expect("JSON call prints");
-    let readmitted = lashlang::ModuleArtifact::from_program(parse(&printed).expect("text parses"))
+    let readmitted = lash_vm::ModuleArtifact::from_program(parse(&printed).expect("text parses"))
         .expect("text admits");
     assert_eq!(readmitted.module_ref(), original.module_ref());
     assert_eq!(readmitted.source_identity(), original.source_identity());
@@ -138,7 +138,7 @@ fn unmarked_json_traversal_is_not_sugared() {
         parse_typescript_expression("JSON.stringify({a: 1})", &BTreeSet::new(), &BTreeSet::new())
             .expect("JSON call lowers");
     let unmarked = match expression {
-        lashlang::Expr::Role { expr, .. } => *expr,
+        lash_vm::Expr::Role { expr, .. } => *expr,
         expression => expression,
     };
     assert!(typescript_expression_source(&unmarked).is_err());
@@ -146,7 +146,7 @@ fn unmarked_json_traversal_is_not_sugared() {
 
 #[test]
 fn json_traversal_printing_does_not_depend_on_binding_names() {
-    use lashlang::{AstString, Expr, ExprFolder, fold_expr_children};
+    use lash_vm::{AstString, Expr, ExprFolder, fold_expr_children};
     struct Rename;
     impl ExprFolder for Rename {
         fn fold_expr(&mut self, mut expression: Expr) -> Expr {
@@ -184,7 +184,7 @@ fn json_traversal_printing_does_not_depend_on_binding_names() {
 
 #[test]
 fn malformed_json_traversal_roles_are_refused() {
-    use lashlang::Expr;
+    use lash_vm::Expr;
     let mut expression =
         parse_typescript_expression("JSON.stringify(1)", &BTreeSet::new(), &BTreeSet::new())
             .expect("JSON call lowers");
@@ -195,8 +195,8 @@ fn malformed_json_traversal_roles_are_refused() {
     let mut program = parse("finish(1);").expect("program parses");
     program.main = expression.clone();
     assert!(matches!(
-        lashlang::validate_ast(&program),
-        Err(lashlang::InvalidAst::MalformedRole {
+        lash_vm::validate_ast(&program),
+        Err(lash_vm::InvalidAst::MalformedRole {
             role: "json_traversal",
             ..
         })
@@ -206,7 +206,7 @@ fn malformed_json_traversal_roles_are_refused() {
 
 #[test]
 fn json_traversal_roles_preserve_execution_identities() {
-    use lashlang::{Expr, ExprFolder, fold_expr_children};
+    use lash_vm::{Expr, ExprFolder, fold_expr_children};
     struct ExecutionBody;
     impl ExprFolder for ExecutionBody {
         fn fold_expr(&mut self, expression: Expr) -> Expr {
@@ -226,24 +226,23 @@ fn json_traversal_roles_preserve_execution_identities() {
         let mut legacy = program.clone();
         legacy.main = ExecutionBody.fold_expr(legacy.main);
         let original =
-            lashlang::ModuleArtifact::from_program(legacy.clone()).expect("legacy admits");
-        let marked =
-            lashlang::ModuleArtifact::from_program(program.clone()).expect("marked admits");
+            lash_vm::ModuleArtifact::from_program(legacy.clone()).expect("legacy admits");
+        let marked = lash_vm::ModuleArtifact::from_program(program.clone()).expect("marked admits");
         assert_eq!(marked.module_ref(), original.module_ref());
         assert_eq!(marked.source_identity(), original.source_identity());
         assert_eq!(
-            lashlang::lifted_process_identity(&program.main, &[2, 3]),
-            lashlang::lifted_process_identity(&legacy.main, &[2, 3])
+            lash_vm::lifted_process_identity(&program.main, &[2, 3]),
+            lash_vm::lifted_process_identity(&legacy.main, &[2, 3])
         );
-        let compile = lashlang::testing::harness::compile_program;
+        let compile = lash_vm::testing::harness::compile_program;
         let marked_compiled = compile(&program);
         let legacy_compiled = compile(&legacy);
         assert_eq!(
-            lashlang::testing::harness::compiled_execution_sites(&marked_compiled),
-            lashlang::testing::harness::compiled_execution_sites(&legacy_compiled)
+            lash_vm::testing::harness::compiled_execution_sites(&marked_compiled),
+            lash_vm::testing::harness::compiled_execution_sites(&legacy_compiled)
         );
-        let linked = lashlang::testing::harness::link_labeled(program);
-        let legacy_linked = lashlang::testing::harness::link_labeled(legacy);
+        let linked = lash_vm::testing::harness::link_labeled(program);
+        let legacy_linked = lash_vm::testing::harness::link_labeled(legacy);
         assert_eq!(
             linked.artifact.module_ref(),
             legacy_linked.artifact.module_ref()
@@ -253,7 +252,7 @@ fn json_traversal_roles_preserve_execution_identities() {
 
 #[test]
 fn edited_json_traversals_are_refused() {
-    use lashlang::Expr;
+    use lash_vm::Expr;
     for edit in 0..5 {
         let mut expression = parse_typescript_expression(
             "JSON.stringify({a: 1})",
@@ -367,16 +366,16 @@ fn property_presence_queries_round_trip() {
         &BTreeSet::new(),
     )
     .expect("own-property guard lowers");
-    let lashlang::Expr::Block(items) = &mut edited else {
+    let lash_vm::Expr::Block(items) = &mut edited else {
         panic!("own-property receiver")
     };
-    let lashlang::Expr::If { else_block, .. } = &mut items[1] else {
+    let lash_vm::Expr::If { else_block, .. } = &mut items[1] else {
         panic!("own-property guard")
     };
-    let lashlang::Expr::BuiltinCall { args, .. } = else_block.as_mut() else {
+    let lash_vm::Expr::BuiltinCall { args, .. } = else_block.as_mut() else {
         panic!("own-property fallback")
     };
-    args[2] = lashlang::Expr::Number(-0.0);
+    args[2] = lash_vm::Expr::Number(-0.0);
     assert!(
         typescript_expression_source(&edited).is_err(),
         "guard keys with distinct artifact identities must refuse"
@@ -384,8 +383,8 @@ fn property_presence_queries_round_trip() {
 }
 
 /// The language-neutral IR projection, with TypeScript opaque-statement text.
-fn workflow_graph_from_program(program: &lashlang::Program) -> lashlang::WorkflowGraph {
-    lashlang::workflow_graph_from_program(
+fn workflow_graph_from_program(program: &lash_vm::Program) -> lash_vm::WorkflowGraph {
+    lash_vm::workflow_graph_from_program(
         program,
         &lash_typescript::workflow_graph::TypeScriptStatementText,
     )
@@ -469,7 +468,7 @@ fn opaque_statements_reject_globals_the_program_cannot_see() {
 
 #[test]
 fn host_descriptor_constructors_spell_registered_paths() {
-    use lashlang::Expr;
+    use lash_vm::Expr;
     // A host descriptor constructor keeps its module path as its type name,
     // so `host.Timer(..)` spells it and re-links the same constructor.
     let constructor = Expr::HostDescriptorConstructor {
@@ -485,7 +484,7 @@ fn host_descriptor_constructors_spell_registered_paths() {
     );
     // A constructor whose type name is not a module path keeps its typed
     // refusal: the link resolved the path and the IR does not keep it.
-    for type_name in ["Schedule", "not a path", "__lashlang_0_x.y"] {
+    for type_name in ["Schedule", "not a path", "__lash_vm_0_x.y"] {
         assert!(
             matches!(
                 typescript_expression_source(&Expr::HostDescriptorConstructor {
@@ -501,7 +500,7 @@ fn host_descriptor_constructors_spell_registered_paths() {
 
 #[test]
 fn this_call_prints_as_function_call_builtin() {
-    use lashlang::Expr;
+    use lash_vm::Expr;
     // A builtin's explicit receiver spells `f["call"](t, ..)` — evaluation-
     // equal, re-lowering to a computed method call rather than this node.
     let call = Expr::ThisCall {
@@ -544,7 +543,7 @@ fn collection_transform_operands_round_trip() {
 
 #[test]
 fn bare_map_intrinsic_prints_as_map_call() {
-    use lashlang::{Expr, FunctionExpr};
+    use lash_vm::{Expr, FunctionExpr};
     // A `Map` outside its owning shape — AST-only, never lowered from
     // source — prints the evaluation-equal `.map` spelling.
     let map = Expr::Map {

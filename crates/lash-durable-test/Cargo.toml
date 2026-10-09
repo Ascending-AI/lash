@@ -33,7 +33,7 @@ lash = { workspace = true, features = ["rlm", "testing"] }
 lash-core = { workspace = true }
 lash-core-execution = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }
-lash-lashlang-runtime = { workspace = true }
+lash-vm-runtime = { workspace = true }
 lash-llm-tools = { workspace = true }
 lash-llm-transport = { workspace = true }
 lash-provider-anthropic = { workspace = true }
@@ -42,7 +42,7 @@ lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
 lash-vm-client = { workspace = true }
 lash-vm-protocol = { workspace = true }
-lashlang = { workspace = true, features = ["testing"] }
+lash-vm = { workspace = true, features = ["testing"] }
 serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["postgres", "runtime-tokio-rustls"] }
 tempfile = { workspace = true }

@@ -4,10 +4,10 @@ use lash_core::{
     Message, MessageRole, PartKind, RuntimeExecutionContext, facade_support::ChronologicalPayload,
 };
 use lash_rlm_types::{RlmAttachmentRef, RlmHistoryItem, RlmHistoryRole, RlmProtocolEvent};
-use lashlang::{ProjectedBindings, Value as FlowValue};
+use lash_vm::{ProjectedBindings, Value as FlowValue};
 
 #[cfg(test)]
-use lashlang::State as FlowState;
+use lash_vm::State as FlowState;
 
 use super::bindings::RlmProjectedBindings;
 use super::history_provider::{HISTORY_PROJECTION, HistoryProvider};
@@ -116,7 +116,7 @@ impl RlmHistoryProjection {
                             })
                         }
                         Some(RlmProtocolEvent::RlmTrajectoryEntry(step)) => {
-                            Some(history_item_from_lashlang_step(&step))
+                            Some(history_item_from_lash_vm_step(&step))
                         }
                         _ => None,
                     }
@@ -339,7 +339,7 @@ pub(crate) fn prune_projected_binding_names<'a>(
     rlm: &mut FlowState,
     names: impl IntoIterator<Item = &'a str>,
 ) {
-    rlm.patch_globals(names.into_iter().map(|name| lashlang::GlobalPatch::Remove {
+    rlm.patch_globals(names.into_iter().map(|name| lash_vm::GlobalPatch::Remove {
         name: name.to_string(),
     }))
     .expect("removing bindings cannot exceed the heap bound");
@@ -375,7 +375,7 @@ fn history_item_from_message(message: &Message) -> Option<RlmHistoryItem> {
     })
 }
 
-fn history_item_from_lashlang_step(entry: &lash_core::CellRecord) -> RlmHistoryItem {
+fn history_item_from_lash_vm_step(entry: &lash_core::CellRecord) -> RlmHistoryItem {
     RlmHistoryItem::from_cell_record(entry)
 }
 
@@ -405,7 +405,7 @@ mod tests {
     use super::*;
     use crate::projection::history_provider::answer;
     use lash_core::CellRecord;
-    use lashlang::{ProjectedReadRequest, ProjectedReadResponse, ProjectionProvider};
+    use lash_vm::{ProjectedReadRequest, ProjectedReadResponse, ProjectionProvider};
     use std::sync::Arc;
 
     #[test]
@@ -463,7 +463,7 @@ mod tests {
         let entry = CellRecord {
             language: "typescript".to_string(),
             prints_retained: None,
-            id: "lashlang_step_0".to_string(),
+            id: "lash_vm_step_0".to_string(),
             protocol_iteration: 0,
             code: "print big".to_string(),
             prints: vec![output.to_string().into()],
@@ -570,18 +570,16 @@ mod tests {
     /// observable result.
     struct FinishOnlyHost;
 
-    impl lashlang::ExecutionHost for FinishOnlyHost {
+    impl lash_vm::ExecutionHost for FinishOnlyHost {
         async fn perform(
             &self,
-            op: lashlang::AbilityOp,
-        ) -> Result<lashlang::AbilityOutcome, lashlang::ExecutionHostError> {
+            op: lash_vm::AbilityOp,
+        ) -> Result<lash_vm::AbilityOutcome, lash_vm::ExecutionHostError> {
             match op {
-                lashlang::AbilityOp::Finish(value) | lashlang::AbilityOp::Fail(value) => {
-                    Ok(lashlang::AbilityOutcome::Value(value))
+                lash_vm::AbilityOp::Finish(value) | lash_vm::AbilityOp::Fail(value) => {
+                    Ok(lash_vm::AbilityOutcome::Value(value))
                 }
-                _ => Err(lashlang::ExecutionHostError::new(
-                    "unsupported host ability",
-                )),
+                _ => Err(lash_vm::ExecutionHostError::new("unsupported host ability")),
             }
         }
     }
@@ -590,27 +588,27 @@ mod tests {
     async fn run_history_cell(
         source: &str,
         history: &lash_core::facade_support::ChronologicalProjection,
-    ) -> Result<FlowValue, lashlang::RuntimeError> {
+    ) -> Result<FlowValue, lash_vm::RuntimeError> {
         let provider = HistoryProvider::new("session", "frame", Arc::new(history.clone()));
         let mut bindings = ProjectedBindings::new();
         bindings.insert("history", provider.binding());
-        let mut providers = lashlang::ProjectionCatalog::new();
+        let mut providers = lash_vm::ProjectionCatalog::new();
         providers
             .register(Arc::new(provider))
             .expect("one history provider");
-        let bindings = bindings.with_reader(Arc::new(
-            lashlang::testing::projection::CatalogReader(providers),
-        ));
+        let bindings = bindings.with_reader(Arc::new(lash_vm::testing::projection::CatalogReader(
+            providers,
+        )));
         let globals = BTreeSet::from(["history".to_string()]);
         let parsed = lash_typescript::parse_with_globals(source, &globals)
             .unwrap_or_else(|error| panic!("`{source}` should parse: {error}"));
-        let compiled = lashlang::testing::harness::try_compile_program(&parsed)
+        let compiled = lash_vm::testing::harness::try_compile_program(&parsed)
             .unwrap_or_else(|error| panic!("`{source}` should compile: {error}"));
         let env =
-            lashlang::ExecutionEnvironment::new(&FinishOnlyHost).with_projected_bindings(bindings);
-        let mut state = lashlang::State::new();
-        match lashlang::execute(&compiled, &mut state, &env).await? {
-            lashlang::ExecutionOutcome::Finished(value) => Ok(value),
+            lash_vm::ExecutionEnvironment::new(&FinishOnlyHost).with_projected_bindings(bindings);
+        let mut state = lash_vm::State::new();
+        match lash_vm::execute(&compiled, &mut state, &env).await? {
+            lash_vm::ExecutionOutcome::Finished(value) => Ok(value),
             other => panic!("`{source}` should finish, got {other:?}"),
         }
     }
@@ -721,7 +719,7 @@ mod tests {
                 .await
                 .expect("an unanswered field is absent, not a failure"),
             FlowValue::Bool(false),
-            "`null` is the lashlang surface's absent value, not TypeScript's"
+            "`null` is the lash_vm surface's absent value, not TypeScript's"
         );
         assert_eq!(
             run_history_cell("finish(typeof history.nonexistent);", &projection)
@@ -889,7 +887,7 @@ mod tests {
         ));
         assert!(matches!(
             &projection.history()[3],
-            RlmHistoryItem::LashlangStep { id, .. } if id == "retained"
+            RlmHistoryItem::LashVmStep { id, .. } if id == "retained"
         ));
     }
 
@@ -972,7 +970,7 @@ mod tests {
         assert_eq!(projection.len(), 3);
         assert!(matches!(
             &projection.history()[1],
-            RlmHistoryItem::LashlangStep { id, outcome, .. }
+            RlmHistoryItem::LashVmStep { id, outcome, .. }
                 if id == "intermediate"
                     && outcome.error.as_ref().map(|error| error.message.as_str()) == Some("unknown name")
         ));

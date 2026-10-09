@@ -8,13 +8,13 @@ fn direct_process_handle_await_error_keeps_typed_provenance() {
         finish(await handle);
     "#;
     let linked = lash_typescript::link(source, &process_environment()).expect("link await");
-    let error = futures::executor::block_on(lashlang::execute(
-        &lashlang::testing::harness::compile_linked_main(&linked),
+    let error = futures::executor::block_on(lash_vm::execute(
+        &lash_vm::testing::harness::compile_linked_main(&linked),
         &mut State::new(),
         &ProcessAwaitFailureHost::Typed,
     ))
     .expect_err("uncaught process-await failure");
-    let lashlang::RuntimeError::UnwrappedHostToolResultFailed { source } = error else {
+    let lash_vm::RuntimeError::UnwrappedHostToolResultFailed { source } = error else {
         panic!("process await must preserve its typed host failure");
     };
     let failure = source.tool_failure();

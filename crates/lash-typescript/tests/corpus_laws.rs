@@ -19,7 +19,7 @@
 
 use std::collections::BTreeSet;
 
-use lashlang::{Declaration, Expr, Program};
+use lash_vm::{Declaration, Expr, Program};
 
 #[path = "corpus_laws/corpora.rs"]
 mod corpora;
@@ -50,7 +50,7 @@ mod vm_instance;
 
 /// The identifier namespace the lowerer reserves for its generated bindings
 /// (ADR 0062); no authored name can begin with it.
-const RESERVED_PREFIX: &str = "__lashlang_";
+const RESERVED_PREFIX: &str = "__lash_vm_";
 
 /// Every name `program` binds anywhere: an assignment's root, a loop
 /// binding, a function's name and parameters, a catch binding.

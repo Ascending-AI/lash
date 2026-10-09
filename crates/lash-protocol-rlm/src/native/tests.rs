@@ -1078,14 +1078,14 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
 /// FIG-2777: a provider tool call on the cell channel — whose request declares
 /// no tools — is malformed provider output, repaired like a reply with no
 /// usable cell, not a terminal runtime error. The chunk is glm-5.3-flash's
-/// captured shape: the tool name is a stray `lashlang</arg_value>` and the
-/// arguments hold the lashlang source.
+/// captured shape: the tool name is a stray `lash_vm</arg_value>` and the
+/// arguments hold the lash_vm source.
 #[test]
 fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() {
     let stray_tool_call = || {
         vec![call(
             "call_stray",
-            "lashlang</arg_value>",
+            "lash_vm</arg_value>",
             r#"{"p":"await retail.customer(...)?"}"#,
         )]
     };
@@ -1186,7 +1186,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
             .collect::<Vec<_>>()
             .join("\n");
         assert!(
-            repair_text.contains("lashlang</arg_value>"),
+            repair_text.contains("lash_vm</arg_value>"),
             "the repair copy names the stray call: {repair_text}"
         );
         assert!(

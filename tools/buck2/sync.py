@@ -1156,7 +1156,7 @@ export_file(
 schema_documents(
     name = "host_schema_documents",
     generators = [
-        "//crates/lashlang:workflow_schema_generator__bin",
+        "//crates/lash-vm:workflow_schema_generator__bin",
         "//crates/lash-trace:trace_schema_generator__bin",
         "//crates/lash-core-execution:process_event_schema_generator__bin",
     ],

@@ -45,7 +45,7 @@ lash_store_sql::statements! {
         /// Every predicate is an indexed `NOT EXISTS` over exact edges; no
         /// whole-catalog mark/sweep runs in this transaction. PostgreSQL has
         /// no counterpart: its artifact bytes live inline in
-        /// `lash_lashlang_artifacts` and never reach this table.
+        /// `lash_lash_vm_artifacts` and never reach this table.
         reclaim_unreferenced_artifact = "DELETE FROM blobs AS candidate
              WHERE candidate.hash = ?1
                AND NOT EXISTS (SELECT 1 FROM artifact_refs WHERE blob_ref = candidate.hash)

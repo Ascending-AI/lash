@@ -2,10 +2,10 @@
 
 `lash-typescript` is the source front-end for the durable Lash heap VM, and the
 only shipped one today: future dialects may target the same IR and VM with
-their own semantics. `lashlang` names
+their own semantics. `lash_vm` names
 the dialect-neutral IR and VM it lowers into (ADR 0096). SWC is
 confined to `src/adapter/`; the adapter produces a Lash-owned normalized tree,
-which lowers into `lashlang::Program`. Process parameter and return annotations
+which lowers into `lash_vm::Program`. Process parameter and return annotations
 carry their durable signature; other runtime type annotations are erased.
 The current host serves TypeScript without a language selector or session pin.
 The retained `Dialect` extension contract is documented in ADR 0096; new
@@ -593,7 +593,7 @@ corpus cites:
 - `closure-boundary`: a binding whose value reaches a function — a function
   declaration, an arrow, a built-in method read as a value (`'x'.includes`),
   an array or object holding one — does not survive its cell
-  ([ADR 0076](../../docs/adr/0076-lashlang-durable-stores-hold-exclusively-owned-copies.md)):
+  ([ADR 0076](../../docs/adr/0076-lash-vm-durable-stores-hold-exclusively-owned-copies.md)):
   a function's index is only meaningful inside the program that compiled it,
   where Node still holds the function. The session remembers the name, live
   and across a reload, so a later cell that reads it (by name, with `typeof`,
@@ -707,14 +707,14 @@ mutable heap values: pattern, flags, and `lastIndex` persist across suspension,
 while the compiled matcher is a rebuildable cache and is never serialized.
 Node-shaped exec/match results use an unforgeable durable `RegExpMatch` heap
 kind. The current owning constants are `BYTECODE_FORMAT_VERSION` (30) in
-[`lashlang`](../lashlang/src/lib.rs), `LASHLANG_SNAPSHOT_VERSION` (1) in
-[`runtime/state.rs`](../lashlang/src/runtime/state.rs),
+[`lash_vm`](../lash-vm/src/lib.rs), `LASH_VM_SNAPSHOT_VERSION` (1) in
+[`runtime/state.rs`](../lash-vm/src/runtime/state.rs),
 `VM_CONTINUATION_FORMAT_VERSION` (1) in
-[`runtime/vm/continuation.rs`](../lashlang/src/runtime/vm/continuation.rs),
+[`runtime/vm/continuation.rs`](../lash-vm/src/runtime/vm/continuation.rs),
 `RLM_SNAPSHOT_VERSION` (1) in
 [`executor/snapshot.rs`](../lash-protocol-rlm/src/executor/snapshot.rs), and
-`LASHLANG_SEGMENT_STATE_VERSION` (1) in
-[`engine/state.rs`](../lash-lashlang-runtime/src/engine/state.rs). The snapshot,
+`LASH_VM_SEGMENT_STATE_VERSION` (1) in
+[`engine/state.rs`](../lash-vm-runtime/src/engine/state.rs). The snapshot,
 continuation and RLM envelope constants become 2 with `synthetic-next`.
 The pre-1.0 freeze changes shapes in place; these numbers do not promise
 compatibility across development builds. Admission checks the node's decoded

@@ -664,7 +664,7 @@ fn every_generator_exclusion_is_a_pinned_open_defect() {
 fn every_value_type_round_trips_or_is_refused() {
     let corpus = corpus();
     let mut failures = Vec::new();
-    let kinds = lashlang::testing::heap_object_kinds();
+    let kinds = lash_vm::testing::heap_object_kinds();
     for kind in kinds {
         let covered = ROWS.iter().any(|row| row.kind == *kind)
             || NOT_A_DIALECT_VALUE.iter().any(|(name, _)| name == kind);

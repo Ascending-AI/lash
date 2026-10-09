@@ -29,7 +29,7 @@ pub(super) async fn record_cell_outputs(
     ctx: &RuntimeExecutionContext<'_>,
     cell: &cell_run::CellRun,
     code_renderer: &crate::render::CodeRendererSlot,
-    values: Vec<lashlang::Value>,
+    values: Vec<lash_vm::Value>,
     response: &mut ExecResponse,
 ) {
     // Only prints are rendered: a cell that finished without printing needs

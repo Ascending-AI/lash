@@ -887,5 +887,5 @@ lash_conformance::checkpoint_profile_tests!({
 #[tokio::test]
 async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_arms() {
     let backend = TestBackend::open(SUBSTRATE).await;
-    lash_lashlang_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(artifact_store_handles(&backend).artifacts).await;
+    lash_vm_runtime::testing::nested_process_arguments_reject_forged_aliases_and_try_later_union_arms(artifact_store_handles(&backend).artifacts).await;
 }
