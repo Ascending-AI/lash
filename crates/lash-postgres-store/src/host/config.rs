@@ -45,6 +45,9 @@ pub struct PostgresHostConfig {
     pub signals: SignalPolicy,
     /// The live replay store; `None` opens no replay pool or listener.
     pub live_replay: Option<LiveReplayPolicy>,
+    /// The process replay store; `None` opens no process replay pool or
+    /// listener.
+    pub process_replay: Option<ProcessReplayPolicy>,
     /// Preflight, migration and detached-session limits.
     pub maintenance: MaintenancePolicy,
     /// What open does when the live schema drifts.
@@ -65,7 +68,7 @@ impl PostgresHostConfig {
     /// retry and maintenance values documented in `docs/operations/postgres.md`.
     /// Pool recycling matches SQLx 0.8.6; exact sizes, deadlines and retries
     /// have no universal workload measurement. TLS inherits endpoints,
-    /// schema checks enforce compatibility, live replay is off, and no
+    /// schema checks enforce compatibility, live and process replay are off, and no
     /// deployment capacity claim is invented (`deployment = None`). Set a
     /// deployment budget to check capacity against the server before serving.
     pub fn standard() -> Self {
@@ -77,6 +80,7 @@ impl PostgresHostConfig {
             retry: RetryPolicies::default(),
             signals: SignalPolicy::default(),
             live_replay: None,
+            process_replay: None,
             maintenance: MaintenancePolicy::default(),
             schema_check: SchemaCheck::default(),
             deployment: None,
@@ -384,8 +388,8 @@ pub struct GuardPolicies {
     /// `FOR SHARE`. Default lock 250 ms, statement 1 s, idle 1 s, operation
     /// 2 s.
     pub scheduler: TransactionGuards,
-    /// Live replay transactions. Default lock 10 s, statement 30 s, idle
-    /// 30 s, operation 60 s.
+    /// Live replay and process replay transactions. Default lock 10 s,
+    /// statement 30 s, idle 30 s, operation 60 s.
     pub replay: TransactionGuards,
     /// Schema verification and preflight inspection. Default lock 5 s,
     /// statement 30 s, idle 30 s, operation 30 s.
@@ -457,6 +461,9 @@ pub struct RetryPolicies {
     /// Contended live replay publications and trims. Default 8 attempts,
     /// 5 to 100 ms.
     pub live_replay: RetryPolicy,
+    /// Contended process replay publications and trims. Default 8
+    /// attempts, 5 to 100 ms.
+    pub process_replay: RetryPolicy,
 }
 
 impl Default for RetryPolicies {
@@ -466,6 +473,7 @@ impl Default for RetryPolicies {
             durable: RetryPolicy::new(4, 5, 20),
             wait_resolution: RetryPolicy::new(3, 5, 20),
             live_replay: RetryPolicy::new(8, 5, 100),
+            process_replay: RetryPolicy::new(8, 5, 100),
         }
     }
 }
@@ -505,7 +513,7 @@ impl Default for SignalPolicy {
     }
 }
 
-/// Whether the live replay store creates its tables or only checks them.
+/// Whether a replay store creates its tables or only checks them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReplaySchemaMode {
@@ -595,6 +603,127 @@ impl Default for LiveReplayPolicy {
     fn default() -> Self {
         Self {
             data: ReplayDataPolicy::default(),
+            pool: PoolPolicy {
+                test_before_acquire: false,
+                ..PoolPolicy::standard(7, Duration::from_secs(5))
+            },
+            listener: DedicatedConnectionPolicy {
+                acquire_timeout: Duration::from_secs(5),
+            },
+            reconnect: ReconnectPolicy {
+                initial_delay: Duration::from_millis(100),
+                max_delay: Duration::from_secs(5),
+                jitter: true,
+            },
+        }
+    }
+}
+
+/// Where the process replay store keeps its tables, how it batches and what
+/// it retains. The retention values are a provisional preset: no measurement
+/// backs them.
+///
+/// A process's window is cut by whichever bound it reaches first, so the
+/// replay it can offer lasts about
+/// `min(max_age, max_events / events per second, max_bytes / bytes per second)`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProcessReplayDataPolicy {
+    /// The schema holding the tables; `<schema>_process_replay` names the
+    /// notification channel. Default `lash_process_replay`; a lowercase
+    /// identifier of at most 48 characters.
+    pub schema: String,
+    /// Default `verify_only`.
+    pub schema_mode: ReplaySchemaMode,
+    /// How long a replica gathers publications before one transaction
+    /// writes them. Default 5 ms, 0 to 1 s.
+    #[serde(rename = "publish_tick_ms", with = "serde_ms")]
+    pub publish_tick: Duration,
+    /// Publish transactions at once. Default 4; 1 to the data pool's
+    /// `max_connections`.
+    pub publish_concurrency: usize,
+    /// The events a tick gathers into one transaction; a single
+    /// publication is never split. Default 1024, 1 to 65536.
+    pub max_batch_events: usize,
+    /// Events a replica holds between `publish` and their tick; a publisher
+    /// past it waits. Default 8192, 1 to 1,000,000.
+    pub max_pending_events: usize,
+    /// Encoded bytes a replica holds between `publish` and their tick; a
+    /// publisher past it waits. Default 16 MiB, 1 KiB to 1 GiB.
+    pub max_pending_bytes: usize,
+    /// Events retained per process. Default 2048, 1 to 1,000,000.
+    pub max_events_per_process: usize,
+    /// How long an event stays replayable, whether or not the process has
+    /// ended. Default 120 s, 1 ms to 24 h.
+    #[serde(rename = "max_age_ms", with = "serde_ms")]
+    pub max_age: Duration,
+    /// Encoded bytes retained per process; a larger single publication is
+    /// refused. Default 8 MiB, 1 KiB to 1 GiB.
+    pub max_bytes_per_process: usize,
+    /// Processes with a window at once, across every replica; the idlest
+    /// window is evicted to admit another. Default 4096, 1 to 1,000,000.
+    pub max_processes: usize,
+    /// Encoded bytes reserved across every process's window, across every
+    /// replica. Default 256 MiB; `max_bytes_per_process` to 1 TiB.
+    pub max_retained_bytes: u64,
+    /// The step a process's share of `max_retained_bytes` grows and shrinks
+    /// by: a window takes the aggregate lock once per step, not per event.
+    /// Default 64 KiB; 1 KiB to `max_bytes_per_process`.
+    pub reservation_bytes: usize,
+    /// How often a replica reclaims expired events, idle windows and unused
+    /// reservations. Default 30 s, 100 ms to 1 h.
+    #[serde(rename = "cleanup_interval_ms", with = "serde_ms")]
+    pub cleanup_interval: Duration,
+    /// The most a cleanup run is delayed past its interval, drawn at random.
+    /// Default 10 s; at most the interval.
+    #[serde(rename = "cleanup_jitter_ms", with = "serde_ms")]
+    pub cleanup_jitter: Duration,
+    /// Rows one cleanup statement reclaims. Default 256, 1 to 65536.
+    pub cleanup_batch: usize,
+}
+
+impl Default for ProcessReplayDataPolicy {
+    fn default() -> Self {
+        Self {
+            schema: "lash_process_replay".to_owned(),
+            schema_mode: ReplaySchemaMode::VerifyOnly,
+            publish_tick: Duration::from_millis(5),
+            publish_concurrency: 4,
+            max_batch_events: 1024,
+            max_pending_events: 8192,
+            max_pending_bytes: 16 * 1024 * 1024,
+            max_events_per_process: 2048,
+            max_age: Duration::from_secs(120),
+            max_bytes_per_process: 8 * 1024 * 1024,
+            max_processes: 4096,
+            max_retained_bytes: 256 * 1024 * 1024,
+            reservation_bytes: 64 * 1024,
+            cleanup_interval: Duration::from_secs(30),
+            cleanup_jitter: Duration::from_secs(10),
+            cleanup_batch: 256,
+        }
+    }
+}
+
+/// The process replay store: its data, its data pool and its own listener.
+/// It shares nothing with the live replay store.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProcessReplayPolicy {
+    pub data: ProcessReplayDataPolicy,
+    /// Publication, reads and cleanup. Default 7 connections, 5 s acquire,
+    /// no checkout ping.
+    pub pool: PoolPolicy,
+    /// The process replay listener's own session. Default 5 s acquire.
+    pub listener: DedicatedConnectionPolicy,
+    /// Default 100 ms to 5 s with jitter.
+    pub reconnect: ReconnectPolicy,
+}
+
+impl Default for ProcessReplayPolicy {
+    fn default() -> Self {
+        Self {
+            data: ProcessReplayDataPolicy::default(),
             pool: PoolPolicy {
                 test_before_acquire: false,
                 ..PoolPolicy::standard(7, Duration::from_secs(5))

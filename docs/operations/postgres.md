@@ -19,14 +19,15 @@ let backend = lash::durable::DurableBackendBuilder::postgres(&host, attachments)
     .process_engine(engine)
     .build()?;
 // host.live_replay: Some(store) when `live_replay` is configured.
+// host.process_replay: Some(store) when `process_replay` is configured.
 // host.pool_metrics.snapshot(): each role pool's size, idle and maximum.
 ```
 
 - `PostgresHost::connect(endpoints, config, observer)` validates the
   configuration, checks the declared deployment budget against the server,
-  opens the storage's role pools and, when `live_replay` is set, the live
-  replay store. It returns `{ storage, live_replay, effective_config,
-  pool_metrics }`.
+  opens the storage's role pools and, when `live_replay` or `process_replay`
+  is set, that replay store. It returns `{ storage, live_replay,
+  process_replay, effective_config, pool_metrics }`.
 - `DurableBackendBuilder::postgres(&host, attachments)` builds the durable
   backend under `host.effective_config.node`. The durable settings live in
   that one place: calling `.config(...)` on this builder is refused at build
@@ -49,8 +50,9 @@ path (`roles.work.max_connections`).
 
 `PostgresHostConfig::standard()` is the production preset and `Default`.
 JSON section omission and an unset `LASH_POSTGRES_CONFIG` resolve to it.
-All operational fields remain optional and configurable. Live replay stays
-absent unless selected; enabling it states the host's retention policy.
+All operational fields remain optional and configurable. Live replay and
+process replay stay absent unless selected; enabling one states the host's
+retention policy for it.
 
 `PostgresHostConfig::development()` is explicit: work/critical pools 4/1,
 store admission 4, preflight/migration pools 1 each, checkpoint chunks 256
@@ -127,7 +129,7 @@ idle_in_transaction_timeout, transaction_timeout, operation_deadline_ms}`.
 | `durable` | 2 s / 5 s / 5 s / 10 s | Durable commits on the work and critical pools. |
 | `renewal` | 250 ms / 1 s / 1 s / 2 s | Registration and heartbeat. |
 | `scheduler` | 250 ms / 1 s / 1 s / 2 s | Claims and the scheduler's other operations. |
-| `replay` | 10 s / 30 s / 30 s / 60 s | Live replay transactions. |
+| `replay` | 10 s / 30 s / 30 s / 60 s | Live replay and process replay transactions. |
 | `inspection` | 5 s / 30 s / 30 s / 30 s | Schema verification sessions. |
 
 `transaction_timeout` (PostgreSQL 17+) inherits by default. `store_startup_ms`
@@ -188,6 +190,7 @@ never re-applied.
 | `durable` | 4, 5–20 ms | Durable owner and mailbox commits. |
 | `wait_resolution` | 3, 5–20 ms | Wait resolutions (`wait.resolve`) and due-wait settlements (`wait.timeout`). |
 | `live_replay` | 8, 5–100 ms | Live replay publications and trims. |
+| `process_replay` | 8, 5–100 ms | Process replay publications and trims. |
 
 ### `signals`
 
@@ -213,6 +216,59 @@ Absent by default: no replay pool or listener opens.
 | `pool` | 7 connections, 5 s acquire, no checkout ping |
 | `listener` | its own session, 5 s open |
 | `reconnect` | 100 ms to 5 s, jitter |
+
+### `process_replay`
+
+Absent by default: no process replay pool or listener opens. With it,
+`host.process_replay` is the `ProcessReplayStore` every replica shares
+(`LashCoreBuilder::process_replay_store`): provisional process observation
+published on one replica reaches observers on the others. Without it each
+OS process keeps its own in-memory store, and a follower converges on the
+durable process alone ([observing processes](../observing-processes.md)).
+
+The store has its own tables, incarnation, notification channel
+(`<schema>_process_replay`), pool and listener. It shares none of them with
+`live_replay`: losing either store's unlogged history gaps only its own
+subjects, and neither's traffic takes the other's retention or connections.
+
+| Field | Default |
+|---|---|
+| `data.schema` | `lash_process_replay` |
+| `data.schema_mode` | `verify_only` (`install` runs the published DDL) |
+| `data.publish_tick_ms` | 5 (0–1000) |
+| `data.publish_concurrency` | 4 (1 to `pool.max_connections`) |
+| `data.max_batch_events` | 1024 |
+| `data.max_pending_events`, `max_pending_bytes` | 8192, 16 MiB |
+| `data.max_events_per_process` | 2048 |
+| `data.max_age_ms` | 120000 |
+| `data.max_bytes_per_process` | 8 MiB |
+| `data.max_processes` | 4096 |
+| `data.max_retained_bytes` | 256 MiB (at least `max_bytes_per_process`) |
+| `data.reservation_bytes` | 64 KiB (at most `max_bytes_per_process`) |
+| `data.cleanup_interval_ms`, `cleanup_jitter_ms` | 30000, 10000 |
+| `data.cleanup_batch` | 256 |
+| `pool` | 7 connections, 5 s acquire, no checkout ping |
+| `listener` | its own session, 5 s open |
+| `reconnect` | 100 ms to 5 s, jitter |
+
+The retention values are a provisional preset; no measurement backs them. A
+process's window is cut by whichever bound it reaches first, so it lasts about
+`min(max_age, max_events / events per second, max_bytes / bytes per second)`:
+at 1,000 events a second, 2,048 events are two seconds. Completion does not
+shorten a window, and a subscriber does not lengthen it.
+
+- **Per process.** Events, age (by database time) and encoded bytes. A single
+  publication larger than `max_bytes_per_process` is refused and ends the
+  process's continuity: its observers get a gap, never a silent loss.
+- **Across every replica.** `max_processes` windows and `max_retained_bytes`
+  reserved for them. A window reserves its bytes in `reservation_bytes` steps
+  and is trimmed to what it reserved, so an event append takes no store-wide
+  lock; only a new window or a new step does. When either bound is spent the
+  idlest window (the one published to longest ago) is evicted to admit
+  another, and its observers get a gap. Cleanup hands unused steps back.
+- **Ingress.** A replica holds at most `max_pending_events` events and
+  `max_pending_bytes` bytes between `publish` and their transaction; a
+  publisher past either bound waits.
 
 ### `maintenance`
 
@@ -251,6 +307,7 @@ by hand (`PostgresHostConfig::connections_per_process`):
 P = work + scheduler + critical
   + served_nodes * (1 renewal + 1 listener when notifier = after_commit)
   + live_replay.pool + 1 replay listener         # 0 without live_replay
+  + process_replay.pool + 1 replay listener      # 0 without process_replay
   + max_schema_sessions + max_sweep_sessions
   + other_host_connections + operator_connections
 
@@ -260,7 +317,8 @@ admin_headroom >= superuser_reserved_connections + reserved_connections
 ```
 
 Worked example: the defaults with one node give 16 + 1 + 3 + 1·(1 + 1) + 1 +
-1 = **24**; with live replay, 24 + 7 + 1 = **32**. Four replicas over two
+1 = **24**; with live replay, 24 + 7 + 1 = **32** (process replay adds another
+7 + 1). Four replicas over two
 overlapping generations, ten other clients and ten admin slots declare
 `4 · 32 · 2 + 10 + 10 = 276`, so the server needs `max_connections >= 276`.
 These are pool maxima: lazy pools open connections only as they are used.

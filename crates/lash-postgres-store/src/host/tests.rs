@@ -115,6 +115,30 @@ fn a_configuration_that_breaks_a_rule_is_refused_by_its_field() {
             }),
         ),
         (
+            "process_replay.data.schema",
+            Box::new(|c| {
+                let mut replay = ProcessReplayPolicy::default();
+                replay.data.schema = "Process-Replay".into();
+                c.process_replay = Some(replay);
+            }),
+        ),
+        (
+            "process_replay.data.max_retained_bytes",
+            Box::new(|c| {
+                let mut replay = ProcessReplayPolicy::default();
+                replay.data.max_retained_bytes = replay.data.max_bytes_per_process as u64 - 1;
+                c.process_replay = Some(replay);
+            }),
+        ),
+        (
+            "process_replay.data.reservation_bytes",
+            Box::new(|c| {
+                let mut replay = ProcessReplayPolicy::default();
+                replay.data.reservation_bytes = replay.data.max_bytes_per_process + 1;
+                c.process_replay = Some(replay);
+            }),
+        ),
+        (
             "maintenance.max_sweep_sessions",
             Box::new(|c| c.maintenance.max_sweep_sessions = 0),
         ),
@@ -305,13 +329,16 @@ fn a_prelude_installs_exactly_its_profile_with_begin() {
 
 /// The sizing rule's worked example in `docs/operations/postgres.md`: one
 /// default node opens at most 24 server connections, 32 with live replay,
-/// and the declared budget multiplies that by every overlapping process.
+/// 40 with process replay too, and the declared budget multiplies that by every overlapping process.
 #[test]
 fn the_sizing_rule_counts_every_session_a_process_opens() {
     let mut config = PostgresHostConfig::default();
     assert_eq!(config.connections_per_process(), Some(24));
     config.live_replay = Some(LiveReplayPolicy::default());
     assert_eq!(config.connections_per_process(), Some(32));
+    config.process_replay = Some(ProcessReplayPolicy::default());
+    assert_eq!(config.connections_per_process(), Some(40));
+    config.process_replay = None;
     config.node.notifier = lash_durable::Notifier::PollOnly;
     assert_eq!(config.connections_per_process(), Some(31), "no listener");
     let budget = DeploymentBudget {

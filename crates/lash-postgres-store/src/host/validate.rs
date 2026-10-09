@@ -7,7 +7,7 @@ use lash_durable::{DurableConfig, Notifier};
 
 use super::config::{
     DedicatedConnectionPolicy, DeploymentBudget, LiveReplayPolicy, PoolPolicy, PostgresHostConfig,
-    ReconnectPolicy, RetryPolicy, ServerTimeout, TransactionGuards,
+    ProcessReplayPolicy, ReconnectPolicy, RetryPolicy, ServerTimeout, TransactionGuards,
 };
 use crate::PostgresConnectionBudget;
 
@@ -178,26 +178,31 @@ fn count(field: &str, value: usize, low: usize, high: usize) -> Checked {
     Ok(())
 }
 
-fn live_replay(policy: &LiveReplayPolicy) -> Checked {
-    let data = &policy.data;
-    let schema_ok = data.schema.len() <= REPLAY_SCHEMA_MAX
-        && data
-            .schema
+/// A replay store's schema: it is spliced into the store's statements and
+/// names its notification channel.
+fn replay_schema(field: &str, schema: &str) -> Checked {
+    let schema_ok = schema.len() <= REPLAY_SCHEMA_MAX
+        && schema
             .chars()
             .next()
             .is_some_and(|first| first.is_ascii_lowercase() || first == '_')
-        && data
-            .schema
+        && schema
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
     if !schema_ok {
         return refuse(
-            "live_replay.data.schema",
+            field,
             format!(
                 "must be a lowercase identifier ([a-z_][a-z0-9_]*) of at most {REPLAY_SCHEMA_MAX} characters"
             ),
         );
     }
+    Ok(())
+}
+
+fn live_replay(policy: &LiveReplayPolicy) -> Checked {
+    let data = &policy.data;
+    replay_schema("live_replay.data.schema", &data.schema)?;
     within(
         "live_replay.data.publish_tick_ms",
         data.publish_tick,
@@ -257,6 +262,81 @@ fn live_replay(policy: &LiveReplayPolicy) -> Checked {
     }
     dedicated("live_replay.listener", &policy.listener)?;
     reconnect("live_replay.reconnect", &policy.reconnect)
+}
+
+fn process_replay(policy: &ProcessReplayPolicy) -> Checked {
+    let data = &policy.data;
+    replay_schema("process_replay.data.schema", &data.schema)?;
+    within(
+        "process_replay.data.publish_tick_ms",
+        data.publish_tick,
+        Duration::ZERO,
+        Duration::from_secs(1),
+    )?;
+    within(
+        "process_replay.data.max_age_ms",
+        data.max_age,
+        Duration::from_millis(1),
+        Duration::from_secs(24 * 3600),
+    )?;
+    within(
+        "process_replay.data.cleanup_interval_ms",
+        data.cleanup_interval,
+        Duration::from_millis(100),
+        Duration::from_secs(3600),
+    )?;
+    within(
+        "process_replay.data.cleanup_jitter_ms",
+        data.cleanup_jitter,
+        Duration::ZERO,
+        data.cleanup_interval,
+    )?;
+    const GIB: usize = 1024 * 1024 * 1024;
+    for (field, value, low, high) in [
+        ("max_batch_events", data.max_batch_events, 1, 65_536),
+        ("max_pending_events", data.max_pending_events, 1, 1_000_000),
+        ("max_pending_bytes", data.max_pending_bytes, 1024, GIB),
+        (
+            "max_events_per_process",
+            data.max_events_per_process,
+            1,
+            1_000_000,
+        ),
+        (
+            "max_bytes_per_process",
+            data.max_bytes_per_process,
+            1024,
+            GIB,
+        ),
+        ("max_processes", data.max_processes, 1, 1_000_000),
+        (
+            "reservation_bytes",
+            data.reservation_bytes,
+            1024,
+            data.max_bytes_per_process,
+        ),
+        ("cleanup_batch", data.cleanup_batch, 1, 65_536),
+    ] {
+        count(&format!("process_replay.data.{field}"), value, low, high)?;
+    }
+    let per_process = data.max_bytes_per_process as u64;
+    if !(per_process..=1 << 40).contains(&data.max_retained_bytes) {
+        return refuse(
+            "process_replay.data.max_retained_bytes",
+            "must be between process_replay.data.max_bytes_per_process and 1 TiB",
+        );
+    }
+    pool("process_replay.pool", &policy.pool)?;
+    if data.publish_concurrency == 0
+        || data.publish_concurrency > policy.pool.max_connections as usize
+    {
+        return refuse(
+            "process_replay.data.publish_concurrency",
+            "must be between 1 and process_replay.pool.max_connections",
+        );
+    }
+    dedicated("process_replay.listener", &policy.listener)?;
+    reconnect("process_replay.reconnect", &policy.reconnect)
 }
 
 fn deployment(budget: &DeploymentBudget, per_process: u32) -> Checked {
@@ -396,10 +476,14 @@ impl PostgresHostConfig {
         retry("retry.durable", &self.retry.durable)?;
         retry("retry.wait_resolution", &self.retry.wait_resolution)?;
         retry("retry.live_replay", &self.retry.live_replay)?;
+        retry("retry.process_replay", &self.retry.process_replay)?;
         reconnect("signals.reconnect", &self.signals.reconnect)?;
 
         if let Some(replay) = &self.live_replay {
             live_replay(replay)?;
+        }
+        if let Some(replay) = &self.process_replay {
+            process_replay(replay)?;
         }
 
         let maintenance = &self.maintenance;
@@ -465,7 +549,7 @@ impl PostgresHostConfig {
 
     /// The server connections one process opens at most under this
     /// configuration: every pool at its maximum, each served node's renewal
-    /// connection and listener session, the replay store's pool and
+    /// connection and listener session, each replay store's pool and
     /// listener, the detached schema and sweep sessions, and the
     /// deployment's declared other pools. The open's capacity probe and
     /// schema gate run on the work pool, so they add no session of their
@@ -476,6 +560,10 @@ impl PostgresHostConfig {
         let per_node = 1 + listener;
         let replay = self
             .live_replay
+            .as_ref()
+            .map_or(Some(0), |replay| replay.pool.max_connections.checked_add(1))?;
+        let process_replay = self
+            .process_replay
             .as_ref()
             .map_or(Some(0), |replay| replay.pool.max_connections.checked_add(1))?;
         let declared = self.deployment.as_ref().map_or(Some(0), |budget| {
@@ -489,6 +577,7 @@ impl PostgresHostConfig {
             roles.critical.max_connections,
             roles.served_nodes.checked_mul(per_node)?,
             replay,
+            process_replay,
             self.maintenance.max_schema_sessions,
             self.maintenance.max_sweep_sessions,
             declared,

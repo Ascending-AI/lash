@@ -77,7 +77,7 @@ Several lash nodes can serve one PostgreSQL store (ADR 0132 §3). One
 validated `PostgresHostConfig` sizes, guards and names every connection a
 process opens: the work, scheduler and critical pools, a renewal connection
 and a listener session per served node, the detached schema and sweep
-sessions and, when configured, the live replay store's pool and listener.
+sessions and, when configured, each replay store's pool and listener.
 [`postgres.md`](postgres.md) is the reference: every field, the sizing
 formula (24 server connections for one default node, 32 with live replay),
 the declared deployment budget a connect checks against the server, and the

@@ -59,6 +59,8 @@
 //crates/lash-postgres-store:preflight_durable_walk__test__fv_6a18cde0
 //crates/lash-postgres-store:preflight_schema_status__test
 //crates/lash-postgres-store:preflight_schema_status__test__fv_6a18cde0
+//crates/lash-postgres-store:process_replay__test
+//crates/lash-postgres-store:process_replay__test__fv_6a18cde0
 //crates/lash-postgres-store:schema_constraints__test
 //crates/lash-postgres-store:schema_constraints__test__fv_6a18cde0
 //crates/lash-postgres-store:schema_drift__test

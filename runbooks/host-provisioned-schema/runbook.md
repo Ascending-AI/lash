@@ -147,6 +147,56 @@ The live replay evidence is the `live_replay` suite of `lash-internal-postgres-s
 kiln test //crates/lash-postgres-store:live_replay__test --test_arg=schema::
 ```
 
+## The process replay store's schema
+
+`lash::postgres::PostgresProcessReplayStore` keeps its five tables
+(`process_replay_incarnation`, `_sentinel`, `_head`, `_log`, `_dedupe`) in its
+own configured `schema` (default `lash_process_replay`). It follows the live
+replay store's contract with its own artifacts, and shares no table,
+incarnation or notification channel with it:
+
+- `PostgresProcessReplayStore::schema_ddl()` / the committed
+  `crates/lash/postgres-process-replay-schema.sql` is the artifact:
+  creation-only, idempotent and schema-unqualified. The host's migration
+  creates the configured schema, sets `search_path` to it and applies the file
+  verbatim. It seeds no rows; the store mints its incarnation and sentinel rows
+  itself.
+- `process_replay.data.schema_mode` picks who provisions: `install` executes
+  those same bytes and needs `CREATE` on the database; `verify_only` (the
+  default) runs no DDL.
+- Every connect, in either mode, checks the tables against the generated
+  `crates/lash/postgres-process-replay-schema-shape.txt` and refuses with
+  `PostgresProcessReplayError::SchemaDrift`, naming each missing, differing or
+  extra object. Nothing is created or repaired on refusal.
+- `PostgresProcessReplayStore::verify_schema(&pool, schema)` is the same check
+  without connecting a store.
+- **Runtime role.** `USAGE` on the schema and `SELECT, INSERT, UPDATE, DELETE,
+  TRUNCATE` on its tables. `TRUNCATE` is needed because the store rotates its
+  incarnation by truncating the unlogged tables, when crash recovery or a
+  failover lost its sentinel and when a publisher invalidates every process at
+  once.
+- **Both stores in one schema.** Supported: the table names do not collide and
+  each store checks only the tables its own artifact names. The default is a
+  schema each, so dropping one store's schema never touches the other's.
+- **Resetting or upgrading across a shape change.** The tables hold only the
+  replay window, so drop the process replay schema (`DROP SCHEMA ... CASCADE`)
+  and re-apply this build's artifact, with every replica on this build. Open
+  process cursors then gap and observers resnapshot; sessions are not affected.
+
+| Item | Objective gate | Evidence |
+|---|---|---|
+| Artifact matches the shape | an `install` connect provisions exactly the committed shape | `schema::the_install_mode_provisions_exactly_the_committed_shape` |
+| Verify-only, no DDL | connects, serves and rotates under a role whose `CREATE TABLE` is refused | `schema::a_host_provisioned_schema_serves_verify_only_under_a_role_without_ddl_privileges` |
+| Missing or drifted schema refused | refused by name; the schema stays absent and the dropped guard stays dropped | `schema::verify_only_refuses_a_missing_or_drifted_schema_without_repair` |
+| Stale table refused by `install` | a table missing a column refuses instead of being altered | `schema::install_refuses_a_stale_table_without_repair` |
+
+The evidence is the `process_replay` suite of `lash-internal-postgres-store`,
+which starts its own PostgreSQL:
+
+```sh
+kiln test //crates/lash-postgres-store:process_replay__test --test_arg=schema::
+```
+
 ## Scorecard
 
 | Item | Objective gate | Evidence |

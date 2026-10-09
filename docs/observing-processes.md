@@ -266,6 +266,18 @@ through a store they share; with separate in-memory stores a follower still
 converges on the durable process through its snapshot and gaps, and the other
 process's node events are absent, the same as for sessions.
 
+`lash::postgres::PostgresProcessReplayStore` is that shared store: every
+replica of a host publishes to and reads from the same PostgreSQL tables, so
+an observer on one replica sees the node events another replica's execution
+produced, in one position order, without contacting it. Configure it with the
+`process_replay` section of the host configuration
+([`operations/postgres.md`](operations/postgres.md#process_replay)) and
+install `PostgresHost::process_replay`. Its tables, incarnation and budgets
+are its own, apart from the session live replay store's. They are unlogged:
+after a crash recovery or failover the store starts a new incarnation and
+every older cursor gaps. On SQLite there is no shared replay store, so node
+events stay with the OS process that produced them.
+
 A store implementation keeps the obligations on the `ProcessReplayStore`
 trait; `lash_conformance::process_replay_tests!` certifies them with the same
 replay laws the session store passes.

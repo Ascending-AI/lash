@@ -36,7 +36,9 @@
     },
     "compile_data": [
       "postgres-live-replay-schema.sql",
-      "postgres-live-replay-schema-shape.txt"
+      "postgres-live-replay-schema-shape.txt",
+      "postgres-process-replay-schema.sql",
+      "postgres-process-replay-schema-shape.txt"
     ]
   },
   "crates/lash-conformance": {

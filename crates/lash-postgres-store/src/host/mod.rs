@@ -26,8 +26,9 @@ pub(crate) mod validate;
 pub use config::{
     ConnectionPolicy, ConnectionTopology, DedicatedConnectionPolicy, DeploymentBudget,
     GuardPolicies, LiveReplayPolicy, MaintenancePolicy, PoolPolicy, PostgresHostConfig,
-    ReconnectPolicy, ReplayDataPolicy, ReplaySchemaMode, RetryPolicies, RetryPolicy, RolePolicies,
-    ServerTimeout, SignalPolicy, SslMode, TransactionGuards, TransportOverrides,
+    ProcessReplayDataPolicy, ProcessReplayPolicy, ReconnectPolicy, ReplayDataPolicy,
+    ReplaySchemaMode, RetryPolicies, RetryPolicy, RolePolicies, ServerTimeout, SignalPolicy,
+    SslMode, TransactionGuards, TransportOverrides,
 };
 pub use validate::PostgresHostConfigError;
 
@@ -207,6 +208,10 @@ pub enum ConnectionRole {
     Replay,
     /// The live replay store's listener.
     ReplayListener,
+    /// The process replay store's data pool.
+    ProcessReplay,
+    /// The process replay store's listener.
+    ProcessReplayListener,
     /// A preflight probe.
     Preflight,
     /// `lash migrate`.
@@ -225,6 +230,8 @@ impl ConnectionRole {
             Self::Session => "session",
             Self::Replay => "replay",
             Self::ReplayListener => "replay-listener",
+            Self::ProcessReplay => "process-replay",
+            Self::ProcessReplayListener => "process-replay-listener",
             Self::Preflight => "preflight",
             Self::Migration => "migration",
         }
@@ -237,6 +244,7 @@ impl ConnectionRole {
             Self::Listener
                 | Self::Session
                 | Self::ReplayListener
+                | Self::ProcessReplayListener
                 | Self::Preflight
                 | Self::Migration
         )

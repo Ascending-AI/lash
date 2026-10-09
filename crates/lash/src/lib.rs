@@ -87,6 +87,8 @@ mod parked_work;
 mod postgres_host;
 #[cfg(feature = "postgres")]
 mod postgres_live_replay;
+#[cfg(feature = "postgres")]
+mod postgres_process_replay;
 pub mod preflight;
 pub(crate) mod process_admin;
 mod process_feed;
@@ -1326,6 +1328,12 @@ pub mod postgres {
     pub use crate::postgres_live_replay::{
         PostgresLiveReplayError, PostgresLiveReplaySchemaFinding, PostgresLiveReplaySchemaReport,
         PostgresLiveReplayStore,
+    };
+    /// The process replay store every replica of a host shares through one
+    /// PostgreSQL database, apart from the live replay store (FIG-5568).
+    pub use crate::postgres_process_replay::{
+        PostgresProcessReplayError, PostgresProcessReplaySchemaFinding,
+        PostgresProcessReplaySchemaReport, PostgresProcessReplayStore,
     };
 }
 

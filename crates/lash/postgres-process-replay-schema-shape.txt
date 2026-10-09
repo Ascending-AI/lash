@@ -1,0 +1,53 @@
+# lash PostgreSQL process replay store expected schema shape.
+#
+# Generated artifact -- never edit by hand. Regenerate after any change to
+# postgres-process-replay-schema.sql by running the process_replay suite's
+# `regenerate_process_replay_schema_shape` against PostgreSQL 18 with
+# LASH_REGENERATE=1, which rewrites this file from the catalog the DDL
+# artifact produces.
+#
+# Each table is a set of member lines: its persistence, its columns by name,
+# and its unique guards by key column set (sorted) and partial predicate.
+# Member order, object names, CHECK constraints and non-unique indexes are
+# never compared.
+table process_replay_dedupe
+  column identity text not-null
+  column position bigint not-null
+  column process_id text not-null
+  persistence unlogged
+  primary-key (identity, process_id)
+table process_replay_head
+  column first_retained bigint not-null
+  column floor_position bigint not-null
+  column process_id text not-null
+  column reserved_bytes bigint not-null
+  column retained_bytes bigint not-null
+  column retained_events bigint not-null
+  column tail_position bigint not-null
+  column touched_at timestamp with time zone not-null
+  persistence unlogged
+  primary-key (process_id)
+table process_replay_incarnation
+  column incarnation_id text not-null
+  column rotated_at timestamp with time zone not-null
+  column rotations bigint not-null
+  column singleton boolean not-null
+  persistence logged
+  primary-key (singleton)
+table process_replay_log
+  column bytes bigint not-null
+  column payload bytea not-null
+  column position bigint not-null
+  column process_id text not-null
+  column published_at timestamp with time zone not-null
+  column sequence bigint not-null
+  persistence unlogged
+  primary-key (position, process_id)
+table process_replay_sentinel
+  column incarnation_id text not-null
+  column reserved_bytes bigint not-null
+  column resident_processes bigint not-null
+  column singleton boolean not-null
+  column watermark bigint not-null
+  persistence unlogged
+  primary-key (singleton)

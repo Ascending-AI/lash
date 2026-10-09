@@ -79,6 +79,11 @@ path = "tests/live_replay.rs"
 required-features = ["testing"]
 
 [[test]]
+name = "process_replay"
+path = "tests/process_replay.rs"
+required-features = ["testing"]
+
+[[test]]
 name = "durable_read_fixture"
 path = "tests/durable_read_fixture.rs"
 
