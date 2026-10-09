@@ -535,6 +535,7 @@ fn a_declared_function_is_closed() {
         panic!("the function read main's variable");
     };
     assert_eq!(error.kind, "unbound_variable");
+    assert_eq!(error.data, Datum::Text("secret".to_owned()));
 }
 
 /// `K-EFF-006`: under the `float` policy every bare number is a float.

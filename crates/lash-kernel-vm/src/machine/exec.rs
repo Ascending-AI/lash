@@ -1,5 +1,7 @@
 //! Statements and control: blocks, loops, `try`, calls and returns.
 
+use std::sync::Arc;
+
 use lash_kernel_doc::{Formula, Measure, ObjectId, Operand, TaskId, Value};
 
 use super::{
@@ -279,6 +281,7 @@ impl KernelMachine {
             result,
         );
         self.charge(units)
+            .map_err(|halt| halt.in_function(&definition.name))
     }
 
     pub(super) fn formula(
@@ -387,10 +390,13 @@ impl KernelMachine {
 
     pub(super) fn read_var(&mut self, task: TaskId, exe: &Executable, var: &Var) -> Eval<Value> {
         let unbound = |name: &lash_kernel_doc::Name| {
-            raise(
-                "unbound_variable",
-                format!("no variable `{name}` is bound here"),
-            )
+            Err(Interrupt::Raise(Value::Error(Arc::new(
+                lash_kernel_doc::ErrorValue {
+                    kind: "unbound_variable".to_owned(),
+                    message: format!("no variable `{name}` is bound here"),
+                    data: Value::text(name.as_str()),
+                },
+            ))))
         };
         match var {
             Var::Local(slot) => {
@@ -418,10 +424,13 @@ impl KernelMachine {
 
     fn write_var(&mut self, task: TaskId, exe: &Executable, var: &Var, value: Value) -> Eval<()> {
         let unbound = |name: &lash_kernel_doc::Name| {
-            raise(
-                "unbound_variable",
-                format!("no variable `{name}` is bound here"),
-            )
+            Err(Interrupt::Raise(Value::Error(Arc::new(
+                lash_kernel_doc::ErrorValue {
+                    kind: "unbound_variable".to_owned(),
+                    message: format!("no variable `{name}` is bound here"),
+                    data: Value::text(name.as_str()),
+                },
+            ))))
         };
         self.reserve(value_bytes(&value))?;
         match var {

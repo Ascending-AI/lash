@@ -485,61 +485,6 @@ async fn a_deferred_tool_granted_to_a_cell_is_callable_after_a_restart() {
     );
 }
 
-/// `K-SES-003`, the closure rule: a function does not outlive its cell. A
-/// binding that held one is not carried, and the cell that reads it gets
-/// the typed refusal naming the binding; the session's data bindings are
-/// untouched.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_function_stored_in_a_session_binding_is_refused_in_a_later_cell() {
-    let host = open_host().await;
-    let tools = Arc::new(CellTools::default());
-    let services = typescript_services(None);
-    let mut state = typescript_state();
-
-    let bound = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
-        &services,
-        "const base = 41;\nconst increment = (value) => value + 1;",
-    )
-    .await;
-    assert!(bound.error().is_none(), "{:?}", bound.error());
-
-    let refused = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
-        &services,
-        "finish(increment(base));",
-    )
-    .await;
-    let failure = refused.error().expect("the later cell is refused");
-    assert_eq!(
-        failure.defect,
-        Some(lash_core::CellDefect::BindingNotCarried {
-            binding: "increment".to_owned()
-        })
-    );
-    assert_eq!(failure.kind, lash_core::CellFailureKind::Program);
-    assert!(
-        failure
-            .message
-            .starts_with(crate::SESSION_BINDING_NOT_CARRIED)
-            && failure.message.contains("`increment`")
-            && failure.message.contains("Define the function again"),
-        "{}",
-        failure.message
-    );
-
-    let repaired = run_cell(
-        &mut state,
-        cell_context(&host, SESSION, TURN, "exec-code:2", tools),
-        &services,
-        "const increment = (value) => value + 1;\nfinish(increment(base));",
-    )
-    .await;
-    assert_eq!(finish_of(&repaired), serde_json::json!(42));
-}
-
 /// `K-TASK-018`, the unjoined-task rule: a cell that ends with work it
 /// started still running gets the kernel's typed error as its observation,
 /// naming the line of the async code that is still running and how to
@@ -626,4 +571,127 @@ async fn a_python_session_runs_a_cell_end_to_end() {
         vec!["42"],
         "the second cell reads the first cell's binding"
     );
+}
+
+/// FIG-5763: an unrelated throw keeps its kind and message even when its
+/// text mentions a closure binding an earlier cell dropped (K-SES-003).
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unrelated_error_keeps_its_cause_after_a_binding_is_dropped() {
+    let host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let services = typescript_services(None);
+    let mut state = typescript_state();
+    let first = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:0", tools.clone()),
+        &services,
+        "const format = (value) => value;",
+    )
+    .await;
+    assert!(first.error().is_none(), "{:?}", first.error());
+    let second = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:1", tools.clone()),
+        &services,
+        "throw new Error(\"unsupported format in row 3\");",
+    )
+    .await;
+    let failure = second.error().expect("the throw ends the cell");
+    assert_eq!(failure.defect, None, "{failure:?}");
+    assert_eq!(failure.kind, lash_core::CellFailureKind::Program);
+    assert!(
+        failure.message.contains("unsupported format in row 3"),
+        "{}",
+        failure.message
+    );
+    assert!(failure.message.contains("Error"), "{}", failure.message);
+
+    // K-SES-003 requires both the unbound-variable kind and exact data.
+    let dropped = std::collections::BTreeSet::from([lash_kernel_doc::Name::new("format")]);
+    for (kind, binding, expected) in [
+        ("unbound_variable", "format", true),
+        ("unbound_variable", "other", false),
+        ("other_error", "format", false),
+    ] {
+        let value = lash_kernel_doc::Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
+            kind: kind.to_owned(),
+            message: "original diagnostic".to_owned(),
+            data: lash_kernel_doc::Datum::Text(binding.to_owned()),
+        }));
+        let observation = crate::feedback::CellObservation::of_run_error(
+            lash_kernel_vm::RunError::Uncaught(value.clone()),
+            &dropped,
+        );
+        if expected {
+            assert_eq!(
+                observation,
+                crate::feedback::CellObservation::BindingNotCarried {
+                    binding: "format".to_owned(),
+                }
+            );
+        } else {
+            assert_eq!(
+                observation,
+                crate::feedback::CellObservation::Uncaught(value)
+            );
+        }
+    }
+
+    // A dialect refusal mentioning that name keeps its original diagnosis.
+    let refused = run_cell(
+        &mut state,
+        cell_context(&host, SESSION, TURN, "exec-code:2", tools),
+        &services,
+        "format(1);",
+    )
+    .await;
+    let failure = refused
+        .error()
+        .expect("the dialect refuses an unknown call");
+    assert_eq!(failure.defect, None, "{failure:?}");
+    assert!(
+        !failure.message.contains(crate::SESSION_BINDING_NOT_CARRIED),
+        "{}",
+        failure.message
+    );
+}
+
+/// FIG-5763 / ADR 0132 NR-2: an interrupted Once effect names the
+/// admitted call and warns that its outside work may already have happened.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_once_effect_observation_names_the_effect() {
+    let mut host = open_host().await;
+    let tools = Arc::new(CellTools::default());
+    let response = crash_at_the_held_call_and_resume(
+        &mut host,
+        &tools,
+        &typescript_services(None),
+        "await echo.say({ text: \"held\" });",
+    )
+    .await;
+    let failure = response
+        .error()
+        .expect("the interrupted call ends the cell");
+    assert!(
+        failure.message.contains("tool_failed"),
+        "{}",
+        failure.message
+    );
+    assert!(failure.message.contains("echo.say"), "{}", failure.message);
+    assert!(
+        failure.message.contains("site") && failure.message.contains("occurrence 0"),
+        "{}",
+        failure.message
+    );
+    assert!(
+        failure
+            .message
+            .contains("outside work may already have happened")
+            && failure
+                .message
+                .contains("check outside state before calling again"),
+        "{}",
+        failure.message
+    );
+    assert!(tools.answered().is_empty(), "Once never starts again");
 }

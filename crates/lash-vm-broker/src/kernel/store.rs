@@ -159,7 +159,7 @@ pub fn outcome_of(output: &SettledOutput) -> Option<Outcome> {
         ),
         SettledOutput::Interrupted => failed(
             EFFECT_INTERRUPTED,
-            "the effect started and never settled".to_owned(),
+            "the effect started and never settled; outside work may already have happened, so check outside state before calling again".to_owned(),
             Datum::Null,
         ),
         SettledOutput::TimedOut { cause, .. } => failed(
@@ -195,8 +195,34 @@ fn settled_in(
         .pending()
         .filter_map(|(identity, entry)| {
             let outcome = match &entry.standing {
-                Standing::Admitted(admitted) => final_output(folded, exec, admitted)
-                    .and_then(|output| outcome(admitted, output))?,
+                Standing::Admitted(admitted) => {
+                    let output = final_output(folded, exec, admitted)?;
+                    let mut result = outcome(admitted, output)?;
+                    if matches!(output, SettledOutput::Interrupted)
+                        && let Outcome::Failed(error) = &mut result
+                    {
+                        let name = entry.effect.as_ref().map_or("effect", EffectName::as_str);
+                        error.message = format!(
+                            "effect `{name}` at site {:?}, occurrence {} started and never settled; outside work may already have happened, so check outside state before calling again",
+                            identity.site, identity.occurrence,
+                        );
+                        error.data = Datum::Record(vec![
+                            ("effect".to_owned(), Datum::Text(name.to_owned())),
+                            ("site".to_owned(), Datum::Record(vec![
+                                ("unit".to_owned(), Datum::Text(match &identity.site.unit {
+                                    lash_kernel_doc::Unit::Main => "main".to_owned(),
+                                    lash_kernel_doc::Unit::Function(name) => format!("fn:{name}"),
+                                    lash_kernel_doc::Unit::Library(function) => format!("lib:{function}"),
+                                })),
+                                ("path".to_owned(), Datum::List(identity.site.path.iter()
+                                    .map(|part| Datum::Int(i64::from(*part).into())).collect())),
+                            ])),
+                            ("occurrence".to_owned(), Datum::Int(lash_kernel_doc::Integer::new(identity.occurrence))),
+                            ("cause".to_owned(), error.data.clone()),
+                        ]);
+                    }
+                    result
+                },
                 Standing::Sleeping { until_ms } => {
                     (now.0 >= *until_ms).then_some(Outcome::Elapsed)?
                 }

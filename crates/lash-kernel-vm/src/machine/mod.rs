@@ -44,11 +44,30 @@ pub(crate) enum Halt {
     Fault(String),
 }
 
+impl Halt {
+    /// Preserve the innermost library definition that caused a bound.
+    fn in_function(mut self, function: &lash_kernel_doc::FunctionName) -> Self {
+        if let Self::Bound(exceeded) = &mut self {
+            exceeded.function.get_or_insert_with(|| function.clone());
+        }
+        self
+    }
+}
+
 /// Why a statement did not complete.
 #[derive(Debug)]
 pub(crate) enum Interrupt {
     Raise(Value),
     Halt(Halt),
+}
+
+impl Interrupt {
+    fn in_function(self, function: &lash_kernel_doc::FunctionName) -> Self {
+        match self {
+            Self::Halt(halt) => Self::Halt(halt.in_function(function)),
+            other => other,
+        }
+    }
 }
 
 type Eval<T> = Result<T, Interrupt>;
@@ -78,7 +97,11 @@ fn fault(problem: &str) -> Halt {
 }
 
 fn bound(bound: Bound, limit: u64) -> Halt {
-    Halt::Bound(BoundExceeded { bound, limit })
+    Halt::Bound(BoundExceeded {
+        bound,
+        limit,
+        function: None,
+    })
 }
 
 /// How a run that reached its end got there.
@@ -673,7 +696,16 @@ impl Machine for KernelMachine {
                     self.ended = true;
                     return Err(MachineError::Fault { problem });
                 }
-                Err(Halt::Bound(exceeded)) => {
+                Err(Halt::Bound(mut exceeded)) => {
+                    if exceeded.function.is_none()
+                        && let Some(lib) = self
+                            .frame(task)
+                            .ok()
+                            .and_then(|frame| frame.library.as_ref().map(|call| call.lib))
+                    {
+                        exceeded.function =
+                            Some(self.exe.libs[lib.0 as usize].definition.name.clone());
+                    }
                     return Ok(self.finish_with(End::Error(RunError::Bound(exceeded))));
                 }
                 Err(Halt::Finish(result)) => {

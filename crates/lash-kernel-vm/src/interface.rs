@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_kernel_doc::{
-    Datum, Document, DocumentId, EffectIdentity, EffectName, ErrorDatum, FunctionId,
+    Datum, Document, DocumentId, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName,
     FunctionRegistry, Handle, Invalid, Name, Object, ObjectId, TaskIdentity, Timestamp, Type,
     Value,
 };
@@ -58,6 +58,9 @@ pub enum Bound {
 pub struct BoundExceeded {
     pub bound: Bound,
     pub limit: u64,
+    /// The definition name of the library call that passed the bound, when
+    /// it arose in a library call rather than in the program itself.
+    pub function: Option<FunctionName>,
 }
 
 /// What a run has used so far.

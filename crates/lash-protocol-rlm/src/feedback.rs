@@ -64,37 +64,11 @@ pub(crate) enum CellObservation {
     Bound(BoundExceeded),
 }
 
-/// Whether `text` names `name` as a whole identifier.
-fn names(text: &str, name: &str) -> bool {
-    let part = |character: char| character == '_' || character.is_alphanumeric();
-    text.match_indices(name).any(|(at, _)| {
-        !text[..at].chars().next_back().is_some_and(part)
-            && !text[at + name.len()..].chars().next().is_some_and(part)
-    })
-}
-
 impl CellObservation {
-    /// A dialect's refusal of `source`. A refusal at a name the session
-    /// lost to `K-SES-003` is that rule's refusal: the name is unknown
-    /// because it was not carried, and the model is told so.
-    pub(crate) fn of_refusal(
-        refusal: DialectRefusal,
-        source: &str,
-        not_carried: &BTreeSet<Name>,
-    ) -> Self {
-        let at = refusal
-            .span
-            .and_then(|(start, end)| source.get(start..end))
-            .unwrap_or_default();
-        match not_carried
-            .iter()
-            .find(|name| names(at, name.as_str()) || names(&refusal.message, name.as_str()))
-        {
-            Some(name) => Self::BindingNotCarried {
-                binding: name.to_string(),
-            },
-            None => Self::Refused(refusal),
-        }
+    /// A dialect refusal remains the dialect's typed diagnosis. Source or
+    /// diagnostic text cannot establish that a session binding was dropped.
+    pub(crate) fn of_refusal(refusal: DialectRefusal) -> Self {
+        Self::Refused(refusal)
     }
 
     /// How a run's error ended the cell. An uncaught unbound-variable error
@@ -103,12 +77,16 @@ impl CellObservation {
     pub(crate) fn of_run_error(error: RunError, not_carried: &BTreeSet<Name>) -> Self {
         match error {
             RunError::Uncaught(value) => {
-                let text = datum_text(&value);
-                match not_carried.iter().find(|name| names(&text, name.as_str())) {
-                    Some(name) => Self::BindingNotCarried {
-                        binding: name.to_string(),
-                    },
-                    None => Self::Uncaught(value),
+                if let Datum::Error(error) = &value
+                    && error.kind == "unbound_variable"
+                    && let Datum::Text(binding) = &error.data
+                    && not_carried.contains(&Name::new(binding.as_str()))
+                {
+                    Self::BindingNotCarried {
+                        binding: binding.clone(),
+                    }
+                } else {
+                    Self::Uncaught(value)
                 }
             }
             RunError::TasksOutstanding {
@@ -260,14 +238,26 @@ impl CellObservation {
                         None,
                     ),
                     Bound::JoinMembers => ("too many tasks were awaited together".to_owned(), None),
-                    Bound::Guard { function } => (
-                        format!("the library function {function} ran past its work limit"),
+                    Bound::Guard { .. } => (
+                        "work limit exceeded".to_owned(),
                         None,
                     ),
                 };
+                let function = exceeded.function.as_ref()
+                    .map(|name| format!(" in library function `{name}`"))
+                    .unwrap_or_default();
+                let repair = match exceeded.bound {
+                    Bound::Charge => "Reduce the computation or split it across smaller cells to fit the instruction budget.",
+                    Bound::Memory => "Keep fewer or smaller values live to fit the memory limit.",
+                    Bound::Guard { .. } => "Reduce the function's input or split its work into smaller calls to fit its work limit.",
+                    Bound::CallDepth => "Reduce nested calls or replace recursion with an iterative computation.",
+                    Bound::LiveTasks => "Start fewer tasks at once and await them before starting more.",
+                    Bound::RequestsPerPark => "Start fewer tool calls and sleeps at once; await some before starting more.",
+                    Bound::JoinMembers => "Await fewer tasks together, in smaller groups.",
+                };
                 let mut failure = CellFailure::new(
                     CellFailureKind::Policy,
-                    format!("{CELL_BOUND_EXCEEDED}: {what} (limit {})", exceeded.limit),
+                    format!("{CELL_BOUND_EXCEEDED}: {what}{function} (limit {})\n{repair}", exceeded.limit),
                 );
                 failure.worker_limit = limit;
                 failure
@@ -356,7 +346,7 @@ pub(crate) fn render(failure: &CellFailure, cell_noun: &str) -> String {
 fn imperative(kind: CellFailureKind, cell_noun: &str) -> String {
     match kind {
         CellFailureKind::Policy => format!(
-            "Next: the runtime refused this {cell_noun}; sending it again unchanged will be refused again. Rewrite it in the form named above."
+            "Next: the runtime refused this {cell_noun}; sending it again unchanged will be refused again. Correct the reported constraint, then send the revised {cell_noun}."
         ),
         CellFailureKind::Program => format!(
             "Next: the defect is in the program, not in what the runtime allows. Fix the cause named above, then send the corrected {cell_noun}."
@@ -364,5 +354,118 @@ fn imperative(kind: CellFailureKind, cell_noun: &str) -> String {
         CellFailureKind::Host => format!(
             "Next: the host failed while handling this {cell_noun}. Retry it; if the failure persists, report the host problem."
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use lash_kernel_doc::{
+        ErrorDatum, FunctionRegistry, Handle, NativeCall, NativeError, NativeFunction, Timestamp,
+        Value, parse_definition, parse_document,
+    };
+    use lash_kernel_vm::{
+        Bindings, Bounds, End, Host, KernelMachine, Machine, Program, Start, Target,
+    };
+
+    use super::*;
+
+    struct Guarded {
+        memory: bool,
+    }
+
+    impl NativeFunction for Guarded {
+        fn call(&self, call: NativeCall<'_>) -> Result<Value, NativeError> {
+            if self.memory {
+                return Err(NativeError::Memory);
+            }
+            call.counter.spend(1)?;
+            Ok(Value::Null)
+        }
+    }
+
+    struct World;
+
+    impl Host for World {
+        fn clock(&mut self) -> Timestamp {
+            panic!("no clock read")
+        }
+        fn random(&mut self) -> u64 {
+            panic!("no random read")
+        }
+        fn read(&mut self, _: &Handle, _: &Datum) -> Result<Datum, ErrorDatum> {
+            panic!("no projection read")
+        }
+        fn print(&mut self, _: &Datum) {
+            panic!("no print")
+        }
+        fn cancel_requested(&mut self) -> bool {
+            false
+        }
+    }
+
+    /// FIG-5763 / K-LIB-008: a guard observation names the definition,
+    /// survives recording the end, and offers repair without an unnamed form.
+    #[test]
+    fn a_guard_observation_names_the_function_and_its_repair() {
+        for (guard, memory, charge, repair) in [
+            (true, false, 1, "smaller calls"),
+            (false, true, 1, "fewer or smaller values"),
+            (false, false, 10_000, "instruction budget"),
+        ] {
+            let mut registry = FunctionRegistry::new();
+            let definition = parse_definition(&format!(
+                "function work.spin() -> Any\nkernel 1\ncharge {charge}\n{}native\n",
+                if guard { "guard \"step\" 0\n" } else { "" },
+            ))
+            .expect("definition");
+            let function = registry
+                .register(definition, Some(Arc::new(Guarded { memory })))
+                .expect("registered");
+            let document = parse_document(&format!(
+            "kernel 1\nnumbers by_spelling\nuse work.spin = @{function}\nmain {{ return work.spin() }}",
+        )).expect("document");
+            let mut machine = KernelMachine::start(
+                Program {
+                    document: Arc::new(document),
+                    registry: Arc::new(registry),
+                },
+                Bounds {
+                    charge: 1000,
+                    memory: 1 << 20,
+                    call_depth: 100,
+                    live_tasks: 10,
+                    requests_per_park: 10,
+                    join_members: 10,
+                },
+                Start {
+                    target: Target::Main,
+                    args: Vec::new(),
+                    bindings: Bindings::default(),
+                },
+            )
+            .expect("started");
+            let lash_kernel_vm::Step::Ended(end) = machine.run(&mut World, 1000).expect("run")
+            else {
+                panic!("the guard must end the run");
+            };
+            let end = lash_vm_broker::kernel::RecordedEnd::of(&end).expect("recorded");
+            let end: lash_vm_broker::kernel::RecordedEnd =
+                serde_json::from_str(&serde_json::to_string(&end).expect("encoded"))
+                    .expect("decoded");
+            let End::Error(error) = end.into_end() else {
+                panic!("bound error");
+            };
+            let observation = CellObservation::of_run_error(error, &BTreeSet::new());
+            let prompts = crate::CellDialect::typescript().prompts();
+            let failure =
+                observation.failure("", None, crate::plugin::RlmChannel::Cell, prompts.as_ref());
+            let text = render(&failure, "cell");
+            assert!(text.contains("work.spin"), "{text}");
+            assert!(!text.contains(&function.to_string()), "{text}");
+            assert!(!text.contains("form named above"), "{text}");
+            assert!(text.contains(repair), "{text}");
+        }
     }
 }

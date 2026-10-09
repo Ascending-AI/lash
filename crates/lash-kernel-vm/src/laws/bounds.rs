@@ -36,7 +36,11 @@ fn passes(body: &str, bounds: Bounds) -> BoundExceeded {
 }
 
 fn exceeded(bound: Bound, limit: u64) -> BoundExceeded {
-    BoundExceeded { bound, limit }
+    BoundExceeded {
+        bound,
+        limit,
+        function: None,
+    }
 }
 
 /// `K-CHG-008`: the charge that takes the run past its bound ends it.
@@ -65,7 +69,10 @@ fn the_memory_bound_counts_what_is_live() {
             "let xs = [] while true { set xs[list.len(xs)] = \"0123456789\" }",
             bounds
         ),
-        exceeded(Bound::Memory, 64 << 10)
+        BoundExceeded {
+            function: Some(lash_kernel_doc::FunctionName::new("list.len").unwrap()),
+            ..exceeded(Bound::Memory, 64 << 10)
+        }
     );
     // The same allocations, dropped as they are made, fit.
     let mut embedder = Embedder::with(
@@ -95,7 +102,10 @@ fn the_memory_bound_holds_inside_a_native_call() {
     };
     assert_eq!(
         passes("let big = work.fill(100000)", bounds),
-        exceeded(Bound::Memory, 64 << 10)
+        BoundExceeded {
+            function: Some(lash_kernel_doc::FunctionName::new("work.fill").unwrap()),
+            ..exceeded(Bound::Memory, 64 << 10)
+        }
     );
     // What fits once fits every time: the garbage of earlier calls is
     // collected before a native call is refused.
@@ -181,7 +191,10 @@ fn a_native_guard_ends_the_run() {
     assert_eq!(result(embedder.run_to_end(&[])), int(100));
     assert_eq!(
         passes("let spun = work.spin(101)", ROOMY),
-        exceeded(Bound::Guard { function }, 100)
+        BoundExceeded {
+            function: Some(lash_kernel_doc::FunctionName::new("work.spin").unwrap()),
+            ..exceeded(Bound::Guard { function }, 100)
+        }
     );
 }
 

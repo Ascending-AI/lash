@@ -358,7 +358,7 @@ async fn link_cell(
             annotations,
         }) => (document, annotations),
         Ok(Response::DialectRefused(refusal)) => {
-            let observation = CellObservation::of_refusal(refusal, code, session.not_carried());
+            let observation = CellObservation::of_refusal(refusal);
             emit_step_trace(ctx, Err(&observation.code()));
             return Err(Refused::Cell(Box::new(observation.failure(
                 code,

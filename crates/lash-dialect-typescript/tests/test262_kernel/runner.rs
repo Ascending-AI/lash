@@ -541,6 +541,7 @@ fn huge_sparse_array_writes_end_at_the_memory_bound() {
         matches!(end, End::Error(RunError::Bound(lash_kernel_vm::BoundExceeded {
         bound: lash_kernel_vm::Bound::Memory,
         limit,
+        ..
     })) if limit == BOUNDS.memory),
         "{end:?}"
     );

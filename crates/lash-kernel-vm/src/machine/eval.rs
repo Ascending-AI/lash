@@ -249,6 +249,17 @@ impl KernelMachine {
         task: TaskId,
         exe: &Executable,
         lib: LibId,
+        args: Vec<Value>,
+    ) -> Eval<Result<Value, Vec<Value>>> {
+        self.call_library_inner(task, exe, lib, args)
+            .map_err(|interrupt| interrupt.in_function(&exe.libs[lib.0 as usize].definition.name))
+    }
+
+    fn call_library_inner(
+        &mut self,
+        task: TaskId,
+        exe: &Executable,
+        lib: LibId,
         mut args: Vec<Value>,
     ) -> Eval<Result<Value, Vec<Value>>> {
         let function = &exe.libs[lib.0 as usize];
@@ -364,7 +375,8 @@ impl KernelMachine {
         if self.inline_depth >= MAX_INLINE_DEPTH {
             return Err(bound(Bound::CallDepth, u64::from(self.bounds.call_depth)).into());
         }
-        self.push_frame(task, exe, Call::new(*code, args).of_library(lib).inline())?;
+        self.push_frame(task, exe, Call::new(*code, args).of_library(lib).inline())
+            .map_err(|halt| halt.in_function(&exe.libs[lib.0 as usize].definition.name))?;
         self.inline_depth += 1;
         let result = loop {
             if let Some(result) = self.inline_result.take() {
@@ -373,7 +385,9 @@ impl KernelMachine {
             let outcome = self.advance(task, host, exe);
             if let Err(halt) = self.settle(task, host, exe, outcome) {
                 self.inline_depth -= 1;
-                return Err(halt.into());
+                return Err(halt
+                    .in_function(&exe.libs[lib.0 as usize].definition.name)
+                    .into());
             }
             if self.current != Some(task) {
                 self.inline_depth -= 1;
@@ -384,7 +398,8 @@ impl KernelMachine {
         self.refresh_charging(task, exe);
         match result {
             Ok(value) => {
-                self.pin(&value)?;
+                self.pin(&value)
+                    .map_err(|halt| halt.in_function(&exe.libs[lib.0 as usize].definition.name))?;
                 Ok(value)
             }
             Err(value) => Err(Interrupt::Raise(value)),

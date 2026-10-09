@@ -23,8 +23,8 @@ use std::collections::BTreeMap;
 
 use lash_durable::DurableInstant;
 use lash_kernel_doc::{
-    Datum, EffectIdentity, EffectName, ErrorDatum, FunctionId, Name, Object, ObjectId,
-    TaskIdentity, Value,
+    Datum, EffectIdentity, EffectName, ErrorDatum, FunctionId, FunctionName, Name, Object,
+    ObjectId, TaskIdentity, Value,
 };
 use lash_kernel_vm::{Bindings, Bound, BoundExceeded, End, Finished, RunError, WaitId};
 use lash_vm_protocol::EncodedPayload;
@@ -320,6 +320,7 @@ pub enum RecordedEnd {
     Bound {
         bound: RecordedBound,
         limit: u64,
+        function: Option<FunctionName>,
     },
 }
 
@@ -382,6 +383,7 @@ impl RecordedEnd {
                     },
                 },
                 limit: exceeded.limit,
+                function: exceeded.function.clone(),
             },
             End::Cancelled => return None,
         })
@@ -415,7 +417,11 @@ impl RecordedEnd {
                 unobserved,
             }),
             Self::Deadlock { waiting } => End::Error(RunError::Deadlock { waiting }),
-            Self::Bound { bound, limit } => End::Error(RunError::Bound(BoundExceeded {
+            Self::Bound {
+                bound,
+                limit,
+                function,
+            } => End::Error(RunError::Bound(BoundExceeded {
                 bound: match bound {
                     RecordedBound::Charge => Bound::Charge,
                     RecordedBound::Memory => Bound::Memory,
@@ -426,6 +432,7 @@ impl RecordedEnd {
                     RecordedBound::Guard { function } => Bound::Guard { function },
                 },
                 limit,
+                function,
             })),
         }
     }

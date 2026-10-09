@@ -296,6 +296,7 @@ pub fn park_bound(bounds: &Bounds, requests: usize) -> Option<BoundExceeded> {
     (requests > bounds.requests_per_park as usize).then(|| BoundExceeded {
         bound: Bound::RequestsPerPark,
         limit: u64::from(bounds.requests_per_park),
+        function: None,
     })
 }
 
@@ -631,6 +632,7 @@ mod tests {
             Some(BoundExceeded {
                 bound: Bound::RequestsPerPark,
                 limit: 4,
+                function: None,
             })
         );
     }
