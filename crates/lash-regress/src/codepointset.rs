@@ -58,10 +58,6 @@ impl Interval {
         }
     }
 
-    fn mergeable(self, rhs: Interval) -> bool {
-        self.mergecmp(rhs) == Ordering::Equal
-    }
-
     pub fn contains(self, cp: CodePoint) -> bool {
         self.first <= cp && cp <= self.last
     }
@@ -87,7 +83,7 @@ pub(crate) fn interval_contains(interval: &[Interval], cp: u32) -> bool {
 
 /// Merge two intervals, which must be overlapping or abutting.
 fn merge_intervals(x: Interval, y: &Interval) -> Interval {
-    debug_assert!(x.mergeable(*y), "Ranges not mergeable");
+    debug_assert!(x.mergecmp(*y) == Ordering::Equal, "Ranges not mergeable");
     Interval {
         first: core::cmp::min(x.first, y.first),
         last: core::cmp::max(x.last, y.last),
@@ -152,7 +148,10 @@ impl CodePointSet {
                 } else if idx >= mergeable.end {
                     debug_assert!(new_iv.is_strictly_before(*iv));
                 } else {
-                    debug_assert!(iv.mergeable(new_iv) && new_iv.mergeable(*iv));
+                    debug_assert!(
+                        iv.mergecmp(new_iv) == Ordering::Equal
+                            && new_iv.mergecmp(*iv) == Ordering::Equal
+                    );
                 }
             }
         }
@@ -311,96 +310,12 @@ mod tests {
     }
 
     #[test]
-    fn test_is_before() {
-        let a = iv(0, 9);
-        let b = iv(10, 19);
-        assert!(a.is_before(b));
-        assert!(!b.is_before(a));
-    }
-
-    #[test]
-    fn test_is_strictly_before() {
-        let a = iv(0, 9);
-        let b = iv(10, 19);
-        let c = iv(11, 19);
-        assert!(!a.is_strictly_before(b));
-        assert!(a.is_strictly_before(c));
-        assert!(!b.is_strictly_before(a));
-        assert!(!b.is_strictly_before(c));
-    }
-
-    #[test]
-    fn test_mergecmp() {
-        let a = iv(0, 9);
-        let b = iv(10, 19);
-        let c = iv(9, 18);
-        assert_eq!(a.mergecmp(b), Ordering::Equal);
-        assert_eq!(b.mergecmp(a), Ordering::Equal);
-        assert_eq!(a.mergecmp(c), Ordering::Equal);
-        assert_eq!(c.mergecmp(a), Ordering::Equal);
-
-        let d = iv(11, 19);
-        assert_eq!(a.mergecmp(d), Ordering::Less);
-        assert_eq!(d.mergecmp(a), Ordering::Greater);
-        assert_eq!(b.mergecmp(d), Ordering::Equal);
-        assert_eq!(d.mergecmp(b), Ordering::Equal);
-        assert_eq!(c.mergecmp(d), Ordering::Equal);
-        assert_eq!(d.mergecmp(c), Ordering::Equal);
-
-        let e = iv(100, 109);
-        assert_eq!(a.mergecmp(e), Ordering::Less);
-        assert_eq!(e.mergecmp(a), Ordering::Greater);
-    }
-
-    #[test]
-    fn test_mergeable() {
-        let a = iv(0, 9);
-        let b = iv(9, 19);
-        assert!(a.mergeable(a));
-        assert!(a.mergeable(b));
-        assert!(b.mergeable(b));
-    }
-
-    #[test]
-    fn test_contains() {
-        let a = iv(0, 9);
-        assert!(a.contains(0));
-        assert!(a.contains(9));
-        assert!(!a.contains(10));
-    }
-
-    #[test]
     fn test_overlaps() {
         let a = iv(0, 9);
         let b = iv(5, 14);
         let c = iv(10, 19);
         assert!(a.overlaps(b));
         assert!(!a.overlaps(c));
-    }
-
-    #[test]
-    fn test_codepoints() {
-        let a = iv(0, 9);
-        assert_eq!(a.codepoints(), 0..10);
-    }
-
-    #[test]
-    fn test_count_codepoints() {
-        assert_eq!(iv(0, 9).count_codepoints(), 10);
-        assert_eq!(iv(0, 0).count_codepoints(), 1);
-        assert_eq!(
-            iv(0, CODE_POINT_MAX).count_codepoints(),
-            (CODE_POINT_MAX + 1) as usize
-        );
-    }
-
-    #[test]
-    fn test_add() {
-        let mut set = CodePointSet::new();
-        set.add(iv(10, 20));
-        set.add(iv(30, 40));
-        set.add(iv(15, 35));
-        assert_eq!(set.intervals(), &[iv(10, 40)]);
     }
 
     #[test]

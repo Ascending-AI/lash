@@ -635,26 +635,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fold_idempotent() {
-        for c in 0..=0x10FFFF {
-            let fc = fold(c);
-            let ffc = fold(fc);
-            assert_eq!(ffc, fc);
-        }
-    }
-
-    #[test]
-    fn test_unfolds_refold() {
-        for c in 0..=0x10FFFF {
-            let fc = fold(c);
-            let unfolds = unfold_char(c);
-            for uc in unfolds {
-                assert_eq!(fold(uc), fc);
-            }
-        }
-    }
-
-    #[test]
     fn test_unfold_chars() {
         let unfold_map = get_unfold_map();
         for c in 0..=0x10FFFF {

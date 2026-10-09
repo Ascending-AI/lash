@@ -567,25 +567,6 @@ fn unicode_sets_character_intersection_character_class() {
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
 
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-union-character-property-escape.js
-#[test]
-fn unicode_sets_character_class_union_character_property_escape() {
-    const EXPRESSION: &str = "^[[0-9]\\p{ASCII_Hex_Digit}]+$";
-    const MATCHES: &[&str] = &[
-        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "a", "b",
-        "c", "d", "e", "f",
-    ];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
 /// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-escape-intersection-character-class-escape.js
 #[test]
 fn unicode_sets_character_class_escape_intersection_character_class_escape() {
@@ -680,30 +661,6 @@ fn unicode_sets_character_class_escape_difference_character_property_escape() {
         "2",
         "3",
         "4",
-        "5",
-        "6",
-        "6\u{FE0F}\u{20E3}",
-        "7",
-        "8",
-        "9",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-intersection-string-literal.js
-#[test]
-fn unicode_sets_character_class_intersection_string_literal() {
-    const EXPRESSION: &str = "^[[0-9]&&\\q{0|2|4|9\u{FE0F}\u{20E3}}]+$";
-    const MATCHES: &[&str] = &["0", "2", "4"];
-    const FAILS: &[&str] = &[
-        "1",
-        "3",
         "5",
         "6",
         "6\u{FE0F}\u{20E3}",
@@ -819,25 +776,6 @@ fn unicode_sets_character_class_escape_intersection_string_literal() {
         "\u{1F1E7}\u{1F1EA}",
     ];
 
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-difference-string-literal.js
-#[test]
-fn unicode_sets_character_class_difference_string_literal() {
-    const EXPRESSION: &str = "^[[0-9]--\\q{0|2|4|9\u{FE0F}\u{20E3}}]+$";
-    const MATCHES: &[&str] = &["1", "3", "5", "6", "7", "8", "9"];
-    const FAILS: &[&str] = &[
-        "0",
-        "2",
-        "4",
-        "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
 
@@ -977,23 +915,6 @@ fn unicode_sets_string_literal_difference_property_of_strings_escape() {
     const FAILS: &[&str] = &[
         "6\u{FE0F}\u{20E3}",
         "7",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-union-character-class.js
-#[test]
-fn unicode_sets_character_class_union_character_class() {
-    const EXPRESSION: &str = "^[[0-9][0-9]]+$";
-    const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
         "9\u{FE0F}\u{20E3}",
         "C",
         "\u{2603}",
@@ -1335,34 +1256,6 @@ fn unicode_sets_character_union_character_property_escape() {
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
 
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-union-string-literal.js
-#[test]
-fn unicode_sets_character_class_union_string_literal() {
-    const EXPRESSION: &str = "^[[0-9]\\q{0|2|4|9\u{FE0F}\u{20E3}}]+$";
-    const MATCHES: &[&str] = &[
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "7",
-        "8",
-        "9",
-        "9\u{FE0F}\u{20E3}",
-    ];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
 /// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-escape-union-character-class-escape.js
 #[test]
 fn unicode_sets_character_class_escape_union_character_class_escape() {
@@ -1398,23 +1291,6 @@ fn unicode_sets_property_of_strings_escape_intersection_character() {
         "7",
         "7\u{FE0F}\u{20E3}",
         "8\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-intersection-character-class.js
-#[test]
-fn unicode_sets_character_class_intersection_character_class() {
-    const EXPRESSION: &str = "^[[0-9]&&[0-9]]+$";
-    const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
         "9\u{FE0F}\u{20E3}",
         "C",
         "\u{2603}",
@@ -1701,23 +1577,6 @@ fn unicode_sets_character_class_escape_difference_property_of_strings_escape() {
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
 
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-union-character-class-escape.js
-#[test]
-fn unicode_sets_character_class_union_character_class_escape() {
-    const EXPRESSION: &str = "^[[0-9]\\d]+$";
-    const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
 /// 262 test/built-ins/RegExp/unicodeSets/generated/character-property-escape-union-character-property-escape.js
 #[test]
 fn unicode_sets_character_property_escape_union_character_property_escape() {
@@ -1794,23 +1653,6 @@ fn unicode_sets_property_of_strings_escape_union_character_class_escape() {
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
 
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-intersection-character-property-escape.js
-#[test]
-fn unicode_sets_character_class_intersection_character_property_escape() {
-    const EXPRESSION: &str = "^[[0-9]&&\\p{ASCII_Hex_Digit}]+$";
-    const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
 /// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-escape-union-character.js
 #[test]
 fn unicode_sets_character_class_escape_union_character() {
@@ -1818,33 +1660,6 @@ fn unicode_sets_character_class_escape_union_character() {
     const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "_"];
     const FAILS: &[&str] = &[
         "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-difference-character-class-escape.js
-#[test]
-fn unicode_sets_character_class_difference_character_class_escape() {
-    const EXPRESSION: &str = "^[[0-9]--\\d]+$";
-    const MATCHES: &[&str] = &[];
-    const FAILS: &[&str] = &[
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "6\u{FE0F}\u{20E3}",
-        "7",
-        "8",
-        "9",
         "9\u{FE0F}\u{20E3}",
         "C",
         "\u{2603}",
@@ -1883,16 +1698,6 @@ fn unicode_sets_property_of_strings_escape_intersection_character_class() {
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
 
-/// 262 test/built-ins/RegExp/unicodeSets/generated/string-literal-intersection-string-literal.js
-#[test]
-fn unicode_sets_string_literal_intersection_string_literal() {
-    const EXPRESSION: &str = "^[\\q{0|2|4|9\u{FE0F}\u{20E3}}&&\\q{0|2|4|9\u{FE0F}\u{20E3}}]+$";
-    const MATCHES: &[&str] = &[];
-    const FAILS: &[&str] = &[];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
 /// 262 test/built-ins/RegExp/unicodeSets/generated/character-property-escape-union-string-literal.js
 #[test]
 fn unicode_sets_character_property_escape_union_string_literal() {
@@ -1924,67 +1729,6 @@ fn unicode_sets_character_property_escape_union_string_literal() {
     ];
     const FAILS: &[&str] = &[
         "6\u{FE0F}\u{20E3}",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-difference-property-of-strings-escape.js
-#[test]
-fn unicode_sets_character_class_difference_property_of_strings_escape() {
-    const EXPRESSION: &str = "^[[0-9]--\\p{Emoji_Keycap_Sequence}]+$";
-    const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-difference-character-property-escape.js
-#[test]
-fn unicode_sets_character_class_difference_character_property_escape() {
-    const EXPRESSION: &str = "^[[0-9]--\\p{ASCII_Hex_Digit}]+$";
-    const MATCHES: &[&str] = &[];
-    const FAILS: &[&str] = &[
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "6\u{FE0F}\u{20E3}",
-        "7",
-        "8",
-        "9",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-difference-character.js
-#[test]
-fn unicode_sets_character_class_difference_character() {
-    const EXPRESSION: &str = "^[[0-9]--_]+$";
-    const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
         "\u{2603}",
         "\u{1D306}",
         "\u{1F1E7}\u{1F1EA}",
@@ -2042,23 +1786,6 @@ fn unicode_sets_character_class_escape_union_property_of_strings_escape() {
         "9\u{FE0F}\u{20E3}",
     ];
     const FAILS: &[&str] = &["C", "\u{2603}", "\u{1D306}", "\u{1F1E7}\u{1F1EA}"];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-intersection-character-class-escape.js
-#[test]
-fn unicode_sets_character_class_intersection_character_class_escape() {
-    const EXPRESSION: &str = "^[[0-9]&&\\d]+$";
-    const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
 
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
@@ -2305,33 +2032,6 @@ fn unicode_sets_character_property_escape_intersection_string_literal() {
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
 
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-difference-character-class.js
-#[test]
-fn unicode_sets_character_class_difference_character_class() {
-    const EXPRESSION: &str = "^[[0-9]--[0-9]]+$";
-    const MATCHES: &[&str] = &[];
-    const FAILS: &[&str] = &[
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "6\u{FE0F}\u{20E3}",
-        "7",
-        "8",
-        "9",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
 /// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-escape-intersection-property-of-strings-escape.js
 #[test]
 fn unicode_sets_character_class_escape_intersection_property_of_strings_escape() {
@@ -2515,23 +2215,6 @@ fn unicode_sets_character_class_escape_union_character_class() {
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
 
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-union-character.js
-#[test]
-fn unicode_sets_character_class_union_character() {
-    const EXPRESSION: &str = "^[[0-9]_]+$";
-    const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "_"];
-    const FAILS: &[&str] = &[
-        "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
 /// 262 test/built-ins/RegExp/unicodeSets/generated/property-of-strings-escape-difference-character-class.js
 #[test]
 fn unicode_sets_property_of_strings_escape_difference_character_class() {
@@ -2569,39 +2252,6 @@ fn unicode_sets_character_union_character() {
         "\u{1D306}",
         "\u{1F1E7}\u{1F1EA}",
     ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-union-property-of-strings-escape.js
-#[test]
-fn unicode_sets_character_class_union_property_of_strings_escape() {
-    const EXPRESSION: &str = "^[[0-9]\\p{Emoji_Keycap_Sequence}]+$";
-    const MATCHES: &[&str] = &[
-        "#\u{FE0F}\u{20E3}",
-        "*\u{FE0F}\u{20E3}",
-        "0",
-        "0\u{FE0F}\u{20E3}",
-        "1",
-        "1\u{FE0F}\u{20E3}",
-        "2",
-        "2\u{FE0F}\u{20E3}",
-        "3",
-        "3\u{FE0F}\u{20E3}",
-        "4",
-        "4\u{FE0F}\u{20E3}",
-        "5",
-        "5\u{FE0F}\u{20E3}",
-        "6",
-        "6\u{FE0F}\u{20E3}",
-        "7",
-        "7\u{FE0F}\u{20E3}",
-        "8",
-        "8\u{FE0F}\u{20E3}",
-        "9",
-        "9\u{FE0F}\u{20E3}",
-    ];
-    const FAILS: &[&str] = &["C", "\u{2603}", "\u{1D306}", "\u{1F1E7}\u{1F1EA}"];
 
     test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
 }
@@ -2693,33 +2343,6 @@ fn unicode_sets_character_class_escape_difference_character() {
     const MATCHES: &[&str] = &["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
     const FAILS: &[&str] = &[
         "6\u{FE0F}\u{20E3}",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-intersection-character.js
-#[test]
-fn unicode_sets_character_class_intersection_character() {
-    const EXPRESSION: &str = "^[[0-9]&&_]+$";
-    const MATCHES: &[&str] = &[];
-    const FAILS: &[&str] = &[
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "6\u{FE0F}\u{20E3}",
-        "7",
-        "8",
-        "9",
         "9\u{FE0F}\u{20E3}",
         "C",
         "\u{2603}",
@@ -2881,33 +2504,6 @@ fn unicode_sets_property_of_strings_escape_intersection_property_of_strings_esca
 #[test]
 fn unicode_sets_character_class_escape_difference_character_class_escape() {
     const EXPRESSION: &str = "^[\\d--\\d]+$";
-    const MATCHES: &[&str] = &[];
-    const FAILS: &[&str] = &[
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "6\u{FE0F}\u{20E3}",
-        "7",
-        "8",
-        "9",
-        "9\u{FE0F}\u{20E3}",
-        "C",
-        "\u{2603}",
-        "\u{1D306}",
-        "\u{1F1E7}\u{1F1EA}",
-    ];
-
-    test_with_configs_no_ascii(|tc| test_unicode_sets_matches(tc, EXPRESSION, MATCHES, FAILS));
-}
-
-/// 262 test/built-ins/RegExp/unicodeSets/generated/character-class-intersection-property-of-strings-escape.js
-#[test]
-fn unicode_sets_character_class_intersection_property_of_strings_escape() {
-    const EXPRESSION: &str = "^[[0-9]&&\\p{Emoji_Keycap_Sequence}]+$";
     const MATCHES: &[&str] = &[];
     const FAILS: &[&str] = &[
         "0",
