@@ -83,7 +83,7 @@ Independent scenario rows may execute concurrently from the start, subject to th
 repository's two-heavy-job limit and each runbook's port/container isolation rules.
 Judging is a separate sharded phase over completed evidence bundles, so a judge never owns
 or mutates the app it scores. `python3 scripts/judged_runbook_matrix.py --shard I/N` emits a
-stable JSON work shard. The matrix currently expands to **25 rows**: 22 RLM scenarios, two
+stable JSON work shard. The matrix currently expands to **24 rows**: 21 RLM scenarios, two
 no-RLM-session rows, and one composite that exercises host-language surface. The arithmetic
 is asserted by `scripts/test_judged_runbook_matrix.py`, so a reclassification cannot leave
 this number stale without turning CI red.

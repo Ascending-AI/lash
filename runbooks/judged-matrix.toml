@@ -52,7 +52,6 @@ deterministic_only = { emits = false, referent = "runbook" }
 provider-runtime-feedback = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "runtime_feedback_ workspace nextest companion; live outgoing retry request remains judged" }
 context-overflow-recovery = { tier = "deterministic", model = "scripted-provider" }
 rlm-cell-boundary = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
-tictactoe-full-game = { tier = "economy", model = "deepseek/deepseek-v4-flash" }
 workbench-approval = { tier = "economy", model = "deepseek/deepseek-v4-pro" }
 workbench-attachments = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "only Phase 2 calls a provider" }
 workbench-chat-projection = { tier = "economy", model = "deepseek/deepseek-v4-flash", deterministic_phases = "Surfaces A-E, on the named dev-provider scenarios; only Phases 0-4 call a provider" }
