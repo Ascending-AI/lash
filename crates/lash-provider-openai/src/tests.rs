@@ -1542,6 +1542,7 @@ async fn openrouter_handle_records_failed_request_id_then_served_model_evidence(
     let completion = handle
         .complete(
             req,
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -1766,6 +1767,7 @@ async fn responses_handle_does_not_retry_unfinished_tool_arguments() {
             requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
                 Vec::new(),
             )))),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -1807,6 +1809,7 @@ async fn responses_handle_does_not_retry_opaque_reasoning_output() {
             requiring_terminal_evidence(streamed_request(Arc::new(std::sync::Mutex::new(
                 Vec::new(),
             )))),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )

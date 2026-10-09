@@ -142,17 +142,22 @@ impl PluginHost {
         }
     }
 
-    /// A host of the builtin plugins alone, under `execution_budgets`.
-    pub fn empty(execution_budgets: crate::ExecutionBudgets) -> Self {
-        Self::new(Vec::new(), execution_budgets)
+    /// A host of the builtin plugins under the caller's budgets and trace runtime.
+    pub fn empty(
+        execution_budgets: crate::ExecutionBudgets,
+        trace_runtime: crate::trace::TraceRuntime,
+    ) -> Self {
+        Self::new(Vec::new(), execution_budgets, trace_runtime)
     }
 
     /// A host of `factories` over the builtin plugins. Every catalog its
     /// sessions build admits its tools against `execution_budgets`, the
-    /// budgets its runtime's host config records.
+    /// budgets its runtime's host config records. The trace runtime carries the
+    /// caller's clock and observers from construction onward.
     pub fn new(
         factories: Vec<Arc<dyn PluginFactory>>,
         execution_budgets: crate::ExecutionBudgets,
+        trace_runtime: crate::trace::TraceRuntime,
     ) -> Self {
         let override_ids: BTreeSet<&'static str> =
             factories.iter().map(|factory| factory.id()).collect();
@@ -175,7 +180,7 @@ impl PluginHost {
             extensions,
             sessions: Arc::new(StdMutex::new(BTreeMap::new())),
             config_registry,
-            trace_runtime: crate::trace::TraceRuntime::new(Arc::new(crate::SystemClock)),
+            trace_runtime,
             execution_budgets,
         }
     }

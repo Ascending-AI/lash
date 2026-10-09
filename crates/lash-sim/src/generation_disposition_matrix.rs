@@ -355,6 +355,7 @@ async fn run(
     let result = provider
         .complete(
             with_llm_profile_cap(request, cap),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -852,6 +853,7 @@ async fn route_headers_are_sent_or_refused_before_io() {
         let completion = provider
             .complete(
                 with_llm_profile_cap(dialect.request(), cap),
+                lash_core::ChargeSafetyPolicy::RequireGuarantee,
                 lash_core::ExecutionBudgets::recommended(),
                 &lash_core::provider::NoSlotDeliveries,
             )
@@ -882,6 +884,7 @@ async fn route_headers_are_sent_or_refused_before_io() {
         let error = provider
             .complete(
                 with_llm_profile_cap(dialect.request(), cap),
+                lash_core::ChargeSafetyPolicy::RequireGuarantee,
                 lash_core::ExecutionBudgets::recommended(),
                 &lash_core::provider::NoSlotDeliveries,
             )
@@ -918,6 +921,7 @@ async fn thinking_visibility_and_summary_have_distinct_receipts() {
         let completion = provider
             .complete(
                 request,
+                lash_core::ChargeSafetyPolicy::RequireGuarantee,
                 lash_core::ExecutionBudgets::recommended(),
                 &lash_core::provider::NoSlotDeliveries,
             )
@@ -969,6 +973,7 @@ async fn receipt_survives_a_failure_after_send() {
     let error = provider
         .complete(
             request,
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -1027,6 +1032,7 @@ async fn websocket_generation_settings_have_the_same_dispositions_as_sse() {
         let result = provider
             .complete(
                 request,
+                lash_core::ChargeSafetyPolicy::RequireGuarantee,
                 lash_core::ExecutionBudgets::recommended(),
                 &lash_core::provider::NoSlotDeliveries,
             )

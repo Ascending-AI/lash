@@ -259,6 +259,7 @@ impl Processes {
         let environment = lash_core::ProcessExecutionEnvSpec::new(
             lash_core::AdmittedPluginConfig::default(),
             policy,
+            create_request.tool_access.clone(),
         );
         crate::support::build_plugin_host(
             self.core.protocol_factory.as_ref(),

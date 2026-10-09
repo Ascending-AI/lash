@@ -124,6 +124,7 @@ async fn provider_panic_is_typed_and_non_retryable() {
     let failure = provider
         .complete(
             request(),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -156,6 +157,7 @@ async fn manufactured_provider_panic_bypasses_text_classification() {
     let failure = provider
         .complete(
             request(),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -432,6 +434,7 @@ async fn provider_desugared_construction_panics_are_typed_in_quiet_and_loud_mode
             DesugaredPanicCallback::Complete => auxiliary
                 .complete(
                     request(),
+                    lash_core::ChargeSafetyPolicy::RequireGuarantee,
                     lash_core::ExecutionBudgets::recommended(),
                     &lash_core::provider::NoSlotDeliveries,
                 )

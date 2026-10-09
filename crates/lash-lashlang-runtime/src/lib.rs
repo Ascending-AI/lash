@@ -877,7 +877,7 @@ impl LashlangRecordedSettings {
 pub trait LashlangRunSettingsRecorder: Send + Sync {
     fn record(
         &self,
-        plugin_config: &lash_core::AdmittedPluginConfig,
+        environment: &lash_core::ProcessExecutionEnvSpec,
     ) -> Result<LashlangRecordedSettings, lash_core::PluginError>;
 }
 
@@ -961,7 +961,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         env_spec: &lash_core::ProcessExecutionEnvSpec,
     ) -> Result<Option<serde_json::Value>, lash_core::PluginError> {
         let recorded = match &self.run_settings_recorder {
-            Some(recorder) => recorder.record(&env_spec.plugin_config)?,
+            Some(recorder) => recorder.record(env_spec)?,
             None => LashlangRecordedSettings::new(self.surface.clone(), self.execution_bounds),
         };
         serde_json::to_value(recorded)

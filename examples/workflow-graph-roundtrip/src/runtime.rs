@@ -163,6 +163,7 @@ impl PreparedRun {
                     lash::MaxToolCalls::new(1024),
                     lash::NoProgressBudget::bounded(12),
                 ),
+                lash::plugins::SessionToolAccess::ambient(),
             );
             let env_ref = artifacts.publish_process_env(&pin, &env).await?;
             Ok(ProcessStartRequest::new(

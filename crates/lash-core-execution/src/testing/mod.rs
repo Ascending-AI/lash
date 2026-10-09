@@ -75,6 +75,7 @@ fn process_execution_env_fixture_spec() -> crate::ProcessExecutionEnvSpec {
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
         ),
+        crate::SessionToolAccess::ambient(),
     )
 }
 

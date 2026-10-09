@@ -175,6 +175,7 @@ where
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        lash_core::SessionToolAccess::ambient(),
     );
     let env_ref = env.stable_ref().expect("env ref");
     let env_bytes = env.to_store_bytes().expect("env bytes");
@@ -295,6 +296,7 @@ where
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        lash_core::SessionToolAccess::ambient(),
     );
     let env_ref = env.stable_ref().expect("env ref");
     let env_bytes = env.to_store_bytes().expect("env bytes");
@@ -482,6 +484,7 @@ where
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        lash_core::SessionToolAccess::ambient(),
     );
     let first_ref = spec.stable_ref().expect("first captured digest");
     let second_ref = spec.clone().stable_ref().expect("second captured digest");
@@ -586,6 +589,7 @@ where
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        lash_core::SessionToolAccess::ambient(),
     );
     let env_ref = env.stable_ref().expect("environment reference");
     let env_bytes = env.to_store_bytes().expect("environment bytes");

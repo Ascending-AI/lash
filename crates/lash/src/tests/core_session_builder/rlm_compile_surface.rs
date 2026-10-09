@@ -147,6 +147,9 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
             )),
         ],
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     );
     let plugin_config = || {
         let mut config = lash_core::PluginConfig::default();
@@ -168,7 +171,22 @@ async fn rlm_compile_surface_uses_core_plugins_extra_plugins_and_request_options
                 lash_core::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
             ),
+            lash_core::SessionToolAccess::ambient(),
         ),
+    );
+
+    let mut restricted = crate::rlm::LashlangCompileSurfaceRequest::new(
+        "restricted-compile-surface",
+        request.execution_env_spec.clone(),
+    );
+    restricted.execution_env_spec.tool_access =
+        lash_core::SessionToolAccess::restricted(Vec::new()).expect("no resident tools");
+    let restricted_surface = factory.lashlang_compile_surface(&plugin_host, restricted)?;
+    assert!(!restricted_surface.tool_catalog.has_callable_tool("lookup"));
+    assert!(
+        !restricted_surface
+            .tool_catalog
+            .has_callable_tool("compile_core_tool")
     );
 
     let surface = factory.lashlang_compile_surface(&plugin_host, request)?;
@@ -207,6 +225,7 @@ finish(value);
                         lash_core::MaxToolCalls::new(1024),
                         crate::NoProgressBudget::bounded(12),
                     ),
+                    lash_core::SessionToolAccess::ambient(),
                 ),
             ),
         )

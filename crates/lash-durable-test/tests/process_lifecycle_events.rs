@@ -364,6 +364,7 @@ fn environment() -> lash_core::ProcessExecutionEnvSpec {
             lash::MaxToolCalls::new(16),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        lash_core::SessionToolAccess::ambient(),
     );
     environment.render = Some(lash_core::RecordedRender {
         renderer_id: lash::render::ToolOutputRendererSlot::default()

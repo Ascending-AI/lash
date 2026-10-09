@@ -9,7 +9,7 @@ async fn authorizes_bounded_duplicate_billing_and_projects_typed_trace() {
     let mut handle = paid_partial_handle(Arc::clone(&attempts), 1, 2, None);
 
     let completion = handle
-        .complete_with_charge_safety(
+        .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: 1,
@@ -43,7 +43,7 @@ async fn duplicate_cost_bound_denies_and_projects_typed_trace() {
     let mut handle = paid_partial_handle(Arc::clone(&attempts), 1, 2, None);
 
     let failure = handle
-        .complete_with_charge_safety(
+        .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: 1,
@@ -134,7 +134,7 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
     let mut handle = paid_partial_handle(Arc::clone(&attempts), 1, 1, Some(Duration::from_secs(2)))
         .with_clock(Arc::clone(&clock) as _);
     handle
-        .complete_with_charge_safety(
+        .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: 1,
@@ -154,7 +154,7 @@ async fn unsafe_retry_honors_retry_after_and_excessive_delay_fails_fast() {
         paid_partial_handle(Arc::clone(&attempts), 1, 2, Some(Duration::from_secs(61)))
             .with_clock(Arc::clone(&clock) as _);
     let failure = handle
-        .complete_with_charge_safety(
+        .complete(
             empty_request(),
             crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: 1,
@@ -235,4 +235,54 @@ fn precedence_is_structural() {
         }),
         "the appetite may authorize only after higher-precedence facts permit evaluation",
     );
+}
+
+/// FIG-5582: a one-shot call uses the caller's configured billing bound.
+#[tokio::test]
+async fn one_shot_completion_applies_configured_charge_safety_policy() {
+    for bound in [9, 10] {
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let mut handle = paid_partial_handle(Arc::clone(&attempts), 1, 2, None)
+            .with_clock(Arc::new(RecordingClock::default()));
+        let configured = crate::ChargeSafetyPolicy::AcceptDuplicateBilling {
+            max_unsafe_retries: 1,
+            max_duplicate_cost_tokens: Some(bound),
+        };
+        let result = handle
+            .complete(
+                empty_request(),
+                configured,
+                lash_sansio::ExecutionBudgets::recommended(),
+                &crate::provider::NoSlotDeliveries,
+            )
+            .await;
+        if bound == 9 {
+            let failure = result.expect_err("the configured cost bound refuses the retry");
+            assert_eq!(attempts.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                failure.call_record.attempts[0]
+                    .retry_decision
+                    .as_ref()
+                    .and_then(|decision| decision.charge_safety()),
+                Some(crate::ChargeSafetyDecision::Denied {
+                    tokens_at_stake: 10,
+                    attempt_number: 1,
+                    reason: crate::ChargeSafetyDenialReason::DuplicateCostLimitExceeded,
+                }),
+            );
+        } else {
+            let completion = result.expect("the configured cost bound permits one retry");
+            assert_eq!(attempts.load(Ordering::SeqCst), 2);
+            assert_eq!(
+                completion.call_record.attempts[0]
+                    .retry_decision
+                    .as_ref()
+                    .and_then(|decision| decision.charge_safety()),
+                Some(crate::ChargeSafetyDecision::Authorized {
+                    tokens_at_stake: 10,
+                    attempt_number: 1,
+                }),
+            );
+        }
+    }
 }

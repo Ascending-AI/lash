@@ -24,6 +24,9 @@ pub(super) fn config(native: bool, termination: RlmTermination) -> TurnMachineCo
     let host = lash_core::facade_support::PluginHost::new(
         vec![Arc::new(factory)],
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     );
     let session = host
         .build_session(PluginSessionRequest::creation(
@@ -86,6 +89,9 @@ fn rlm_catalog_distinguishes_ambient_from_restricted_empty_access() {
         lash_core::facade_support::PluginHost::new(
             vec![Arc::new(factory)],
             lash_core::ExecutionBudgets::recommended(),
+            lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                lash_core::facade_support::SystemClock,
+            )),
         )
         .build_session(PluginSessionRequest::creation(
             lash_core::SessionId::fixture(session_id),
@@ -759,6 +765,9 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
     let host = lash_core::facade_support::PluginHost::new(
         vec![Arc::new(factory)],
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     );
     let session = host
         .build_session(PluginSessionRequest::creation(

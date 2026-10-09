@@ -101,6 +101,9 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
     let created_host = lash_core::facade_support::PluginHost::new(
         vec![protocol(), created_factory.clone()],
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     );
     let plugin_config = created_host
         .resolve_creation_plugin_config(
@@ -136,6 +139,9 @@ async fn recorded_tool_surface_is_preserved_when_advertised_tools_change() {
     let reopened = lash_core::facade_support::PluginHost::new(
         vec![protocol(), reopened_factory.clone()],
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     )
     .build_session(lash_core::plugin::PluginSessionRequest::rematerialization(
         "advertised-surface",
@@ -265,6 +271,9 @@ async fn server_instructions_render_once_per_module_on_every_prompt_surface() {
         let host = lash_core::facade_support::PluginHost::new(
             vec![protocol, factory.clone()],
             lash_core::ExecutionBudgets::recommended(),
+            lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                lash_core::facade_support::SystemClock,
+            )),
         );
         let plugin_config = host
             .resolve_creation_plugin_config(

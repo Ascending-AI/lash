@@ -52,6 +52,7 @@ async fn a_started_process_reads_as_its_graph_and_canonical_source() {
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),
                 ),
+                lash_core::SessionToolAccess::ambient(),
             ),
         )
         .await

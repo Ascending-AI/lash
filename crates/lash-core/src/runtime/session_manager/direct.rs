@@ -442,6 +442,7 @@ mod tests {
         .with_plugin_host(Arc::new(crate::PluginHost::new(
             crate::testing::test_standard_protocol_factories(),
             crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         )))
         .build();
         let policy = standard_test_policy();

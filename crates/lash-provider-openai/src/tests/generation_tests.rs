@@ -166,6 +166,7 @@ async fn every_retry_attempt_reapplies_the_sampling_controls() {
     let completion = handle
         .complete(
             sampled_request(),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )

@@ -170,6 +170,7 @@ pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutio
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        crate::SessionToolAccess::ambient(),
     );
     let bytes = spec.to_store_bytes().expect("encode test environment");
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(

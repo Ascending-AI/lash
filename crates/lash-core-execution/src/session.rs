@@ -925,15 +925,19 @@ mod tool_catalog_cache_tests {
             crate::plugin::PluginDeclaration::initial("admission_probe"),
             crate::PluginSpec::new().with_tool_provider(provider),
         )));
-        crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
-            .build_session(PluginSessionRequest::creation(
-                "admission-probe",
-                crate::plugin::SessionAuthorityContext {
-                    tool_access,
-                    ..crate::plugin::SessionAuthorityContext::ambient_fixture()
-                },
-            ))
-            .expect("plugin session")
+        crate::PluginHost::new(
+            factories,
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+        )
+        .build_session(PluginSessionRequest::creation(
+            "admission-probe",
+            crate::plugin::SessionAuthorityContext {
+                tool_access,
+                ..crate::plugin::SessionAuthorityContext::ambient_fixture()
+            },
+        ))
+        .expect("plugin session")
     }
 
     async fn admission_probe_session(provider: Arc<dyn ToolProvider>) -> Session {
@@ -1088,12 +1092,16 @@ mod tool_catalog_cache_tests {
             crate::plugin::PluginDeclaration::initial("pinned_surface"),
             crate::PluginSpec::new().with_tool_provider(provider),
         )));
-        let plugins = crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
-            .build_session(PluginSessionRequest::creation(
-                "pinned-surface",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
-            ))
-            .expect("plugin session");
+        let plugins = crate::PluginHost::new(
+            factories,
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+        )
+        .build_session(PluginSessionRequest::creation(
+            "pinned-surface",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
+        .expect("plugin session");
         let session = Session::new(
             crate::testing::runtime_services_without_ports(plugins),
             &SessionId::from("pinned-surface"),
@@ -1220,12 +1228,16 @@ mod tool_catalog_cache_tests {
             crate::plugin::PluginDeclaration::initial("reassignable"),
             spec,
         )));
-        let plugins = crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
-            .build_session(PluginSessionRequest::creation(
-                "route-reassignment",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
-            ))
-            .expect("plugin session");
+        let plugins = crate::PluginHost::new(
+            factories,
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+        )
+        .build_session(PluginSessionRequest::creation(
+            "route-reassignment",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
+        .expect("plugin session");
         let session_id = SessionId::from("route-reassignment");
         let session = Session::new(
             crate::testing::runtime_services_without_ports(plugins),

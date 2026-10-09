@@ -151,6 +151,7 @@ async fn refusing_dispatch_context(plugins: Arc<PluginSession>) -> ToolDispatchC
                 crate::MaxToolCalls::new(1024),
                 lash_core_execution::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: crate::SessionId::from("session"),

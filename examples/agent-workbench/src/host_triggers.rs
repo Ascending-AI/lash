@@ -1135,6 +1135,7 @@ fn delivered_process_environment() -> lash::process::ProcessExecutionEnvSpec {
             lash::MaxToolCalls::new(1024),
             lash::NoProgressBudget::bounded(12),
         ),
+        lash::plugins::SessionToolAccess::ambient(),
     )
 }
 

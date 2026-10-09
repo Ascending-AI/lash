@@ -30,7 +30,7 @@ pub struct ProcessRuntimeContext {
 
 impl ProcessRuntimeContext {
     /// Build the runtime `process` runs under: the environment its start
-    /// captured — its starter's recorded policy and plugin config — and this
+    /// captured — its starter's policy, plugin config and tool authority — and this
     /// worker's ports. An engine process and a session-turn process alike run
     /// under the facts their start recorded; the worker supplies no default
     /// for either (FIG-4396).
@@ -77,11 +77,9 @@ impl ProcessRuntimeContext {
             .isolated_registry()
             .defer_session(crate::plugin::PluginSessionRequest::process_creation(
                 process_id.clone(),
-                // A process records no session: its captured environment
-                // states its plugin configuration, and its tool authority is
-                // ambient over the worker's registry by construction.
+                // Every rebuild reads the authority the process captured at creation.
                 crate::plugin::SessionAuthorityContext {
-                    tool_access: crate::SessionToolAccess::ambient(),
+                    tool_access: environment.tool_access.clone(),
                     plugin_config: environment.plugin_config.clone(),
                 },
             ))?;

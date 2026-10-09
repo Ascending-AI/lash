@@ -235,6 +235,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
             turn_context: crate::TurnContext::default(),
             session_host_mode: TestSessionHostMode::Independent,
@@ -437,13 +438,16 @@ impl<'run> TestExecutionContextBuilder<'run> {
             crate::plugin::PluginDeclaration::initial(crate::PLUGIN_TOOL_SOURCE_ID),
             crate::plugin::PluginSpec::new().with_tool_provider(Arc::clone(&self.provider)),
         )));
-        let plugins =
-            crate::plugin::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
-                .build_session(PluginSessionRequest::creation(
-                    &self.session_id,
-                    crate::plugin::SessionAuthorityContext::ambient_fixture(),
-                ))
-                .expect("test plugin session");
+        let plugins = crate::plugin::PluginHost::new(
+            factories,
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+        )
+        .build_session(PluginSessionRequest::creation(
+            &self.session_id,
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
+        .expect("test plugin session");
         let (sessions, session_lifecycle, session_graph): (
             Arc<dyn crate::plugin::SessionStateService>,
             Arc<dyn crate::plugin::SessionLifecycleService>,

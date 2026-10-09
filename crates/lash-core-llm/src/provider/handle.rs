@@ -173,37 +173,13 @@ impl ProviderHandle {
         self.components.provider.requires_streaming()
     }
 
-    /// Completes `request` under `budgets`, the execution budgets its caller
-    /// recorded, and the default charge-safety policy.
+    /// Completes a request under the caller's recorded or configured charge-safety
+    /// policy and execution budgets, just as an admitted attempt does.
     #[allow(
         clippy::result_large_err,
         reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
     )]
     pub async fn complete(
-        &mut self,
-        request: LlmRequest,
-        budgets: lash_sansio::ExecutionBudgets,
-        deliveries: &dyn SlotDeliveries,
-    ) -> Result<ProviderCompletion, ProviderCompletionError> {
-        self.complete_with_charge_safety(
-            request,
-            crate::ChargeSafetyPolicy::default(),
-            budgets,
-            deliveries,
-        )
-        .await
-    }
-
-    /// Completes a request under an explicit live charge-safety policy and
-    /// `budgets`, the execution budgets its caller recorded.
-    ///
-    /// Prefer [`Self::complete`] unless the host has deliberately accepted a
-    /// bounded duplicate-billing risk for this call.
-    #[allow(
-        clippy::result_large_err,
-        reason = "ProviderCompletionError carries the sealed call record for observability; boxing it would push the cost onto every caller"
-    )]
-    pub async fn complete_with_charge_safety(
         &mut self,
         mut request: LlmRequest,
         charge_safety: crate::ChargeSafetyPolicy,

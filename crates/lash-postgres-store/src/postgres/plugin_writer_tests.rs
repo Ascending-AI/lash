@@ -181,6 +181,7 @@ async fn publish_env(storage: &PostgresStorage, format: u32) -> Result<(), Store
             lash_core_execution::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        lash_core_execution::SessionToolAccess::ambient(),
     )
     .to_store_bytes()
     .expect("encode the environment");

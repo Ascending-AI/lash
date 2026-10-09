@@ -62,6 +62,7 @@ fn host(reducer_calls: &Arc<AtomicUsize>) -> crate::PluginHost {
             )),
         ],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     )
 }
 
@@ -732,6 +733,7 @@ async fn a_recorded_resolution_replays_without_its_reducer() {
             )),
         ],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let cold = session(&changed, Some(&base));
     publish(&cold, "add", journaled(&outcome)).unwrap();
@@ -1074,6 +1076,7 @@ async fn a_publication_past_the_session_budget_warns_then_is_refused() {
             })
             .collect(),
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let live = session(&host, None);
     // Four values each just under the value limit: about 120 KB a namespace.

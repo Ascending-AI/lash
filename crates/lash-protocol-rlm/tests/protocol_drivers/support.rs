@@ -559,6 +559,9 @@ impl RlmProtocolScenario {
                 PluginHost::new(
                     self.plugin_factories.clone(),
                     lash_core::ExecutionBudgets::recommended(),
+                    lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                        lash_core::facade_support::SystemClock,
+                    )),
                 )
                 .build_session(PluginSessionRequest::creation(
                     "rlm-protocol-scenario-hooks",

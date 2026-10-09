@@ -232,6 +232,7 @@ where
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        lash_core::SessionToolAccess::ambient(),
     );
     let env_ref = env_spec.stable_ref().expect("stable env ref");
     let env_bytes = env_spec.to_store_bytes().expect("encode env");

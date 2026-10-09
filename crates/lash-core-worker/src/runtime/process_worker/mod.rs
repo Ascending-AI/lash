@@ -17,7 +17,7 @@ use lash_core_execution::runtime::actor::process::{
 /// Deployment-local configuration for rebuilding durable process executions.
 ///
 /// Process rows carry portable process input, provenance and the environment
-/// their start captured: the starter's recorded policy and plugin config, which
+/// their start captured: the starter's recorded policy, tool authority and plugin config, which
 /// every process runtime runs under. Workers provide the physical binding —
 /// plugins, providers, stores, secrets and host capabilities — for the
 /// deployment that owns those rows, and no behaviour of their own: a worker
@@ -78,6 +78,7 @@ impl DurableProcessWorkerConfig {
             Arc::new(PluginHost::new(
                 plugin_factories.into_iter().collect(),
                 runtime_host.control.execution_budgets.clone(),
+                runtime_host.tracing.clone(),
             )),
             runtime_host,
             process_work,

@@ -387,6 +387,7 @@ impl Spawn {
                         lash::MaxToolCalls::new(16),
                         lash_core::NoProgressBudget::bounded(12),
                     ),
+                    lash_core::SessionToolAccess::ambient(),
                 ),
             )
             .await

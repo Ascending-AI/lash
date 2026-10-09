@@ -685,6 +685,7 @@ async fn complete_websocket_with_events_and_capture(
     let result = provider
         .complete(
             matrix_request("codex.responses-websocket", row, Arc::clone(events)),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -821,6 +822,7 @@ async fn complete_http_buffered(
     provider
         .complete(
             request,
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -851,6 +853,7 @@ async fn complete_http_with_events(
     provider
         .complete(
             matrix_request(dialect, row, Arc::clone(events)),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )

@@ -138,7 +138,13 @@ pub(super) async fn plugin_format_boundary(
     let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(FormatPlugin(calls.clone())));
-    let host = crate::PluginHost::new(factories, lash_core::ExecutionBudgets::recommended());
+    let host = crate::PluginHost::new(
+        factories,
+        lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
+    );
     let mut state = RuntimeSessionState {
         session_id: crate::SessionId::fixture(session_id),
         ..RuntimeSessionState::ambient_fixture(crate::SessionPolicy::new(

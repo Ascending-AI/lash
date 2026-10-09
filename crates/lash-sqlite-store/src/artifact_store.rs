@@ -1048,6 +1048,7 @@ mod tests {
                 lash_core_execution::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
+            lash_core_execution::SessionToolAccess::ambient(),
         );
         let bytes = spec.to_store_bytes().expect("encode environment");
         let env_ref = spec.stable_ref().expect("environment reference");

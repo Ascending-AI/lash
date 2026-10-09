@@ -65,7 +65,11 @@ pub fn test_plugin_host(factories: Vec<Arc<dyn PluginFactory>>) -> crate::Plugin
     let mut all = test_standard_protocol_factories();
     all.retain(|factory| !override_ids.contains(factory.id()));
     all.extend(factories);
-    crate::PluginHost::new(all, crate::ExecutionBudgets::recommended())
+    crate::PluginHost::new(
+        all,
+        crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+    )
 }
 
 pub fn test_code_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {

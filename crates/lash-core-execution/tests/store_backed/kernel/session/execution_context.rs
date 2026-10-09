@@ -60,6 +60,7 @@ mod tests {
                 crate::MaxToolCalls::new(1024),
                 lash_core_execution::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         );
         let pin = crate::testing::host_pin_claim_for_testing();
         let inherited =

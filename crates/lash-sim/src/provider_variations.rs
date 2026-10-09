@@ -401,6 +401,7 @@ mod tests {
                                 trace_sink.lock_recover().push(event);
                             }),
                         ),
+                        lash_core::ChargeSafetyPolicy::RequireGuarantee,
                         lash_core::ExecutionBudgets::recommended(),
                         &lash_core::provider::NoSlotDeliveries,
                     )

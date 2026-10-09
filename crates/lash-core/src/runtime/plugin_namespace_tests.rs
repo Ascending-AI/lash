@@ -75,6 +75,7 @@ async fn runtime_open_defers_capabilities_until_recorded_publication() {
     let old_host = crate::PluginHost::new(
         crate::testing::test_standard_protocol_factories(),
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let id = crate::SessionId::from("deferred-cold-composition");
     let request = crate::plugin::PluginTransitionRequest {
@@ -283,7 +284,11 @@ async fn plugin_context_host_exports_cannot_escape_namespaces() {
             hosts: hosts.clone(),
         }) as Arc<dyn crate::plugin::PluginFactory>,
     ]);
-    let host = crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended());
+    let host = crate::PluginHost::new(
+        factories,
+        crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+    );
     let parent = host
         .defer_session(PluginSessionRequest::creation(
             "private-parent",

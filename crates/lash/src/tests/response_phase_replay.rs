@@ -16,12 +16,18 @@ fn callback_session(
     plugins.push(Arc::new(
         lash_protocol_standard::StandardProtocolPluginFactory::new(),
     ));
-    lash_core::facade_support::PluginHost::new(plugins, lash_core::ExecutionBudgets::recommended())
-        .build_session(lash_core::plugin::PluginSessionRequest::creation(
-            "recorded-response-plan",
-            lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
-        ))
-        .expect("materialize the callback registry")
+    lash_core::facade_support::PluginHost::new(
+        plugins,
+        lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
+    )
+    .build_session(lash_core::plugin::PluginSessionRequest::creation(
+        "recorded-response-plan",
+        lash_core::plugin::SessionAuthorityContext::ambient_fixture(),
+    ))
+    .expect("materialize the callback registry")
 }
 
 fn appending_callback(

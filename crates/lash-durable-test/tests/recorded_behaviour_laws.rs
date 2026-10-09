@@ -386,6 +386,7 @@ async fn a_host_started_process_runs_under_the_behaviour_its_creation_recorded(t
                     lash::MaxToolCalls::new(16),
                     lash_core::NoProgressBudget::bounded(12),
                 ),
+                lash_core::SessionToolAccess::ambient(),
             ),
         )
         .await

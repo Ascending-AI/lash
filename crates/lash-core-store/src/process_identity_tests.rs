@@ -1,7 +1,7 @@
 use super::*;
 
 /// ADR 0004: a process execution environment is a closed, typed shape —
-/// policy plus plugin-owned options. A field the type does not declare is a
+/// policy, tool authority and plugin-owned options. A field the type does not declare is a
 /// missing capability, and it is refused when the environment decodes, not
 /// discovered later during process recovery.
 #[test]
@@ -13,12 +13,37 @@ fn a_process_execution_environment_rejects_unknown_fields() {
             crate::MaxToolCalls::new(1024),
             crate::NoProgressBudget::bounded(12),
         ),
+        crate::SessionToolAccess::restricted(Vec::new()).expect("no resident tools"),
     );
     let encoded = spec.to_store_bytes().expect("encode the environment");
     assert_eq!(
         ProcessExecutionEnvSpec::from_store_bytes(&encoded).expect("the environment decodes"),
         spec,
         "a conforming environment round-trips"
+    );
+
+    let mut missing: serde_json::Value = serde_json::from_slice(&encoded).expect("object");
+    missing
+        .as_object_mut()
+        .expect("object")
+        .remove("tool_access");
+    assert!(
+        ProcessExecutionEnvSpec::from_store_bytes(
+            &serde_json::to_vec(&missing).expect("encode missing authority")
+        )
+        .expect_err("authority is required")
+        .to_string()
+        .contains("tool_access")
+    );
+    assert_ne!(
+        spec.stable_ref().expect("restricted reference"),
+        ProcessExecutionEnvSpec::new(
+            spec.plugin_config.clone(),
+            spec.policy.clone(),
+            crate::SessionToolAccess::ambient()
+        )
+        .stable_ref()
+        .expect("ambient reference")
     );
 
     let mut fields: serde_json::Map<String, serde_json::Value> =

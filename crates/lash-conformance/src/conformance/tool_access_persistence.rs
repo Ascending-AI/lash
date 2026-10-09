@@ -48,6 +48,9 @@ fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id:
     let session = lash_core::facade_support::PluginHost::new(
         factories,
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     )
     .build_session(PluginSessionRequest::creation(
         lash_core::SessionId::fixture(session_id),

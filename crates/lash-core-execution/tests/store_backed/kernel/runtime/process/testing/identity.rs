@@ -68,7 +68,11 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
                 }),
         ),
     ));
-    let spec = ProcessExecutionEnvSpec::new(crate::AdmittedPluginConfig::default(), policy);
+    let spec = ProcessExecutionEnvSpec::new(
+        crate::AdmittedPluginConfig::default(),
+        policy,
+        crate::SessionToolAccess::ambient(),
+    );
     let claim = crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
         crate::HostArtifactPin::mint(),
     ))

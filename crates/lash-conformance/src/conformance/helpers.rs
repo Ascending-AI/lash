@@ -77,6 +77,7 @@ fn alternate_process_environment() -> crate::ProcessExecutionEnvSpec {
             crate::MaxToolCalls::new(1),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        crate::SessionToolAccess::ambient(),
     )
 }
 

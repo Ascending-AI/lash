@@ -773,6 +773,7 @@ async fn provider_handle_records_drop_without_provider_trace_and_stamps_fresh_st
     let completion = handle
         .complete(
             request,
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -837,6 +838,7 @@ async fn same_provider_and_model_on_distinct_gateways_are_foreign_routes() {
     let completion = handle
         .complete(
             request,
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -866,6 +868,7 @@ async fn invalid_endpoint_failure_records_a_real_no_response_attempt() {
     let failure = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -914,6 +917,7 @@ async fn call_id_derives_from_the_request_scope() {
     let first = handle
         .complete(
             request.clone(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -922,6 +926,7 @@ async fn call_id_derives_from_the_request_scope() {
     let second = handle
         .complete(
             request,
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -938,6 +943,7 @@ async fn call_id_derives_from_the_request_scope() {
     let third = handle
         .complete(
             other,
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -955,6 +961,7 @@ async fn provider_handle_rejects_instead_of_recertifying_foreign_stamped_output(
     let failure = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -979,6 +986,7 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
     let failure = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -1206,6 +1214,7 @@ async fn provider_handle_records_aborted_and_interrupted_outcomes() {
         let completion = handle
             .complete(
                 empty_request(),
+                crate::ChargeSafetyPolicy::RequireGuarantee,
                 lash_sansio::ExecutionBudgets::recommended(),
                 &NoSlotDeliveries,
             )
@@ -1228,6 +1237,7 @@ async fn failed_stream_attempt_retains_observed_usage_and_evidence_in_ledger() {
     let failure = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -1277,6 +1287,7 @@ async fn output_started_failure_is_typed_non_retryable_when_max_attempts_is_one(
     let failure = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -1614,6 +1625,7 @@ async fn provider_handle_records_usage_and_evidence_for_any_provider_kind() {
     let completion = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -1735,6 +1747,7 @@ async fn provider_handle_stops_on_non_retryable_failure() {
     let err = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -1833,6 +1846,7 @@ async fn provider_handle_retry_after_beyond_cap_fails_without_sleeping() {
     let failure = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -1868,6 +1882,7 @@ async fn provider_handle_repeated_past_http_dates_are_attempt_bounded() {
     let failure = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -1917,6 +1932,7 @@ async fn provider_handle_throttle_budget_exhaustion_degrades_to_attempt_counting
     let err = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -1949,6 +1965,7 @@ async fn provider_handle_one_second_throttle_storm_has_a_total_call_bound() {
     let failure = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -1999,6 +2016,7 @@ async fn provider_handle_throttle_without_retry_after_uses_counted_backoff_retry
     let err = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -2034,6 +2052,7 @@ async fn provider_handle_throttle_with_malformed_retry_after_uses_counted_backof
     let err = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -2070,6 +2089,7 @@ async fn provider_handle_server_error_with_retry_after_is_not_retried() {
     let err = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -2101,6 +2121,7 @@ async fn provider_handle_attachment_413_remains_plain_non_retryable_validation()
     let error = handle
         .complete(
             empty_request(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )
@@ -2208,6 +2229,7 @@ async fn admission_decorator_observes_all_retry_requests_with_session_identity()
     let completion = handle
         .complete(
             request.clone(),
+            crate::ChargeSafetyPolicy::RequireGuarantee,
             lash_sansio::ExecutionBudgets::recommended(),
             &NoSlotDeliveries,
         )

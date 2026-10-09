@@ -141,6 +141,7 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
     };
     let mut first_call = Box::pin(first.complete(
         request.clone(),
+        lash_core::ChargeSafetyPolicy::RequireGuarantee,
         lash_core::ExecutionBudgets::recommended(),
         &lash_core::provider::NoSlotDeliveries,
     ));
@@ -151,6 +152,7 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
     assert_eq!(permits.available_permits(), 0);
     let mut second_call = Box::pin(second.complete(
         request.clone(),
+        lash_core::ChargeSafetyPolicy::RequireGuarantee,
         lash_core::ExecutionBudgets::recommended(),
         &lash_core::provider::NoSlotDeliveries,
     ));
@@ -172,6 +174,7 @@ async fn host_admission_permit_releases_on_cancellation_and_forwards_close() {
     next_request.scope.request_id = "next-request".into();
     let mut next_call = Box::pin(second.complete(
         next_request,
+        lash_core::ChargeSafetyPolicy::RequireGuarantee,
         lash_core::ExecutionBudgets::recommended(),
         &lash_core::provider::NoSlotDeliveries,
     ));

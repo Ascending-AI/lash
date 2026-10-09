@@ -224,6 +224,7 @@ fn offered(namespace: Option<DelegatedChild>) -> Vec<String> {
             factory,
         ],
         lash::ExecutionBudgets::recommended(),
+        lash::runtime::TraceRuntime::new(std::sync::Arc::new(lash::runtime::SystemClock)),
     );
     let options = match namespace {
         Some(child) => PluginOptions::typed(DELEGATION_PLUGIN_ID, child).expect("the namespace"),

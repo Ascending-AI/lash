@@ -37,6 +37,9 @@ async fn compile(
             &PluginHost::new(
                 vec![factory.clone()],
                 lash_core::ExecutionBudgets::recommended(),
+                lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                    lash_core::facade_support::SystemClock,
+                )),
             ),
             LashlangModuleCompileRequest::new(
                 "worker-policy",
@@ -48,6 +51,7 @@ async fn compile(
                         crate::MaxToolCalls::new(16),
                         crate::NoProgressBudget::bounded(12),
                     ),
+                    crate::plugins::SessionToolAccess::ambient(),
                 ),
             ),
         )
@@ -232,7 +236,13 @@ async fn facade_vm_segment_policy_reaches_engine_step_admission() {
     );
 
     let factory = Arc::new(factory(&backend, WorkerService::default()).with_segment_policy(policy));
-    let host = PluginHost::new(vec![factory], lash_core::ExecutionBudgets::recommended());
+    let host = PluginHost::new(
+        vec![factory],
+        lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
+    );
     let runtime = host
         .install_process_engine_contributions(
             crate::durability::RuntimeHostConfig::new(

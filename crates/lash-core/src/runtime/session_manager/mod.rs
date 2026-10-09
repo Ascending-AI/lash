@@ -629,6 +629,7 @@ mod process_visibility_tests {
             .with_plugin_host(Arc::new(crate::PluginHost::new(
                 crate::testing::test_standard_protocol_factories(),
                 crate::ExecutionBudgets::recommended(),
+                crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
             )))
             .with_process_work(crate::testing::process_work_wiring_for_registry(
                 registry.clone(),

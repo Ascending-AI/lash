@@ -39,6 +39,9 @@ async fn assert_runtime_assembly_refuses_without_writes(
     let plugins = lash_core::facade_support::PluginHost::new(
         lash_core::testing::test_standard_protocol_factories(),
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     )
     .build_session(PluginSessionRequest::creation(
         session_id.clone(),

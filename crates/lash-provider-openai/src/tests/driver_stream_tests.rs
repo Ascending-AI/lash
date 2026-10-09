@@ -607,6 +607,7 @@ async fn responses_handle_resumes_after_the_last_sequence_without_duplicate_outp
     let completion = handle
         .complete(
             request,
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &super::attachment_tests::UrlDelivery,
         )
@@ -737,6 +738,7 @@ async fn responses_checkpoint_does_not_resume_a_different_logical_call() {
     handle
         .complete(
             call_a,
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -748,6 +750,7 @@ async fn responses_checkpoint_does_not_resume_a_different_logical_call() {
     let completion = handle
         .complete(
             call_b,
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -803,6 +806,7 @@ async fn responses_resume_event_without_sequence_number_fails_closed() {
     let failure = handle
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -857,6 +861,7 @@ async fn responses_resume_response_without_event_stream_fails_closed() {
     let failure = handle
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -902,6 +907,7 @@ async fn retry_guarantee_stays_none_without_a_response_id_and_for_chat_completio
     let failure = handle
         .complete(
             streamed_request(Arc::new(std::sync::Mutex::new(Vec::new()))),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )
@@ -1003,6 +1009,7 @@ async fn responses_resume_keeps_cumulative_usage_as_one_generation_bill() {
     let completion = handle
         .complete(
             streamed_request(Arc::clone(&events)),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )

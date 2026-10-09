@@ -60,6 +60,7 @@ fn session_env_ref() -> lash_core::ProcessExecutionEnvRef {
                 crate::NoProgressBudget::bounded(12),
             )
         },
+        lash_core::SessionToolAccess::ambient(),
     ))
     .stable_ref()
     .expect("captured environment digest")
@@ -289,6 +290,7 @@ async fn ingress_engine_core(
                         crate::NoProgressBudget::bounded(12),
                     )
                 },
+                lash_core::SessionToolAccess::ambient(),
             ),
         )
         .await?;
@@ -323,6 +325,7 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
                         crate::NoProgressBudget::bounded(12),
                     )
                 },
+                lash_core::SessionToolAccess::ambient(),
             ))
             .stable_ref()
             .expect("captured environment digest"),
@@ -341,6 +344,7 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
                 crate::NoProgressBudget::bounded(12),
             )
         },
+        lash_core::SessionToolAccess::ambient(),
     )
 }
 

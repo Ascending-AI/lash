@@ -438,12 +438,16 @@ pub fn plugin_session_with_tools(
     );
     let mut factories = crate::testing::test_standard_protocol_factories();
     factories.push(Arc::new(tool_factory));
-    crate::PluginHost::new(factories, crate::ExecutionBudgets::recommended())
-        .build_session(PluginSessionRequest::creation(
-            session_id,
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
-        ))
-        .expect("plugins")
+    crate::PluginHost::new(
+        factories,
+        crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+    )
+    .build_session(PluginSessionRequest::creation(
+        session_id,
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+    ))
+    .expect("plugins")
 }
 
 pub struct EmptyTools;

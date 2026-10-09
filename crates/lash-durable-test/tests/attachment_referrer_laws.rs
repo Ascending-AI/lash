@@ -515,6 +515,9 @@ impl Law {
                 sim::untimed_workers(),
             ))],
             lash_core::ExecutionBudgets::recommended(),
+            lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                lash_core::facade_support::SystemClock,
+            )),
         );
         let engines = host
             .install_process_engine_contributions(

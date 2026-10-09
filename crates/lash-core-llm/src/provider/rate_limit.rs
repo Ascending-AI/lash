@@ -473,11 +473,13 @@ mod admission_tests {
             tokio::join!(
                 first.complete(
                     super::super::tests::empty_request(),
+                    crate::ChargeSafetyPolicy::RequireGuarantee,
                     lash_sansio::ExecutionBudgets::recommended(),
                     &crate::provider::NoSlotDeliveries
                 ),
                 second.complete(
                     super::super::tests::empty_request(),
+                    crate::ChargeSafetyPolicy::RequireGuarantee,
                     lash_sansio::ExecutionBudgets::recommended(),
                     &crate::provider::NoSlotDeliveries
                 )
@@ -571,6 +573,7 @@ mod admission_tests {
         let completion = handle
             .complete(
                 super::super::tests::empty_request(),
+                crate::ChargeSafetyPolicy::RequireGuarantee,
                 lash_sansio::ExecutionBudgets::recommended(),
                 &crate::provider::NoSlotDeliveries,
             )
@@ -598,6 +601,7 @@ mod admission_tests {
         first
             .complete(
                 super::super::tests::empty_request(),
+                crate::ChargeSafetyPolicy::RequireGuarantee,
                 lash_sansio::ExecutionBudgets::recommended(),
                 &crate::provider::NoSlotDeliveries,
             )
@@ -624,6 +628,7 @@ mod admission_tests {
             second_handle
                 .complete(
                     request.clone(),
+                    crate::ChargeSafetyPolicy::RequireGuarantee,
                     lash_sansio::ExecutionBudgets::recommended(),
                     &crate::provider::NoSlotDeliveries
                 )
@@ -635,6 +640,7 @@ mod admission_tests {
         second_handle
             .complete(
                 request,
+                crate::ChargeSafetyPolicy::RequireGuarantee,
                 lash_sansio::ExecutionBudgets::recommended(),
                 &crate::provider::NoSlotDeliveries,
             )

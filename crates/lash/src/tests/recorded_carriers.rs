@@ -81,6 +81,7 @@ async fn reopened_rlm_session_and_process_runtime_run_under_recorded_budgets_and
     let environment = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::AdmittedPluginConfig::new(head.plugin_config.clone(), head.config_revision),
         head.session_policy(),
+        authority.clone(),
     );
     assert!(
         !environment.plugin_config.config.is_empty(),
@@ -161,8 +162,8 @@ async fn reopened_rlm_session_and_process_runtime_run_under_recorded_budgets_and
     assert_eq!(plugins.admitted_plugin_config(), environment.plugin_config);
     assert_eq!(
         plugins.tool_access(),
-        crate::plugins::SessionToolAccess::ambient(),
-        "a process records no session authority and states ambient"
+        authority,
+        "a reopened process keeps its recorded tool restriction"
     );
     drop(session);
     core.shutdown().await.expect("shutdown");

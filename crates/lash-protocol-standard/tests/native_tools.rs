@@ -34,6 +34,9 @@ fn standard_session_with_access(
             )),
         ],
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     )
     .build_session(PluginSessionRequest::creation(
         lash_core::SessionId::fixture(session_id),
@@ -77,6 +80,9 @@ fn a_catalogue_tool_named_batch_is_refused_while_the_sugar_is_offered() {
                 )),
             ],
             lash_core::ExecutionBudgets::recommended(),
+            lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                lash_core::facade_support::SystemClock,
+            )),
         )
         .build_session(PluginSessionRequest::creation(
             "root",

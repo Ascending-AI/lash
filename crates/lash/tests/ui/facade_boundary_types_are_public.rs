@@ -96,6 +96,7 @@ fn plugin_types_are_nameable() -> PluginHost {
             builder,
         ))],
         lash_core::ExecutionBudgets::recommended(),
+        lash::runtime::TraceRuntime::new(Arc::new(lash::runtime::SystemClock)),
     )
 }
 

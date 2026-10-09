@@ -17,6 +17,7 @@ mod tests {
                 crate::MaxToolCalls::new(1024),
                 lash_core_execution::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         );
         let env_ref = crate::publish_process_execution_env(store.as_ref(), &pin, &spec)
             .await
@@ -106,6 +107,7 @@ mod tests {
                         crate::MaxToolCalls::new(1024),
                         lash_core_execution::NoProgressBudget::bounded(12),
                     ),
+                    crate::SessionToolAccess::ambient(),
                 ),
             )
             .await;
@@ -191,6 +193,7 @@ mod tests {
                     crate::MaxToolCalls::new(1024),
                     lash_core_execution::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
         )
         .await;
@@ -346,6 +349,7 @@ mod tests {
                 crate::MaxToolCalls::new(1024),
                 lash_core_execution::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         );
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let command = start_envelope(
@@ -478,6 +482,7 @@ mod tests {
                 crate::MaxToolCalls::new(1024),
                 lash_core_execution::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         );
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let bytes = env_spec.to_store_bytes().expect("encode environment");
@@ -584,6 +589,7 @@ mod tests {
                     crate::MaxToolCalls::new(1024),
                     lash_core_execution::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             )
         };
         let first_env = env(crate::TurnBudget::Unbounded);
@@ -716,6 +722,7 @@ mod tests {
                     crate::MaxToolCalls::new(1024),
                     lash_core_execution::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
         )
         .await;

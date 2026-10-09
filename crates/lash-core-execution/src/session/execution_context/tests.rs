@@ -30,12 +30,15 @@ fn test_execution_context() -> RuntimeExecutionContext<'static> {
 fn test_execution_context_with_env_store(
     env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
 ) -> RuntimeExecutionContext<'static> {
-    let plugins = crate::plugin::PluginHost::empty(crate::ExecutionBudgets::recommended())
-        .build_session(PluginSessionRequest::creation(
-            "session",
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
-        ))
-        .expect("plugin session");
+    let plugins = crate::plugin::PluginHost::empty(
+        crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+    )
+    .build_session(PluginSessionRequest::creation(
+        "session",
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+    ))
+    .expect("plugin session");
     let dispatch = Arc::new(ToolDispatchContext {
         fleet_format: crate::FleetFormat::current(),
         plugins,
@@ -64,6 +67,7 @@ fn test_execution_context_with_env_store(
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         ),
         owner: crate::ExecutionOwner::SessionFrame {
             session_id: SessionId::from("session"),
@@ -89,6 +93,7 @@ fn test_execution_context_with_env_store(
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         ),
     )
 }

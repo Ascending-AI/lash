@@ -17,6 +17,7 @@ fn sample_env_spec() -> crate::ProcessExecutionEnvSpec {
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        crate::SessionToolAccess::ambient(),
     )
 }
 

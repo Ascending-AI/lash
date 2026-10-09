@@ -683,6 +683,7 @@ mod tests {
                 crate::ProcessExecutionEnvSpec::new(
                     crate::AdmittedPluginConfig::new(plugin_config, 0),
                     policy,
+                    crate::SessionToolAccess::ambient(),
                 )
                 .stable_ref()
                 .expect("environment digest"),

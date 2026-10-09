@@ -418,15 +418,22 @@ pub struct ProcessExecutionEnvSpec {
     /// (FIG-4379).
     pub plugin_config: crate::AdmittedPluginConfig,
     pub policy: crate::SessionPolicy,
+    /// The tool authority captured at creation and used by every process runtime.
+    pub tool_access: crate::SessionToolAccess,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render: Option<crate::run_spec::RecordedRender>,
 }
 impl ProcessExecutionEnvSpec {
     /// Constructs a `ProcessExecutionEnvSpec` for protocol and process-engine implementors running a durable process.
-    pub fn new(plugin_config: crate::AdmittedPluginConfig, policy: crate::SessionPolicy) -> Self {
+    pub fn new(
+        plugin_config: crate::AdmittedPluginConfig,
+        policy: crate::SessionPolicy,
+        tool_access: crate::SessionToolAccess,
+    ) -> Self {
         Self {
             plugin_config,
             policy,
+            tool_access,
             render: None,
         }
     }

@@ -1555,6 +1555,9 @@ async fn property_runtime(
     let host = crate::PluginHost::new(
         crate::testing::test_standard_protocol_factories(),
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     );
     let plugins = match state.plugin_state() {
         Some(snapshot) => host.build_session(PluginSessionRequest::rematerialization(

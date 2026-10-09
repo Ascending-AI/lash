@@ -146,6 +146,7 @@ mod tests {
                     crate::MaxToolCalls::new(1024),
                     lash_core_execution::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -171,6 +172,7 @@ mod tests {
                     crate::MaxToolCalls::new(1024),
                     lash_core_execution::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
         );
 
@@ -300,6 +302,7 @@ mod tests {
                     crate::MaxToolCalls::new(1024),
                     lash_core_execution::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -325,6 +328,7 @@ mod tests {
                     crate::MaxToolCalls::new(1024),
                     lash_core_execution::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
         );
         let handle = lash_sansio::handle::handle_record_json(
@@ -589,6 +593,7 @@ mod tests {
                     crate::MaxToolCalls::new(1024),
                     lash_core_execution::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: SessionId::from("session"),
@@ -614,6 +619,7 @@ mod tests {
                     crate::MaxToolCalls::new(1024),
                     lash_core_execution::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
         );
         let realized_handle = RuntimeExecutionContext::process_handle_json(&started.id.clone());

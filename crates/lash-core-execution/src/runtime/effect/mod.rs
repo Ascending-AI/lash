@@ -76,6 +76,7 @@ mod captured_environment_row_tests {
         let spec = crate::ProcessExecutionEnvSpec::new(
             crate::AdmittedPluginConfig::new(plugin_config, 0),
             policy,
+            crate::SessionToolAccess::ambient(),
         );
         let outcome = crate::RuntimeEffectOutcome::LoadExecutionEnv {
             env: spec.stable_ref().expect("environment digest"),

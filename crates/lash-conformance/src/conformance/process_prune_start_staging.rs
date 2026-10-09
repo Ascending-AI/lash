@@ -31,6 +31,7 @@ pub async fn prune_and_late_transfer_fences(
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        crate::SessionToolAccess::ambient(),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env");
@@ -223,6 +224,7 @@ pub async fn a_refused_start_never_strands_a_concurrent_start_under_its_key(
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         )
     };
     let spec_b = spec(crate::TurnBudget::Unbounded);
@@ -436,6 +438,7 @@ pub async fn a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_star
                 crate::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         )
     };
     let spec_a = spec(crate::TurnBudget::Bounded(
@@ -842,6 +845,7 @@ pub async fn two_starts_share_one_captured_environment(
             crate::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        crate::SessionToolAccess::ambient(),
     );
     let engines = crate::testing::process_engine_fixture();
     let stores = crate::ProcessStartStores {

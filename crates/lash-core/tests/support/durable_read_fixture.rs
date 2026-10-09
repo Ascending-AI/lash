@@ -1135,6 +1135,7 @@ fn fixture_process_env() -> ProcessExecutionEnvSpec {
             lash_core::MaxToolCalls::new(1024),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        lash_core::SessionToolAccess::ambient(),
     );
     env.render = Some(lash_core::RecordedRender {
         renderer_id: "standard".to_string(),

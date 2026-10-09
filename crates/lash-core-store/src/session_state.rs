@@ -1309,8 +1309,11 @@ pub mod facade_ops {
             };
             // The process captures the configuration its creator runs under:
             // a running run's admitted view, or the head's (FIG-4379).
-            let mut spec =
-                crate::ProcessExecutionEnvSpec::new(self.admitted_plugin_config(), policy);
+            let mut spec = crate::ProcessExecutionEnvSpec::new(
+                self.admitted_plugin_config(),
+                policy,
+                self.authority.tool_access.clone(),
+            );
             spec.render = self
                 .authority
                 .run_view()

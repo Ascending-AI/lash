@@ -248,12 +248,16 @@ mod tests {
                 )) as Arc<dyn PluginFactory>
             })
             .collect();
-        let session = PluginHost::new(factories, crate::ExecutionBudgets::recommended())
-            .build_session(PluginSessionRequest::creation(
-                "typed-causes",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
-            ))
-            .unwrap();
+        let session = PluginHost::new(
+            factories,
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+        )
+        .build_session(PluginSessionRequest::creation(
+            "typed-causes",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
+        .unwrap();
         let error = session
             .dispatch(None)
             .emit_runtime_event(PluginLifecycleEvent::SessionConfigChanged(Box::new(
@@ -506,6 +510,7 @@ mod tests {
         let host = PluginHost::new(
             vec![Arc::new(MockPluginFactory)],
             crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         );
         let session = host
             .build_session(PluginSessionRequest::creation(
@@ -535,6 +540,7 @@ mod tests {
         let host = PluginHost::new(
             vec![Arc::new(MockPluginFactory)],
             crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         );
         let session = host
             .build_session(PluginSessionRequest::creation(
@@ -641,6 +647,7 @@ mod tests {
         let err = match PluginHost::new(
             vec![Arc::new(CrossKindFactory)],
             crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         )
         .build_session(PluginSessionRequest::creation(
             "root",
@@ -736,6 +743,7 @@ mod tests {
         let host = PluginHost::new(
             vec![Arc::new(MockPluginFactory)],
             crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         );
         let root = host
             .build_session(PluginSessionRequest::creation(
@@ -775,6 +783,7 @@ mod tests {
         let host = PluginHost::new(
             vec![Arc::new(MockPluginFactory)],
             crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
         );
         let _session = host
             .build_session(PluginSessionRequest::creation(

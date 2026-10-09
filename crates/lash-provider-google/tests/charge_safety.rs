@@ -110,7 +110,7 @@ fn charge_safety_google_escaped_content_refuses_retry_with_typed_reason() {
         .expect("test runtime");
     let (mut handle, calls) = handle(body);
     let failure = runtime
-        .block_on(handle.complete_with_charge_safety(
+        .block_on(handle.complete(
             request(),
             ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
@@ -158,7 +158,7 @@ fn charge_safety_google_truly_empty_partial_schedules_empty_stream_retry() {
         .expect("test runtime");
     let (mut handle, calls) = handle(body);
     let failure = runtime
-        .block_on(handle.complete_with_charge_safety(
+        .block_on(handle.complete(
             request(),
             ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),

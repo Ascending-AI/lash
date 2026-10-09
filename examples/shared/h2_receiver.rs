@@ -430,6 +430,7 @@ pub async fn register_receiver(
                     lash::MaxToolCalls::new(1024),
                     lash::NoProgressBudget::bounded(12),
                 ),
+                lash::plugins::SessionToolAccess::ambient(),
             ),
         )
         .await?;
@@ -462,6 +463,7 @@ pub async fn start_source(
                     lash::MaxToolCalls::new(1024),
                     lash::NoProgressBudget::bounded(12),
                 ),
+                lash::plugins::SessionToolAccess::ambient(),
             ),
         )
         .await?;
@@ -497,6 +499,7 @@ pub async fn start_sleeper(
                     lash::MaxToolCalls::new(1024),
                     lash::NoProgressBudget::bounded(12),
                 ),
+                lash::plugins::SessionToolAccess::ambient(),
             ),
         )
         .await?;

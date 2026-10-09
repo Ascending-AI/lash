@@ -532,6 +532,7 @@ mod tests {
                 lash::MaxToolCalls::new(1024),
                 lash::NoProgressBudget::bounded(12),
             ),
+            lash::plugins::SessionToolAccess::ambient(),
         )
         .stable_ref()
         .expect("captured environment digest")

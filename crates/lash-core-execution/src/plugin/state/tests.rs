@@ -26,6 +26,7 @@ async fn an_equal_format_different_revision_redrive_parks_before_callbacks_or_ef
             ),
         ))],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let recorded = crate::store::plugin_writers::PluginAdmission::from_plugins(
         host.factories()
@@ -215,6 +216,7 @@ fn plugin_formats_refuse_before_callbacks_and_preserve_bytes() {
     let host = crate::PluginHost::new(
         vec![Arc::new(FormatProbe(calls.clone()))],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
         "format-probe": {"generation": 7, "format_version": 4294967295_u32, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"old": 17}}
@@ -436,6 +438,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     let host = crate::PluginHost::new(
         vec![Arc::new(FormatProbe(calls_probe.clone()))],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     for stamp in [1_u32, 2] {
         for malformed in [
@@ -475,6 +478,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
     let host = crate::PluginHost::new(
         vec![Arc::new(NoMigrateProbe(calls_no_migrate.clone()))],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
         "no-migrate": {"generation": 7, "format_version": 1, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"old": 17}},
@@ -535,6 +539,7 @@ fn plugin_state_refusals_are_distinct_typed_and_pre_callback() {
             calls: calls_owner.clone(),
         })],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
         "registered": {"generation": 7, "format_version": 1, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"value": 1}},
@@ -573,6 +578,7 @@ fn plugin_formats_convert_only_in_recorded_transition() {
     let host = crate::PluginHost::new(
         vec![Arc::new(FormatProbe(calls))],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let snapshot: PluginState = serde_json::from_value(serde_json::json!({
         "format-probe": {"generation": 7, "format_version": 1, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"old": 17}}
@@ -645,6 +651,7 @@ fn plugin_formats_stamp_every_state_write() {
             std::sync::atomic::AtomicUsize::new(0),
         )))],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let native: PluginState = serde_json::from_value(serde_json::json!({
         "format-probe": {"generation": 8, "format_version": 2, "fork": "copy", "publication": {"owner_segment": 0, "settled": null, "recent": []}, "values": {"native": 18}},
@@ -705,6 +712,7 @@ fn plugin_formats_stamp_every_state_write() {
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         );
         let environment: crate::ProcessExecutionEnvSpec =
             rmp_serde::from_slice(&rmp_serde::to_vec_named(&environment).unwrap()).unwrap();
@@ -743,7 +751,10 @@ fn fork_preserves_absent_namespaces_and_canonical_order() {
             },
         )]),
     };
-    let host = crate::PluginHost::empty(crate::ExecutionBudgets::recommended());
+    let host = crate::PluginHost::empty(
+        crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+    );
     let parent = host
         .build_session(PluginSessionRequest::rematerialization(
             "parent",
@@ -848,6 +859,7 @@ async fn a_session_writes_state_in_its_admissions_recorded_format_across_a_final
             std::sync::atomic::AtomicUsize::new(0),
         )))],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let fleet = FleetRecord::permitting(1, 1);
     let stored: PluginState = serde_json::from_value(serde_json::json!({
@@ -1007,6 +1019,7 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
             }),
         ],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let base = PluginState {
         plugins: ["first", "second", "inactive"]
@@ -1060,13 +1073,16 @@ fn recorded_transition_keeps_typed_refusal_and_publishes_neither_namespace() {
     assert!(
         matches!(record.candidate(), Err(crate::PluginError::Format(ref refusal)) if refusal.plugin == "second")
     );
-    let session = crate::PluginHost::empty(crate::ExecutionBudgets::recommended())
-        .build_session(PluginSessionRequest::rematerialization(
-            "transition-owner",
-            &base,
-            crate::plugin::SessionAuthorityContext::ambient_fixture(),
-        ))
-        .unwrap();
+    let session = crate::PluginHost::empty(
+        crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+    )
+    .build_session(PluginSessionRequest::rematerialization(
+        "transition-owner",
+        &base,
+        crate::plugin::SessionAuthorityContext::ambient_fixture(),
+    ))
+    .unwrap();
     let before = session.export_state();
     assert!(session.adopt_plugin_transition(&record).is_err());
     assert_eq!(session.export_state(), before);
@@ -1169,6 +1185,7 @@ async fn pure_initialization_precedes_read_only_registration_and_readiness() {
     let host = crate::PluginHost::new(
         vec![Arc::new(ReadOnly(calls.clone()))],
         crate::ExecutionBudgets::recommended(),
+        crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
     );
     let request = transition_request("read-only-owner", &host);
     let record = host.transition_plugins(request, &Default::default(), &Default::default());

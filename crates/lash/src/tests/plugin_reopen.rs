@@ -29,6 +29,9 @@ fn host(payload: serde_json::Value) -> PluginHost {
             probe(payload),
         ],
         lash_core::ExecutionBudgets::recommended(),
+        lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+            lash_core::facade_support::SystemClock,
+        )),
     )
 }
 

@@ -282,12 +282,15 @@ mod panic_tests {
             replay: None,
             prepared_payload: serde_json::Value::Null,
         };
-        let plugins = crate::plugin::PluginHost::empty(crate::ExecutionBudgets::recommended())
-            .build_session(crate::plugin::PluginSessionRequest::creation(
-                "session",
-                crate::plugin::SessionAuthorityContext::ambient_fixture(),
-            ))
-            .expect("plugin session");
+        let plugins = crate::plugin::PluginHost::empty(
+            crate::ExecutionBudgets::recommended(),
+            crate::trace::TraceRuntime::new(std::sync::Arc::new(crate::SystemClock)),
+        )
+        .build_session(crate::plugin::PluginSessionRequest::creation(
+            "session",
+            crate::plugin::SessionAuthorityContext::ambient_fixture(),
+        ))
+        .expect("plugin session");
         let dispatch = Arc::new(super::ToolDispatchContext {
             fleet_format: crate::FleetFormat::current(),
             plugins,
@@ -316,6 +319,7 @@ mod panic_tests {
                     crate::MaxToolCalls::new(1024),
                     crate::NoProgressBudget::bounded(12),
                 ),
+                crate::SessionToolAccess::ambient(),
             ),
             owner: crate::ExecutionOwner::SessionFrame {
                 session_id: crate::SessionId::from("session"),

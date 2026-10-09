@@ -160,7 +160,10 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
             "preview": lash_render::RenderParams::preview(),
         }),
     };
-    let mut resolved = ResolvedRun::snapshot(snapshot());
+    let authority = crate::SessionToolAccess::restricted(Vec::new()).expect("no resident tools");
+    let mut config = snapshot();
+    config.tool_access = authority.clone();
+    let mut resolved = ResolvedRun::snapshot(config);
     resolved.render = Some(record.clone());
     let encoded = serde_json::to_vec(&resolved).expect("encode run");
     let decoded: ResolvedRun = serde_json::from_slice(&encoded).expect("decode run");
@@ -174,10 +177,12 @@ fn recorded_render_survives_run_and_detached_environment_round_trip() {
     state.install_run_view(&decoded);
     let env = state.process_execution_env_spec(&state.policy);
     assert_eq!(env.render, Some(record.clone()));
+    assert_eq!(env.tool_access, authority);
     let env_bytes = env.to_store_bytes().expect("encode env");
     let restored =
         crate::ProcessExecutionEnvSpec::from_store_bytes(&env_bytes).expect("decode env");
     assert_eq!(restored.render, Some(record));
+    assert_eq!(restored.tool_access, authority);
 }
 
 #[test]

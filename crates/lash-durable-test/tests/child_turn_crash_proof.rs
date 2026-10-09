@@ -182,6 +182,7 @@ impl ChildTurn {
                 &lash_core_execution::ProcessExecutionEnvSpec::new(
                     lash_core_execution::AdmittedPluginConfig::default(),
                     policy,
+                    lash_core_execution::SessionToolAccess::ambient(),
                 ),
             )
             .await

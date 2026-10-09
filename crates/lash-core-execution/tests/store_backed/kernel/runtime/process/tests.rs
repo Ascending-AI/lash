@@ -225,6 +225,7 @@ async fn env_store_reports_typed_referrer_fences_and_carry_refusals() {
             crate::MaxToolCalls::new(1024),
             lash_core_execution::NoProgressBudget::bounded(12),
         ),
+        crate::SessionToolAccess::ambient(),
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");

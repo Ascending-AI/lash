@@ -166,6 +166,7 @@ pub(super) async fn run_once_process_list_stress(
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
                         ),
+                        lash_core::SessionToolAccess::ambient(),
                     );
                     let env_ref = spec
                         .stable_ref()

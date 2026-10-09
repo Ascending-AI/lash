@@ -59,8 +59,9 @@ fn process_execution_env_identity_corpus() -> [(String, String); 2] {
                 crate::MaxToolCalls::new(1024),
                 crate::NoProgressBudget::bounded(12),
             ),
+            crate::SessionToolAccess::ambient(),
         ),
-        ProcessExecutionEnvSpec::new(plugin_config, policy),
+        ProcessExecutionEnvSpec::new(plugin_config, policy, crate::SessionToolAccess::ambient()),
     ];
     specs.map(|spec| {
         let bytes = spec.to_store_bytes().expect("encode golden env");

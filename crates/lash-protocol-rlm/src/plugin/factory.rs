@@ -141,11 +141,9 @@ impl RlmProtocolPluginFactory {
         )?;
         let plugins = plugin_host.build_session(PluginSessionRequest::creation(
             &request.session_id,
-            // The compile surface is resolved for a process environment,
-            // which records no session: its tool authority is ambient over
-            // the caller's plugin host.
+            // Compile against the authority this process environment records.
             SessionAuthorityContext {
-                tool_access: lash_core::SessionToolAccess::ambient(),
+                tool_access: request.execution_env_spec.tool_access,
                 plugin_config: request.execution_env_spec.plugin_config,
             },
         ))?;
@@ -335,8 +333,9 @@ struct RlmProcessSettingsRecorder {
 impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRecorder {
     fn record(
         &self,
-        plugin_config: &lash_core::AdmittedPluginConfig,
+        environment: &lash_core::ProcessExecutionEnvSpec,
     ) -> Result<lash_lashlang_runtime::LashlangRecordedSettings, PluginError> {
+        let plugin_config = &environment.plugin_config;
         let captured = plugin_config
             .decode::<RlmRecordedConfig>(RLM_PROTOCOL_PLUGIN_ID)
             .map_err(|error| PluginError::StoredDataCorrupt {
@@ -357,7 +356,7 @@ impl lash_lashlang_runtime::LashlangRunSettingsRecorder for RlmProcessSettingsRe
             tracing: self.plugin_host.trace_runtime().clone(),
             trace: None,
             owner: lash_core::RuntimeOwner::Process(lash_core::mint_process_id()),
-            tool_access: lash_core::SessionToolAccess::ambient(),
+            tool_access: environment.tool_access.clone(),
             plugin_config: plugin_config.clone(),
             materialization: lash_core::plugin::PluginSessionMaterialization::Creation,
             extensions: self.plugin_host.extensions().clone(),
@@ -531,6 +530,9 @@ mod label_annotation_tests {
         let plugin_host = lash_core::facade_support::PluginHost::new(
             vec![factory_plugin],
             lash_core::ExecutionBudgets::recommended(),
+            lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                lash_core::facade_support::SystemClock,
+            )),
         );
         let source = "process 42oops() { finish \"x\" }";
         let err = factory
@@ -546,6 +548,7 @@ mod label_annotation_tests {
                             lash_core::MaxToolCalls::new(1024),
                             lash_core::NoProgressBudget::bounded(12),
                         ),
+                        lash_core::SessionToolAccess::ambient(),
                     ),
                 ),
             )
@@ -641,10 +644,16 @@ mod process_settings_tests {
     }
 
     /// A plugin contributing [`resources`] to the lashlang surface.
-    fn resource_factory() -> Arc<dyn PluginFactory> {
+    fn resource_factory(
+        observed: Arc<std::sync::Mutex<Vec<lash_core::SessionToolAccess>>>,
+    ) -> Arc<dyn PluginFactory> {
         Arc::new(lash_core::plugin::PluginSpecFactory::new(
             lash_core::plugin::PluginDeclaration::initial("settings-resources"),
-            Arc::new(|_| {
+            Arc::new(move |context| {
+                observed
+                    .lock()
+                    .expect("authority probe")
+                    .push(context.tool_access.clone());
                 Ok(
                     lash_core::plugin::PluginSpec::new().with_extension_contribution(
                         lash_lashlang_runtime::lashlang_surface_extension(
@@ -668,6 +677,9 @@ mod process_settings_tests {
             Arc::new(TypescriptDialect),
             &backend,
         ));
+        let authority =
+            lash_core::SessionToolAccess::restricted(Vec::new()).expect("no resident tools");
+        let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
         let installing_host = PluginHost::new(
             vec![
                 Arc::new(RlmProtocolPluginFactory::new(
@@ -675,9 +687,12 @@ mod process_settings_tests {
                     Arc::new(TypescriptDialect),
                     &backend,
                 )),
-                resource_factory(),
+                resource_factory(Arc::clone(&observed)),
             ],
             lash_core::ExecutionBudgets::recommended(),
+            lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                lash_core::facade_support::SystemClock,
+            )),
         );
         let runtime_host = installing_host
             .install_process_engine_contributions(
@@ -696,6 +711,9 @@ mod process_settings_tests {
         let plugin_config = PluginHost::new(
             vec![creating_factory.clone()],
             lash_core::ExecutionBudgets::recommended(),
+            lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                lash_core::facade_support::SystemClock,
+            )),
         )
         .resolve_creation_plugin_config(
             Some(RLM_PROTOCOL_PLUGIN_ID),
@@ -710,6 +728,7 @@ mod process_settings_tests {
                 lash_core::MaxToolCalls::new(1024),
                 lash_core::NoProgressBudget::bounded(12),
             ),
+            authority.clone(),
         );
         let record = runtime_host
             .process_engines
@@ -718,6 +737,7 @@ mod process_settings_tests {
             .creation_config(&environment)
             .expect("the settings record")
             .expect("captured settings are mapped into the process row");
+        assert_eq!(*observed.lock().expect("authority probe"), vec![authority]);
         assert_eq!(
             record["execution_bounds"]["instruction_budget"],
             serde_json::json!({"bounded": 1_000_000})

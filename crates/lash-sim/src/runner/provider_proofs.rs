@@ -712,7 +712,7 @@ pub(super) async fn prove_openai_compatible_retry_exhaustion()
     let mut handle = ProviderHandle::new(provider.into_components());
     handle.set_options(retry_options);
     let err = handle
-        .complete_with_charge_safety(
+        .complete(
             openai_compatible_request(false),
             lash_core::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: u8::try_from(attempt_budget - 1)

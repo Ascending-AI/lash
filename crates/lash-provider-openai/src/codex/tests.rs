@@ -1866,6 +1866,7 @@ async fn codex_websocket_output_started_forced_delay_pins_hardened_ordering() {
     let result = handle
         .complete(
             request(vec![LlmMessage::text(LlmRole::User, "hello")]),
+            lash_core::ChargeSafetyPolicy::RequireGuarantee,
             lash_core::ExecutionBudgets::recommended(),
             &lash_core::provider::NoSlotDeliveries,
         )

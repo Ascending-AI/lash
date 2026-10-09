@@ -105,7 +105,10 @@ fn ext_write(world: &Arc<ExternalWorld>) -> Arc<dyn lash_core::ToolProvider> {
 
 /// The engine: one step on its start payload, then a terminal carrying the
 /// step's payload.
-struct WriteEngine;
+#[derive(Default)]
+struct WriteEngine {
+    unavailable: Option<Arc<std::sync::atomic::AtomicBool>>,
+}
 
 fn infra(error: impl std::fmt::Display) -> ProcessInfraError {
     ProcessInfraError::new(lash_core::PluginError::Session(error.to_string()))
@@ -158,6 +161,13 @@ impl ProcessEngine for WriteEngine {
         _state: EngineState,
         event: EngineEvent,
     ) -> Result<(EngineState, EngineAction), ProcessInfraError> {
+        if self
+            .unavailable
+            .as_ref()
+            .is_some_and(|flag| flag.load(std::sync::atomic::Ordering::SeqCst))
+        {
+            return Err(infra("the process engine is temporarily unavailable"));
+        }
         let action = match event {
             EngineEvent::Started { payload } => {
                 let step = lash_core_execution::StepName("write".to_owned());
@@ -244,6 +254,7 @@ fn environment() -> lash_core_execution::ProcessExecutionEnvSpec {
             lash::MaxToolCalls::new(16),
             lash_core::NoProgressBudget::bounded(12),
         ),
+        lash_core_execution::SessionToolAccess::ambient(),
     );
     environment.render = Some(lash_core::RecordedRender {
         renderer_id: lash::render::ToolOutputRendererSlot::default()
@@ -348,7 +359,7 @@ impl Scenario for StepProof {
         let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
         let stores: Arc<dyn StoreSet> = Arc::new(stores);
         let backend = lash::durable::DurableBackendBuilder::new(stores)
-            .process_engine(Arc::new(WriteEngine))
+            .process_engine(Arc::new(WriteEngine::default()))
             .build()
             .expect("the backend assembles");
         *self.backend.lock_recover() = Some(backend);
@@ -539,4 +550,146 @@ async fn a_host_engines_once_tool_step_killed_at_every_label_runs_at_most_once()
             "the matrix never cut {label}"
         );
     }
+}
+
+/// FIG-5582: a process's restricted authority survives a file-store reopen
+/// and the engine's redrive of its parked activation.
+#[tokio::test]
+async fn restricted_process_tool_access_survives_reopen_and_redrive() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let directory = tempfile::tempdir().expect("SQLite directory");
+    let path = directory.path().join("authority.db");
+    let clock = SimClock::new();
+    let world = Arc::new(ExternalWorld::default());
+    let unavailable = Arc::new(AtomicBool::new(true));
+    let authority =
+        lash_core::SessionToolAccess::restricted(Vec::new()).expect("no resident tools");
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let mut process = None;
+
+    for boot in 0..2 {
+        let stores = sim::file(&path, Arc::clone(&clock)).await;
+        let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
+        let backend = lash::durable::DurableBackendBuilder::new(Arc::new(stores))
+            .process_engine(Arc::new(WriteEngine {
+                unavailable: Some(Arc::clone(&unavailable)),
+            }))
+            .build()
+            .expect("backend");
+        let captures = Arc::clone(&observed);
+        let probe = Arc::new(lash_core::plugin::PluginSpecFactory::new(
+            lash_core::plugin::PluginDeclaration::initial("process-authority-probe"),
+            Arc::new(move |context| {
+                if matches!(context.owner, lash_core::RuntimeOwner::Process(_)) {
+                    captures.lock_recover().push(context.tool_access.clone());
+                }
+                Ok(lash_core::plugin::PluginSpec::new())
+            }),
+        ));
+        let core = lash::LashCore::standard_builder(backend.clone())
+            .serve_sessions(false)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .data_retention(lash::DataRetention::standard())
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .tool_source_policy(lash_core::ToolSourcePolicy::Tolerate)
+            .execution_budgets(lash::ExecutionBudgets::recommended())
+            .delta_coalescing(lash::DeltaCoalescing::recommended())
+            .tools(ext_write(&world))
+            .plugin(probe)
+            .build(lash::persistence::LeaseOwnerIdentity::opaque(
+                "authority-law",
+                format!("boot-{boot}"),
+            ))
+            .expect("core");
+        if boot == 0 {
+            let mut env = environment();
+            env.tool_access = authority.clone();
+            let reference = core
+                .host_artifacts()
+                .publish_process_env(&lash_core::HostArtifactPin::mint(), &env)
+                .await
+                .expect("publish environment");
+            process = Some(
+                core.processes()
+                    .start(
+                        lash_core::ProcessStartRequest::new(
+                            lash_core::ProcessInput::Engine {
+                                kind: ENGINE.to_owned(),
+                                payload: serde_json::json!({ "x": 7 }),
+                            },
+                            lash_core::ProcessOriginator::host(),
+                            lash_core::LifetimeDecision::Detached,
+                        )
+                        .with_env_ref(reference),
+                        core.effect_host(),
+                    )
+                    .await
+                    .expect("start process")
+                    .process_id,
+            );
+        } else {
+            unavailable.store(false, Ordering::SeqCst);
+            assert!(
+                backend
+                    .redrive_process(process.as_ref().expect("process"), "authority-law")
+                    .await
+                    .expect("redrive")
+            );
+        }
+        let id = process.as_ref().expect("process");
+        let (node, activation) =
+            lash::testing::node_activation(&core, Arc::new(Tripwire::default()))
+                .expect("node activation");
+        let nodes = SimNodes::new(
+            database,
+            Arc::clone(&clock),
+            lash_durable_test::Script::new(),
+            SimNodesConfig {
+                lease: Matrix::test_lease(),
+                decodes: node.formats().decodes(),
+                max_active: 4,
+            },
+            activation,
+        );
+        nodes.start("authority-node");
+        let expected = if boot == 0 {
+            ActorState::Parked
+        } else {
+            ActorState::Terminal
+        };
+        let mut reached = false;
+        for _ in 0..400 {
+            nodes.quiesce().await;
+            if nodes
+                .database()
+                .actor(&process_actor(id))
+                .await
+                .expect("actor")
+                .is_some_and(|actor| actor.state == expected)
+            {
+                reached = true;
+                break;
+            }
+            if nodes.step().await.is_none() {
+                clock.advance_by(1000).await;
+            }
+        }
+        assert!(reached, "the process reaches {expected:?}");
+        nodes.stop("authority-node");
+        nodes.quiesce().await;
+        core.shutdown().await.expect("shutdown");
+    }
+    let observed = observed.lock_recover();
+    assert!(
+        !observed.is_empty(),
+        "the redriven process built its tool runtime"
+    );
+    assert!(
+        observed.iter().all(|access| access == &authority),
+        "the process lost its restriction: {observed:?}"
+    );
+    assert!(
+        world.writes.lock_recover().is_empty(),
+        "a restricted process cannot call the deployment's resident tool"
+    );
 }

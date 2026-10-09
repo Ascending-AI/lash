@@ -37,10 +37,10 @@ impl EmbeddedRuntimeBuilder {
             session_id: None,
             creation: None,
             initial_state: None,
-            plugin_source: PluginSource::Host(
-                PluginHost::empty(core.control.execution_budgets.clone())
-                    .with_trace_runtime(core.tracing.clone()),
-            ),
+            plugin_source: PluginSource::Host(PluginHost::empty(
+                core.control.execution_budgets.clone(),
+                core.tracing.clone(),
+            )),
             core,
             store: None,
             attachment_referrers_store: None,
@@ -81,15 +81,19 @@ impl EmbeddedRuntimeBuilder {
     }
 
     pub fn with_plugin_factories(mut self, factories: Vec<Arc<dyn PluginFactory>>) -> Self {
-        let host = PluginHost::new(factories, self.core.control.execution_budgets.clone())
-            .with_trace_runtime(self.core.tracing.clone());
+        let host = PluginHost::new(
+            factories,
+            self.core.control.execution_budgets.clone(),
+            self.core.tracing.clone(),
+        );
         self.plugin_source = PluginSource::Host(host);
         self
     }
 
     pub fn with_plugin_stack(self, stack: PluginStack) -> Self {
         let budgets = self.core.control.execution_budgets.clone();
-        self.with_plugin_host(stack.into_host(budgets))
+        let tracing = self.core.tracing.clone();
+        self.with_plugin_host(stack.into_host(budgets, tracing))
     }
 
     pub fn with_trace_sink(mut self, sink: Option<Arc<dyn lash_trace::TraceSink>>) -> Self {

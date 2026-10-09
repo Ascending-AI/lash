@@ -220,6 +220,9 @@ fn batch_config_ceiling_is_refused_at_build() {
         lash_core::facade_support::PluginHost::new(
             vec![factory],
             lash_core::ExecutionBudgets::recommended(),
+            lash_core::trace::TraceRuntime::new(std::sync::Arc::new(
+                lash_core::facade_support::SystemClock,
+            )),
         )
         .build_session(PluginSessionRequest::creation(
             "root",

@@ -103,6 +103,7 @@ async fn retries_honor_count_and_exponential_backoff() {
         )
         .complete(
             request(),
+            lash::ChargeSafetyPolicy::RequireGuarantee,
             lash::ExecutionBudgets::recommended(),
             &lash::provider::NoSlotDeliveries,
         )
@@ -154,6 +155,7 @@ async fn request_shape_errors_are_not_retried_and_failed_rows_keep_rich_errors()
         let failure = handle(&telemetry.capture, 3, vec![Err(error)])
             .complete(
                 request(),
+                lash::ChargeSafetyPolicy::RequireGuarantee,
                 lash::ExecutionBudgets::recommended(),
                 &lash::provider::NoSlotDeliveries,
             )
@@ -189,6 +191,7 @@ async fn retry_after_is_honored_without_extra_courtesy_attempts() {
     let failure = handle(&capture, 1, vec![Err(error.clone()), Err(error)])
         .complete(
             request(),
+            lash::ChargeSafetyPolicy::RequireGuarantee,
             lash::ExecutionBudgets::recommended(),
             &lash::provider::NoSlotDeliveries,
         )
@@ -218,6 +221,7 @@ async fn partial_costs_survive_retries_and_charge_safety_refusal_is_visible() {
     let failure = provider
         .complete(
             request(),
+            lash::ChargeSafetyPolicy::RequireGuarantee,
             lash::ExecutionBudgets::recommended(),
             &lash::provider::NoSlotDeliveries,
         )
@@ -250,7 +254,7 @@ async fn partial_costs_survive_retries_and_charge_safety_refusal_is_visible() {
     );
     // Only this simulated accounting test authorizes duplicate billing.
     let completion = provider
-        .complete_with_charge_safety(
+        .complete(
             request(),
             lash::ChargeSafetyPolicy::AcceptDuplicateBilling {
                 max_unsafe_retries: 1,
@@ -298,7 +302,7 @@ async fn cancellation_during_backoff_keeps_the_failed_call_and_its_cost() {
     assert!(
         tokio::time::timeout(
             Duration::from_millis(20),
-            provider.complete_with_charge_safety(
+            provider.complete(
                 request(),
                 lash::ChargeSafetyPolicy::AcceptDuplicateBilling {
                     max_unsafe_retries: 1,
@@ -328,6 +332,7 @@ async fn empty_response_keeps_cost_from_raw_usage_even_without_partial_response(
     let failure = handle(&telemetry.capture, 3, vec![Err(error)])
         .complete(
             request(),
+            lash::ChargeSafetyPolicy::RequireGuarantee,
             lash::ExecutionBudgets::recommended(),
             &lash::provider::NoSlotDeliveries,
         )
