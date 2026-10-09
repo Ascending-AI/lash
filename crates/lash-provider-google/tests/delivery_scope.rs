@@ -38,7 +38,7 @@ impl LlmHttpTransport for FilesTransport {
                 status: 200,
                 headers: vec![(
                     "x-goog-upload-url".into(),
-                    "https://upload.example.invalid/private".into(),
+                    "https://generativelanguage.googleapis.com/upload/private".into(),
                 )],
                 body: LlmHttpBody::buffered(""),
             });
