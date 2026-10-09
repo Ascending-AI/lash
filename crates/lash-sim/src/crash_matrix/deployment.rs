@@ -314,6 +314,10 @@ pub async fn sqlite_file(
     )
     .await
     .map_err(|error| error.to_string())?;
+    lash_core_execution::testing::process_execution_env_fixture(
+        stores.process_env_store().as_ref(),
+    )
+    .await;
     let database: Arc<dyn DurableStore> = Arc::new(stores.durable_store());
     let backend = assemble(Arc::new(stores))?;
     keep.push(Box::new(directory));

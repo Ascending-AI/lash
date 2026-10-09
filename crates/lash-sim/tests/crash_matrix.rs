@@ -255,4 +255,5 @@ crash_matrix_on_a_sqlite_file! {
     the_crash_matrix_holds_on_a_sqlite_file_for_a_drained_node => Drain;
     the_crash_matrix_holds_on_a_sqlite_file_for_a_prompt_composition => Prompt;
     the_crash_matrix_holds_on_a_sqlite_file_for_a_compaction_s_summary => Compaction;
+    the_crash_matrix_holds_on_a_sqlite_file_for_a_pressure_frame => Pressure;
 }
