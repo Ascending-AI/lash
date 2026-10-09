@@ -1,0 +1,25 @@
+[package]
+name = "lash-kernel-check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The lash kernel's checker: links a document, derives the facts a host reads and admits it against an environment."
+keywords = ["lash", "kernel", "workflow", "linker"]
+categories = ["compilers"]
+publish = false
+
+[lib]
+name = "lash_kernel_check"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-doc = { workspace = true }
+thiserror = { workspace = true }

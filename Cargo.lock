@@ -2757,6 +2757,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-kernel-check"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-doc",
+ "thiserror",
+]
+
+[[package]]
 name = "lash-kernel-doc"
 version = "0.0.0-dev"
 dependencies = [

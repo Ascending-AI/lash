@@ -954,6 +954,14 @@ PACKAGE_DEPS = {
             "serde_json": "//third-party/rust:p0313"
         }
     },
+    "lash-kernel-check": {
+        "build": {},
+        "dev": {},
+        "normal": {
+            "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
+            "thiserror": "//third-party/rust:p0364"
+        }
+    },
     "lash-kernel-doc": {
         "build": {},
         "dev": {},

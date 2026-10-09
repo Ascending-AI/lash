@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
-  "cargo_package_count": 56,
-  "cargo_target_count": 225,
+  "cargo_package_count": 57,
+  "cargo_target_count": 226,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -42520,7 +42520,7 @@
       "//crates/lash:lash__fv_cc442436"
     ]
   },
-  "generated_label_count": 292,
+  "generated_label_count": 294,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -42649,6 +42649,7 @@
     "//crates/lash-e2e:e2e__test",
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:test_batch",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
@@ -43139,6 +43140,7 @@
     "//crates/lash-e2e:e2e__test",
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test",
     "//crates/lash-kernel-doc:lash-kernel-doc__unit_test",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
@@ -44904,6 +44906,41 @@
           "clippy_label": "//crates/lash-http-transport:lash-http-transport__unit_test__clippy[clippy.txt]",
           "kind": "unit-test",
           "label": "//crates/lash-http-transport:lash-http-transport__unit_test",
+          "tags": []
+        }
+      ],
+      "test_batch": {
+        "label": null,
+        "members": []
+      }
+    },
+    {
+      "declared_features": [],
+      "dependencies": [
+        "lash-kernel-doc",
+        "thiserror"
+      ],
+      "doc": "//crates/lash-kernel-check:lash-kernel-check__doc",
+      "manifest": "crates/lash-kernel-check/Cargo.toml",
+      "package": "lash-kernel-check",
+      "resolved_features": [],
+      "targets": [
+        {
+          "build_label": "//crates/lash-kernel-check:lash-kernel-check[static]",
+          "cargo": "lash_kernel_check",
+          "check_label": "//crates/lash-kernel-check:lash-kernel-check[check]",
+          "clippy_label": "//crates/lash-kernel-check:lash-kernel-check__clippy[clippy.txt]",
+          "doc_label": "//crates/lash-kernel-check:lash-kernel-check[doc]",
+          "kind": "lib",
+          "label": "//crates/lash-kernel-check:lash-kernel-check"
+        },
+        {
+          "build_label": "//crates/lash-kernel-check:lash-kernel-check__unit_test",
+          "cargo": "lash_kernel_check",
+          "check_label": "//crates/lash-kernel-check:lash-kernel-check__unit_test[check]",
+          "clippy_label": "//crates/lash-kernel-check:lash-kernel-check__unit_test__clippy[clippy.txt]",
+          "kind": "unit-test",
+          "label": "//crates/lash-kernel-check:lash-kernel-check__unit_test",
           "tags": []
         }
       ],
@@ -48466,6 +48503,7 @@
     "//crates/lash-e2e:e2e__test": 300,
     "//crates/lash-e2e:lash-e2e__unit_test": 300,
     "//crates/lash-http-transport:lash-http-transport__unit_test": 300,
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test": 300,
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test": 300,
     "//crates/lash-kernel-doc:lash-kernel-doc__unit_test": 300,
     "//crates/lash-kernel-doc:test_batch": 300,
@@ -48965,6 +49003,8 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport[static]",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check[static]",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test",
     "//crates/lash-kernel-doc:lash-kernel-doc[static]",
@@ -49276,6 +49316,8 @@
     "//crates/lash-http-transport:lash-http-transport[check]",
     "//crates/lash-http-transport:lash-http-transport__fv_db75952d[check]",
     "//crates/lash-http-transport:lash-http-transport__unit_test[check]",
+    "//crates/lash-kernel-check:lash-kernel-check[check]",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test[check]",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin[check]",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test[check]",
     "//crates/lash-kernel-doc:lash-kernel-doc[check]",
@@ -49599,6 +49641,8 @@
     "//crates/lash-e2e:lash-e2e__unit_test__clippy[clippy.txt]",
     "//crates/lash-http-transport:lash-http-transport__clippy[clippy.txt]",
     "//crates/lash-http-transport:lash-http-transport__unit_test__clippy[clippy.txt]",
+    "//crates/lash-kernel-check:lash-kernel-check__clippy[clippy.txt]",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test__clippy[clippy.txt]",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__clippy[clippy.txt]",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test__clippy[clippy.txt]",
     "//crates/lash-kernel-doc:lash-kernel-doc__clippy[clippy.txt]",
@@ -49891,6 +49935,8 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test",
     "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -50183,6 +50229,8 @@
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test",
     "//crates/lash-kernel-doc:lash-kernel-doc",
@@ -50456,6 +50504,7 @@
     "//crates/lash-e2e:e2e__test",
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:test_batch",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
@@ -50610,6 +50659,7 @@
     "//crates/lash-e2e:e2e__test",
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:test_batch",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
@@ -50780,6 +50830,7 @@
     "//crates/lash-e2e:e2e__test",
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test",
     "//crates/lash-kernel-doc:lash-kernel-doc__unit_test",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
@@ -50905,6 +50956,7 @@
     "//crates/lash-durable:lash-durable__doc",
     "//crates/lash-e2e:lash-e2e__doc",
     "//crates/lash-http-transport:lash-http-transport__doc",
+    "//crates/lash-kernel-check:lash-kernel-check__doc",
     "//crates/lash-kernel-doc:lash-kernel-doc__doc",
     "//crates/lash-kernel-vm:lash-kernel-vm__doc",
     "//crates/lash-llm-tools:lash-llm-tools__doc",
@@ -50958,6 +51010,7 @@
     "//crates/lash-durable:rust_sources",
     "//crates/lash-e2e:rust_sources",
     "//crates/lash-http-transport:rust_sources",
+    "//crates/lash-kernel-check:rust_sources",
     "//crates/lash-kernel-doc:rust_sources",
     "//crates/lash-kernel-vm:rust_sources",
     "//crates/lash-llm-tools:rust_sources",
@@ -51168,6 +51221,7 @@
     "//crates/lash-e2e:e2e__test",
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:test_batch",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",
     "//crates/lash-llm-tools:lash-llm-tools__unit_test",
@@ -51347,6 +51401,7 @@
     "//crates/lash-e2e:e2e__test",
     "//crates/lash-e2e:lash-e2e__unit_test",
     "//crates/lash-http-transport:lash-http-transport__unit_test",
+    "//crates/lash-kernel-check:lash-kernel-check__unit_test",
     "//crates/lash-kernel-doc:kernel_schema_generator__bin__unit_test",
     "//crates/lash-kernel-doc:lash-kernel-doc__unit_test",
     "//crates/lash-kernel-vm:lash-kernel-vm__unit_test",

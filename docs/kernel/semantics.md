@@ -1,6 +1,6 @@
 # Kernel semantics
 
-The lash kernel is one small language with one meaning. This document is that meaning, one behaviour per numbered rule. The design it implements is [design.md](design.md); the types the rules speak of are in `crates/lash-kernel-doc`, and the machine interface in `crates/lash-kernel-vm`.
+The lash kernel is one small language with one meaning. This document is that meaning, one behaviour per numbered rule. The design it implements is [design.md](design.md); the types the rules speak of are in `crates/lash-kernel-doc`, linking, derived facts and admission in `crates/lash-kernel-check`, and the machine interface in `crates/lash-kernel-vm`.
 
 A rule id is permanent. A rule is never renumbered or reused; a rule that is withdrawn keeps its id and says so. Other crates, the conformance corpus and dialect deviation registers cite rules by id. Changing what a rule says is a new kernel version (`K-VER-001`).
 
@@ -242,6 +242,30 @@ Rules whose cases need a running machine are pinned by the conformance corpus (`
 - **K-ID-002.** A function's identity is the SHA-256 of the bytes `lash-kernel-function`, one zero byte, and the definition's canonical form. It covers the name, signature, error kinds, charge formula, guard and implementation.
 - **K-ID-003.** The canonical form is the JSON encoding (`K-DOC-004`) with every object's members sorted by name as UTF-8 bytes, no white space, and strings written with only these escapes: `\"`, `\\`, and `\u00XX` (lower-case) for a character below U+0020.
 - **K-ID-004.** A site is the unit a node belongs to (`main`, a declared function by name, or a library body by identity) and the chain of child indexes that reaches the node from that unit's body. A block's children are its statements. A statement's children are its expressions, its action and its blocks, in the order kernel text writes them; an absent `catch` or `finally` takes no index. An expression's children are its sub-expressions in order (a map entry's key before its value), and a closure's one child is its body. An action has none.
+
+## Execution sites (`K-SITE`)
+
+Every coordinate a machine reports and a parked run saves is a site of `K-ID-004`. These rules fix which node each one names. `lash-kernel-check` derives them from the document and publishes them; nothing stores them as authority.
+
+- **K-SITE-001.** Where a task stands is the site of a statement: its pending statement, the calling statement of each of its active calls, and the `try` whose `finally` it is running. It is never the site of a block, an expression or an action.
+- **K-SITE-002.** A wait and a spawn are named by the site of the action node: the site in an effect's identity (`K-EFF-008`), in a spawn's (`K-TASK-020`), and the one their occurrences are counted at. The action is a child of its statement, so its statement's site is the action's with the last index dropped. A statement holds at most one action, so the two name each other.
+- **K-SITE-003.** A loop is named by the site of its `for` or `while` statement, in an effect's loop context and wherever a loop's state is saved.
+- **K-SITE-004.** The loops that enclose a site inside its own function body, outermost first, are derived from the document. A closure body is a function body: the loops around a closure expression do not enclose the sites inside it. The loop context of `K-EFF-008` is these, joined across the task's active calls.
+- **K-SITE-005.** Code written in a closure belongs to the unit that writes the closure, and its sites continue that unit's path through the closure expression. A library body's sites are in the unit of that function's identity. A derived view also numbers its nodes, from 0, in a pre-order walk of the units, `main` first and then the declared functions by name, children in the order of `K-ID-004`. A node id names a node within one derivation of one document; only a site is saved or reported.
+
+## Admission (`K-ADM`)
+
+Admission decides whether an environment can run a document. The environment is what an embedder provides: effects with their signatures, library functions by identity, and the session's bindings. A refusal names every fault of the first three rules, not the first one found.
+
+- **K-ADM-001.** A document is refused when its manifest lists an effect the environment does not provide.
+- **K-ADM-002.** A document is refused when the environment provides an effect with a signature that does not serve the one the manifest expects. A signature serves when it takes every argument list the expected one allows (as many parameters or more, no more of them required, each expected parameter type contained in the provided one) and its result type is contained in the expected result type. A type is contained in another when every value of the first is a value of the second.
+- **K-ADM-003.** A document is refused when the environment holds no definition for a function identity the manifest lists or the code reaches, directly or through another function's body (`K-LIB-005`).
+- **K-ADM-004.** A variable `main` reads or assigns where no enclosing scope has declared it is a session binding (`K-SES-001`), and the document is refused when the environment does not provide it. In a declared function, which is closed (`K-FN-002`), and in a library body, such a variable is refused whatever the environment (`K-FORM-003`). The refusal names the node.
+- **K-ADM-005.** An argument of a library call or of a `perform` is refused when no value it can hold is of its parameter's type: a literal of another kind, a construction of another kind, the result of a call whose signature states another type. The check reads only what the document states. A variable is typed by the `let` that declares it when nothing assigns it, and then only as far as its kind, since the contents of a mutable object may change; every other variable may hold anything. An argument that might fit is admitted and checked when it runs (`K-FN-007`). `absent` given for an optional parameter is the omitted argument (`K-FN-004`).
+- **K-ADM-006.** A `perform` is refused when the result type it states shares no value with the result type of the effect's signature in the manifest.
+- **K-ADM-007.** The manifest a document carries is the one its code derives (`K-DOC-002`). A document is refused when its manifest lists an effect nothing performs, lists a function nothing reaches, omits a function reached through another function's body, or lists a function under a name its definition does not carry.
+- **K-ADM-008.** The body of every library function a document reaches is held to the rules of a document: structural validation with the statement rule (`K-STMT-003`, `K-LIB-004`), and the scope rule of `K-FORM-003`, its parameters being its signature's.
+- **K-ADM-009.** Every derived fact (node ids, edges, scopes, type facets, effect sets, execution sites) is a function of the document and of the definitions of the functions it reaches. Annotations change none of them.
 
 ## Kernel text (`K-TEXT`)
 
