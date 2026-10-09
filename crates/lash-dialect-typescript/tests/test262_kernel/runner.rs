@@ -691,3 +691,14 @@ fn borrowed_boolean_value_of_rejects_other_kinds() {
         Datum::Bool(true),
     );
 }
+
+/// Bind rejects a non-callable target before creating a bound function.
+#[test]
+fn borrowed_bind_rejects_non_callable_targets() {
+    assert_finished(
+        execute(
+            "let count = 0; for (const value of [undefined, null, true, 1, 'x', [], {}]) { try { Function.prototype.bind.call(value); } catch (e) { if (e.name === 'TypeError') { count++; } } } finish(count);",
+        ),
+        Datum::Float(lash_kernel_doc::Float::new(7.0)),
+    );
+}
