@@ -226,7 +226,7 @@ fn a_duplicate_engine_kind_is_refused() {
 /// engine's. The restoration is deliberately not a decision `with_admitted_identity`
 /// makes by inspecting the row: a label already on a registration is not evidence
 /// that a host declared it, and treating it as evidence let a first admitted stamp
-/// mask a second (#1543, the `list_processes_filters_by_enriched_fields` law).
+/// mask a second (#1543, the `process_roster_pages_match_enriched_filters` law).
 #[tokio::test]
 async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
     let engine_label = "__process_02178275819fb79b903c9a8b03a8b2d28c41708383b1728900e429e3a59b6a32";

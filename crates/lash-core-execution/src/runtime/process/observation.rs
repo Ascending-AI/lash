@@ -323,7 +323,7 @@ impl ProcessWorkObserver {
         &self,
         filter: &ProcessListFilter,
     ) -> Result<Vec<ObservedWorkItem>, PluginError> {
-        let records = self.registry.list_processes(filter).await?;
+        let records = self.roster_records(filter).await?;
         let mut items = Vec::with_capacity(records.len());
         for record in records {
             items.push(self.work_item_from_record(record).await?);
@@ -417,8 +417,8 @@ impl ProcessWorkObserver {
     ///
     /// The scope is handed to the store as a typed `ProcessOriginatorFilter`
     /// rather than pre-flattened to an id string: the store pushes the session
-    /// id down to its `originator_id` index and the shared Rust predicate
-    /// narrows to the named agent frame, so the lens no longer has a
+    /// id down to its `originator_id` index and filters the named agent frame
+    /// before the page limit, so the lens no longer has a
     /// caller-side copy of the match rule that could drift from the store's.
     /// A filter the caller already populated with an originator is replaced,
     /// not intersected — this lens owns that field.
@@ -431,8 +431,32 @@ impl ProcessWorkObserver {
             originator: Some(ProcessOriginatorFilter::Session(scope.clone())),
             ..filter.clone()
         };
-        let records = self.registry.list_processes(&filter).await?;
+        let records = self.roster_records(&filter).await?;
         self.observe_records(records).await
+    }
+
+    async fn roster_records(
+        &self,
+        filter: &ProcessListFilter,
+    ) -> Result<Vec<ProcessRecord>, PluginError> {
+        let mut records = Vec::new();
+        let mut continuation = None;
+        loop {
+            let page = self
+                .registry
+                .list_processes_page(
+                    filter,
+                    std::num::NonZeroUsize::MIN
+                        .saturating_add(super::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                    continuation,
+                )
+                .await?;
+            records.extend(page.records);
+            continuation = page.continuation;
+            if continuation.is_none() {
+                return Ok(records);
+            }
+        }
     }
 
     /// Read the roster changes after `cursor`, oldest first, and the cursor

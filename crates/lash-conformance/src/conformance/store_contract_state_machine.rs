@@ -203,10 +203,12 @@ async fn cursor_after_full_relist_if_required(
             tombstone_compaction_horizon,
             ..
         }) => {
-            registry
-                .list_processes(&crate::ProcessListFilter::default())
-                .await
-                .map_err(|error| error.to_string())?;
+            lash_core::testing::process_roster_records_for_fixture(
+                registry.as_ref(),
+                &crate::ProcessListFilter::default(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
             registry
                 .processes_changed_since(tombstone_compaction_horizon, 1_000)
                 .await

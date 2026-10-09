@@ -85,15 +85,15 @@ async fn world(tier: Tier, inspector: &Arc<Inspector>) -> Option<World> {
 
 /// Every process the core's registry holds.
 async fn processes(world: &World) -> Vec<lash_core::ProcessRecord> {
-    world
-        .backend
-        .process_registry()
-        .list_processes(&lash_core::ProcessListFilter {
+    lash_core::testing::process_roster_records_for_fixture(
+        world.backend.process_registry().as_ref(),
+        &lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
             ..lash_core::ProcessListFilter::default()
-        })
-        .await
-        .expect("the registry lists its processes")
+        },
+    )
+    .await
+    .expect("the registry lists its processes")
 }
 
 /// A process handle a cell bound in one turn is still the process in the

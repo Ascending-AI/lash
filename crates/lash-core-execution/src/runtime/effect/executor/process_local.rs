@@ -189,19 +189,35 @@ impl ProcessLocalExecution {
                         }
                     },
                     crate::ProcessListSelection::HostRunning => {
-                        registry
-                            .list_processes(&crate::ProcessListFilter {
-                                // Live, not only `running`: a process that
-                                // sleeps or awaits reads `waiting`.
-                                status: crate::ProcessStatusFilter::any_of(
-                                    crate::ProcessStatus::ALL
-                                        .iter()
-                                        .copied()
-                                        .filter(crate::ProcessStatus::is_live),
-                                ),
-                                ..Default::default()
-                            })
-                            .await?
+                        let filter = &crate::ProcessListFilter {
+                            // Live, not only `running`: a process that
+                            // sleeps or awaits reads `waiting`.
+                            status: crate::ProcessStatusFilter::any_of(
+                                crate::ProcessStatus::ALL
+                                    .iter()
+                                    .copied()
+                                    .filter(crate::ProcessStatus::is_live),
+                            ),
+                            ..Default::default()
+                        };
+                        let mut records = Vec::new();
+                        let mut continuation = None;
+                        loop {
+                            let page = registry
+                                .list_processes_page(
+                                    filter,
+                                    std::num::NonZeroUsize::MIN
+                                        .saturating_add(crate::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                                    continuation,
+                                )
+                                .await?;
+                            records.extend(page.records);
+                            continuation = page.continuation;
+                            if continuation.is_none() {
+                                break;
+                            }
+                        }
+                        records
                     }
                 };
                 Ok((

@@ -195,8 +195,7 @@ lash_store_sql::statements! {
          )
          ORDER BY candidate.ordinal ASC";
 
-/// Every process matching the always-bound filters, including those
-        /// retired since `?10` when it is bound.
+        /// A bounded keyset matching the filters, including rows retired since `?8`.
 
         list = "SELECT record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
@@ -209,7 +208,11 @@ lash_store_sql::statements! {
                AND (?7::BIGINT IS NULL OR created_at_ms < ?7)
                AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
                     OR updated_at_ms >= ?8)
-             ORDER BY process_id ASC";
+           AND (?9::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,type}' = ?9)
+           AND (?10::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?10)
+           AND (?11::TEXT IS NULL OR process_id > ?11)
+           AND process_id <= ?12
+             ORDER BY process_id ASC LIMIT ?13";
         /// The same, narrowed to lifetime scope `?9` / `?10`.
         list_by_lifetime_scope = "SELECT record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
@@ -223,8 +226,12 @@ lash_store_sql::statements! {
                AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
                     OR updated_at_ms >= ?8)
                AND lifetime_scope_kind = ?9
-               AND lifetime_scope_id IS NOT DISTINCT FROM ?10::TEXT
-             ORDER BY process_id ASC";
+               AND lifetime_scope_id = ?10
+           AND (?11::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,type}' = ?11)
+           AND (?12::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?12)
+           AND (?13::TEXT IS NULL OR process_id > ?13)
+           AND process_id <= ?14
+             ORDER BY process_id ASC LIMIT ?15";
         /// The same, narrowed to rows whose cancel request is older than `?9`
         /// and whose outcome is still open.
         list_pending_cancel = "SELECT record_json FROM processes
@@ -241,7 +248,11 @@ lash_store_sql::statements! {
                AND cancel_requested_at_ms IS NOT NULL
                AND cancel_requested_at_ms < ?9
                AND {{nonterminal_process_status(status)}}
-             ORDER BY process_id ASC";
+           AND (?10::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,type}' = ?10)
+           AND (?11::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?11)
+           AND (?12::TEXT IS NULL OR process_id > ?12)
+           AND process_id <= ?13
+             ORDER BY process_id ASC LIMIT ?14";
         /// Both narrowings at once.
         list_by_lifetime_scope_pending_cancel = "SELECT record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
@@ -255,11 +266,15 @@ lash_store_sql::statements! {
                AND (?8::BIGINT IS NULL OR {{live_process_status(status)}}
                     OR updated_at_ms >= ?8)
                AND lifetime_scope_kind = ?9
-               AND lifetime_scope_id IS NOT DISTINCT FROM ?10::TEXT
+               AND lifetime_scope_id = ?10
                AND cancel_requested_at_ms IS NOT NULL
                AND cancel_requested_at_ms < ?11
                AND {{nonterminal_process_status(status)}}
-             ORDER BY process_id ASC";
+           AND (?12::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,type}' = ?12)
+           AND (?13::TEXT IS NULL OR record_json::JSONB #>> '{provenance,originator,agent_frame_id}' = ?13)
+           AND (?14::TEXT IS NULL OR process_id > ?14)
+           AND process_id <= ?15
+             ORDER BY process_id ASC LIMIT ?16";
     }
 }
 
@@ -527,14 +542,14 @@ pub(crate) fn process_sql() -> &'static ProcessSql {
     &PROCESS_SQL
 }
 
-/// The list statement this filter asks for.
+/// The roster page statement this filter asks for.
 ///
 /// The optional clauses are conjuncts that are either present or absent — an
 /// `($n IS NULL OR …)` over them would cost the planner the partial indexes
 /// they exist to use — so each combination is its own named statement rather
-/// than a template with a hole. The caller binds the always-bound ten
+/// than a template with a hole. The caller binds the always-bound eight
 /// parameters and then, in this same order, the clauses' own.
-pub(crate) fn list_processes_sql(filter: &lash_core_execution::ProcessListFilter) -> &'static str {
+pub(crate) fn roster_sql(filter: &lash_core_execution::ProcessListFilter) -> &'static str {
     let statements = &process_sql().process_postgres;
     match (
         filter.until.is_some(),

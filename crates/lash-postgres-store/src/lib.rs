@@ -180,6 +180,8 @@ pub struct PostgresProcessRegistry {
     /// through the fenced `F`'s `writer_version`, never a bare build constant
     /// (FIG-3796).
     fence: guarded_tx::WriterFence,
+    #[cfg(test)]
+    decoded_roster_records: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl PostgresProcessRegistry {
@@ -717,6 +719,8 @@ impl PostgresStorage {
             pools: Arc::clone(&self.pools),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            #[cfg(test)]
+            decoded_roster_records: Arc::default(),
             fence: self.fence.clone(),
         }
     }

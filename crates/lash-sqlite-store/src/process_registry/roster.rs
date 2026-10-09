@@ -59,6 +59,8 @@ pub(super) async fn page(
     let limit = limit
         .get()
         .min(lash_core_execution::MAX_PROCESS_ROSTER_PAGE_SIZE);
+    #[cfg(test)]
+    let decoded = Arc::clone(&registry.decoded_roster_records);
     registry
         .conn
         .call(move |conn| {
@@ -81,24 +83,31 @@ pub(super) async fn page(
                         .transpose()?,
                 };
                 let mut candidates = Vec::new();
-                if let Some(through) = &through {
-                    let (sql, values) = match &cursor {
-                        Some(cursor) => (
-                            process_sql().process.list_next_roster_candidates.sql(),
-                            vec![
-                                rusqlite::types::Value::Text(through.as_str().to_owned()),
-                                rusqlite::types::Value::Text(cursor.after().as_str().to_owned()),
-                                rusqlite::types::Value::Integer((limit + 1) as i64),
-                            ],
-                        ),
-                        None => (
-                            process_sql().process.list_first_roster_candidates.sql(),
-                            vec![
-                                rusqlite::types::Value::Text(through.as_str().to_owned()),
-                                rusqlite::types::Value::Integer((limit + 1) as i64),
-                            ],
-                        ),
-                    };
+                if let Some(through) = &through
+                    && filter
+                        .created_at_start_ms
+                        .is_none_or(|value| value <= i64::MAX as u64)
+                {
+                    let definition = filter
+                        .definition_id
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()
+                        .map_err(process_decode_error)?;
+                    let status = filter
+                        .status
+                        .labels()
+                        .map(|labels| serde_json::to_string(&labels))
+                        .transpose()
+                        .map_err(process_decode_error)?;
+                    let (sql, values) = sql::roster_query(
+                        &filter,
+                        status,
+                        definition,
+                        cursor.as_ref().map(|cursor| cursor.after().as_str()),
+                        through.as_str(),
+                        limit + 1,
+                    );
                     let mut stmt = tx.prepare_cached(sql).map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values), |row| {
@@ -106,6 +115,8 @@ pub(super) async fn page(
                         })
                         .map_err(process_sqlite_error)?;
                     for row in rows {
+                        #[cfg(test)]
+                        decoded.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         candidates.push(
                             serde_json::from_str(&row.map_err(process_sqlite_error)?)
                                 .map_err(process_decode_error)?,
@@ -126,4 +137,79 @@ pub(super) async fn page(
         })
         .await
         .map_err(process_sqlite_error)?
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn filtered_roster_page_decodes_only_matches_in_ten_thousand_rows() {
+    let backend = crate::SqliteStoreSet::memory().await.expect("memory store");
+    lash_core_execution::testing::process_execution_env_fixture(
+        backend.process_env_store().as_ref(),
+    )
+    .await;
+    let registry = backend.process_registry();
+
+    use lash_core_execution::{Lifetime, ProcessProvenance, ProcessRegistrar as _};
+    let base = registry
+        .register_process(lash_core_execution::testing::held_engine_registration(
+            serde_json::Value::Null,
+            ProcessProvenance::host(),
+            Lifetime::Detached,
+        ))
+        .await
+        .expect("register template");
+    let mut rows = Vec::new();
+    let mut expected = Vec::new();
+    for index in 0..10_000 {
+        let mut record = base.clone();
+        record.id = ProcessId::fixture(&format!("roster-{index:05}"));
+        let matches = matches!(index, 1000 | 5000 | 9000);
+        record.identity.label = Some(if matches { "selected" } else { "other" }.to_owned());
+        if matches {
+            expected.push(record.id.clone());
+        }
+        rows.push(record);
+    }
+    expected.sort();
+
+    registry.conn.call(move |conn| {
+        let tx = conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM processes", [])?;
+        for record in rows {
+            tx.execute("INSERT INTO processes (process_id, originator_id, identity_kind, identity_label, created_at_ms, updated_at_ms, change_seq, lifetime, record_json) VALUES (?1, 'host', ?2, ?3, ?4, ?5, 1, 'detached', ?6)", params![record.id.as_str(), record.identity.kind.as_str(), record.identity.label, record.created_at_ms as i64, record.updated_at_ms as i64, serde_json::to_string(&record).expect("encode record")])?;
+        }
+        tx.commit()?;
+        Ok(())
+    }).await.expect("seed ten thousand rows");
+
+    let page = registry
+        .list_processes_page(
+            &ProcessListFilter {
+                status: lash_core_execution::ProcessStatusFilter::Any,
+                identity_label: Some("selected".to_owned()),
+                ..ProcessListFilter::default()
+            },
+            std::num::NonZeroUsize::new(10).expect("page limit"),
+            None,
+        )
+        .await
+        .expect("filtered page");
+    assert_eq!(
+        registry
+            .decoded_roster_records
+            .load(std::sync::atomic::Ordering::Relaxed),
+        3,
+        "a filtered page must decode only its three matching records"
+    );
+    assert_eq!(
+        page.records
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert!(
+        page.continuation.is_none(),
+        "all three matches fit in one page"
+    );
 }

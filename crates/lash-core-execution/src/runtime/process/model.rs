@@ -902,7 +902,7 @@ impl<I> ProcessRegistration<I> {
     /// may stamp an admitted identity more than once. Reading the label back
     /// off the registration to decide whether to keep it therefore lets the
     /// *first* stamp mask the second, which is how #1543 turned the
-    /// `list_processes_filters_by_enriched_fields` conformance law red. A
+    /// `process_roster_pages_match_enriched_filters` conformance law red. A
     /// host-declared label is restored after admission, from the declaration
     /// that carried it, by [`Self::with_host_facing_label`].
     pub fn with_admitted_identity(mut self, admitted: crate::AdmittedProcessIdentity) -> Self {

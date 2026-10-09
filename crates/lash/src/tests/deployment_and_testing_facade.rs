@@ -158,12 +158,13 @@ async fn definition_args_checks_partial_and_complete_inputs_without_starting() {
         Err(ArgsMismatch::DefinitionRefused { .. })
     ));
     assert!(
-        core.backend()
-            .process_registry()
-            .list_processes(&Default::default())
-            .await
-            .unwrap()
-            .is_empty(),
+        lash_core::testing::process_roster_records_for_fixture(
+            core.backend().process_registry().as_ref(),
+            &Default::default()
+        )
+        .await
+        .unwrap()
+        .is_empty(),
         "argument checking admits no process"
     );
     core.shutdown().await.unwrap();

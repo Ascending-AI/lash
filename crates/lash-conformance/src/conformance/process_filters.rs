@@ -7,7 +7,7 @@ use pretty_assertions::assert_eq;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn ProcessRegistry>) {
+pub async fn process_roster_pages_match_enriched_filters(registry: Arc<dyn ProcessRegistry>) {
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
@@ -16,8 +16,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
         registry: &Arc<dyn ProcessRegistry>,
         filter: ProcessListFilter,
     ) -> Vec<ProcessId> {
-        registry
-            .list_processes(&filter)
+        lash_core::testing::process_roster_records_for_fixture(registry.as_ref(), &filter)
             .await
             .expect("list processes")
             .into_iter()
@@ -30,13 +29,15 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn assert_rust_parity(registry: &Arc<dyn ProcessRegistry>, filter: ProcessListFilter) {
-        let all = registry
-            .list_processes(&ProcessListFilter {
+        let all = lash_core::testing::process_roster_records_for_fixture(
+            registry.as_ref(),
+            &ProcessListFilter {
                 status: ProcessStatusFilter::Any,
                 ..ProcessListFilter::default()
-            })
-            .await
-            .expect("list reference processes");
+            },
+        )
+        .await
+        .expect("list reference processes");
         let expected = all
             .iter()
             .filter(|record| filter.matches_record(record))
@@ -231,7 +232,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
+pub async fn process_roster_pages_bound_retired_rows_without_hiding_live_rows(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     const KIND: &str = "recent-retired-filter-kind";
@@ -355,29 +356,33 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
         "remaining filters still apply conjunctively"
     );
 
-    let recent = registry
-        .list_processes(&ProcessListFilter {
+    let recent = lash_core::testing::process_roster_records_for_fixture(
+        registry.as_ref(),
+        &ProcessListFilter {
             status: ProcessStatusFilter::Any,
             identity_kind: Some(KIND.to_string()),
             retired_since_ms: Some(fresh.updated_at_ms),
             ..ProcessListFilter::default()
-        })
-        .await
-        .expect("list live plus recently retired processes");
+        },
+    )
+    .await
+    .expect("list live plus recently retired processes");
     assert_eq!(
         recent_labels(&recent),
         ["recent-filter-fresh", "recent-filter-running"],
         "the bounded read must retain old live rows and exclude old retired rows"
     );
 
-    let all = registry
-        .list_processes(&ProcessListFilter {
+    let all = lash_core::testing::process_roster_records_for_fixture(
+        registry.as_ref(),
+        &ProcessListFilter {
             status: ProcessStatusFilter::Any,
             identity_kind: Some(KIND.to_string()),
             ..ProcessListFilter::default()
-        })
-        .await
-        .expect("list all recent-retired fixtures");
+        },
+    )
+    .await
+    .expect("list all recent-retired fixtures");
     assert_eq!(
         recent_labels(&all),
         [
@@ -411,7 +416,7 @@ fn recent_labels(records: &[crate::ProcessRecord]) -> Vec<&str> {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn list_processes_filters_by_until_scope_and_pending_cancel(
+pub async fn process_roster_pages_match_scope_frame_and_cancel_filters(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     #[expect(
@@ -422,8 +427,7 @@ pub async fn list_processes_filters_by_until_scope_and_pending_cancel(
         registry: &Arc<dyn ProcessRegistry>,
         filter: &ProcessListFilter,
     ) -> Vec<String> {
-        registry
-            .list_processes(filter)
+        lash_core::testing::process_roster_records_for_fixture(registry.as_ref(), filter)
             .await
             .expect("list processes")
             .iter()
@@ -461,13 +465,15 @@ pub async fn list_processes_filters_by_until_scope_and_pending_cancel(
                 .collect::<Vec<_>>(),
             "{message}"
         );
-        let all = registry
-            .list_processes(&ProcessListFilter {
+        let all = lash_core::testing::process_roster_records_for_fixture(
+            registry.as_ref(),
+            &ProcessListFilter {
                 status: ProcessStatusFilter::Any,
                 ..ProcessListFilter::default()
-            })
-            .await
-            .expect("list reference processes");
+            },
+        )
+        .await
+        .expect("list reference processes");
         let mut expected_by_predicate = all
             .iter()
             .filter(|record| filter.matches_record(record))

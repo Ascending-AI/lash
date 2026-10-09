@@ -120,12 +120,31 @@ pub(super) async fn run_once_process_list_stress(
                 let phase_started = Instant::now();
                 let phase_before_alloc = allocator_stats();
                 let phase_before_memory = process_memory_sample();
-                let global_records = registry
-                    .list_processes(&lash_core::ProcessListFilter {
+                let global_records = async {
+                    let registry = &registry;
+                    let filter = &lash_core::ProcessListFilter {
                         status: lash_core::ProcessStatusFilter::Any,
                         ..lash_core::ProcessListFilter::default()
-                    })
-                    .await?;
+                    };
+                    let mut records = Vec::new();
+                    let mut continuation = None;
+                    loop {
+                        let page = registry
+                            .list_processes_page(
+                                filter,
+                                std::num::NonZeroUsize::MIN
+                                    .saturating_add(lash_core::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                                continuation,
+                            )
+                            .await?;
+                        records.extend(page.records);
+                        continuation = page.continuation;
+                        if continuation.is_none() {
+                            break Ok::<_, lash_core::PluginError>(records);
+                        }
+                    }
+                }
+                .await?;
                 phase_profile.insert(
                     "process_list_stress.list_global".to_string(),
                     RuntimePerfPhaseRunResult {

@@ -94,6 +94,26 @@ pub async fn process_execution_env_fixture(
     .expect("fixed process execution environment fixture publishes")
 }
 
+/// Collect a fixture's roster through single-record pages, exercising continuations.
+#[cfg(any(test, feature = "testing"))]
+pub async fn process_roster_records_for_fixture(
+    registry: &dyn crate::ProcessQuery,
+    filter: &crate::ProcessListFilter,
+) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
+    let mut records = Vec::new();
+    let mut continuation = None;
+    loop {
+        let page = registry
+            .list_processes_page(filter, std::num::NonZeroUsize::MIN, continuation)
+            .await?;
+        records.extend(page.records);
+        continuation = page.continuation;
+        if continuation.is_none() {
+            return Ok(records);
+        }
+    }
+}
+
 /// The reference [`process_execution_env_fixture`] publishes under. An
 /// environment reference is content-addressed, so it names the fixture
 /// environment in every store: a subscription draft that records the

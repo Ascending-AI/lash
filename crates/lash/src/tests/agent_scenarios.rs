@@ -107,14 +107,14 @@ finish(await handle);"#,
         lash_core::LlmRequestOwner::Session { session_id },
         "the cell's llm.query is its session's"
     );
-    let processes = core
-        .backend()
-        .process_registry()
-        .list_processes(&lash_core::ProcessListFilter {
+    let processes = lash_core::testing::process_roster_records_for_fixture(
+        core.backend().process_registry().as_ref(),
+        &lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
             ..lash_core::ProcessListFilter::default()
-        })
-        .await?;
+        },
+    )
+    .await?;
     let [process] = processes.as_slice() else {
         panic!("one process ran: {processes:?}");
     };

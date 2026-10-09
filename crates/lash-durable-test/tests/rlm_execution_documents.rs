@@ -505,15 +505,15 @@ async fn run_process_corpus(world: &World, corpus: &str, count: usize) {
         .await;
     served::assert_answered("the L1 process corpus cell", &output);
     let registered = || async {
-        world
-            .backend
-            .process_registry()
-            .list_processes(&lash_core::ProcessListFilter {
+        lash_core::testing::process_roster_records_for_fixture(
+            world.backend.process_registry().as_ref(),
+            &lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
                 ..lash_core::ProcessListFilter::default()
-            })
-            .await
-            .expect("the registry lists its processes")
+            },
+        )
+        .await
+        .expect("the registry lists its processes")
     };
     let ended = tokio::time::timeout(served::WATCHDOG, async {
         loop {
@@ -974,15 +974,15 @@ finish("started");
     served::assert_answered("the step body starts", &output);
     let ended = tokio::time::timeout(served::WATCHDOG, async {
         loop {
-            let listed = world
-                .backend
-                .process_registry()
-                .list_processes(&lash_core::ProcessListFilter {
+            let listed = lash_core::testing::process_roster_records_for_fixture(
+                world.backend.process_registry().as_ref(),
+                &lash_core::ProcessListFilter {
                     status: lash_core::ProcessStatusFilter::Any,
                     ..lash_core::ProcessListFilter::default()
-                })
-                .await
-                .expect("the registry lists its processes");
+                },
+            )
+            .await
+            .expect("the registry lists its processes");
             if let [record] = listed.as_slice()
                 && record.is_terminal()
             {

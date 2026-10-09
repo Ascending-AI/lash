@@ -66,12 +66,7 @@ pub trait ProcessQuery: Send + Sync {
         start_key: &crate::StartKey,
     ) -> Result<Option<ProcessRecord>, PluginError>;
 
-    async fn list_processes(
-        &self,
-        filter: &ProcessListFilter,
-    ) -> Result<Vec<ProcessRecord>, PluginError>;
-
-    /// Read at most `limit` candidates plus one lookahead (page size capped at MAX_PROCESS_ROSTER_PAGE_SIZE)
+    /// Read at most `limit` matching records plus one lookahead (page size capped at MAX_PROCESS_ROSTER_PAGE_SIZE)
     /// in process-id order, filtering inside the store. Capture a change fence
     /// before the first page and keep it in every continuation. Drain global
     /// changes after that fence to reconcile inserts, deletion and filter exit.
@@ -774,12 +769,6 @@ pub trait ProcessClockRebind: Send + Sync {
 /// #[async_trait::async_trait]
 /// impl ProcessQuery for ObserverOnly {
 ///     async fn get_process(&self, _: &str) -> Result<Option<ProcessRecord>, PluginError> {
-///         unimplemented!()
-///     }
-///     async fn list_processes(
-///         &self,
-///         _: &ProcessListFilter,
-///     ) -> Result<Vec<ProcessRecord>, PluginError> {
 ///         unimplemented!()
 ///     }
 ///     async fn processes_changed_since(

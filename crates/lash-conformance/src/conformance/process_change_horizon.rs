@@ -72,13 +72,12 @@ pub async fn process_change_cursor_below_tombstone_compaction_horizon_is_refused
         .expect("the horizon cursor itself remains resumable");
 }
 
-/// FIG-5569: a filter can make a page empty without finishing enumeration.
-/// Keyset work stays bounded and every page retains the pre-scan change fence.
+/// The filtered keyset retains the pre-scan change fence and binds its selection.
 #[expect(
     clippy::expect_used,
     reason = "conformance fixture and its named contract assertions"
 )]
-pub async fn process_roster_pages_preserve_the_fence_through_empty_filtered_pages(
+pub async fn process_roster_pages_preserve_the_fence_and_refuse_filter_changes(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     for index in 0..3 {
@@ -87,48 +86,49 @@ pub async fn process_roster_pages_preserve_the_fence_through_empty_filtered_page
             .await
             .expect("register roster");
     }
-    let bound = std::num::NonZeroUsize::MIN;
     let filter = crate::ProcessListFilter {
-        identity_label: Some("no-row-has-this-label".to_owned()),
         status: crate::ProcessStatusFilter::Any,
         ..crate::ProcessListFilter::default()
     };
+    let bound = std::num::NonZeroUsize::MIN;
     let first = registry
         .list_processes_page(&filter, bound, None)
         .await
-        .expect("filtered page");
+        .expect("first page");
     let fence = first.change_cursor;
-    assert!(first.records.is_empty());
-    let cursor = first
-        .continuation
-        .expect("empty page still has candidates after it");
+    assert_eq!(first.records.len(), 1);
+    let cursor = first.continuation.expect("two matching rows remain");
+    let no_matches = crate::ProcessListFilter {
+        identity_label: Some("no-row-has-this-label".to_owned()),
+        ..filter.clone()
+    };
     assert!(matches!(
         registry
-            .list_processes_page(
-                &crate::ProcessListFilter::default(),
-                bound,
-                Some(cursor.clone())
-            )
+            .list_processes_page(&no_matches, bound, Some(cursor.clone()))
             .await,
         Err(crate::PluginError::ProcessRosterFilterMismatch {})
     ));
+    let empty = registry
+        .list_processes_page(&no_matches, bound, None)
+        .await
+        .expect("no matches");
+    assert!(empty.records.is_empty());
+    assert!(empty.continuation.is_none());
     let mut continuation = Some(cursor);
-    let mut pages = 1;
+    let mut records = first.records;
     while let Some(cursor) = continuation {
         let page = registry
             .list_processes_page(&filter, bound, Some(cursor))
             .await
-            .expect("continue filtered page");
-        assert!(page.records.is_empty());
+            .expect("next page");
         assert_eq!(page.change_cursor, fence);
+        assert_eq!(page.records.len(), 1);
+        assert!(records.last().expect("preceding record").id < page.records[0].id);
+        records.extend(page.records);
         continuation = page.continuation;
-        pages += 1;
-        assert!(
-            pages <= 3,
-            "a continuation advances past examined candidates"
-        );
+        assert!(records.len() <= 3, "keyset advances strictly");
     }
-    assert_eq!(pages, 3);
+    assert_eq!(records.len(), 3);
     let bounds = registry
         .process_change_bounds()
         .await

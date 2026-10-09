@@ -1,32 +1,31 @@
 use super::*;
 
-use sql::list_processes_query;
+use sql::roster_query;
 
 #[test]
-fn recently_retired_query_uses_bounded_live_and_retired_indexes() {
+fn retired_roster_page_uses_live_and_recency_indexes() {
     let conn = rusqlite::Connection::open_in_memory().expect("open query-plan database");
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
+    let (sql, values) = roster_query(
+        &lash_core_execution::ProcessListFilter {
+            status: lash_core_execution::ProcessStatusFilter::Any,
+            retired_since_ms: Some(100),
+            ..Default::default()
+        },
+        None,
+        None,
+        Some("p_"),
+        "~",
+        257,
+    );
     let mut stmt = conn
-        .prepare(&format!(
-            "EXPLAIN QUERY PLAN {}",
-            process_sql().process_sqlite.list_recent_retired.sql()
-        ))
-        .expect("prepare recently retired query plan");
+        .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        .expect("prepare recently retired page query plan");
     let plan = stmt
-        .query_map(
-            params![
-                Option::<String>::None,
-                Option::<String>::None,
-                Option::<String>::None,
-                Option::<String>::None,
-                Option::<String>::None,
-                Option::<i64>::None,
-                Option::<i64>::None,
-                100_i64,
-            ],
-            |row| row.get::<_, String>(3),
-        )
+        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+            row.get::<_, String>(3)
+        })
         .expect("explain recently retired query")
         .collect::<Result<Vec<_>, _>>()
         .expect("collect recently retired query plan");
@@ -87,11 +86,11 @@ fn observed_recently_retired_query_seeks_recency_before_observer_history() {
 }
 
 #[test]
-fn pending_cancel_query_seeks_the_partial_cancel_index() {
+fn pending_cancel_roster_page_seeks_the_partial_cancel_index() {
     let conn = rusqlite::Connection::open_in_memory().expect("open query-plan database");
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
-    let (sql, values) = list_processes_query(
+    let (sql, values) = roster_query(
         &lash_core_execution::ProcessListFilter {
             status: lash_core_execution::ProcessStatusFilter::Any,
             cancel_pending_before_ms: Some(1_700_000_000_000),
@@ -99,6 +98,9 @@ fn pending_cancel_query_seeks_the_partial_cancel_index() {
         },
         None,
         None,
+        Some("p_"),
+        "~",
+        257,
     );
     let mut stmt = conn
         .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
@@ -118,11 +120,11 @@ fn pending_cancel_query_seeks_the_partial_cancel_index() {
 }
 
 #[test]
-fn until_scope_query_seeks_the_lifetime_scope_index() {
+fn until_scope_roster_page_seeks_the_lifetime_scope_index() {
     let conn = rusqlite::Connection::open_in_memory().expect("open query-plan database");
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
-    let (sql, values) = list_processes_query(
+    let (sql, values) = roster_query(
         &lash_core_execution::ProcessListFilter {
             status: lash_core_execution::ProcessStatusFilter::Any,
             until: Some(lash_core_execution::ScopeId::turn(
@@ -133,6 +135,9 @@ fn until_scope_query_seeks_the_lifetime_scope_index() {
         },
         None,
         None,
+        Some("p_"),
+        "~",
+        257,
     );
     let mut stmt = conn
         .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))

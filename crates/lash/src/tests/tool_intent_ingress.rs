@@ -26,13 +26,15 @@ fn started_process_id(outcome: &crate::tools::ToolIntentIngressOutcome) -> Proce
 
 /// Every process the registry holds.
 async fn registered_process_count(registry: &Arc<dyn ProcessRegistry>) -> Result<usize> {
-    Ok(registry
-        .list_processes(&lash_core::ProcessListFilter {
+    Ok(lash_core::testing::process_roster_records_for_fixture(
+        registry.as_ref(),
+        &lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
             ..lash_core::ProcessListFilter::default()
-        })
-        .await?
-        .len())
+        },
+    )
+    .await?
+    .len())
 }
 
 /// A held process start under the session's captured environment.

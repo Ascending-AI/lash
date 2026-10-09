@@ -252,6 +252,8 @@ impl SqliteProcessRegistry {
             clock,
             location,
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            #[cfg(test)]
+            decoded_roster_records: Arc::default(),
         }
     }
 

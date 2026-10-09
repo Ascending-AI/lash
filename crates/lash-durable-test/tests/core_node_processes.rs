@@ -1954,22 +1954,23 @@ async fn isolated_turn(
 
 /// The processes of the isolated engine the registry holds.
 async fn isolated_processes(backend: &lash::Backend) -> Vec<lash_core::ProcessRecord> {
-    backend
-        .process_registry()
-        .list_processes(&lash_core::ProcessListFilter {
+    lash_core::testing::process_roster_records_for_fixture(
+        backend.process_registry().as_ref(),
+        &lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
             ..lash_core::ProcessListFilter::default()
-        })
-        .await
-        .expect("the registry lists its processes")
-        .into_iter()
-        .filter(|record| {
-            matches!(
-                record.input.as_ref(),
-                lash_core::ProcessInput::Engine { kind, .. } if kind == ISOLATED_ENGINE
-            )
-        })
-        .collect()
+        },
+    )
+    .await
+    .expect("the registry lists its processes")
+    .into_iter()
+    .filter(|record| {
+        matches!(
+            record.input.as_ref(),
+            lash_core::ProcessInput::Engine { kind, .. } if kind == ISOLATED_ENGINE
+        )
+    })
+    .collect()
 }
 
 /// L08/D04: an RLM cell's call of a tool declared isolated, which its

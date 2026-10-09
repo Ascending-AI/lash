@@ -261,14 +261,14 @@ macro_rules! process_registry_tests {
                 (long_cancellation_requester_replay_is_backend_safe, "long-cancellation-replay"),
                 (an_unstamped_cancelled_terminal_replay_coalesces, "unstamped-cancelled-terminal-replay"),
                 (lifecycle_status_and_outcome_fold, "lifecycle-fold"),
-                (list_filters_match_extracted_and_json_fields, "list-filters"),
+                (process_roster_pages_match_status_sets_and_definition, "list-filters"),
                 (process_registry_pagination, "pagination"),
                 (non_terminal_process_pages_visit_every_row_across_the_page_bound, "bounded-pagination"),
                 (process_event_pages_reject_out_of_range_sequences, "process-event-page-sql-cursor-range"),
                 (waiting_processes_remain_in_the_non_terminal_scan, "waiting-non-terminal-scan"),
-                (list_processes_filters_by_enriched_fields, "enriched-filters"),
-                (list_processes_bounds_retired_rows_without_hiding_live_rows, "retired-bounds"),
-                (list_processes_filters_by_until_scope_and_pending_cancel, "until-scope-cancel-filters"),
+                (process_roster_pages_match_enriched_filters, "enriched-filters"),
+                (process_roster_pages_bound_retired_rows_without_hiding_live_rows, "retired-bounds"),
+                (process_roster_pages_match_scope_frame_and_cancel_filters, "until-scope-cancel-filters"),
                 (process_change_feed_never_misses_concurrent_terminal_writers, "concurrent-terminal-feed"),
                 (session_delete_preserves_process_bytes, "session-delete-bytes"),
                 (record_fold_and_retention_hold_for_every_registry_writer, "registry-writer-fold-retention"),
@@ -539,7 +539,7 @@ macro_rules! process_change_horizon_tests {
     ($fixture:block) => {
         $crate::process_change_horizon_tests!(@catalogue $fixture; [
             (process_change_cursor_below_tombstone_compaction_horizon_is_refused, "process-change-horizon"),
-            (process_roster_pages_preserve_the_fence_through_empty_filtered_pages, "process-roster-fence"),
+            (process_roster_pages_preserve_the_fence_and_refuse_filter_changes, "process-roster-fence"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

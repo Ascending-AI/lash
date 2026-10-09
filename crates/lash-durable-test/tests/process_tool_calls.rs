@@ -244,15 +244,15 @@ async fn tool_call_limit_counts_what_a_process_holds(tier: Tier) {
         "the call past the limit never ran: {:?}",
         witness.of("refused")
     );
-    let processes = world
-        .backend
-        .process_registry()
-        .list_processes(&lash_core::ProcessListFilter {
+    let processes = lash_core::testing::process_roster_records_for_fixture(
+        world.backend.process_registry().as_ref(),
+        &lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
             ..lash_core::ProcessListFilter::default()
-        })
-        .await
-        .expect("the registry lists its processes");
+        },
+    )
+    .await
+    .expect("the registry lists its processes");
     let held = processes
         .iter()
         .find(|process| process.is_terminal())

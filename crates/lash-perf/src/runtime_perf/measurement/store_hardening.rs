@@ -634,13 +634,32 @@ mod store_hardening_tests {
             .expect("complete unrelated process");
 
         let mut phase_profile = BTreeMap::new();
-        let scoped_before = registry
-            .list_processes(&lash_core::ProcessListFilter {
+        let scoped_before = async {
+            let registry = &registry;
+            let filter = &lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
                 ..lash_core::ProcessListFilter::default()
-            })
-            .await
-            .expect("list processes before prune");
+            };
+            let mut records = Vec::new();
+            let mut continuation = None;
+            loop {
+                let page = registry
+                    .list_processes_page(
+                        filter,
+                        std::num::NonZeroUsize::MIN
+                            .saturating_add(lash_core::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                        continuation,
+                    )
+                    .await?;
+                records.extend(page.records);
+                continuation = page.continuation;
+                if continuation.is_none() {
+                    break Ok::<_, lash_core::PluginError>(records);
+                }
+            }
+        }
+        .await
+        .expect("list processes before prune");
         assert_eq!(scoped_before.len(), 1);
         measure_process_prune(
             &(registry.clone() as Arc<dyn lash_core::ProcessRegistry>),
@@ -653,16 +672,35 @@ mod store_hardening_tests {
         .await
         .expect("prune hardening batch");
 
-        let remaining = registry
-            .list_processes(&lash_core::ProcessListFilter {
+        let remaining = async {
+            let registry = &registry;
+            let filter = &lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
                 originator: Some(lash_core::ProcessOriginatorFilter::Host {
                     scope: Some("unrelated".to_string()),
                 }),
                 ..lash_core::ProcessListFilter::default()
-            })
-            .await
-            .expect("list unrelated process");
+            };
+            let mut records = Vec::new();
+            let mut continuation = None;
+            loop {
+                let page = registry
+                    .list_processes_page(
+                        filter,
+                        std::num::NonZeroUsize::MIN
+                            .saturating_add(lash_core::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                        continuation,
+                    )
+                    .await?;
+                records.extend(page.records);
+                continuation = page.continuation;
+                if continuation.is_none() {
+                    break Ok::<_, lash_core::PluginError>(records);
+                }
+            }
+        }
+        .await
+        .expect("list unrelated process");
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, unrelated_process_id);
     }

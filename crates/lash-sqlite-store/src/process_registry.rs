@@ -75,59 +75,6 @@ impl lash_core_execution::ProcessQuery for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
-    async fn list_processes(
-        &self,
-        filter: &lash_core_execution::ProcessListFilter,
-    ) -> Result<Vec<ProcessRecord>, lash_core_execution::PluginError> {
-        if filter
-            .created_at_start_ms
-            .is_some_and(|value| value > i64::MAX as u64)
-        {
-            return Ok(Vec::new());
-        }
-        let filter = filter.clone();
-        let definition = filter
-            .definition_id
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()
-            .map_err(process_decode_error)?;
-        let status = filter
-            .status
-            .labels()
-            .map(|labels| serde_json::to_string(&labels))
-            .transpose()
-            .map_err(process_decode_error)?;
-        self.conn
-            .call(move |conn| {
-                Ok((|| {
-                    let (sql, values) = sql::list_processes_query(&filter, status, definition);
-                    let mut stmt = conn.prepare_cached(sql).map_err(process_sqlite_error)?;
-                    let rows = stmt
-                        .query_map(rusqlite::params_from_iter(values.iter()), |row| {
-                            row.get::<_, String>(0)
-                        })
-                        .map_err(process_sqlite_error)?;
-                    let mut records = Vec::new();
-                    for row in rows {
-                        let record: ProcessRecord =
-                            serde_json::from_str(&row.map_err(process_sqlite_error)?)
-                                .map_err(process_decode_error)?;
-                        // SQLite's JSON functions deliberately coerce some JSON
-                        // representations. The typed/canonical SQL predicate is
-                        // the pushdown; the Rust predicate is the exact
-                        // `serde_json::Value` equality fence.
-                        if filter.matches_record(&record) {
-                            records.push(record);
-                        }
-                    }
-                    Ok(records)
-                })())
-            })
-            .await
-            .map_err(process_sqlite_error)?
-    }
-
     async fn list_processes_page(
         &self,
         filter: &lash_core_execution::ProcessListFilter,
@@ -847,6 +794,8 @@ impl lash_core_execution::ProcessClockRebind for SqliteProcessRegistry {
             clock,
             location: self.location.clone(),
             process_id_mint: self.process_id_mint.clone(),
+            #[cfg(test)]
+            decoded_roster_records: Arc::default(),
         }))
     }
 }

@@ -5,7 +5,9 @@ use pretty_assertions::assert_eq;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn ProcessRegistry>) {
+pub async fn process_roster_pages_match_status_sets_and_definition(
+    registry: Arc<dyn ProcessRegistry>,
+) {
     let record = registry
         .register_process(crate::started_until_starter(
             executed_registration("filter-target")
@@ -70,8 +72,9 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
         .expect("register filter decoy")
         .id;
 
-    let matches = registry
-        .list_processes(&ProcessListFilter {
+    let matches = lash_core::testing::process_roster_records_for_fixture(
+        registry.as_ref(),
+        &ProcessListFilter {
             definition_id: record.identity.definition_id.clone(),
             status: ProcessStatusFilter::any_of([ProcessStatus::Waiting]),
 
@@ -83,9 +86,10 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
             created_at_start_ms: Some(record.created_at_ms),
             created_at_end_ms: Some(record.created_at_ms.saturating_add(1)),
             retired_since_ms: None,
-        })
-        .await
-        .expect("list with all filters");
+        },
+    )
+    .await
+    .expect("list with all filters");
     assert_eq!(
         matches
             .into_iter()
@@ -125,13 +129,15 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
         (ProcessStatusFilter::Any, true, true),
         (ProcessStatusFilter::any_of([]), false, false),
     ] {
-        let records = registry
-            .list_processes(&ProcessListFilter {
+        let records = lash_core::testing::process_roster_records_for_fixture(
+            registry.as_ref(),
+            &ProcessListFilter {
                 status,
                 ..Default::default()
-            })
-            .await
-            .expect("status set query");
+            },
+        )
+        .await
+        .expect("status set query");
         assert_eq!(records.iter().any(|row| row.id == process_id), target);
         assert_eq!(records.iter().any(|row| row.id == decoy_id), decoy);
     }

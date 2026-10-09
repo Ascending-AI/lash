@@ -101,17 +101,6 @@ pub(crate) async fn require_process_tx(
     ))
 }
 
-pub(crate) fn decode_matching_process(
-    row: sqlx::postgres::PgRow,
-    filter: &lash_core_execution::ProcessListFilter,
-) -> Result<Option<ProcessRecord>, PluginError> {
-    let json: String = row.get(0);
-    let record = serde_json::from_str(&json).map_err(process_decode_error)?;
-    // JSONB normalizes numeric representations (`1` equals `1.0`).
-    // SQL is the coarse pushdown; this is the exact public Value contract.
-    Ok(filter.matches_record(&record).then_some(record))
-}
-
 /// Save `record`'s mutable columns, staged on the process feed: its change
 /// sequence is assigned after the transaction commits (FIG-5276).
 pub(crate) async fn save_process_tx(

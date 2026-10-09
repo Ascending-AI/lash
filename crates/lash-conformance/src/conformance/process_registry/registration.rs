@@ -159,10 +159,12 @@ pub async fn a_host_start_key_is_global_and_fences_its_originator(
         .expect("read the retained process")
         .expect("the retained process survives the refused starts");
     assert_eq!(retained, first.record, "A's row is unchanged");
-    let rows = registry
-        .list_processes(&crate::ProcessListFilter::default())
-        .await
-        .expect("list processes");
+    let rows = lash_core::testing::process_roster_records_for_fixture(
+        registry.as_ref(),
+        &crate::ProcessListFilter::default(),
+    )
+    .await
+    .expect("list processes");
     assert_eq!(
         rows.iter()
             .filter(|row| row.start_key.as_ref() == Some(&crate::StartKey::for_host(bytes)))

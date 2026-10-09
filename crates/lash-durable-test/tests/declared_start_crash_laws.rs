@@ -217,14 +217,15 @@ fn migrated_parent(target: &ProcessId) -> Vec<lash_core::LlmResponse> {
 
 /// Every process the deployment registered, whatever its status.
 async fn registered(backend: &lash::Backend) -> Vec<ProcessRecord> {
-    backend
-        .process_registry()
-        .list_processes(&ProcessListFilter {
+    lash_core::testing::process_roster_records_for_fixture(
+        backend.process_registry().as_ref(),
+        &ProcessListFilter {
             status: ProcessStatusFilter::Any,
             ..ProcessListFilter::default()
-        })
-        .await
-        .expect("the registry lists its processes")
+        },
+    )
+    .await
+    .expect("the registry lists its processes")
 }
 
 /// One parent turn spawning `width` children, fresh for every matrix cell.

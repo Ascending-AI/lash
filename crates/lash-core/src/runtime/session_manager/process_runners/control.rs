@@ -615,13 +615,29 @@ impl ProcessCapability {
             },
             crate::RuntimeOwner::Process(process_id) => {
                 let starter = crate::ScopeId::process(process_id.clone());
-                Ok(registry
-                    .list_processes(&crate::ProcessListFilter {
-                        status: crate::ProcessStatusFilter::Any,
-                        until: Some(starter.clone()),
-                        ..Default::default()
-                    })
-                    .await?
+                let filter = &crate::ProcessListFilter {
+                    status: crate::ProcessStatusFilter::Any,
+                    until: Some(starter.clone()),
+                    ..Default::default()
+                };
+                let mut records = Vec::new();
+                let mut continuation = None;
+                loop {
+                    let page = registry
+                        .list_processes_page(
+                            filter,
+                            std::num::NonZeroUsize::MIN
+                                .saturating_add(crate::MAX_PROCESS_ROSTER_PAGE_SIZE - 1),
+                            continuation,
+                        )
+                        .await?;
+                    records.extend(page.records);
+                    continuation = page.continuation;
+                    if continuation.is_none() {
+                        break;
+                    }
+                }
+                Ok(records
                     .into_iter()
                     .filter(|record| record.ancestry.starter() == Some(&starter))
                     .filter(|record| match mode {

@@ -367,13 +367,6 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
         self.inner.get_process(process_id).await
     }
 
-    async fn list_processes(
-        &self,
-        filter: &crate::ProcessListFilter,
-    ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
-        self.inner.list_processes(filter).await
-    }
-
     async fn list_processes_page(
         &self,
         filter: &crate::ProcessListFilter,

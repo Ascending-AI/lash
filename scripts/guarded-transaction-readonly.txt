@@ -35,7 +35,6 @@ postgres crates/lash-postgres-store/src/postgres/process_registry/park_feed.rs::
 postgres crates/lash-postgres-store/src/postgres/process_registry.rs::get_process_by_start_key  # reads the process a start key names
 postgres crates/lash-postgres-store/src/postgres/process_registry.rs::processes_changed_since  # reads a page of process changes under the compaction horizon
 postgres crates/lash-postgres-store/src/postgres/process_registry.rs::event_page_after  # reads a page of process events
-postgres crates/lash-postgres-store/src/postgres/process_registry.rs::list_processes  # a filtered process listing, a SELECT the filter composes
 postgres crates/lash-postgres-store/src/postgres/process_registry/parent_end.rs::children  # lists the children a parent's end names, a SELECT chosen by scope kind
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/queued_work.rs::list_queued_work_pg  # reads the queued work of one session
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/queued_work.rs::pending_session_work_ordering_pg  # reads the order of a session's pending work

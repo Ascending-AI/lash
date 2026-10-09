@@ -27,13 +27,15 @@ pub(super) async fn assert_process_count_conservation(
         .live_reference_summary()
         .await
         .map_err(|error| error.to_string())?;
-    let retained = registry
-        .list_processes(&ProcessListFilter {
+    let retained = lash_core::testing::process_roster_records_for_fixture(
+        registry.as_ref(),
+        &ProcessListFilter {
             status: ProcessStatusFilter::Any,
             ..ProcessListFilter::default()
-        })
-        .await
-        .map_err(|error| error.to_string())?;
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())?;
     let canonical = ProcessLiveReferenceView::from_records(&retained);
     if summaries != canonical {
         return Err(format!(

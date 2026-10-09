@@ -22,9 +22,8 @@ use lash_conformance::{
 use lash_core_execution::store::{ConformanceDeployment, RuntimeStore};
 use lash_core_execution::{
     DeploymentStore, ProcessCompletionAuthority, ProcessExecutionEnvStore, ProcessIdentity,
-    ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessQuery as _,
-    ProcessRegistrar as _, ProcessRegistry, ProcessStatusFilter, SessionCatalogStore,
-    SessionCommitStore,
+    ProcessLifecycle as _, ProcessListFilter, ProcessProvenance, ProcessRegistrar as _,
+    ProcessRegistry, ProcessStatusFilter, SessionCatalogStore, SessionCommitStore,
 };
 
 use super::SUBSTRATE;
@@ -513,31 +512,35 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
     );
     drop(conn);
 
-    let bounded = registry
-        .list_processes(&ProcessListFilter {
+    let bounded = lash_core::testing::process_roster_records_for_fixture(
+        registry.as_ref(),
+        &ProcessListFilter {
             status: ProcessStatusFilter::Any,
             identity_kind: Some("recent-pushdown-kind".to_string()),
             retired_since_ms: Some(terminal.updated_at_ms),
             ..ProcessListFilter::default()
-        })
-        .await
-        .expect("list bounded recently retired rows");
+        },
+    )
+    .await
+    .expect("list bounded recently retired rows");
     assert!(
         bounded.is_empty(),
         "the SQL WHERE must reject the extracted old timestamp before JSON decode"
     );
     assert_eq!(
-        registry
-            .list_processes(&ProcessListFilter {
+        lash_core::testing::process_roster_records_for_fixture(
+            registry.as_ref(),
+            &ProcessListFilter {
                 status: ProcessStatusFilter::Any,
                 identity_kind: Some("recent-pushdown-kind".to_string()),
                 ..ProcessListFilter::default()
-            })
-            .await
-            .expect("list unbounded pushdown fixture")
-            .len(),
+            }
+        )
+        .await
+        .expect("page through all retained pushdown rows")
+        .len(),
         1,
-        "the unbounded list still returns the retained row"
+        "the roster without a recency bound still returns the retained row"
     );
 }
 

@@ -2,7 +2,7 @@
 
 use super::{ProcessChangeCursor, ProcessId, ProcessListFilter, ProcessRecord};
 
-/// Maximum candidates in a roster page, excluding its single lookahead row.
+/// Maximum matching records in a roster page, excluding its single lookahead row.
 pub const MAX_PROCESS_ROSTER_PAGE_SIZE: usize = 256;
 
 /// The verified durable change high water and oldest resumable position.
@@ -77,7 +77,7 @@ impl ProcessRosterCursor {
 }
 
 /// Store-side roster page. Enumeration is followed by changes after `change_cursor`.
-/// An empty filtered page may have a continuation: always follow it.
+/// The selection is applied before the keyset limit, including its lookahead.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessRosterRecords {
     pub records: Vec<ProcessRecord>,
@@ -87,7 +87,7 @@ pub struct ProcessRosterRecords {
 }
 
 impl ProcessRosterRecords {
-    /// Builds a page from a bounded keyset read of at most `limit + 1` candidates.
+    /// Builds a page from a bounded keyset read of at most `limit + 1` matching records.
     pub fn from_candidates(
         store: String,
         filter: &ProcessListFilter,
@@ -97,6 +97,11 @@ impl ProcessRosterRecords {
         bounds: ProcessChangeBounds,
         mut candidates: Vec<ProcessRecord>,
     ) -> Self {
+        debug_assert!(
+            candidates
+                .iter()
+                .all(|record| filter.matches_record(record))
+        );
         let change_cursor = cursor.map_or(bounds.current, ProcessRosterCursor::change_cursor);
         let more = candidates.len() > limit;
         candidates.truncate(limit);
@@ -114,10 +119,7 @@ impl ProcessRosterRecords {
             None
         };
         Self {
-            records: candidates
-                .into_iter()
-                .filter(|record| filter.matches_record(record))
-                .collect(),
+            records: candidates,
             continuation,
             change_cursor,
             verified_through: bounds.current,

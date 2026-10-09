@@ -73,14 +73,14 @@ fn octets() -> lash_core::AttachmentCreateMeta {
 
 /// Every process the registry holds.
 async fn processes(core: &LashCore) -> Result<Vec<lash_core::ProcessRecord>> {
-    Ok(core
-        .backend()
-        .process_registry()
-        .list_processes(&lash_core::ProcessListFilter {
+    Ok(lash_core::testing::process_roster_records_for_fixture(
+        core.backend().process_registry().as_ref(),
+        &lash_core::ProcessListFilter {
             status: lash_core::ProcessStatusFilter::Any,
             ..lash_core::ProcessListFilter::default()
-        })
-        .await?)
+        },
+    )
+    .await?)
 }
 
 /// A started process holds its uploaded input under its own record: the

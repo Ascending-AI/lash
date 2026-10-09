@@ -240,14 +240,15 @@ impl Holding {
     }
 
     async fn registered(&self) -> Vec<lash_core::ProcessRecord> {
-        self.backend()
-            .process_registry()
-            .list_processes(&lash_core::ProcessListFilter {
+        lash_core::testing::process_roster_records_for_fixture(
+            self.backend().process_registry().as_ref(),
+            &lash_core::ProcessListFilter {
                 status: lash_core::ProcessStatusFilter::Any,
                 ..lash_core::ProcessListFilter::default()
-            })
-            .await
-            .expect("the registry lists its processes")
+            },
+        )
+        .await
+        .expect("the registry lists its processes")
     }
 
     /// The laws of one run, cut at `cut`.

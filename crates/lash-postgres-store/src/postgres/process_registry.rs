@@ -26,7 +26,7 @@ pub(crate) mod prune_api;
 mod retention;
 #[path = "process_registry/tool_intent_submission.rs"]
 mod tool_intent_submission;
-use crate::process_sql::{list_processes_sql, process_sql};
+use crate::process_sql::process_sql;
 
 #[path = "process_registry/pages.rs"]
 pub(crate) mod pages;
@@ -75,50 +75,6 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
             ));
         }
         Ok(None)
-    }
-
-    async fn list_processes(
-        &self,
-        filter: &lash_core_execution::ProcessListFilter,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        if filter
-            .created_at_start_ms
-            .is_some_and(|value| value > i64::MAX as u64)
-        {
-            return Ok(Vec::new());
-        }
-        let definition = filter
-            .definition_id
-            .as_ref()
-            .map(serde_json::to_value)
-            .transpose()
-            .map_err(process_decode_error)?;
-        let mut query = sqlx::query(list_processes_sql(filter))
-            .bind(filter.status.labels())
-            .bind(filter.originator.as_ref().map(|o| o.originator_id()))
-            .bind(filter.identity_kind.as_deref())
-            .bind(filter.identity_label.as_deref())
-            .bind(definition)
-            .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
-            .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
-            .bind(filter.retired_since_ms.map(clamp_epoch_ms));
-        if let Some(scope) = &filter.until {
-            query = query.bind(scope.storage_kind()).bind(scope.storage_id());
-        }
-        if let Some(before_ms) = filter.cancel_pending_before_ms {
-            query = query.bind(clamp_epoch_ms(before_ms));
-        }
-        let rows = query
-            .fetch_all(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        let mut records: Vec<ProcessRecord> = Vec::new();
-        for row in rows {
-            if let Some(record) = decode_matching_process(row, filter)? {
-                records.push(record);
-            }
-        }
-        Ok(records)
     }
 
     async fn list_processes_page(

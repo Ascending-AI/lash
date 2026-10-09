@@ -413,12 +413,7 @@ impl ProcessQuery for Integrator {
     ) -> Result<Option<ProcessRecord>, PluginError> {
         unreachable!("external signature witness")
     }
-    async fn list_processes(
-        &self,
-        filter: &ProcessListFilter,
-    ) -> Result<Vec<ProcessRecord>, PluginError> {
-        unreachable!("external signature witness")
-    }
+
     async fn list_processes_page(
         &self,
         filter: &ProcessListFilter,

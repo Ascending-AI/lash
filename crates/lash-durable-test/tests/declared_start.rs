@@ -867,14 +867,15 @@ impl World {
 
     /// Every process the deployment registered, whatever its status.
     async fn registered(&self) -> Vec<ProcessRecord> {
-        self.backend()
-            .process_registry()
-            .list_processes(&ProcessListFilter {
+        lash_core::testing::process_roster_records_for_fixture(
+            self.backend().process_registry().as_ref(),
+            &ProcessListFilter {
                 status: ProcessStatusFilter::Any,
                 ..ProcessListFilter::default()
-            })
-            .await
-            .expect("the registry lists its processes")
+            },
+        )
+        .await
+        .expect("the registry lists its processes")
     }
 
     /// The delegated children the deployment registered.
@@ -1238,16 +1239,17 @@ async fn declared_start_cancel_at_each_point(tier: Tier) {
                     .run_with(async move |cancel| {
                         script.child_steps(1).await;
                         let child = loop {
-                            let ended = backend
-                                .process_registry()
-                                .list_processes(&ProcessListFilter {
+                            let ended = lash_core::testing::process_roster_records_for_fixture(
+                                backend.process_registry().as_ref(),
+                                &ProcessListFilter {
                                     status: ProcessStatusFilter::Any,
                                     ..ProcessListFilter::default()
-                                })
-                                .await
-                                .expect("list the processes")
-                                .into_iter()
-                                .find(ProcessRecord::is_terminal);
+                                },
+                            )
+                            .await
+                            .expect("list the processes")
+                            .into_iter()
+                            .find(ProcessRecord::is_terminal);
                             if let Some(child) = ended {
                                 break child;
                             }
@@ -1335,23 +1337,24 @@ async fn declared_start_cancel_at_each_point(tier: Tier) {
 
 /// The probe children `backend` registered.
 async fn probes_of(backend: &lash::Backend) -> Vec<ProcessRecord> {
-    backend
-        .process_registry()
-        .list_processes(&ProcessListFilter {
+    lash_core::testing::process_roster_records_for_fixture(
+        backend.process_registry().as_ref(),
+        &ProcessListFilter {
             status: ProcessStatusFilter::Any,
             ..ProcessListFilter::default()
-        })
-        .await
-        .expect("list the processes")
-        .into_iter()
-        .filter(|record| {
-            matches!(
-                record.input.as_ref(),
-                lash_core::ProcessInput::Engine { payload, .. }
-                    if payload.get(PROBE_MARKER).is_some()
-            )
-        })
-        .collect()
+        },
+    )
+    .await
+    .expect("list the processes")
+    .into_iter()
+    .filter(|record| {
+        matches!(
+            record.input.as_ref(),
+            lash_core::ProcessInput::Engine { payload, .. }
+                if payload.get(PROBE_MARKER).is_some()
+        )
+    })
+    .collect()
 }
 
 /// A retryable failure followed by a declared start launches exactly one

@@ -25,13 +25,6 @@ macro_rules! delegate_process_query {
                 self.$inner.get_process_by_start_key(start_key).await
             }
 
-            async fn list_processes(
-                &self,
-                filter: &$crate::ProcessListFilter,
-            ) -> Result<Vec<$crate::ProcessRecord>, $crate::PluginError> {
-                self.$inner.list_processes(filter).await
-            }
-
             async fn list_processes_page(
                 &self,
                 filter: &$crate::ProcessListFilter,

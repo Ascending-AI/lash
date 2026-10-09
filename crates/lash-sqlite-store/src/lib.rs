@@ -225,6 +225,8 @@ pub struct SqliteProcessRegistry {
     location: DatabaseLocation,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
+    #[cfg(test)]
+    decoded_roster_records: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {

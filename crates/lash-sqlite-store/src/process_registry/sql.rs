@@ -155,7 +155,7 @@ lash_store_sql::statements! {
                          )
                          ORDER BY candidate.key ASC";
 
-/// Every process matching the always-bound filters.
+        /// A bounded keyset of processes matching the always-bound filters.
         list = "SELECT record_json FROM processes
      WHERE (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
        AND (?2 IS NULL OR originator_id = ?2)
@@ -165,7 +165,11 @@ lash_store_sql::statements! {
             (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
        AND (?6 IS NULL OR created_at_ms >= ?6)
        AND (?7 IS NULL OR created_at_ms < ?7)
-     ORDER BY process_id ASC";
+           AND (?8 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?8)
+           AND (?9 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?9)
+           AND (?10 IS NULL OR process_id > ?10)
+           AND process_id <= ?11
+     ORDER BY process_id ASC LIMIT ?12";
         /// The same, narrowed to lifetime scope `?8` / `?9`.
         list_by_lifetime_scope = "SELECT record_json FROM processes
      WHERE (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
@@ -178,7 +182,11 @@ lash_store_sql::statements! {
        AND (?7 IS NULL OR created_at_ms < ?7)
            AND lifetime_scope_kind = ?8
            AND lifetime_scope_id IS ?9
-     ORDER BY process_id ASC";
+           AND (?10 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?10)
+           AND (?11 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?11)
+           AND (?12 IS NULL OR process_id > ?12)
+           AND process_id <= ?13
+     ORDER BY process_id ASC LIMIT ?14";
         /// The same, narrowed to rows whose cancel request is older than `?8`
         /// and whose outcome is still open.
         list_pending_cancel = "SELECT record_json FROM processes
@@ -193,7 +201,11 @@ lash_store_sql::statements! {
            AND cancel_requested_at_ms IS NOT NULL
            AND cancel_requested_at_ms < ?8
            AND {{nonterminal_process_status(status)}}
-     ORDER BY process_id ASC";
+           AND (?9 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?9)
+           AND (?10 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?10)
+           AND (?11 IS NULL OR process_id > ?11)
+           AND process_id <= ?12
+     ORDER BY process_id ASC LIMIT ?13";
         /// Both narrowings at once.
         list_by_lifetime_scope_pending_cancel = "SELECT record_json FROM processes
      WHERE (?1 IS NULL OR status IN (SELECT value FROM json_each(?1)))
@@ -209,7 +221,11 @@ lash_store_sql::statements! {
            AND cancel_requested_at_ms IS NOT NULL
            AND cancel_requested_at_ms < ?10
            AND {{nonterminal_process_status(status)}}
-     ORDER BY process_id ASC";
+           AND (?11 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?11)
+           AND (?12 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?12)
+           AND (?13 IS NULL OR process_id > ?13)
+           AND process_id <= ?14
+     ORDER BY process_id ASC LIMIT ?15";
         /// Every live process plus those retired since `?8`.
         ///
         /// The union is the point: each arm is planned on its own partial
@@ -225,6 +241,10 @@ lash_store_sql::statements! {
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR created_at_ms >= ?6)
            AND (?7 IS NULL OR created_at_ms < ?7)
+           AND (?9 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?9)
+           AND (?10 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?10)
+           AND (?11 IS NULL OR process_id > ?11)
+           AND process_id <= ?12
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE {{retired_process_status(status)}}
@@ -237,7 +257,12 @@ lash_store_sql::statements! {
                 (json_extract(record_json, '$.identity.definition_id.\"$lash_definition_id\"') IS json_extract(?5, '$.\"$lash_definition_id\"')))
            AND (?6 IS NULL OR created_at_ms >= ?6)
            AND (?7 IS NULL OR created_at_ms < ?7)
-     ) ORDER BY process_id ASC";
+           AND (?9 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?9)
+           AND (?10 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?10)
+           AND (?11 IS NULL OR process_id > ?11)
+           AND process_id <= ?12
+
+     ) ORDER BY process_id ASC LIMIT ?13";
         /// The same, narrowed to lifetime scope `?9` / `?10`.
         list_recent_retired_by_lifetime_scope = "SELECT record_json FROM (
          SELECT process_id, record_json FROM processes
@@ -252,6 +277,10 @@ lash_store_sql::statements! {
            AND (?7 IS NULL OR created_at_ms < ?7)
            AND lifetime_scope_kind = ?9
            AND lifetime_scope_id IS ?10
+           AND (?11 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?11)
+           AND (?12 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?12)
+           AND (?13 IS NULL OR process_id > ?13)
+           AND process_id <= ?14
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE {{retired_process_status(status)}}
@@ -266,7 +295,12 @@ lash_store_sql::statements! {
            AND (?7 IS NULL OR created_at_ms < ?7)
            AND lifetime_scope_kind = ?9
            AND lifetime_scope_id IS ?10
-     ) ORDER BY process_id ASC";
+           AND (?11 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?11)
+           AND (?12 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?12)
+           AND (?13 IS NULL OR process_id > ?13)
+           AND process_id <= ?14
+
+     ) ORDER BY process_id ASC LIMIT ?15";
         /// The same, narrowed to rows whose cancel request is older than `?9`
         /// and whose outcome is still open.
         list_recent_retired_pending_cancel = "SELECT record_json FROM (
@@ -283,6 +317,10 @@ lash_store_sql::statements! {
            AND cancel_requested_at_ms IS NOT NULL
            AND cancel_requested_at_ms < ?9
            AND {{nonterminal_process_status(status)}}
+           AND (?10 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?10)
+           AND (?11 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?11)
+           AND (?12 IS NULL OR process_id > ?12)
+           AND process_id <= ?13
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE {{retired_process_status(status)}}
@@ -298,7 +336,12 @@ lash_store_sql::statements! {
            AND cancel_requested_at_ms IS NOT NULL
            AND cancel_requested_at_ms < ?9
            AND {{nonterminal_process_status(status)}}
-     ) ORDER BY process_id ASC";
+           AND (?10 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?10)
+           AND (?11 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?11)
+           AND (?12 IS NULL OR process_id > ?12)
+           AND process_id <= ?13
+
+     ) ORDER BY process_id ASC LIMIT ?14";
         /// Both narrowings at once.
         list_recent_retired_by_lifetime_scope_pending_cancel = "SELECT record_json FROM (
          SELECT process_id, record_json FROM processes
@@ -316,6 +359,10 @@ lash_store_sql::statements! {
            AND cancel_requested_at_ms IS NOT NULL
            AND cancel_requested_at_ms < ?11
            AND {{nonterminal_process_status(status)}}
+           AND (?12 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?12)
+           AND (?13 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?13)
+           AND (?14 IS NULL OR process_id > ?14)
+           AND process_id <= ?15
          UNION ALL
          SELECT process_id, record_json FROM processes
          WHERE {{retired_process_status(status)}}
@@ -333,7 +380,12 @@ lash_store_sql::statements! {
            AND cancel_requested_at_ms IS NOT NULL
            AND cancel_requested_at_ms < ?11
            AND {{nonterminal_process_status(status)}}
-     ) ORDER BY process_id ASC";
+           AND (?12 IS NULL OR json_extract(record_json, '$.provenance.originator.type') = ?12)
+           AND (?13 IS NULL OR json_extract(record_json, '$.provenance.originator.agent_frame_id') = ?13)
+           AND (?14 IS NULL OR process_id > ?14)
+           AND process_id <= ?15
+
+     ) ORDER BY process_id ASC LIMIT ?16";
     }
 }
 
@@ -554,17 +606,20 @@ pub(crate) fn process_sql() -> &'static ProcessSql {
     &PROCESS_SQL
 }
 
-/// The list statement this filter asks for, and the values it binds.
+/// The roster page statement this filter asks for, and the values it binds.
 ///
 /// The optional clauses are conjuncts that are either present or absent — an
 /// `(?n IS NULL OR …)` over them would cost the planner the partial indexes
 /// they exist to use — so each combination is its own named statement rather
 /// than a template with a hole. Choosing the statement and pushing the values
 /// in one place is what keeps a clause and the parameter it reads together.
-pub(crate) fn list_processes_query(
+pub(crate) fn roster_query(
     filter: &lash_core_execution::ProcessListFilter,
     status: Option<String>,
     definition: Option<String>,
+    after: Option<&str>,
+    through: &str,
+    limit: usize,
 ) -> (&'static str, Vec<rusqlite::types::Value>) {
     use rusqlite::types::Value;
 
@@ -597,6 +652,22 @@ pub(crate) fn list_processes_query(
     if let Some(before_ms) = filter.cancel_pending_before_ms {
         values.push(integer(Some(before_ms)));
     }
+
+    let (kind, frame) = match &filter.originator {
+        Some(lash_core_execution::ProcessOriginatorFilter::Host { .. }) => (Some("host"), None),
+        Some(lash_core_execution::ProcessOriginatorFilter::Session(scope)) => (
+            Some("session"),
+            scope.agent_frame_id.as_ref().map(|id| id.as_str()),
+        ),
+        None => (None, None),
+    };
+    values.extend([
+        text(kind.map(str::to_owned)),
+        text(frame.map(str::to_owned)),
+        text(after.map(str::to_owned)),
+        Value::Text(through.to_owned()),
+        Value::Integer(limit as i64),
+    ]);
 
     let statements = &process_sql().process_sqlite;
     let sql = match (

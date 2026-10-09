@@ -309,14 +309,16 @@ pub async fn every_execution_write_refuses_a_superseded_invocation_without_mutat
 pub async fn retired_process_shapes_refuse_before_registration_or_effects(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let before = registry
-        .list_processes(&crate::ProcessListFilter {
+    let before = lash_core::testing::process_roster_records_for_fixture(
+        registry.as_ref(),
+        &crate::ProcessListFilter {
             status: crate::ProcessStatusFilter::Any,
             ..Default::default()
-        })
-        .await
-        .expect("registry before invalid requests")
-        .len();
+        },
+    )
+    .await
+    .expect("registry before invalid requests")
+    .len();
     for value in [
         serde_json::json!({"type":"lashvm","module":"old-module","process":"old-process"}),
         serde_json::json!({"type":"external","metadata":{"job":"legacy"}}),
@@ -327,14 +329,16 @@ pub async fn retired_process_shapes_refuse_before_registration_or_effects(
         assert!(decoded.is_err(), "retired input decoded: {value}");
     }
     assert_eq!(
-        registry
-            .list_processes(&crate::ProcessListFilter {
+        lash_core::testing::process_roster_records_for_fixture(
+            registry.as_ref(),
+            &crate::ProcessListFilter {
                 status: crate::ProcessStatusFilter::Any,
                 ..Default::default()
-            })
-            .await
-            .expect("invalid decoding never reached registry")
-            .len(),
+            }
+        )
+        .await
+        .expect("invalid decoding never reached registry")
+        .len(),
         before
     );
     let current = registry
@@ -399,25 +403,29 @@ pub async fn scope_replay_cancel_and_trace_ignore_environment_rebinding(
         events
     );
     assert!(
-        registry
-            .list_processes(&crate::ProcessListFilter {
+        lash_core::testing::process_roster_records_for_fixture(
+            registry.as_ref(),
+            &crate::ProcessListFilter {
                 until: Some(crate::ScopeId::turn(
                     SessionId::from("environment-new-session"),
                     crate::TurnId::from("original-turn")
                 )),
                 ..Default::default()
-            })
-            .await
-            .expect("environment is not cancellation scope")
-            .is_empty()
+            }
+        )
+        .await
+        .expect("environment is not cancellation scope")
+        .is_empty()
     );
-    let matches = registry
-        .list_processes(&crate::ProcessListFilter {
+    let matches = lash_core::testing::process_roster_records_for_fixture(
+        registry.as_ref(),
+        &crate::ProcessListFilter {
             until: Some(scope),
             ..Default::default()
-        })
-        .await
-        .expect("recorded scope owns cancellation");
+        },
+    )
+    .await
+    .expect("recorded scope owns cancellation");
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].id, first.record.id);
     registry
