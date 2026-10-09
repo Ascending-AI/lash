@@ -608,7 +608,10 @@ fn an_edit_inside_a_lifted_container_reaches_its_literal() {
         .iter_mut()
         .find_map(|declaration| match declaration {
             crate::WorkflowDeclaration::Process(process)
-                if process.params.len() == 1 && process.params[0].name.as_str() == "input" =>
+                if process
+                    .params
+                    .first()
+                    .is_some_and(|param| param.name.as_str() == "input") =>
             {
                 Some(process)
             }

@@ -508,9 +508,10 @@ fn store_decode_refuses_bytes_whose_refs_do_not_match_their_content() {
     assert_eq!(decoded, honest);
 }
 
-/// A process's origin is derived by the linker (FIG-3571): a program handed
-/// to it cannot claim a lifted process, and no program an artifact carries can
-/// hold an origin its declaration contradicts.
+/// A process's origin is derived by the linker (FIG-3571): a lifted process
+/// a program handed to it claims is derived again or dropped, never taken as
+/// stated, and no program an artifact carries can hold an origin its
+/// declaration contradicts.
 #[test]
 fn process_origins_are_derived_never_authored() {
     let lifted_body =
@@ -544,7 +545,7 @@ fn process_origins_are_derived_never_authored() {
         ),
         (
             with_process("authored", lifted(0), 0),
-            "a lifted process is named by its literal's digest",
+            "a lifted process is named by a digest",
         ),
         (
             with_process(&lifted_name, lifted(2), 1),
@@ -557,14 +558,14 @@ fn process_origins_are_derived_never_authored() {
         ));
         assert!(ModuleArtifact::from_program(program).is_err(), "{reason}");
     }
+    // A well-formed lifted declaration is still no claim the linker takes:
+    // it derives one again where it is referenced, and nothing references
+    // this one, so it leaves the program.
     let claimed = with_process(&lifted_name, lifted(0), 0);
     crate::validate_ast(&claimed).expect("a well-formed lifted declaration validates");
-    assert!(matches!(
-        crate::LinkedModule::link(claimed, crate::testing::harness::test_environment()),
-        Err(crate::LinkError::InvalidAst {
-            source: crate::InvalidAst::InvalidProcessOrigin { .. }
-        })
-    ));
+    let linked = crate::LinkedModule::link(claimed, crate::testing::harness::test_environment())
+        .expect("the program links");
+    assert!(linked.artifact.ir().declarations.is_empty());
 }
 
 /// FIG-5571: the VM format namespace is a clean cutover, even at the same encoding.

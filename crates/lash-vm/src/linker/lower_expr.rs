@@ -146,7 +146,7 @@ impl<'module> Linker<'module> {
                 scope,
             ),
             Expr::While { condition, body } => self.lower_while(expr, path, condition, body, scope),
-            Expr::ProcessRef { process } => self.lower_process_ref(process, scope),
+            Expr::ProcessRef { process } => self.lower_process_ref(process, path, scope),
             Expr::HostDescriptorConstructor { type_name, input } => {
                 self.lower_host_descriptor_constructor(type_name, input, path, scope)
             }
@@ -699,8 +699,12 @@ impl<'module> Linker<'module> {
     pub(super) fn lower_process_ref(
         &self,
         process: &AstString,
+        path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
+        if let Some((index, declared)) = self.submitted_lifted.get(process.as_str()) {
+            return self.rederive_lifted_process(*index, declared, path, scope);
+        }
         let Some(process_ty) = self.process_types.get(process.as_str()) else {
             return Err(LinkError::UnknownProcess {
                 name: process.to_string(),

@@ -188,6 +188,8 @@ pub enum WorkflowEdit {
         params: Vec<ProcessParam>,
         return_ty: Option<TypeExpr>,
     },
+    /// Removes a declared process. A lifted process is refused as derived:
+    /// it goes when the literal or the last reference to it does.
     RemoveProcess {
         process: WorkflowDraftHandle,
     },
@@ -196,9 +198,9 @@ pub enum WorkflowEdit {
         process: WorkflowDraftHandle,
         name: AstString,
     },
-    /// Sets a process's parameters and declared output. A failure wrapper
-    /// that passes the parameters straight through is rewritten to pass the
-    /// new ones.
+    /// Sets a process's authored parameters and declared output. A lifted
+    /// process keeps its captures after them. A failure wrapper that passes
+    /// the parameters straight through is rewritten to pass the new ones.
     SetProcessSignature {
         process: WorkflowDraftHandle,
         params: Vec<ProcessParam>,
@@ -507,14 +509,17 @@ impl State {
                 self.settled(at_process(handle))
             }
             WorkflowEdit::RemoveProcess { process } => {
+                let declared =
+                    process_mut(&mut self.working, process).ok_or_else(|| unknown(process))?;
+                // A lifted container follows its literal or the references
+                // to it: removing those is what removes it.
+                if declared.origin.is_lifted() {
+                    return Err((at_process(process), Kind::DerivedProcess));
+                }
                 let id = process.id();
-                let before = self.working.declarations.len();
                 self.working.declarations.retain(|declaration| {
                     !matches!(declaration, WorkflowDeclaration::Process(declared) if declared.id == id)
                 });
-                if self.working.declarations.len() == before {
-                    return Err(unknown(process));
-                }
                 self.settled(WorkflowEditLocation::Document)
             }
             WorkflowEdit::RenameProcess { process, name } => {
@@ -549,11 +554,20 @@ impl State {
             }
             WorkflowEdit::SetProcessSignature {
                 process,
-                params,
+                mut params,
                 return_ty,
             } => {
                 let declared =
                     process_mut(&mut self.working, process).ok_or_else(|| unknown(process))?;
+                // A lifted process's captures follow its authored
+                // parameters. They are derived, so the edit keeps them.
+                if let crate::ProcessOrigin::Lifted { hidden_params, .. } = &declared.origin {
+                    let authored = declared
+                        .params
+                        .len()
+                        .saturating_sub(*hidden_params as usize);
+                    params.extend_from_slice(&declared.params[authored..]);
+                }
                 if let Some(wrapper) = &mut declared.wrapper
                     && passes_params_through(wrapper, &declared.params)
                 {

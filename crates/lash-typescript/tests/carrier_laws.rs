@@ -5,12 +5,15 @@
 //! id inside an unchanged structural owner. A lifted process literal is the
 //! named exception: its owner digests its body (ADR 0100 R0), so a rename
 //! inside it re-mints its owner, and every id under that owner, on purpose;
-//! and the lens, the linker, the stored artifact and the runtime all name that
-//! once-minted owner alike.
+//! and the linker, the stored artifact and the runtime all name that
+//! once-minted owner alike. The lens holds the literal before any linker
+//! does, so its container has a name of its own, and admission says which
+//! lifted owner it became (FIG-5640).
 //!
-//! L4: the editor's draft projection of a source and the projection of the
-//! artifact that source admits to agree on node ids, node kinds, execution
-//! sites and lifted owners; a draft claims no identity; and source that is
+//! L4: the editor's draft projection of a source admits to the projection of
+//! the artifact that source admits to: the same node ids, node kinds,
+//! execution sites and lifted owners, with every draft node carried to an
+//! admitted node of its kind; a draft claims no identity; and source that is
 //! edited, rendered, reparsed and admitted reaches a fixed point that admits
 //! to the same module as the source it came from.
 #![expect(
@@ -256,7 +259,25 @@ fn lifted_owner(source: &str) -> LiftedOwner {
     let [lens] = owners.as_slice() else {
         panic!("the variant lifts one literal")
     };
-    let lens = lens.clone();
+    // The lifted owner the lens's container became.
+    let admission = lash_vm::admit_workflow_graph(&draft, &test_environment())
+        .expect("the variant's draft admits");
+    let container = &draft.process(lens).expect("the lens's container").id;
+    let reached = admission
+        .nodes
+        .get(container)
+        .expect("admission names the container");
+    let lens = admission
+        .graph
+        .declarations
+        .iter()
+        .find_map(|declaration| match declaration {
+            WorkflowDeclaration::Process(process) if process.id == *reached => {
+                Some(process.name.clone())
+            }
+            _ => None,
+        })
+        .expect("the container became a process");
     let linked = link(source);
     let lifted = |artifact: &ModuleArtifact| {
         artifact
@@ -302,9 +323,9 @@ fn lifted_owner(source: &str) -> LiftedOwner {
 }
 
 /// L3's named exception: renaming a binder inside a lifted literal re-mints
-/// the literal's owner, and the lens, the linker, the stored artifact and the
-/// runtime all name the one owner the variant mints; the main nodes outside
-/// the literal keep their ids.
+/// the literal's owner; the linker, the stored artifact and the runtime all
+/// name the one owner the variant mints, and admission carries the lens's
+/// container to it; the main nodes outside the literal keep their ids.
 #[test]
 fn l3_a_rename_inside_a_lifted_literal_remints_one_owner_everywhere() {
     let variant = |local: &str| {
@@ -315,7 +336,10 @@ fn l3_a_rename_inside_a_lifted_literal_remints_one_owner_everywhere() {
     let (first, second) = (variant("reply"), variant("answer"));
     let owners = [lifted_owner(&first), lifted_owner(&second)];
     for owner in &owners {
-        assert_eq!(owner.lens, owner.linked, "the lens and the linker agree");
+        assert_eq!(
+            owner.lens, owner.linked,
+            "the lens's container becomes the linker's owner"
+        );
         assert_eq!(owner.linked, owner.reloaded, "the stored artifact agrees");
         assert_eq!(
             owner.runtime,
@@ -349,16 +373,32 @@ fn l4_draft_and_admitted_projections_agree() {
         let draft = workflow_graph_from_source(source).expect("corpus source projects");
         let linked = link(source);
         let admitted = lash_vm::workflow_graph_from_artifact(&linked.artifact);
+        let admission = lash_vm::admit_workflow_graph(&draft, &test_environment())
+            .unwrap_or_else(|refusal| panic!("the draft admits: {refusal:?}\n{source}"));
         assert_eq!(
-            process_owners(&draft),
+            process_owners(&admission.graph),
             process_owners(&admitted),
             "lifted owners agree:\n{source}"
         );
+        let admitted_facts = node_facts(&admitted);
         assert_same_facts(
-            &node_facts(&draft),
-            &node_facts(&admitted),
-            &format!("draft and admitted nodes agree on id, kind and execution sites:\n{source}"),
+            &node_facts(&admission.graph),
+            &admitted_facts,
+            &format!(
+                "the admitted draft and the artifact agree on id, kind and execution sites:\n{source}"
+            ),
         );
+        for (id, (kind, _)) in node_facts(&draft) {
+            let reached = admission
+                .nodes
+                .get(&lash_vm::WorkflowNodeId::new(id.clone()))
+                .and_then(|reached| admitted_facts.get(reached.as_str()));
+            assert_eq!(
+                reached.map(|(kind, _)| kind),
+                Some(&kind),
+                "the draft node {id} is carried to an admitted node of its kind:\n{source}"
+            );
+        }
         assert_eq!(draft.source_identity, None, "a draft claims no identity");
         assert_eq!(
             admitted.source_identity,

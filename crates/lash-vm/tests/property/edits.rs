@@ -16,9 +16,9 @@ use lash_vm::{
     Program, TypeExpr, WorkflowBindingRef, WorkflowBodyForm, WorkflowBodyRef, WorkflowBodySlot,
     WorkflowContainer, WorkflowCorrespondence, WorkflowCorrespondenceEntry as Entry,
     WorkflowDeclaration, WorkflowDraft, WorkflowDraftHandle, WorkflowDraftRevision,
-    WorkflowEdgeDrag, WorkflowEdit, WorkflowEditTransaction, WorkflowNodeId, WorkflowNodeKind,
-    WorkflowProcessWrapper, WorkflowSlotPath, walk_expr_slots, workflow_graph_from_program,
-    workflow_node_statement, workflow_program_from_graph,
+    WorkflowEdgeDrag, WorkflowEdit, WorkflowEditTransaction, WorkflowGraph, WorkflowNodeId,
+    WorkflowNodeKind, WorkflowProcessWrapper, WorkflowSlotPath, walk_expr_slots,
+    workflow_graph_from_program, workflow_node_statement, workflow_program_from_graph,
 };
 use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
@@ -680,9 +680,17 @@ fn correspondence_is_total(
 /// that is a program again: it reconstructs to valid IR, that IR projects
 /// back to the same document, the document opens as the same draft, and the
 /// transaction's correspondence accounts for every node before and after.
-pub fn fuzz(program: &Program, words: &[u16]) -> Result<Fuzzed, TestCaseError> {
-    let opened_document = workflow_graph_from_program(program);
-    let mut draft = WorkflowDraft::open(&opened_document).map_err(|error| fail(&error))?;
+///
+/// `document` is what a host opens: the document of a program it authored,
+/// process literals inline, or the document of an admitted definition,
+/// processes lifted and named by reference.
+pub fn fuzz(document: &WorkflowGraph, words: &[u16]) -> Result<Fuzzed, TestCaseError> {
+    let mut draft = WorkflowDraft::open(document).map_err(|error| fail(&error))?;
+    // A draft is no definition, so it carries no definition's identity.
+    let opened_document = WorkflowGraph {
+        source_identity: None,
+        ..document.clone()
+    };
     prop_assert_eq!(draft.document(), &opened_document);
     let opened = draft
         .opened()

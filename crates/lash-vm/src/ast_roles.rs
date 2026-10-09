@@ -5,7 +5,7 @@
 //! and [`super::validate_ast`] refuses a role whose expression lacks it.
 
 /// version_surface = "coexist"
-/// version_guard(items(LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION, lifted_process_identity))
+/// version_guard(items(LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION, lifted_process_identity, lifted_process_name))
 const LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION: &str = "lash-lifted-process-name/v2";
 
 use schemars::JsonSchema;
@@ -27,8 +27,8 @@ pub enum ProcessOrigin {
     Declared,
     /// Lifted by the linker from the inline process literal at `site`, the
     /// literal's path in the program before lifting. The lifted declaration's
-    /// name digests that literal's body and site
-    /// ([`super::lifted_process_identity`]). Its last `hidden_params`
+    /// name digests what the linker derived for it
+    /// ([`super::lifted_process_name`]). Its last `hidden_params`
     /// parameters are the literal's hidden start arguments, not authored
     /// parameters.
     Lifted {
@@ -666,8 +666,8 @@ pub(crate) fn check_unique_declarations(program: &Program) -> Result<(), Invalid
     Ok(())
 }
 
-/// A declared process never takes a lifted name; a lifted one carries its
-/// literal's digest and has no more hidden parameters than parameters.
+/// A declared process never takes a lifted name; a lifted one carries a
+/// digest name and has no more hidden parameters than parameters.
 pub(super) fn check_process_origins(program: &Program) -> Result<(), InvalidAst> {
     for declaration in &program.declarations {
         let Declaration::Process(process) = declaration else {
@@ -678,9 +678,7 @@ pub(super) fn check_process_origins(program: &Program) -> Result<(), InvalidAst>
             ProcessOrigin::Declared if lifted_name => {
                 "a declared process cannot take a lifted process's name"
             }
-            ProcessOrigin::Lifted { .. } if !lifted_name => {
-                "a lifted process is named by its literal's digest"
-            }
+            ProcessOrigin::Lifted { .. } if !lifted_name => "a lifted process is named by a digest",
             ProcessOrigin::Lifted { hidden_params, .. }
                 if *hidden_params as usize > process.params.len() =>
             {
@@ -702,20 +700,55 @@ pub(super) fn check_process_origins(program: &Program) -> Result<(), InvalidAst>
 /// name can start with it by accident.
 pub const LIFTED_PROCESS_NAME_PREFIX: &str = "__process_";
 
-/// The name a body at a given AST path lifts to.
+/// The name of the process container a document shows for the inline process
+/// literal `body` at `path` of `main`, while the document still holds the
+/// literal.
 ///
-/// A digest over the canonical body plus the path, so it is a function of what
-/// the body *is* and where it sits — never of link order, span tables, or
-/// anything else a re-derivation could reorder. The linker's lift and the
-/// workflow lens's literal projection must agree on this spelling.
+/// A digest over the literal's body as written plus its path. It names a
+/// container of a draft, never a declaration of a linked program: the linker
+/// names what it lifts by [`lifted_process_name`], which reads the linked
+/// declaration.
 ///
-/// Domain v2 (FIG-3571): the preimage serializes the carrier IR body, so the
-/// same source lifts to a different name than under v1; v1 stays reserved.
+/// Domain v2 (FIG-3571): the preimage serializes the carrier IR body.
 pub fn lifted_process_identity(body: &Expr, path: &[u32]) -> String {
     let body = without_json_traversal_roles(body);
     let preimage = serde_json::json!({
         "body": body,
         "path": path,
+    });
+    let digest = lash_sansio::core_support::blake3_domain_hash_hex(
+        LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION,
+        preimage.to_string(),
+    );
+    format!("{LIFTED_PROCESS_NAME_PREFIX}{digest}")
+}
+
+/// The name of a lifted declaration: a digest of everything the linker
+/// derived for it but its name and its inferred output, which the body
+/// decides. That is its site, its parameters with its captures and their
+/// refined types, its authored output annotation and its linked body.
+///
+/// So the name is a function of the declaration's content. A program lifted
+/// from its literals and the same program derived again from its lifted
+/// declarations name every process alike, whichever edits led there
+/// (FIG-5640). A body names the processes it references by their own names,
+/// so a lifted process is named after the ones it reaches.
+pub fn lifted_process_name(process: &super::ProcessDecl) -> String {
+    let (site, hidden_params, declared_return_ty) = match &process.origin {
+        ProcessOrigin::Lifted {
+            site,
+            hidden_params,
+            declared_return_ty,
+        } => (Some(site), *hidden_params, declared_return_ty.as_ref()),
+        ProcessOrigin::Declared => (None, 0, None),
+    };
+    let body = without_json_traversal_roles(&process.body);
+    let preimage = serde_json::json!({
+        "site": site,
+        "params": process.params,
+        "hidden_params": hidden_params,
+        "declared_return_ty": declared_return_ty,
+        "linked_body": body,
     });
     let digest = lash_sansio::core_support::blake3_domain_hash_hex(
         LASH_LIFTED_PROCESS_NAME_DOMAIN_VERSION,

@@ -20,7 +20,8 @@ pub(crate) use roles::check_unique_declarations;
 pub use roles::{
     AttributeAssignParts, AttributeStep, AttributeUpdate, BindingVisibility,
     CollectionTransformParts, LIFTED_PROCESS_NAME_PREFIX, ProcessOrigin, ProcessWrapperParts,
-    StructuralRole, UpdateOperator, lifted_process_identity, process_wrapper_run_path,
+    StructuralRole, UpdateOperator, lifted_process_identity, lifted_process_name,
+    process_wrapper_run_path,
 };
 use roles::{check_process_origins, check_program_roles};
 
@@ -94,23 +95,6 @@ impl AstPath {
         Self {
             root: self.root,
             steps,
-        }
-    }
-
-    /// The flat encoding the lifted-process name hash predates this type on:
-    /// `main` paths are the bare steps; declaration paths are prefixed with
-    /// `u32::MAX` and the declaration index. Kept for that hash only — a
-    /// durable identity input that must not change.
-    pub(crate) fn legacy_steps(&self) -> Vec<u32> {
-        match self.root {
-            AstRoot::Main => self.steps.clone(),
-            AstRoot::Declaration(index) => {
-                let mut steps = Vec::with_capacity(self.steps.len() + 2);
-                steps.push(u32::MAX);
-                steps.push(index);
-                steps.extend_from_slice(&self.steps);
-                steps
-            }
         }
     }
 }

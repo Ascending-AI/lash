@@ -397,8 +397,9 @@ fn exported_names(ir: &lash_vm::Program) -> BTreeSet<String> {
 }
 
 /// Every lifted declaration is the literal the draft holds at its site: the
-/// literal digests to the declaration's name and carries one hidden argument
-/// for each hidden parameter the declaration has. A hidden argument that
+/// declaration is named by the digest of what the linker derived for it, and
+/// the literal carries one hidden argument for each hidden parameter the
+/// declaration has. A hidden argument that
 /// names another literal's binding is no parameter: that literal lifted to a
 /// declaration, and the linker resolves the name to it instead of passing it
 /// at start. TypeScript declares no process.
@@ -438,8 +439,7 @@ fn origins_are_derived(ir: &lash_vm::Program, draft: &lash_vm::Program) -> Vec<S
             .flatten();
         match literal {
             Some(Expr::ProcessLiteral(literal))
-                if lash_vm::lifted_process_identity(&literal.body, &site.steps)
-                    == process.name.as_str()
+                if lash_vm::lifted_process_name(process) == process.name.as_str()
                     && literal
                         .hidden_args
                         .iter()

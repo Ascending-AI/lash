@@ -41,25 +41,155 @@ impl<'module> Linker<'module> {
 
     /// Hoists one process literal to a declaration and resolves the slot to
     /// its reference.
-    ///
-    /// The declaration's name derives from the canonical body plus the
-    /// literal's AST path, so re-linking the same cell lifts the same body to
-    /// the same name — and therefore to the same `ProcessRef`, the identity
-    /// every durable row pins. The body lowers once, in a process scope, with
-    /// completion collection on: the `finish` types it reaches are the
-    /// declaration's inferred output, exactly as a declared process's is.
     pub(super) fn lift_process_literal(
         &self,
         literal: &crate::ast::ProcessLiteralExpr,
         path: &AstPath,
         scope: &mut Scope,
     ) -> Result<(Expr, Binding), LinkError> {
+        self.lift_process(
+            LiftedSource {
+                params: &literal.params,
+                hidden_args: &literal.hidden_args,
+                return_ty: literal.return_ty.as_ref(),
+                body: &literal.body,
+                body_path: path.child(0),
+            },
+            path,
+            scope,
+        )
+    }
+
+    /// Derives a lifted declaration of the program handed in again, at the
+    /// reference to it at `path`, and resolves that reference to what was
+    /// derived (FIG-5640).
+    ///
+    /// The first reference lowering meets stands where the literal stood:
+    /// the declaration is lifted there exactly as its literal would be, so
+    /// its capture types, signature, output, site and name are all derived
+    /// and none is read from the declaration. Every later reference resolves
+    /// to that one declaration by identity. A reference is a process value
+    /// wherever it sits, so no slot is asked for.
+    pub(super) fn rederive_lifted_process(
+        &self,
+        index: u32,
+        declared: &ProcessDecl,
+        path: &AstPath,
+        scope: &mut Scope,
+    ) -> Result<(Expr, Binding), LinkError> {
+        match self.rederived.borrow().get(declared.name.as_str()) {
+            Some(Rederived::Derived { name, ty }) => {
+                return Ok((
+                    Expr::ProcessRef {
+                        process: name.as_str().into(),
+                    },
+                    Binding::Value(ty.clone()),
+                ));
+            }
+            // A lifted process is named by its content, and content that
+            // holds its own name has none.
+            Some(Rederived::Deriving) => {
+                return Err(LinkError::InvalidAst {
+                    source: crate::InvalidAst::InvalidProcessOrigin {
+                        process: declared.name.to_string(),
+                        reason: "a lifted process cannot reference itself",
+                    },
+                });
+            }
+            None => {}
+        }
+        let hidden_params = match &declared.origin {
+            ProcessOrigin::Lifted { hidden_params, .. } => *hidden_params as usize,
+            ProcessOrigin::Declared => 0,
+        };
+        let (params, hidden) = declared
+            .params
+            .split_at(declared.params.len().saturating_sub(hidden_params));
+        // A capture's type is refined from the scope the process is lifted
+        // in, so it goes back to unknown first.
+        let hidden_args = hidden
+            .iter()
+            .map(|hidden| ProcessParam {
+                ty: TypeExpr::Any,
+                ..hidden.clone()
+            })
+            .collect::<Vec<_>>();
+        let return_ty = match &declared.origin {
+            ProcessOrigin::Lifted {
+                declared_return_ty, ..
+            } => declared_return_ty.as_ref(),
+            ProcessOrigin::Declared => declared.return_ty.as_ref(),
+        };
+        self.rederived
+            .borrow_mut()
+            .insert(declared.name.to_string(), Rederived::Deriving);
+        let body_site = self.lifted_site(path).child(0);
+        self.lifted_body_sites.borrow_mut().insert(index, body_site);
+        let lifted = self.lift_process(
+            LiftedSource {
+                params,
+                hidden_args: &hidden_args,
+                return_ty,
+                body: &declared.body,
+                body_path: AstPath::declaration(index, Vec::new()),
+            },
+            path,
+            scope,
+        );
+        let mut rederived = self.rederived.borrow_mut();
+        match &lifted {
+            Ok((Expr::ProcessRef { process }, binding)) => {
+                rederived.insert(
+                    declared.name.to_string(),
+                    Rederived::Derived {
+                        name: process.to_string(),
+                        ty: binding_type(binding),
+                    },
+                );
+            }
+            _ => {
+                rederived.remove(declared.name.as_str());
+            }
+        }
+        lifted
+    }
+
+    /// Where the expression at `path` of the program handed in sat before
+    /// any process was lifted: `path` itself, unless it is inside a submitted
+    /// lifted declaration, whose body sat under the site it is derived at.
+    fn lifted_site(&self, path: &AstPath) -> AstPath {
+        let AstRoot::Declaration(index) = path.root else {
+            return path.clone();
+        };
+        match self.lifted_body_sites.borrow().get(&index) {
+            Some(body) => AstPath {
+                root: body.root,
+                steps: body.steps.iter().chain(&path.steps).copied().collect(),
+            },
+            None => path.clone(),
+        }
+    }
+
+    /// Hoists the process `source` spells to a declaration, lifted at `path`,
+    /// and answers its reference.
+    ///
+    /// The body lowers once, in a process scope, with completion collection
+    /// on: the `finish` types it reaches are the declaration's inferred
+    /// output, exactly as a declared process's is. The declaration is named
+    /// by a digest of what was derived ([`crate::lifted_process_name`]), so
+    /// lifting the same content at the same site gives the same name, and
+    /// therefore the same `ProcessRef`, the identity every durable row pins.
+    fn lift_process(
+        &self,
+        source: LiftedSource<'_>,
+        path: &AstPath,
+        scope: &mut Scope,
+    ) -> Result<(Expr, Binding), LinkError> {
         let span = self.expression_span(path).or(scope.span);
-        let name = self.lifted_process_name(literal, path);
         let mut process_scope = Scope::new(true, span);
         let mut seen = BTreeSet::new();
-        let mut start_params = literal.params.clone();
-        for param in &literal.params {
+        let mut start_params = source.params.to_vec();
+        for param in source.params {
             if !seen.insert(param.name.to_string()) {
                 return Err(LinkError::DuplicateProcessParam {
                     name: param.name.to_string(),
@@ -73,8 +203,8 @@ impl<'module> Linker<'module> {
         // environment — so it writes `Any` and the lift refines it here. That
         // is what lets one process literal name another: the captured binding
         // is a `Process` out here, and stays one inside the body.
-        let mut hidden_args = Vec::with_capacity(literal.hidden_args.len());
-        for hidden in &literal.hidden_args {
+        let mut hidden_args = Vec::with_capacity(source.hidden_args.len());
+        for hidden in source.hidden_args {
             // A read of another literal's binding is not a capture: that
             // literal lifted to a module-level declaration, and the body
             // resolves the name to its `Expr::ProcessRef` (`lower_variable`).
@@ -109,13 +239,13 @@ impl<'module> Linker<'module> {
             process_scope.declare(param.name.as_str(), self.binding_for_type(&param.ty));
         }
         let previous_completion = self.collect_completion.replace(true);
-        let lowered = self.lower_expr(&literal.body, &path.child(0), &mut process_scope);
+        let lowered = self.lower_expr(source.body, &source.body_path, &mut process_scope);
         self.collect_completion.set(previous_completion);
         let body = lowered?.0;
         let completion = self
             .completion_facts
             .borrow()
-            .get(&path.child(0))
+            .get(&source.body_path)
             .cloned()
             .unwrap_or_else(Completion::fallthrough);
         let mut outputs = completion.finishes;
@@ -123,12 +253,25 @@ impl<'module> Linker<'module> {
             outputs.push(TypeExpr::Null);
         }
         let inferred = union_type(outputs);
-        let output = match &literal.return_ty {
+        let mut declaration = ProcessDecl {
+            name: "".into(),
+            params: start_params.clone(),
+            return_ty: None,
+            label: None,
+            origin: ProcessOrigin::Lifted {
+                site: self.lifted_site(path),
+                declared_return_ty: source.return_ty.cloned(),
+                hidden_params: u32::try_from(hidden_args.len()).unwrap_or(u32::MAX),
+            },
+            body,
+        };
+        let name = crate::lifted_process_name(&declaration);
+        let output = match source.return_ty {
             Some(expected) => {
                 self.validate_type_refs(expected, span)?;
                 if !self.is_type_assignable(&inferred, expected) {
                     return Err(LinkError::IncompatibleProcessReturn {
-                        process: name.clone(),
+                        process: name,
                         expected: format_type_expr(&self.resolve_type_aliases(expected)),
                         actual: format_type_expr(&self.resolve_type_aliases(&inferred)),
                         span,
@@ -145,25 +288,12 @@ impl<'module> Linker<'module> {
                 }
             })?;
         let process_ty = TypeExpr::Process(crate::ProcessType::known(signature));
+        declaration.name = name.as_str().into();
+        declaration.return_ty = Some(output);
         self.lifted_declarations.borrow_mut().push((
-            Declaration::Process(ProcessDecl {
-                name: name.clone().into(),
-                params: {
-                    let mut linked = literal.params.clone();
-                    linked.extend(hidden_args.clone());
-                    linked
-                },
-                return_ty: Some(output),
-                label: None,
-                origin: ProcessOrigin::Lifted {
-                    site: path.clone(),
-                    declared_return_ty: literal.return_ty.clone(),
-                    hidden_params: u32::try_from(hidden_args.len()).unwrap_or(u32::MAX),
-                },
-                body,
-            }),
+            Declaration::Process(declaration),
             span,
-            path.child(0),
+            source.body_path,
         ));
         Ok((
             Expr::ProcessRef {
@@ -172,20 +302,18 @@ impl<'module> Linker<'module> {
             Binding::Value(process_ty),
         ))
     }
+}
 
-    /// The name of the declaration a literal lifts to: a digest over the
-    /// canonical body plus the literal's AST path.
-    ///
-    /// The body is hashed in its canonical serialized form, so the name is a
-    /// function of what the body *is* and where it sits — never of link order,
-    /// span tables, or anything else a re-link could reorder.
-    fn lifted_process_name(
-        &self,
-        literal: &crate::ast::ProcessLiteralExpr,
-        path: &AstPath,
-    ) -> String {
-        crate::lifted_process_identity(&literal.body, &path.legacy_steps())
-    }
+/// What a process is lifted from: a literal, or a lifted declaration of the
+/// program handed in.
+struct LiftedSource<'a> {
+    params: &'a [ProcessParam],
+    hidden_args: &'a [ProcessParam],
+    /// The authored settled output annotation.
+    return_ty: Option<&'a TypeExpr>,
+    body: &'a Expr,
+    /// Where `body` is in the program handed in.
+    body_path: AstPath,
 }
 
 /// A union admits a literal when any branch does; every other shape does not,

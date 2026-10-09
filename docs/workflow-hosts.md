@@ -109,6 +109,13 @@ path, with a stable `code()`.
 | Declared functions and private bindings | `InsertFunction`, `ReplaceFunction`, `RemoveFunction`, `SetPrivateBindings` |
 | How a body is spelled around its statements | `SetBodyForm` |
 
+A lifted process (an inline process, shown as a container named by a
+digest) is derived from its content. `RenameProcess` and `RemoveProcess`
+refuse it with `DerivedProcess`: remove the statement that holds its literal,
+or the references to it, and it goes with them. `SetProcessSignature` sets
+its authored parameters and keeps the captures that follow them. An edit
+that makes a lifted process reference itself is refused the same way.
+
 Two rules follow from the document being a program, not a drawing:
 
 - **Edges are derived.** A sequence edge is the order of a body, and a data
@@ -205,6 +212,13 @@ them, is published with it, so one publication is all a run needs.
 
 - **Nothing the document says about itself is trusted.** Ids, types,
   signatures, lifted processes and host requirements are derived again.
+- **A reference means the process it names.** An admitted document names a
+  lifted process by reference wherever it is used. Admission links that
+  reference by identity, never through a variable, so renaming a binding or
+  cloning, moving or re-binding a statement cannot change which process a
+  reference starts. A lifted process's name is a digest of its content: the
+  same process has the same name whether it was linked from source or
+  published from an edited document.
 - **A refusal publishes nothing.** `WorkflowAdmissionRefusal` lists what the
   linker refused, each at a node and slot path, by kind: a missing host
   operation, an unresolved name, a type, a placement, the entry.

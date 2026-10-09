@@ -347,42 +347,21 @@ pub struct LinkedModule {
 }
 
 impl LinkedModule {
+    /// Links `program` against `surface`.
+    ///
+    /// A lifted declaration `program` already holds is not taken as stated:
+    /// the linker derives it again where it is first referenced, as it
+    /// derives a literal, and drops one nothing references. So the program
+    /// an artifact holds links to that artifact again.
     pub fn link(
         program: Program,
         surface: impl Borrow<LashVmHostEnvironment>,
     ) -> Result<Self, LinkError> {
-        Self::link_then(program, surface, |_| {})
-    }
-
-    /// [`Self::link`], with `settle` applied to the linked program, span
-    /// table included, before it becomes the artifact.
-    pub(crate) fn link_then(
-        program: Program,
-        surface: impl Borrow<LashVmHostEnvironment>,
-        settle: impl FnOnce(&mut Program),
-    ) -> Result<Self, LinkError> {
         crate::ast::validate_ast(&program)?;
-        // The linker derives every lifted declaration; a program handed to it
-        // declares its processes and cannot claim one was lifted.
-        if let Some(process) = program
-            .declarations
-            .iter()
-            .find_map(|declaration| match declaration {
-                crate::Declaration::Process(process) if process.origin.is_lifted() => Some(process),
-                _ => None,
-            })
-        {
-            return Err(LinkError::InvalidAst {
-                source: crate::InvalidAst::InvalidProcessOrigin {
-                    process: process.name.to_string(),
-                    reason: "a linked program's lifted processes are derived by the linker",
-                },
-            });
-        }
+        let program = lifted_declarations_last(program);
         let surface = surface.borrow();
         let mut linker = Linker::new(&program, surface);
         let mut program = linker.link_program()?;
-        settle(&mut program);
         let spans = std::mem::take(&mut program.spans);
         let requirements = host_requirements_for_program_with_catalog(&program, &surface.resources);
         let artifact =
@@ -398,4 +377,41 @@ impl LinkedModule {
     pub fn spans(&self) -> &BTreeMap<AstPath, Span> {
         &self.spans
     }
+}
+
+/// `program` with its lifted declarations after every other one, in the
+/// order they had. The linker emits what it lifts after the declarations it
+/// was handed, so every declaration it keeps then keeps its index.
+fn lifted_declarations_last(mut program: Program) -> Program {
+    let lifted = |declaration: &crate::Declaration| matches!(declaration, crate::Declaration::Process(process) if process.origin.is_lifted());
+    if !program.declarations.iter().any(lifted) {
+        return program;
+    }
+    let mut order = (0..program.declarations.len()).collect::<Vec<_>>();
+    order.sort_by_key(|index| lifted(&program.declarations[*index]));
+    let moved = order
+        .iter()
+        .zip(0u32..)
+        .filter_map(|(from, to)| {
+            Some((crate::AstRoot::Declaration(u32::try_from(*from).ok()?), to))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut declarations = std::mem::take(&mut program.declarations)
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<_>>();
+    program.declarations = order
+        .iter()
+        .filter_map(|index| declarations[*index].take())
+        .collect();
+    program.spans = std::mem::take(&mut program.spans)
+        .into_iter()
+        .map(|(mut path, span)| {
+            if let Some(to) = moved.get(&path.root) {
+                path.root = crate::AstRoot::Declaration(*to);
+            }
+            (path, span)
+        })
+        .collect();
+    program
 }

@@ -9,7 +9,7 @@ use crate::artifact::{
     HostRequirements, ModuleArtifact, host_requirements_for_program_with_catalog,
 };
 use crate::ast::{
-    AssignPathStep, AstPath, AstString, Declaration, Expr, ProcessDecl, ProcessOrigin,
+    AssignPathStep, AstPath, AstRoot, AstString, Declaration, Expr, ProcessDecl, ProcessOrigin,
     ProcessParam, Program, ResourceRefExpr, TypeExpr, TypeField, format_type_expr,
 };
 use crate::span::Span;
@@ -27,7 +27,7 @@ pub use host::{
 mod errors;
 pub use errors::LinkError;
 mod pass_setup;
-use pass_setup::{Binding, Linker, function_signature};
+use pass_setup::{Binding, Linker, Rederived, function_signature};
 mod lower_calls;
 mod lower_expr;
 mod lower_javascript;

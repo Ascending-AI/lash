@@ -593,9 +593,19 @@ fn form_edits(
             });
         }
         if base.params != process.params {
+            // The edit sets the authored parameters; a lifted process keeps
+            // the captures after them itself.
+            let captures = match &process.origin {
+                lash::vm::ir::ProcessOrigin::Lifted { hidden_params, .. } => {
+                    *hidden_params as usize
+                }
+                lash::vm::ir::ProcessOrigin::Declared => 0,
+            };
+            let mut params = process.params;
+            params.truncate(params.len().saturating_sub(captures));
             edits.push(WorkflowEdit::SetProcessSignature {
                 process: handle,
-                params: process.params,
+                params,
                 return_ty: base.return_ty.clone(),
             });
         }

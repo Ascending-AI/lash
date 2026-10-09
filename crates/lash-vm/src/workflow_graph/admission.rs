@@ -1,20 +1,20 @@
 //! Admitting a workflow document against a host environment (FIG-5574).
 //!
 //! [`admit_workflow_graph`] is the one path from a document to an artifact:
-//! it reconstructs the IR the document spells, puts every lifted process
-//! back into the literal it was lifted from, and links the result against
-//! the environment, so the linker derives every lifted declaration, type,
+//! it reconstructs the IR the document spells and links it against the
+//! environment, so the linker derives every lifted declaration, type,
 //! signature and host requirement again. Nothing the document states about
 //! itself (ids, source identity, facets, lifted names, refined capture
 //! types) is taken as true.
 //!
-//! A lifted process is named by a digest of the literal it was first lifted
-//! from, which an admitted document no longer holds. So that an unchanged
-//! lifted process is the same process, admission keeps the name the
-//! document gives a lifted declaration exactly when the declaration the
-//! linker derived for its literal equals it in everything but that name
-//! (parameters, types, site and body). The name is then a label of content
-//! the linker produced, never a claim it accepted.
+//! A reference to a lifted process is linked by identity (FIG-5640). The
+//! program handed to the linker holds the document's lifted declarations and
+//! its references to them as they are: the linker derives each declaration
+//! again where it is first referenced, names it by a digest of what it
+//! derived ([`crate::lifted_process_name`]) and resolves every reference to
+//! it. No reference is ever spelled as a variable, so no edit of a binding
+//! name can change which process a reference means, and an unchanged lifted
+//! process is the same process because it derives to the same content.
 //!
 //! No dialect is involved. A refusal is located at a node and expression
 //! path of the submitted document, and an admission says which admitted node
@@ -27,13 +27,10 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::ast::{AstPath, AstRoot, AstString, Declaration, Expr, ProcessLiteralExpr, Program};
-use crate::{
-    LashVmHostEnvironment, LinkError, LinkedModule, ProcessOrigin, Span, TypeExpr,
-    lifted_process_identity,
-};
+use crate::ast::{AstPath, AstRoot, Declaration, Expr, Program};
+use crate::{LashVmHostEnvironment, LinkError, LinkedModule, Span, lifted_process_identity};
 
-use super::projection::{expr_at, statement_addresses};
+use super::projection::{collect_process_literals, expr_at, statement_addresses};
 use super::reconstruction::workflow_program_from_graph;
 use super::{WorkflowGraph, WorkflowNodeId, WorkflowSlotPath, workflow_graph_from_artifact};
 
@@ -158,24 +155,19 @@ pub fn admit_workflow_graph(
         WorkflowAdmissionRefusal::of(location, WorkflowAdmissionDiagnosticKind::Document, error)
     })?;
     let submitted_addresses = statement_addresses(&submitted);
-    let Delinked {
-        mut program,
-        roots,
-        literals,
-        spliced,
-    } = delink(&submitted);
 
     // Tag every expression with a span that is its index, so the linker's
     // path table says where each one went and which one an error is at.
     let mut tagged = Vec::new();
-    tag(&program.main, AstPath::main(Vec::new()), &mut tagged);
-    for (index, declaration) in (0u32..).zip(&program.declarations) {
+    tag(&submitted.main, AstPath::main(Vec::new()), &mut tagged);
+    for (index, declaration) in (0u32..).zip(&submitted.declarations) {
         let body = match declaration {
             Declaration::Process(process) => &process.body,
             Declaration::Function(function) => &function.body,
         };
         tag(body, AstPath::declaration(index, Vec::new()), &mut tagged);
     }
+    let mut program = submitted.clone();
     program.spans = tagged
         .iter()
         .enumerate()
@@ -187,28 +179,11 @@ pub fn admit_workflow_graph(
         .map(|(index, path)| (path, index))
         .collect::<BTreeMap<_, _>>();
 
-    let retain = |linked: &mut Program| {
-        let derived = spliced
-            .iter()
-            .filter_map(|(literal, declared)| {
-                let body = tags.get(&literal.child(0))?;
-                let index = linked.spans.iter().find_map(|(path, span)| {
-                    (span.start == *body && path.steps.is_empty()).then_some(path.root)
-                })?;
-                let AstRoot::Declaration(index) = index else {
-                    return None;
-                };
-                Some((index as usize, *declared))
-            })
-            .collect::<Vec<_>>();
-        retain_lifted_names(linked, derived);
-    };
-    let linked = LinkedModule::link_then(program, environment, retain).map_err(|error| {
+    let linked = LinkedModule::link(program, environment).map_err(|error| {
         let location = error
             .span()
             .and_then(|span| tagged.get(span.start))
-            .and_then(|path| submitted_path(&roots, path))
-            .map(|path| locate(&submitted, &submitted_addresses, &path))
+            .map(|path| locate(&submitted, &submitted_addresses, path))
             .unwrap_or(WorkflowAdmissionLocation::Document);
         WorkflowAdmissionRefusal::of(location, link_error_kind(&error), &error)
     })?;
@@ -224,7 +199,7 @@ pub fn admit_workflow_graph(
             landed.entry(span.start).or_insert_with(|| path.clone());
         }
     }
-    let admitted_at = |delinked: &AstPath| landed.get(tags.get(delinked)?);
+    let admitted_at = |submitted: &AstPath| landed.get(tags.get(submitted)?);
     let admitted_ids = statement_addresses(admitted_program)
         .into_iter()
         .map(|(id, path)| (path, id))
@@ -232,29 +207,42 @@ pub fn admit_workflow_graph(
 
     let mut nodes = BTreeMap::new();
     for (id, path) in &submitted_addresses {
-        let admitted = relocate(&roots, path)
-            .and_then(|delinked| admitted_at(&delinked))
-            .and_then(|path| admitted_ids.get(path));
-        if let Some(admitted) = admitted {
+        if let Some(admitted) = admitted_at(path).and_then(|path| admitted_ids.get(path)) {
             nodes.insert(id.clone(), admitted.clone());
         }
     }
-    // A declared process keeps its name; a literal's container is the
+    // A declared process keeps its name. A lifted process's container, and
+    // the container of a literal the document still holds, is the
     // declaration its body landed in.
-    for declaration in &submitted.declarations {
-        if let Declaration::Process(process) = declaration
-            && process.origin.is_declared()
-            && let Some(from) = graph_process_id(graph, &process.name)
+    let mut bodies = Vec::new();
+    for (index, declaration) in (0u32..).zip(&submitted.declarations) {
+        let Declaration::Process(process) = declaration else {
+            continue;
+        };
+        if process.origin.is_lifted() {
+            bodies.push((
+                process.name.to_string(),
+                AstPath::declaration(index, Vec::new()),
+            ));
+        } else if let Some(from) = graph_process_id(graph, &process.name)
             && let Some(to) = graph_process_id(&admitted_graph, &process.name)
         {
             nodes.insert(from, to);
         }
     }
-    for (name, literal) in literals {
+    let mut literals = Vec::new();
+    collect_process_literals(&submitted.main, &mut Vec::new(), &mut literals);
+    for (path, literal) in literals {
+        bodies.push((
+            lifted_process_identity(&literal.body, &path),
+            AstPath::main(path).child(0),
+        ));
+    }
+    for (name, body) in bodies {
         let Some(AstPath {
             root: AstRoot::Declaration(index),
             steps,
-        }) = admitted_at(&literal.child(0))
+        }) = admitted_at(&body)
         else {
             continue;
         };
@@ -295,261 +283,6 @@ fn tag(expression: &Expr, path: AstPath, out: &mut Vec<AstPath>) {
         tag(child, path.child(index), out);
     }
     out.push(path);
-}
-
-/// A program with every lifted process back in its literal: the form the
-/// linker accepts.
-struct Delinked<'p> {
-    program: Program,
-    /// The literals put back, each with the lifted declaration it came from.
-    spliced: Vec<(AstPath, &'p crate::ProcessDecl)>,
-    /// Where each root of the submitted program is in `program`.
-    roots: BTreeMap<AstRoot, AstPath>,
-    /// Every process literal of `program` the submitted document has a
-    /// container for: the container's process name and the literal's path.
-    literals: Vec<(String, AstPath)>,
-}
-
-struct Lifted<'p> {
-    index: u32,
-    process: &'p crate::ProcessDecl,
-}
-
-struct Delinker<'p> {
-    lifted: BTreeMap<&'p str, Lifted<'p>>,
-    /// The binding each spliced literal is assigned to, by lifted name: what
-    /// a later reference to the lifted process read before linking.
-    aliases: BTreeMap<&'p str, AstString>,
-    roots: BTreeMap<AstRoot, AstPath>,
-    literals: Vec<(String, AstPath)>,
-    spliced: Vec<(AstPath, &'p crate::ProcessDecl)>,
-}
-
-fn delink(submitted: &Program) -> Delinked<'_> {
-    let mut delinker = Delinker {
-        lifted: BTreeMap::new(),
-        aliases: BTreeMap::new(),
-        roots: BTreeMap::from([(AstRoot::Main, AstPath::main(Vec::new()))]),
-        literals: Vec::new(),
-        spliced: Vec::new(),
-    };
-    let mut kept = Vec::new();
-    for (index, declaration) in (0u32..).zip(&submitted.declarations) {
-        match declaration {
-            Declaration::Process(process) if process.origin.is_lifted() => {
-                delinker
-                    .lifted
-                    .insert(process.name.as_str(), Lifted { index, process });
-            }
-            declaration => {
-                let position = u32::try_from(kept.len()).unwrap_or(u32::MAX);
-                delinker.roots.insert(
-                    AstRoot::Declaration(index),
-                    AstPath::declaration(position, Vec::new()),
-                );
-                kept.push(declaration.clone());
-            }
-        }
-    }
-    // Program order: a literal is bound before anything reads its binding,
-    // so the first reference to a lifted process is the literal's own site.
-    let mut main = submitted.main.clone();
-    delinker.expression(&mut main, &AstPath::main(Vec::new()), None, true);
-    for (position, declaration) in (0u32..).zip(&mut kept) {
-        let body = match declaration {
-            Declaration::Process(process) => &mut process.body,
-            Declaration::Function(function) => &mut function.body,
-        };
-        delinker.expression(
-            body,
-            &AstPath::declaration(position, Vec::new()),
-            None,
-            false,
-        );
-    }
-    // A lifted declaration nothing references any more leaves the program,
-    // as its literal did.
-    Delinked {
-        program: Program {
-            declarations: kept,
-            main,
-            private_bindings: submitted.private_bindings.clone(),
-            spans: BTreeMap::new(),
-        },
-        roots: delinker.roots,
-        literals: delinker.literals,
-        spliced: delinker.spliced,
-    }
-}
-
-impl<'p> Delinker<'p> {
-    /// Rewrites `expression`, which sits at `path` of the delinked program.
-    /// `bound` is the name a plain assignment gives it; `in_main` is whether
-    /// the submitted program held it in `main`, where the document has a
-    /// container for an inline literal.
-    fn expression(
-        &mut self,
-        expression: &mut Expr,
-        path: &AstPath,
-        bound: Option<&AstString>,
-        in_main: bool,
-    ) {
-        if let Expr::ProcessRef { process } = expression {
-            let name = process.to_string();
-            if let Some((key, lifted)) = self.lifted.remove_entry(name.as_str()) {
-                if let Some(bound) = bound {
-                    self.aliases.insert(key, bound.clone());
-                }
-                self.roots
-                    .insert(AstRoot::Declaration(lifted.index), path.child(0));
-                self.literals.push((name, path.clone()));
-                self.spliced.push((path.clone(), lifted.process));
-                *expression = Expr::ProcessLiteral(Box::new(literal_of(lifted.process)));
-                let Expr::ProcessLiteral(literal) = expression else {
-                    return;
-                };
-                self.expression(&mut literal.body, &path.child(0), None, false);
-            } else if let Some(alias) = self.aliases.get(name.as_str()) {
-                *expression = Expr::Variable(alias.clone());
-            }
-            return;
-        }
-        if in_main && let Expr::ProcessLiteral(literal) = expression {
-            self.literals.push((
-                lifted_process_identity(&literal.body, &path.legacy_steps()),
-                path.clone(),
-            ));
-        }
-        let bound = match expression {
-            Expr::Assign { target, .. } if target.steps.is_empty() => Some(target.root.clone()),
-            _ => None,
-        };
-        for (index, child) in (0u32..).zip(expression.children_mut()) {
-            self.expression(child, &path.child(index), bound.as_ref(), in_main);
-        }
-    }
-}
-
-/// The literal a lifted declaration was lifted from. A capture's type is the
-/// linker's to refine from the scope the literal sits in, so it goes back as
-/// unknown.
-fn literal_of(process: &crate::ProcessDecl) -> ProcessLiteralExpr {
-    let (hidden_params, declared_return_ty) = match &process.origin {
-        ProcessOrigin::Lifted {
-            hidden_params,
-            declared_return_ty,
-            ..
-        } => (*hidden_params as usize, declared_return_ty.clone()),
-        ProcessOrigin::Declared => (0, process.return_ty.clone()),
-    };
-    let authored = process.params.len().saturating_sub(hidden_params);
-    let mut params = process.params.clone();
-    let mut hidden_args = params.split_off(authored);
-    for hidden in &mut hidden_args {
-        hidden.ty = TypeExpr::Any;
-    }
-    ProcessLiteralExpr {
-        params,
-        hidden_args,
-        return_ty: declared_return_ty,
-        body: Box::new(process.body.clone()),
-    }
-}
-
-/// Gives each declaration of `linked` named in `derived` the name of the
-/// submitted lifted declaration beside it, when the two are otherwise equal.
-/// Declarations name one another, so equality is judged under the renaming
-/// itself and a declaration that fails it takes its dependents with it.
-fn retain_lifted_names(linked: &mut Program, mut derived: Vec<(usize, &crate::ProcessDecl)>) {
-    let renaming = |derived: &[(usize, &crate::ProcessDecl)], linked: &Program| {
-        derived
-            .iter()
-            .filter_map(|(index, declared)| match linked.declarations.get(*index)? {
-                Declaration::Process(process) => {
-                    Some((process.name.clone(), declared.name.clone()))
-                }
-                Declaration::Function(_) => None,
-            })
-            .collect::<BTreeMap<_, _>>()
-    };
-    loop {
-        let names = renaming(&derived, linked);
-        let before = derived.len();
-        derived.retain(|(index, declared)| {
-            let Some(Declaration::Process(process)) = linked.declarations.get(*index) else {
-                return false;
-            };
-            let mut renamed = process.clone();
-            rename_process(&mut renamed, &names);
-            renamed == **declared
-        });
-        if derived.len() == before {
-            break;
-        }
-    }
-    let names = renaming(&derived, linked);
-    let mut taken = std::collections::BTreeSet::new();
-    let distinct = linked
-        .declarations
-        .iter()
-        .all(|declaration| match declaration {
-            Declaration::Process(process) => {
-                taken.insert(names.get(&process.name).unwrap_or(&process.name).clone())
-            }
-            Declaration::Function(_) => true,
-        });
-    if names.is_empty() || !distinct {
-        return;
-    }
-    rename_references(&mut linked.main, &names);
-    for declaration in &mut linked.declarations {
-        match declaration {
-            Declaration::Process(process) => rename_process(process, &names),
-            Declaration::Function(function) => rename_references(&mut function.body, &names),
-        }
-    }
-}
-
-fn rename_process(process: &mut crate::ProcessDecl, names: &BTreeMap<AstString, AstString>) {
-    if let Some(name) = names.get(&process.name) {
-        process.name = name.clone();
-    }
-    rename_references(&mut process.body, names);
-}
-
-fn rename_references(expression: &mut Expr, names: &BTreeMap<AstString, AstString>) {
-    if let Expr::ProcessRef { process } = expression
-        && let Some(name) = names.get(process)
-    {
-        *process = name.clone();
-    }
-    for child in expression.children_mut() {
-        rename_references(child, names);
-    }
-}
-
-/// Where the expression at `path` of the submitted program is in the
-/// delinked one.
-fn relocate(roots: &BTreeMap<AstRoot, AstPath>, path: &AstPath) -> Option<AstPath> {
-    let root = roots.get(&path.root)?;
-    let mut steps = root.steps.clone();
-    steps.extend_from_slice(&path.steps);
-    Some(AstPath {
-        root: root.root,
-        steps,
-    })
-}
-
-/// The inverse of [`relocate`]: the deepest submitted root that holds `path`.
-fn submitted_path(roots: &BTreeMap<AstRoot, AstPath>, path: &AstPath) -> Option<AstPath> {
-    roots
-        .iter()
-        .filter(|(_, root)| root.root == path.root && path.steps.starts_with(&root.steps))
-        .max_by_key(|(_, root)| root.steps.len())
-        .map(|(submitted, root)| AstPath {
-            root: *submitted,
-            steps: path.steps[root.steps.len()..].to_vec(),
-        })
 }
 
 /// The node and expression path that hold the expression at `path` of the

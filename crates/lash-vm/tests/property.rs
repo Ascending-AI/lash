@@ -765,37 +765,67 @@ struct Published {
     refused: Vec<lash_vm::WorkflowAdmissionDiagnosticKind>,
 }
 
-/// The edit law ([`edits::fuzz`]) and what follows it: every document an
-/// applied transaction leaves goes to admission, which admits it or refuses
-/// it with located, typed diagnostics and never anything else, and the last
-/// program it admits round-trips through its document and runs like its
-/// source.
+/// The edit law ([`edits::fuzz`]) and what follows it, over both documents
+/// a host opens: the one it authored, process literals inline, and the one
+/// it reads back from the admitted definition, processes lifted
+/// ([`differential::readmitted_from_document`] reads the same).
+///
+/// Every document an applied transaction leaves goes to admission. A draft
+/// has no types and no host, and the scripts write content with no regard
+/// for either, so admission may refuse a document for a type or for a
+/// requirement the environment lacks. For an admitted document it may
+/// refuse nothing else (FIG-5640): a committed edit that admission refuses
+/// for the document's shape (a name or process it cannot resolve, a
+/// placement, an invalid program) is a failure of this law. An authored
+/// document is held to the earlier rule: admission admits it or refuses it
+/// with located, typed diagnostics. The last program each form admits
+/// round-trips through its document and runs like its source.
 fn edited_documents_stay_programs(
     program_words: &[u16],
     edit_words: &[u16],
 ) -> Result<(edits::Fuzzed, Published), TestCaseError> {
-    let fuzzed = edits::fuzz(&ir_gen::program(program_words), edit_words)?;
+    use lash_vm::WorkflowAdmissionDiagnosticKind as Kind;
+    let program = ir_gen::program(program_words);
     let environment = ir_gen::environment();
+    let authored = lash_vm::workflow_graph_from_program(&program);
+    let admitted = through_wire(&lash_vm::workflow_graph_from_artifact(
+        &link(program)?.artifact,
+    ))?;
+    let mut fuzzed = edits::Fuzzed::default();
     let mut published = Published::default();
-    let mut last = None;
-    for program in &fuzzed.programs {
-        let document = lash_vm::workflow_graph_from_program(program);
-        match lash_vm::admit_workflow_graph(&document, &environment) {
-            Ok(_) => {
-                published.admitted += 1;
-                last = Some(program);
-            }
-            Err(refusal) => {
-                prop_assert!(!refusal.diagnostics.is_empty(), "a refusal says why");
-                published
-                    .refused
-                    .extend(refusal.diagnostics.iter().map(|diagnostic| diagnostic.kind));
+    for (document, lifted) in [(authored, false), (admitted, true)] {
+        let script = edits::fuzz(&document, edit_words)?;
+        let mut last = None;
+        for program in &script.programs {
+            let document = lash_vm::workflow_graph_from_program(program);
+            match lash_vm::admit_workflow_graph(&document, &environment) {
+                Ok(_) => {
+                    published.admitted += 1;
+                    last = Some(program);
+                }
+                Err(refusal) => {
+                    prop_assert!(!refusal.diagnostics.is_empty(), "a refusal says why");
+                    for diagnostic in &refusal.diagnostics {
+                        let of_content =
+                            matches!(diagnostic.kind, Kind::Type | Kind::HostRequirement);
+                        prop_assert!(
+                            !lifted || of_content,
+                            "admission refused a committed edit of an admitted document for its shape: {:?}",
+                            diagnostic
+                        );
+                        published.refused.push(diagnostic.kind);
+                    }
+                }
             }
         }
-    }
-    if let Some(program) = last {
-        document_round_trips(program.clone())?;
-        document_runs_like_its_source(program)?;
+        if let Some(program) = last {
+            document_round_trips(program.clone())?;
+            document_runs_like_its_source(program)?;
+        }
+        fuzzed.applied.extend(script.applied);
+        fuzzed.expression_targets.extend(script.expression_targets);
+        fuzzed.refused.extend(script.refused);
+        fuzzed.programs.extend(script.programs);
     }
     Ok((fuzzed, published))
 }

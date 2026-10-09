@@ -19,10 +19,15 @@ impl<'module> Linker<'module> {
         // Inference lowers the body only to learn its output. The body is
         // lowered again for the program, and that lowering lifts its literals;
         // the literals this pass lifts are dropped, or each would be declared
-        // twice.
+        // twice. A submitted lifted declaration it derived is forgotten with
+        // them, so the lowering that keeps the body derives it.
         let lifted = self.lifted_declarations.borrow().len();
+        let rederived = self.rederived.borrow().clone();
+        let lifted_body_sites = self.lifted_body_sites.borrow().clone();
         let result = self.lower_expr(&process.body, path, &mut scope);
         self.lifted_declarations.borrow_mut().truncate(lifted);
+        self.rederived.replace(rederived);
+        self.lifted_body_sites.replace(lifted_body_sites);
         self.collect_completion.set(false);
         result?;
         let completion = self

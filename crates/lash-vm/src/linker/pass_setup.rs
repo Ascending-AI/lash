@@ -38,6 +38,18 @@ pub(super) fn function_signature(function: &crate::ast::FunctionDecl) -> Functio
     }
 }
 
+/// The state of a submitted lifted declaration being derived again.
+#[derive(Clone)]
+pub(super) enum Rederived {
+    /// Its body is being lowered; a reference met now is the process
+    /// reaching itself.
+    Deriving,
+    Derived {
+        name: String,
+        ty: TypeExpr,
+    },
+}
+
 pub(super) struct Linker<'module> {
     pub(super) program: &'module Program,
     pub(super) surface: &'module LashVmHostEnvironment,
@@ -73,6 +85,17 @@ pub(super) struct Linker<'module> {
     /// nested definition has to reach the child's own start site — one level
     /// deeper than any start argument the enclosing start can carry.
     pub(super) lifted_process_aliases: RefCell<BTreeMap<String, (String, TypeExpr)>>,
+    /// The lifted declarations of the program handed in, by the name it
+    /// gives them, each with its declaration index (FIG-5640). None is taken
+    /// as stated: a reference to one derives it again where it is first
+    /// read ([`Self::rederive_lifted_process`]), and one nothing references
+    /// leaves the program.
+    pub(super) submitted_lifted: BTreeMap<String, (u32, &'module ProcessDecl)>,
+    /// What each submitted lifted name has been derived to so far.
+    pub(super) rederived: RefCell<BTreeMap<String, Rederived>>,
+    /// Where the body of each submitted lifted declaration sat before
+    /// lifting, by its declaration index: under the site it was derived at.
+    pub(super) lifted_body_sites: RefCell<BTreeMap<u32, AstPath>>,
     /// The places whose object shapes the field guard may not trust
     /// (FIG-3626): every read of a binding sees them open.
     pub(super) open_places: OpenPlaces,
@@ -94,6 +117,9 @@ impl<'module> Linker<'module> {
             workflow_error_path: RefCell::new(None),
             lifted_declarations: RefCell::new(Vec::new()),
             lifted_process_aliases: RefCell::new(BTreeMap::new()),
+            submitted_lifted: BTreeMap::new(),
+            rederived: RefCell::new(BTreeMap::new()),
+            lifted_body_sites: RefCell::new(BTreeMap::new()),
             open_places: OpenPlaces::of(program),
         }
     }
@@ -123,12 +149,22 @@ impl<'module> Linker<'module> {
         // declarations in source order, then lower main. Declaration errors
         // therefore still surface before main errors, matching the prior
         // two-pass (validate-then-lower) ordering.
+        self.submitted_lifted = (0u32..)
+            .zip(&self.program.declarations)
+            .filter_map(|(index, declaration)| match declaration {
+                Declaration::Process(process) if process.origin.is_lifted() => {
+                    Some((process.name.to_string(), (index, process)))
+                }
+                _ => None,
+            })
+            .collect();
         self.collect_declarations()?;
         let declarations = self
             .program
             .declarations
             .iter()
             .enumerate()
+            .filter(|(_, declaration)| !self.is_submitted_lifted(declaration))
             .map(|(index, declaration)| {
                 let span = declaration_span(self.program, index);
                 self.lower_declaration(
@@ -146,7 +182,21 @@ impl<'module> Linker<'module> {
             .lower_expr(&self.program.main, &AstPath::main(Vec::new()), &mut scope)?
             .0;
         let mut declarations = declarations;
-        let mut spans = self.program.spans.clone();
+        // A submitted lifted declaration's spans move with its body to the
+        // declaration derived from it; its old index names another
+        // declaration now, or none.
+        let submitted_lifted = self
+            .submitted_lifted
+            .values()
+            .map(|(index, _)| AstRoot::Declaration(*index))
+            .collect::<BTreeSet<_>>();
+        let mut spans = self
+            .program
+            .spans
+            .iter()
+            .filter(|(path, _)| !submitted_lifted.contains(&path.root))
+            .map(|(path, span)| (path.clone(), *span))
+            .collect::<BTreeMap<_, _>>();
         for (declaration, span, source_root) in self.lifted_declarations.borrow_mut().drain(..) {
             let index = u32::try_from(declarations.len()).expect("declaration index fits u32");
             if let Some(span) = span {
@@ -173,6 +223,17 @@ impl<'module> Linker<'module> {
             private_bindings: self.program.private_bindings.clone(),
             spans,
         })
+    }
+
+    /// Whether `declaration` is a lifted declaration of the program handed
+    /// to [`Self::link_program`].
+    fn is_submitted_lifted(&self, declaration: &Declaration) -> bool {
+        matches!(
+            declaration,
+            Declaration::Process(process)
+                if process.origin.is_lifted()
+                    && self.submitted_lifted.contains_key(process.name.as_str())
+        )
     }
 
     pub(super) fn collect_declarations(&mut self) -> Result<(), LinkError> {
@@ -218,6 +279,7 @@ impl<'module> Linker<'module> {
                     }
                     self.validate_type_refs(&function.return_ty, None)?;
                 }
+                Declaration::Process(_) if self.is_submitted_lifted(declaration) => {}
                 Declaration::Process(process) => {
                     for param in &process.params {
                         self.validate_type_refs(&param.ty, None)?;
@@ -230,7 +292,9 @@ impl<'module> Linker<'module> {
             }
         }
         for declaration in &self.program.declarations {
-            if let Declaration::Process(process) = declaration {
+            if let Declaration::Process(process) = declaration
+                && !self.is_submitted_lifted(declaration)
+            {
                 self.process_types.insert(
                     process.name.to_string(),
                     process_type_for_decl(process, TypeExpr::Any),
@@ -241,6 +305,9 @@ impl<'module> Linker<'module> {
             let Declaration::Process(process) = declaration else {
                 continue;
             };
+            if self.is_submitted_lifted(declaration) {
+                continue;
+            }
             let span = declaration_span(self.program, index);
             let output = self.infer_process_output(
                 process,

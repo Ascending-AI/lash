@@ -196,10 +196,12 @@ impl Session<'_, '_> {
         }
     }
 
-    /// A literal's body is addressed the way the declaration it lifts to is:
-    /// its owner is the lifted name and its node paths are relative to the
-    /// body, so the draft and the admitted artifact mint the same ids. Its
-    /// facts stay keyed by where the literal sits in the draft.
+    /// A literal's body is addressed the way a declaration's is: its owner
+    /// is the container's name ([`crate::lifted_process_identity`]) and its
+    /// node paths are relative to the body. The declaration it lifts to is
+    /// named by the linker, so admission says which admitted node each of
+    /// these became. Its facts stay keyed by where the literal sits in the
+    /// draft.
     fn project_literal_process(
         &self,
         path: &[u32],
@@ -207,8 +209,16 @@ impl Session<'_, '_> {
     ) -> WorkflowProcess {
         let name = crate::lifted_process_identity(&literal.body, path);
         let owner = format!("process:{name}");
+        // As the declaration it lifts to does, the container lists the
+        // literal's captures after its authored parameters.
+        let params = literal
+            .params
+            .iter()
+            .chain(&literal.hidden_args)
+            .cloned()
+            .collect::<Vec<_>>();
         let mut versions = VersionState::default();
-        for param in &literal.params {
+        for param in &params {
             versions.seed(param.name.as_str());
         }
         let site = AstPath::main(path.to_vec());
@@ -219,7 +229,7 @@ impl Session<'_, '_> {
             display_name: name,
             description: None,
             name_source: WorkflowNodeNameSource::Derived,
-            params: literal.params.clone(),
+            params,
             return_ty: literal.return_ty.clone(),
             origin: ProcessOrigin::Lifted {
                 site,
@@ -1037,7 +1047,7 @@ fn peel_label(expression: &Expr) -> (Option<&LabelMetadata>, &Expr) {
 }
 
 /// Every inline process literal in `main`, with its path, in walk order.
-fn collect_process_literals<'a>(
+pub(super) fn collect_process_literals<'a>(
     expr: &'a Expr,
     path: &mut Vec<u32>,
     literals: &mut Vec<(Vec<u32>, &'a ProcessLiteralExpr)>,

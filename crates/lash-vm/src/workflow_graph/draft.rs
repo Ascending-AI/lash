@@ -33,7 +33,7 @@ use thiserror::Error;
 
 use crate::ast::{
     AstPath, AstRoot, AstString, Declaration, Expr, InvalidAst, Program, StructuralRole,
-    validate_ast,
+    check_unique_declarations, validate_ast,
 };
 
 use super::projection::{expr_at, statement_addresses};
@@ -188,8 +188,10 @@ pub enum WorkflowEditDiagnosticKind {
     /// names one: its declaration was removed, or never was.
     #[error("no function `{name}` is declared")]
     UnknownFunction { name: AstString },
-    /// A lifted process is derived from the literal that carries it: its name
-    /// is a digest and its declaration follows the literal.
+    /// A lifted process is derived: its name is a digest of its content, and
+    /// its declaration follows the literal that carries it or the references
+    /// to it. So it is not renamed or removed, and it cannot hold a reference
+    /// to itself, which would leave it no content to name.
     #[error("a lifted process is derived from its literal")]
     DerivedProcess,
     #[error(transparent)]
@@ -470,6 +472,49 @@ impl WorkflowDraft {
     }
 }
 
+/// The declaration index of every lifted process of `program` that
+/// references itself, directly or through other lifted processes.
+fn self_reaching_lifted_processes(program: &Program) -> Vec<u32> {
+    fn references<'p>(expression: &'p Expr, names: &mut BTreeSet<&'p str>) {
+        if let Expr::ProcessRef { process } = expression {
+            names.insert(process.as_str());
+        }
+        for child in expression.children() {
+            references(child, names);
+        }
+    }
+    let lifted = (0u32..)
+        .zip(&program.declarations)
+        .filter_map(|(index, declaration)| match declaration {
+            Declaration::Process(process) if process.origin.is_lifted() => {
+                let mut names = BTreeSet::new();
+                references(&process.body, &mut names);
+                Some((process.name.as_str(), (index, names)))
+            }
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    lifted
+        .iter()
+        .filter(|(name, (_, direct))| {
+            let mut reached = BTreeSet::new();
+            let mut pending = direct.iter().copied().collect::<Vec<_>>();
+            while let Some(next) = pending.pop() {
+                if next == **name {
+                    return true;
+                }
+                if reached.insert(next)
+                    && let Some((_, names)) = lifted.get(next)
+                {
+                    pending.extend(names.iter().copied());
+                }
+            }
+            false
+        })
+        .map(|(_, (index, _))| *index)
+        .collect()
+}
+
 /// A draft's document with everything derived from it for editing.
 #[derive(Clone, Debug)]
 struct State {
@@ -516,6 +561,7 @@ impl State {
         carried: Vec<(String, Vec<u32>)>,
     ) -> Result<(), InvalidAst> {
         validate_ast(&program)?;
+        check_unique_declarations(&program)?;
         let document = workflow_graph_from_program(&program);
         let addresses = statement_addresses(&program);
         let working = self.working.clone();
@@ -851,7 +897,8 @@ impl State {
         None
     }
 
-    /// The binding checks of a transaction's whole result.
+    /// The checks of a transaction's whole result: every read resolves, and
+    /// no lifted process reaches itself.
     fn lexical_diagnostics(&self, ambient: &Ambient) -> Vec<WorkflowEditDiagnostic> {
         let lexical = Lexical::of(&self.program);
         let mut diagnostics = Vec::new();
@@ -872,6 +919,16 @@ impl State {
                     Role::Function => WorkflowEditDiagnosticKind::UnknownFunction { name },
                     _ => WorkflowEditDiagnosticKind::UnresolvedBinding { name },
                 },
+            });
+        }
+        for index in self_reaching_lifted_processes(&self.program) {
+            diagnostics.push(WorkflowEditDiagnostic {
+                edit: None,
+                location: match self.owner(&FrameRoot::Declaration(index)) {
+                    Some(Owner::Process(process)) => WorkflowEditLocation::Process { process },
+                    _ => WorkflowEditLocation::Document,
+                },
+                kind: WorkflowEditDiagnosticKind::DerivedProcess,
             });
         }
         for handle in &self.journal.reframed {

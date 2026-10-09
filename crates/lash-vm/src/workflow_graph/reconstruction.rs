@@ -470,9 +470,7 @@ fn check_origin(process: &WorkflowProcess) -> Result<(), WorkflowGraphError> {
         ProcessOrigin::Declared if lifted_name => {
             "a declared process cannot take a lifted process's name"
         }
-        ProcessOrigin::Lifted { .. } if !lifted_name => {
-            "a lifted process is named by its literal's digest"
-        }
+        ProcessOrigin::Lifted { .. } if !lifted_name => "a lifted process is named by a digest",
         ProcessOrigin::Lifted { hidden_params, .. }
             if *hidden_params as usize > process.params.len() =>
         {
@@ -591,13 +589,20 @@ fn splice_carried(
         && let Some(process) = carried.take_for_literal(literal, path, unlabelled)?
     {
         carried.claimed.push((process.name.clone(), path.clone()));
-        literal.params = process.params.clone();
-        literal.return_ty = match &process.origin {
+        let (hidden, return_ty) = match &process.origin {
             ProcessOrigin::Lifted {
-                declared_return_ty, ..
-            } => declared_return_ty.clone(),
-            ProcessOrigin::Declared => None,
+                hidden_params,
+                declared_return_ty,
+                ..
+            } => (*hidden_params as usize, declared_return_ty.clone()),
+            ProcessOrigin::Declared => (0, None),
         };
+        let (params, hidden_args) = process
+            .params
+            .split_at(process.params.len().saturating_sub(hidden));
+        literal.params = params.to_vec();
+        literal.hidden_args = hidden_args.to_vec();
+        literal.return_ty = return_ty;
         *literal.body = process_body(process)?;
     }
     let label = matches!(expression, Expr::LabelAnnotated { .. });

@@ -109,7 +109,7 @@ pub mod ir {
         ProcessParam, ProcessSignature as VmProcessSignature, ProcessSignatureError, ProcessType,
         Program, ResourceRefExpr, StructuralRole, TryExpr, TypeExpr, TypeField, UnionMembers,
         check_ast_nesting_depth, fold_expr_children, format_type_expr, lifted_process_identity,
-        process_wrapper_run_path, validate_ast, walk_expr, walk_expr_slots,
+        lifted_process_name, process_wrapper_run_path, validate_ast, walk_expr, walk_expr_slots,
     };
     pub use lash_vm::{
         AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts,
