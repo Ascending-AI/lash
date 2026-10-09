@@ -220,6 +220,61 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(client.requests[0].executor_override.name, 'local')
         self.assertTrue(client.requests[0].disable_test_execution_caching)
 
+    def test_non_libtest_commands_reject_no_forwarded_libtest_flags(self):
+        # A strict Python command, like ui_fixtures_runner.py, must receive its
+        # declared arguments and native options, never the scheduled timing flags.
+        self.spec.test_type = 'custom'
+        self.spec.ClearField('command')
+        self.spec.command.extend(verbatim(arg) for arg in [
+            sys.executable, '-c',
+            'import argparse; p = argparse.ArgumentParser(); '
+            'p.add_argument("--manifest"); p.add_argument("--native"); '
+            'p.add_argument("selector"); '
+            'assert vars(p.parse_args()) == '
+            '{"manifest": "fixtures.json", "native": "kept", "selector": "case"}',
+            '--manifest', 'fixtures.json',
+        ])
+        for flags in [
+            ['-Z', 'unstable-options', '--report-time'],
+            ['--exact', '--nocapture', '--ignored', '--include-ignored', '--list',
+             '--test-threads', '1', '--format=pretty', '--skip', 'omitted',
+             '--color', 'never', '--logfile=log', '--shuffle-seed', '7',
+             '--quiet', '--show-output', '--ensure-time', '--shuffle',
+             '--exclude-should-panic', '--bench', '--test', '-Zunstable-options'],
+        ]:
+            with self.subTest(flags=flags):
+                self.options.test_arg = [*flags, '--native', 'kept', 'case']
+                client = Client(self.result())
+                runner.run_test(client, self.spec, self.options, {})
+                command = [arg.content.spec_value.verbatim for arg in client.requests[0].test_executable.cmd]
+                result = subprocess.run(command, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_libtest_commands_keep_timing_and_selection_arguments(self):
+        args = ['-Z', 'unstable-options', '--report-time', '--exact', 'actual-case']
+        self.options.test_arg = args
+        # Native rust tests, wrapped/sharded/service-prefixed rust tests, and
+        # batches all run libtest even though the latter two have custom type.
+        for test_type, command, environment in [
+            ('rust', [verbatim('binary')], {}),
+            ('custom', [verbatim('launcher'), verbatim('binary'),
+                        verbatim('--lash-libtest-args'), verbatim('--ignored')], {}),
+            ('custom', [verbatim('batch-launcher'), verbatim('1'), verbatim('0'),
+                        verbatim('binary')], {'LASH_BATCH_JOBS': verbatim('1')}),
+        ]:
+            with self.subTest(test_type=test_type, command=command):
+                self.spec.test_type = test_type
+                self.spec.ClearField('command')
+                self.spec.command.extend(command)
+                self.spec.env.clear()
+                for key, val in environment.items():
+                    self.spec.env[key].CopyFrom(val)
+                client = Client(self.result())
+                report = runner.run_test(client, self.spec, self.options, {})
+                self.assertEqual(report['status'], 'PASS', report)
+                forwarded = [arg.content.spec_value.verbatim for arg in client.requests[0].test_executable.cmd]
+                self.assertEqual(forwarded, [arg.verbatim for arg in command] + args)
+
     def test_runtime_values_cannot_override_budget_or_output_contract(self):
         for key in ['KILN_ACTION_CPU_COUNT', 'XML_OUTPUT_FILE', 'TEST_UNDECLARED_OUTPUTS_DIR', 'LASH_TEST_TIMEOUT_SECONDS']:
             with self.assertRaises(ValueError):

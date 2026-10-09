@@ -178,6 +178,40 @@ def libtest_arguments(spec, test_args):
     return baked + list(test_args), complete
 
 
+def forwarded_test_arguments(spec, test_args):
+    """Keep libtest controls only for commands that declare a libtest harness.
+
+    Native Rust tests have type `rust`; Lash's wrappers mark the binary's
+    arguments, and batches declare their libtest member concurrency. The
+    other custom commands (UI fixtures and facade completeness) are Python
+    programs with their own argument parsers. Their baked command is never
+    filtered, and caller arguments outside libtest's controls pass through.
+    """
+    if spec.test_type == 'rust' or 'LASH_BATCH_JOBS' in spec.env or any(
+        arg.WhichOneof('value') == 'verbatim' and arg.verbatim == ARGUMENT_MARKER
+        for arg in spec.command
+    ):
+        return list(test_args)
+    switches = {
+        '--exact', '--nocapture', '--ignored', '--include-ignored', '--list',
+        '--report-time', '--ensure-time', '--quiet', '-q', '--show-output',
+        '--shuffle', '--exclude-should-panic', '--bench', '--test',
+    }
+    forwarded = []
+    arguments = iter(test_args)
+    for arg in arguments:
+        if arg == '--':
+            forwarded.extend([arg, *arguments])
+            break
+        flag, separator, _ = arg.partition('=')
+        if flag in VALUE_FLAGS:
+            if not separator:
+                next(arguments, None)
+        elif flag not in switches and not arg.startswith('-Z'):
+            forwarded.append(arg)
+    return forwarded
+
+
 def selection_filters(args):
     """Split libtest arguments into positional filters and skipped patterns."""
     filters, skips = [], []
@@ -231,8 +265,9 @@ def execute_test(client, spec, options, runtime_env):
     if len(target_timeouts) > 1 or any(t <= 0 for t in target_timeouts):
         raise ValueError('Invalid target timeout policy')
     timeout = options.timeout if options.timeout is not None else (target_timeouts[0] if target_timeouts else 300)
+    test_args = forwarded_test_arguments(spec, options.test_arg)
     command = [value(arg) for arg in spec.command]
-    command += [value(pb.ExternalRunnerSpecValue(verbatim=arg)) for arg in options.test_arg]
+    command += [value(pb.ExternalRunnerSpecValue(verbatim=arg)) for arg in test_args]
     env = {key: value(val) for key, val in spec.env.items()}
     env.update({key: value(pb.ExternalRunnerSpecValue(verbatim=val)) for key, val in runtime_env.items()})
     env['LASH_TEST_TIMEOUT_SECONDS'] = value(pb.ExternalRunnerSpecValue(verbatim=str(timeout)))
@@ -241,7 +276,7 @@ def execute_test(client, spec, options, runtime_env):
     service = needs_local_uncached(set(spec.env) | set(runtime_env), spec.labels)
     local = bool(options.local_test_execution or service)
     uncached = bool(options.no_test_cache or service)
-    variant = selection_variant(options.test_arg, runtime_env, timeout, local, uncached)
+    variant = selection_variant(test_args, runtime_env, timeout, local, uncached)
     executable = pb.TestExecutable(
         target=spec.target.handle,
         stage=pb.TestStage(testing=pb.Testing(suite=spec.target.target, variant=variant)),
@@ -278,7 +313,7 @@ def report_execution(client, spec, options, label, request, service):
     xml = outputs.get('junit_xml')
     if xml:
         try:
-            mismatch = report_mismatch(xml, stdout, *libtest_arguments(spec, options.test_arg))
+            mismatch = report_mismatch(xml, stdout, *libtest_arguments(spec, forwarded_test_arguments(spec, options.test_arg)))
             if mismatch:
                 output_errors.append(f'Test report does not match its selection: {mismatch}')
         except (ET.ParseError, OSError) as error:

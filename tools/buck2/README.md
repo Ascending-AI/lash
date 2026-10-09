@@ -120,6 +120,18 @@ test brings its service with it: `postgres_action_runner.py` starts the pinned
 PostgreSQL 18 inside the test action, which therefore stays remote and cached
 ([hermetic PostgreSQL tests](../../docs/agents/hermetic-build.md#hermetic-postgresql-tests)).
 
+Caller-supplied libtest flags, including `-Z unstable-options --report-time`,
+reach only native Rust tests, marked Rust wrappers (including shards and
+hermetic PostgreSQL), and libtest batches. The external runner removes those
+flags and their values from arguments appended to non-libtest commands;
+declared command arguments and other caller arguments stay intact. The
+non-libtest commands are `ui_fixtures_runner.py` (UI fixtures and feature
+variants, `ui_store_seam`, and the builder-contract fixture check) and
+`scripts/facade_completeness.py` (the rustdoc facade check). Both run through
+`test_launcher.sh` for timeout and JUnit reporting. Shell launchers, the
+shard runner, and the PostgreSQL prefix wrap libtest binaries rather than
+introducing another non-libtest test command.
+
 Callers that execute build outputs request `--materializations final` and use
 `outputs.py --report PATH --label //package:target --single`; do not guess an
 output path. The driver translates `final` to the stock client's `all` mode
