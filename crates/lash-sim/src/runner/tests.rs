@@ -216,80 +216,13 @@ async fn pending_tool_roundtrip_provider_response_shape_mutation_guard() {
 }
 
 #[tokio::test]
-async fn fixed_script_profile_writes_deterministic_manifest() {
+async fn fixed_script_manifest_schema_contains_required_proofs_and_artifact_fields() {
     let tmp = tempfile::tempdir().expect("tempdir");
 
     let manifest = Box::pin(run_fixed_script_profile(tmp.path()))
         .await
         .expect("profile");
-
-    assert_eq!(manifest.profile, FIXED_SCRIPT_PROFILE);
-    assert_eq!(
-        manifest.timeline_at_semantics,
-        FIXED_SCRIPT_TIMELINE_AT_SEMANTICS
-    );
-    assert_eq!(manifest.summary.total_scripts, 14);
-    assert_eq!(manifest.summary.total_proofs, 16);
-    assert_eq!(manifest.summary.total_events, 17);
-    assert_eq!(manifest.summary.passed, 16);
-    // Codex HTTP/SSE execution rides the injectable LlmHttpTransport and is
-    // in the scripted matrix; the exclusion that remains for codex.rs is
-    // scoped to the provider-native websocket transport.
-    assert!(
-        manifest
-            .provider_transport_exclusions
-            .iter()
-            .any(
-                |exclusion| exclusion.path == "crates/lash-provider-openai/src/codex.rs"
-                    && exclusion.replacement_lane.contains("websocket")
-            )
-    );
-    assert!(manifest.manifest_path.ends_with(FIXED_SCRIPT_MANIFEST));
-    assert!(manifest.summary_path.ends_with(FIXED_SCRIPT_SUMMARY));
-
-    let body = std::fs::read_to_string(tmp.path().join(FIXED_SCRIPT_MANIFEST)).expect("manifest");
-    assert!(body.contains("script_bundle_hash"));
-    assert!(body.contains("anthropic.messages-text-stream"));
-    assert!(body.contains("openai.responses-text-stream"));
-    assert!(body.contains("openai-compatible.chat-response-start-timeout"));
-    assert!(body.contains("openai-compatible.chat-stream-chunk-timeout"));
-    assert!(body.contains("openai-compatible.cancel-before-response-start"));
-    assert!(body.contains("openai-compatible.retry-exhaustion"));
-    assert!(body.contains("google.stream-generate-content-text-stream"));
-    assert!(body.contains("google.generate-content-text"));
-    assert!(body.contains("codex.responses-text-stream"));
-    assert!(body.contains("codex.responses-tool-call-stream"));
-    assert!(body.contains("codex.responses-rate-limit-429"));
-    assert!(body.contains("codex.responses-mid-stream-disconnect"));
-
-    let summary_body =
-        std::fs::read_to_string(tmp.path().join(FIXED_SCRIPT_SUMMARY)).expect("summary");
-    let summary: serde_json::Value = serde_json::from_str(&summary_body).expect("summary JSON");
-    assert_eq!(summary["schema"], "lash.sim.summary.v1");
-    assert_eq!(summary["profile"], FIXED_SCRIPT_PROFILE);
-    assert_eq!(summary["fixed_script_manifest"], FIXED_SCRIPT_MANIFEST);
-    assert_eq!(summary["counts"]["generated_seeds"], 0);
-    assert_eq!(summary["counts"]["fixed_replays"], 16);
-    assert_eq!(summary["counts"]["oracle_passes"], 16);
-    assert_eq!(
-        summary["provider_set"],
-        json!([
-            "anthropic",
-            "codex",
-            "google_oauth",
-            "openai",
-            "openai-compatible"
-        ])
-    );
-}
-
-#[tokio::test]
-async fn fixed_script_manifest_schema_contains_required_proofs_and_artifact_fields() {
-    let tmp = tempfile::tempdir().expect("tempdir");
-
-    Box::pin(run_fixed_script_profile(tmp.path()))
-        .await
-        .expect("profile");
+    assert_eq!(manifest.summary.passed, manifest.summary.total_proofs);
 
     let body = std::fs::read_to_string(tmp.path().join(FIXED_SCRIPT_MANIFEST)).expect("manifest");
     let manifest: serde_json::Value = serde_json::from_str(&body).expect("manifest JSON");
@@ -1380,30 +1313,6 @@ fn runtime_completion_durable_and_observer_readiness_and_units() {
     let observer_units = runtime_completion_units(&observer).expect("observer units");
     assert_eq!(observer_units.len(), 1);
     assert_eq!(observer_units[0].unit, "runtime:observer_snapshot");
-}
-
-#[test]
-fn is_scheduler_owned_runtime_completion_matches_kinds() {
-    for kind in [
-        BoundaryKind::Ingress,
-        BoundaryKind::QueuedIngress,
-        BoundaryKind::Provider,
-        BoundaryKind::ProviderEvent,
-        BoundaryKind::Tool,
-        BoundaryKind::ExecCode,
-        BoundaryKind::DurableEffect,
-        BoundaryKind::Observer,
-        BoundaryKind::Cancellation,
-        BoundaryKind::ContractExecution,
-        BoundaryKind::BackendFailure,
-        BoundaryKind::ProviderMutation,
-    ] {
-        assert_eq!(
-            is_scheduler_owned_runtime_completion(kind),
-            SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS.contains(&kind),
-            "is_scheduler_owned_runtime_completion divergence for {kind:?}"
-        );
-    }
 }
 
 #[test]

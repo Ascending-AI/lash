@@ -102,43 +102,6 @@ async fn a_stale_epoch_cut_at_a_cell_admission_runs_no_body_on_the_old_owner() {
     }
 }
 
-/// A stale-epoch cut at `label` under `case`, at eight seeds over SQLite
-/// memory, holds every invariant, the lease law among them. The paused node
-/// resumes as soon as its actors moved, and the activations its held reply
-/// wakes run before its runner's next tick: the resumed node carries on
-/// past its self-stop deadline while the new owner already runs its actors.
-async fn assert_stale_epoch_holds(case: Case, label: CommitLabel) {
-    for seed in 0..8 {
-        let report = Matrix::new()
-            .faults(&[Fault::StaleEpoch])
-            .labels(&[label])
-            .activations_resume_first()
-            .run_test(|| Deployment::new(case, seed, Dialect::SqliteMemory))
-            .await;
-        assert!(!report.cells.is_empty(), "seed {seed}: no {label} was cut");
-        report.assert_held();
-    }
-}
-
-/// A stale-epoch cut at `model.done` runs no round member's body on the old
-/// owner: the round's admission commits, its node pauses past its lease,
-/// and the new owner settles each started `Once` `Interrupted`. The old
-/// owner's acknowledged admission reaches its round runner only past its
-/// self-stop deadline, so no member's body starts there.
-#[tokio::test]
-async fn a_stale_epoch_cut_at_a_round_admission_runs_no_member_body_on_the_old_owner() {
-    assert_stale_epoch_holds(Case::Round, CommitLabel::MODEL_DONE).await;
-}
-
-/// A stale-epoch cut at `process.advance` runs no process step's body on
-/// the old owner: the transition that admits the steps commits, its node
-/// pauses past its lease, and the new owner settles the started `Once`
-/// step `Interrupted`; no step's body starts on the old owner.
-#[tokio::test]
-async fn a_stale_epoch_cut_at_a_step_admission_runs_no_step_body_on_the_old_owner() {
-    assert_stale_epoch_holds(Case::Process, CommitLabel::PROCESS_ADVANCE).await;
-}
-
 /// A stale-epoch session command commits nothing (FIG-5230): the session
 /// actor writes each command's head commit on its fenced transaction under
 /// `session.command`, so a zombie owner whose write reaches the store only

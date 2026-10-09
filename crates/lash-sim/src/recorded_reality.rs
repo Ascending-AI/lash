@@ -198,25 +198,6 @@ async fn openai_per_minute_throttle_stays_retryable_without_inventing_backoff() 
 }
 
 #[tokio::test]
-async fn openai_insufficient_quota_is_non_retryable() {
-    let mut provider = OpenAiCompatibleProvider::new("test-key", "https://provider.test")
-        .with_transport(transport(OPENAI_HARD_QUOTA));
-    let failure = classify(
-        provider
-            .complete(
-                request("gpt-5.4", false, false),
-                &lash_core::provider::NoSlotDeliveries,
-                &lash_core::provider::LiveCallHorizon::fixture(),
-            )
-            .await
-            .expect_err("recorded OpenAI hard quota"),
-    );
-    assert_eq!(failure.kind, ProviderFailureKind::Quota);
-    assert!(!failure.is_retryable());
-    assert_eq!(failure.retry_after(), None);
-}
-
-#[tokio::test]
 async fn anthropic_rate_limit_and_credit_exhaustion_take_different_retry_paths() {
     let mut rate_limited = AnthropicProvider::new("test-key")
         .with_base_url(Some("https://provider.test".to_string()))

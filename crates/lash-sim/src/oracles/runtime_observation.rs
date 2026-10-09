@@ -583,52 +583,6 @@ pub(super) fn runtime_session_graph_law(
     )
 }
 
-#[cfg(test)]
-pub(super) fn runtime_graph_projection_acyclic(events: &[DeliveredBoundary]) -> OracleVerdict {
-    let mut checked = 0;
-    for event in events
-        .iter()
-        .filter(|event| event.kind == BoundaryKind::Provider)
-    {
-        let Some(facts) = runtime_observed_fact::<RuntimeGraphInvariantFacts>(event, "graph")
-        else {
-            return OracleVerdict::failed(
-                RUNTIME_GRAPH_ACYCLIC_ORACLE,
-                format!(
-                    "provider boundary `{}` did not expose real graph invariant facts",
-                    event.boundary_id
-                ),
-            );
-        };
-        checked += 1;
-        if !facts.passed() {
-            return OracleVerdict::failed(
-                RUNTIME_GRAPH_ACYCLIC_ORACLE,
-                format!(
-                    "provider boundary `{}` observed graph duplicates={:?} missing_parents={:?} cycles={:?} leaf_exists={}",
-                    event.boundary_id,
-                    facts.duplicate_node_ids,
-                    facts.missing_parent_links,
-                    facts.cycle_node_ids,
-                    facts.leaf_exists
-                ),
-            );
-        }
-    }
-    if checked == 0 {
-        return OracleVerdict::failed(
-            RUNTIME_GRAPH_ACYCLIC_ORACLE,
-            "no provider turn exposed runtime graph invariant facts",
-        );
-    }
-    OracleVerdict::passed(
-        RUNTIME_GRAPH_ACYCLIC_ORACLE,
-        format!(
-            "{checked} real provider turn graphs had unique nodes, valid parents, and no cycles"
-        ),
-    )
-}
-
 /// Validate graph integrity from accepted checkpoint raw rows. This deliberately
 /// bypasses `SessionGraph` and its read-model projection so duplicate durable
 /// rows cannot disappear before the oracle observes them.

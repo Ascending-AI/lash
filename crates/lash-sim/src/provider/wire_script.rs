@@ -445,20 +445,6 @@ impl ScriptedResponsePlan {
             ))),
         }
     }
-
-    #[cfg(test)]
-    pub(super) fn event_indices(&self) -> Vec<usize> {
-        match self {
-            Self::Response {
-                event_index, body, ..
-            } => std::iter::once(*event_index)
-                .chain(body.event_indices())
-                .collect(),
-            Self::HttpError { event_index, .. } | Self::Failure { event_index, .. } => {
-                vec![*event_index]
-            }
-        }
-    }
 }
 
 impl BodyPlan {
@@ -558,32 +544,6 @@ impl BodyPlan {
             Ok(Self::Streamed(streamed_steps))
         } else {
             Ok(Self::Buffered(buffered_steps))
-        }
-    }
-
-    #[cfg(test)]
-    fn event_indices(&self) -> impl Iterator<Item = usize> + '_ {
-        match self {
-            Self::Buffered(steps) => BodyEventIndices::Buffered(steps.iter()),
-            Self::Streamed(steps) => BodyEventIndices::Streamed(steps.iter()),
-        }
-    }
-}
-
-#[cfg(test)]
-enum BodyEventIndices<'a> {
-    Buffered(std::slice::Iter<'a, BufferedStep>),
-    Streamed(std::slice::Iter<'a, StreamStep>),
-}
-
-#[cfg(test)]
-impl Iterator for BodyEventIndices<'_> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Buffered(steps) => steps.next().map(|step| step.event_index),
-            Self::Streamed(steps) => steps.next().map(StreamStep::event_index),
         }
     }
 }

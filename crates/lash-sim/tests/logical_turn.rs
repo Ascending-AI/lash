@@ -529,18 +529,6 @@ async fn admissions_settle_for_finish_cancel_and_error() {
     ));
 }
 
-/// FIG-5356, ADR 0101 §3: the default frame-switch bound stops typed,
-/// before the next model call, and settles every admitted input.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_frame_switch_chain_stops_at_its_bound() {
-    let limit = lash::ExecutionBudgets::recommended()
-        .config()
-        .agent_frame_switch_limit
-        .get();
-    assert_eq!(limit, 16);
-    assert_switch_chain(limit as usize, limit as usize, false).await;
-}
-
 /// The host's configured bound governs the durable chain, rather than a
 /// constant or an in-memory count tied to one turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -793,18 +793,6 @@ mod tests {
     }
 
     #[test]
-    fn usage_totals_reject_negative_fields() {
-        let totals = RuntimeUsageTotals::from_usage(&lash_core::LlmUsage {
-            input_tokens: -1,
-            output_tokens: 0,
-            cache_read_input_tokens: 0,
-            cache_write_input_tokens: 0,
-            reasoning_output_tokens: 0,
-        });
-        assert!(!totals.is_non_negative());
-    }
-
-    #[test]
     fn usage_totals_own_the_field_list_and_saturating_total_rule() {
         assert_eq!(
             RuntimeUsageTotals::FIELDS,

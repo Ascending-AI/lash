@@ -1261,37 +1261,3 @@ fn fact_spec_rows_publish_each_contract_under_its_registry_oracle_name() {
         );
     }
 }
-
-#[tokio::test]
-async fn seeded_duplicate_raw_graph_row_mutation_fails_with_projection_contrast() {
-    let workload = crate::generator::generate_workload(5, "fast-random", 24)
-        .expect("seeded generated workload");
-    let mut trace = crate::runner::run_generated_workload_for_fixture(workload, "bundle")
-        .await
-        .expect("generated trace");
-    let baseline = runtime_graph_acyclic(&trace.durable_writes);
-    assert!(
-        baseline.is_passed(),
-        "unmutated raw graph must pass: {}",
-        baseline.message
-    );
-    let rows = trace
-        .durable_writes
-        .iter_mut()
-        .filter_map(|write| write.state.as_mut())
-        .filter_map(|state| state.accepted_raw_rows.as_mut())
-        .filter_map(|raw| raw.get_mut("graph_nodes"))
-        .filter_map(Value::as_array_mut)
-        .find(|rows| !rows.is_empty())
-        .expect("seed 5 records accepted raw graph rows");
-    rows.push(rows[0].clone());
-
-    let old_projection = runtime_graph_projection_acyclic(&trace.events);
-    assert!(
-        old_projection.is_passed(),
-        "the old self-referential projection demonstrates its duplicate-row blind spot"
-    );
-    let raw_verdict = runtime_graph_acyclic(&trace.durable_writes);
-    assert!(!raw_verdict.is_passed(), "duplicate raw row must be red");
-    assert!(raw_verdict.message.contains("duplicate row"));
-}

@@ -8,8 +8,6 @@ use lash_protocol_standard::scenario_contracts::STANDARD_PROTOCOL_SCENARIO_CONTR
 use serde_json::{Value, json};
 
 use crate::provider_mutations::is_transport_provider_mutation;
-#[cfg(test)]
-use crate::runtime_contracts::RuntimeGraphInvariantFacts;
 use crate::runtime_contracts::{RuntimeAgentFrameInvariantFacts, RuntimeUsageInvariantFacts};
 use crate::runtime_providers::MIGRATED_RUNTIME_PROVIDER_KINDS;
 use crate::scheduler::{

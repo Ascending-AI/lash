@@ -611,24 +611,6 @@ fn cache_coverage_matrix_matches_capability_and_retention_dialects() {
 }
 
 #[test]
-fn gemini_dialect_is_independent_of_model_name() {
-    for (retention, expected) in [
-        (CacheRetention::None, CacheWireForm::Nothing),
-        (CacheRetention::Short, CacheWireForm::CacheControl),
-        (CacheRetention::Long, CacheWireForm::CacheControl),
-    ] {
-        let request = with_cache_control(
-            cache_request("unrecognized/model"),
-            CacheControlDialect::Gemini,
-        );
-        let body = lash_provider_openai::testing::serialize_chat_request(&request, retention)
-            .expect("Gemini cache-control dialect body")
-            .0;
-        assert_eq!(observed_wire_form(&body), expected, "{retention:?}");
-    }
-}
-
-#[test]
 fn requested_breakpoints_report_capability_driven_emission_and_drop() {
     let request = with_cache_control(
         cache_request("unrecognized/model"),

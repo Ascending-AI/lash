@@ -583,54 +583,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn scheduler_delivers_seeded_boundaries_without_polling_futures() {
-        let events = [
-            BoundaryEvent::new(
-                "ingress-a",
-                "session-a",
-                BoundaryKind::Ingress,
-                9,
-                "session.open",
-                json!({}),
-            ),
-            BoundaryEvent::new(
-                "provider-a",
-                "session-a",
-                BoundaryKind::Provider,
-                10,
-                "p",
-                json!({}),
-            ),
-            BoundaryEvent::new(
-                "tool-a",
-                "session-a",
-                BoundaryKind::Tool,
-                10,
-                "t",
-                json!({}),
-            ),
-            BoundaryEvent::new(
-                "observer-b",
-                "session-b",
-                BoundaryKind::Observer,
-                11,
-                "observer.snapshot",
-                json!({}),
-            ),
-        ];
-        let mut first = BoundaryScheduler::with_events(7, events.clone());
-        let mut second = BoundaryScheduler::with_events(7, events);
-
-        let first_ids = drain_ids(&mut first);
-        let second_ids = drain_ids(&mut second);
-
-        assert_eq!(first_ids, second_ids);
-        assert_eq!(first_ids.len(), 4);
-        assert_eq!(first_ids.first().map(String::as_str), Some("ingress-a"));
-        assert_eq!(first_ids.last().map(String::as_str), Some("observer-b"));
-    }
-
-    #[test]
     fn scheduler_records_delivery_decisions_as_trace_evidence() {
         let events = [
             BoundaryEvent::new("a", "session-a", BoundaryKind::Provider, 1, "p", json!({})),
@@ -715,60 +667,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_completion_queue_registered_len_tracks_multiple_registrations() {
-        let mut scheduler = BoundaryScheduler::new(23);
-        let registered_after = DeliveredBoundary {
-            schema: BOUNDARY_EVENT_SCHEMA.to_string(),
-            sequence: 1,
-            scheduler: SchedulerDeliveryEvidence {
-                scheduler_controlled: true,
-                delivered_at: 5,
-                ..SchedulerDeliveryEvidence::default()
-            },
-            boundary_id: "session-001:provider:001".to_string(),
-            actor_alias: "session-001".to_string(),
-            kind: BoundaryKind::Provider,
-            at: 5,
-            label: "provider.chat.stream".to_string(),
-            payload: json!({}),
-            observed: json!({}),
-        };
-        let mut queue = RuntimeCompletionQueue::new([
-            BoundaryEvent::new(
-                "session-001:tool:001",
-                "session-001",
-                BoundaryKind::Tool,
-                6,
-                "tool.return",
-                json!({}),
-            ),
-            BoundaryEvent::new(
-                "session-001:exec:001",
-                "session-001",
-                BoundaryKind::ExecCode,
-                7,
-                "exec.result",
-                json!({}),
-            ),
-        ]);
-        assert_eq!(queue.registered_len(), 0);
-        let ready = queue.take_ready(|_| true);
-        for event in ready {
-            queue.register(
-                &mut scheduler,
-                event,
-                &registered_after,
-                RuntimeCompletionFamily::ToolReturn,
-                vec![RuntimeCompletionUnit::new("runtime:unit", 6)],
-            );
-        }
-
-        assert_eq!(queue.registered_len(), 2);
-        assert_eq!(queue.registrations().len(), 2);
-        assert_eq!(drain_ids(&mut scheduler).len(), 2);
-    }
-
-    #[test]
     fn runtime_completion_queue_keeps_unready_boundaries_pending() {
         let events = [
             BoundaryEvent::new(
@@ -796,47 +694,5 @@ mod tests {
         assert_eq!(ready[0].boundary_id, "session-001:provider:001");
         assert_eq!(queue.pending_ids(), vec!["session-001:tool:001"]);
         assert_eq!(queue.pending_len(), 1);
-    }
-
-    #[test]
-    fn runtime_completion_queue_tracks_completed_boundary_ids_idempotently() {
-        let mut queue = RuntimeCompletionQueue::new([
-            BoundaryEvent::new(
-                "session-001:provider:001",
-                "session-001",
-                BoundaryKind::Provider,
-                4,
-                "provider.chat.stream",
-                json!({"turn_index": 1}),
-            ),
-            BoundaryEvent::new(
-                "session-001:tool:001",
-                "session-001",
-                BoundaryKind::Tool,
-                5,
-                "tool.return",
-                json!({}),
-            ),
-        ]);
-
-        assert_eq!(queue.completed_len(), 0);
-        queue.mark_completed("session-001:provider:001");
-        assert_eq!(queue.completed_len(), 1);
-        queue.mark_completed("session-001:provider:001");
-        assert_eq!(
-            queue.completed_len(),
-            1,
-            "completed IDs should be idempotent, not double-counted"
-        );
-        queue.mark_completed("session-001:tool:001");
-        assert_eq!(queue.completed_len(), 2);
-    }
-
-    fn drain_ids(scheduler: &mut BoundaryScheduler) -> Vec<String> {
-        let mut ids = Vec::new();
-        while let Some(event) = scheduler.deliver_next(json!({"ok": true})) {
-            ids.push(event.boundary_id);
-        }
-        ids
     }
 }

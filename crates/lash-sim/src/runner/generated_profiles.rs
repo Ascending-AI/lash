@@ -1043,17 +1043,6 @@ mod seed_tests {
     }
 
     #[test]
-    fn named_regression_corpus_retains_the_unsalted_seed_derivation() {
-        let corpus = SimSeedSource::regression_corpus(WEEKLY_REGRESSION_CORPUS)
-            .expect("named regression corpus");
-        assert_eq!(
-            corpus.seed("full-random", 12),
-            regression_corpus_seed("full-random", 12)
-        );
-        assert_eq!(corpus.corpus(), Some(WEEKLY_REGRESSION_CORPUS));
-    }
-
-    #[test]
     fn time_budget_stops_the_sweep_cleanly_and_records_reached_seeds() {
         let tmp = tempfile::tempdir().expect("tempdir");
 

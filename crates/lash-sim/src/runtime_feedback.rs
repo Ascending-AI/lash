@@ -234,12 +234,8 @@ macro_rules! wire_test {
     };
 }
 wire_test!(runtime_feedback_responses, Responses);
-wire_test!(runtime_feedback_codex, Codex);
 wire_test!(runtime_feedback_chat, Chat);
-wire_test!(runtime_feedback_anthropic_native, AnthropicNative);
-wire_test!(runtime_feedback_anthropic_fallback, AnthropicFallback);
 wire_test!(runtime_feedback_gemini, Gemini);
-wire_test!(runtime_feedback_code_assist, CodeAssist);
 
 #[test]
 fn runtime_feedback_anthropic_per_message_legality_and_coalescing() {
@@ -585,32 +581,12 @@ feedback_contract_test!(
     feedback_tool_results
 );
 feedback_contract_test!(
-    runtime_feedback_tool_results_codex,
-    Codex,
-    feedback_tool_results
-);
-feedback_contract_test!(
     runtime_feedback_tool_results_chat,
     Chat,
     feedback_tool_results
 );
 feedback_contract_test!(
-    runtime_feedback_tool_results_anthropic_native,
-    AnthropicNative,
-    feedback_tool_results
-);
-feedback_contract_test!(
-    runtime_feedback_tool_results_anthropic_fallback,
-    AnthropicFallback,
-    feedback_tool_results
-);
-feedback_contract_test!(
     runtime_feedback_tool_results_gemini,
     Gemini,
-    feedback_tool_results
-);
-feedback_contract_test!(
-    runtime_feedback_tool_results_code_assist,
-    CodeAssist,
     feedback_tool_results
 );

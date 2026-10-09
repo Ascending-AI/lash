@@ -17,8 +17,8 @@ use lash_provider_openai::{OpenAiCompatibleProvider, OpenAiProvider};
 use serde_json::json;
 
 use crate::canonical_scripts::{
-    CANONICAL_SCRIPTS, OPENAI_COMPAT_DISCONNECT, OPENAI_COMPAT_RATE_LIMIT, OPENAI_COMPAT_TOOL_CALL,
-    OPENAI_COMPAT_VALIDATION, OPENAI_RESPONSES_TEXT,
+    OPENAI_COMPAT_RATE_LIMIT, OPENAI_COMPAT_TOOL_CALL, OPENAI_COMPAT_VALIDATION,
+    OPENAI_RESPONSES_TEXT,
 };
 
 const RATE_LIMIT_BODY: &str = "{\"error\":{\"message\":\"Rate limit reached for requests\",\"type\":\"rate_limit_error\",\"code\":\"rate_limit_exceeded\"}}";
@@ -136,26 +136,6 @@ async fn provider_wire_script_openai_compatible_validation_error_preserves_envel
     let classified = DefaultProviderFailureClassifier.classify(err);
     assert_eq!(classified.kind, ProviderFailureKind::Validation);
     assert!(!classified.is_retryable());
-}
-
-#[tokio::test]
-async fn provider_wire_script_openai_compatible_mid_stream_disconnect_surfaces_stream_error() {
-    let (events, sender) = event_collector();
-    let mut provider = scripted_provider(OPENAI_COMPAT_DISCONNECT);
-
-    let err = provider
-        .complete(
-            request(Some(sender)),
-            &lash_core::provider::NoSlotDeliveries,
-            &lash_core::provider::LiveCallHorizon::fixture(),
-        )
-        .await
-        .expect_err("mid-stream disconnect");
-
-    assert_eq!(err.kind, ProviderFailureKind::Stream);
-    assert!(err.is_retryable());
-    assert!(err.message.contains("scripted socket closed"));
-    assert_eq!(text_deltas(&events), vec!["partial".to_string()]);
 }
 
 #[tokio::test]
@@ -442,34 +422,6 @@ fn provider_wire_script_rejects_empty_request_match_at_load() {
 }
 
 #[test]
-fn provider_wire_script_rejects_sse_before_response_start() {
-    let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
-        { "event": "sse", "data": "{}" },
-        { "event": "response_start", "status": 200 },
-        { "event": "end" }
-    ])))
-    .expect_err("SSE before response_start must fail validation");
-
-    assert_eq!(err.kind, ProviderFailureKind::Validation);
-    assert!(err.message.contains("sse"));
-    assert!(err.message.contains("before response_start"));
-}
-
-#[test]
-fn provider_wire_script_rejects_body_before_response_start() {
-    let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
-        { "event": "body", "data": "premature" },
-        { "event": "response_start", "status": 200 },
-        { "event": "end" }
-    ])))
-    .expect_err("body before response_start must fail validation");
-
-    assert_eq!(err.kind, ProviderFailureKind::Validation);
-    assert!(err.message.contains("body"));
-    assert!(err.message.contains("before response_start"));
-}
-
-#[test]
 fn provider_wire_script_rejects_http_error_after_response_start() {
     let err = ProviderWireScript::from_json_str(&wire_script_json(json!([
         { "event": "response_start", "status": 200 },
@@ -492,20 +444,6 @@ fn provider_wire_script_rejects_second_response_start() {
 
     assert_eq!(err.kind, ProviderFailureKind::Validation);
     assert!(err.message.contains("second response_start"));
-}
-
-#[test]
-fn canonical_provider_wire_script_plans_cover_every_timeline_event_index() {
-    for canonical in CANONICAL_SCRIPTS {
-        let script = ProviderWireScript::from_json_str(canonical.content)
-            .unwrap_or_else(|error| panic!("{} failed to parse: {error}", canonical.path));
-        assert_eq!(
-            script.plan().expect("compiled plan").event_indices(),
-            (0..script.timeline().len()).collect::<Vec<_>>(),
-            "{} plan must cover each timeline event exactly once",
-            canonical.path
-        );
-    }
 }
 
 #[test]

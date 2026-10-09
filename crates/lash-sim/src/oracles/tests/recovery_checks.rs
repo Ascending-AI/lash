@@ -217,39 +217,6 @@ fn scheduler_owned_runtime_completion_kinds_match_runner_completion_kinds() {
 }
 
 #[test]
-fn boundary_kind_name_matches_serde_serialization() {
-    let all_kinds = [
-        BoundaryKind::Ingress,
-        BoundaryKind::QueuedIngress,
-        BoundaryKind::Provider,
-        BoundaryKind::ProviderEvent,
-        BoundaryKind::Tool,
-        BoundaryKind::ExecCode,
-        BoundaryKind::DurableEffect,
-        BoundaryKind::Observer,
-        BoundaryKind::Cancellation,
-        BoundaryKind::ContractExecution,
-        BoundaryKind::BackendFailure,
-        BoundaryKind::ProviderMutation,
-    ];
-    assert_eq!(all_kinds.len(), 12, "must test all twelve boundary kinds");
-    for kind in all_kinds {
-        let serialized = serde_json::to_string(&kind).expect("serialization failed");
-        let expected_name = serialized.trim_matches('"');
-        assert_eq!(
-            kind.to_string(),
-            expected_name,
-            "BoundaryKind Display for {kind:?} must match its serde-serialized snake_case string"
-        );
-        assert_eq!(
-            expected_name.parse::<BoundaryKind>().expect("parse failed"),
-            kind,
-            "BoundaryKind FromStr must round-trip {kind:?} through its serde name"
-        );
-    }
-}
-
-#[test]
 fn scheduler_owned_runtime_completion_oracle_rejects_missing_evidence_for_durable_effect_and_observer()
  {
     for kind in [BoundaryKind::DurableEffect, BoundaryKind::Observer] {

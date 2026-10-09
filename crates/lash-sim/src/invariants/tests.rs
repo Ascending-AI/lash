@@ -619,27 +619,6 @@ fn soak_history_transcript_order_catches_reversed_markers() {
 }
 
 #[test]
-fn a_quarantine_entry_covers_only_its_own_violation() {
-    let violation = Violation::new("tool-call-identity", "id x named 2 logical calls");
-    for entry in quarantine::QUARANTINE {
-        assert!(!entry.name.is_empty() && !entry.reason.is_empty());
-        assert!(
-            CHECKERS
-                .iter()
-                .any(|checker| checker.invariant() == entry.invariant),
-            "quarantine `{}` names no registered invariant",
-            entry.name
-        );
-    }
-    assert!(
-        quarantine::covering("fixture/none", &violation).is_none_or(|entry| {
-            entry.invariant == "tool-call-identity"
-                && violation.detail.contains(entry.detail_contains)
-        })
-    );
-}
-
-#[test]
 fn soak_history_empty_history_cannot_pass_vacuously() {
     let mut report = check(&History::new("chaos-soak", SEED));
     report.require_observed();

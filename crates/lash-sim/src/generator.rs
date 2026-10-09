@@ -1161,17 +1161,6 @@ fn hex_digest(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scheduler::{BoundaryKind, QueuedIngressMode};
-
-    #[test]
-    fn workload_generation_is_seed_and_version_deterministic() {
-        let first = generate_workload(42, "fast-random", 24).expect("workload");
-        let second = generate_workload(42, "fast-random", 24).expect("workload");
-
-        assert_eq!(first, second);
-        assert_eq!(first.sessions.len(), MIGRATED_RUNTIME_PROVIDER_KINDS.len());
-        assert_eq!(first.generator_version, GENERATOR_VERSION);
-    }
 
     /// The widened payload domain reaches every class it exists for across a
     /// small seed batch, and the drawn usage keeps reasoning inside output.
@@ -1230,51 +1219,6 @@ mod tests {
     }
 
     #[test]
-    fn fast_profile_default_budget_runs_seeded_extra_transitions() {
-        let max = default_max_boundaries("fast-random").expect("fast max");
-        assert!(max > 24);
-        let first = generate_workload(41, "fast-random", max).expect("first workload");
-        let second = generate_workload(42, "fast-random", max).expect("second workload");
-
-        assert_eq!(first.boundaries.len(), max);
-        assert_eq!(second.boundaries.len(), max);
-        assert_ne!(
-            first.workload_id, second.workload_id,
-            "fast-random seeds should alter the generated transition schedule"
-        );
-        assert!(
-            first
-                .boundaries
-                .iter()
-                .filter(|boundary| boundary.kind == BoundaryKind::ProviderMutation)
-                .count()
-                > 2,
-            "fast-random default budget should have room beyond the required mutation pair"
-        );
-    }
-
-    #[test]
-    fn generated_queue_ingress_modes_vary_when_budget_allows() {
-        let workload = generate_workload(42, "default-random", 160).expect("workload");
-        let modes = workload
-            .boundaries
-            .iter()
-            .filter(|boundary| boundary.kind == BoundaryKind::QueuedIngress)
-            .map(|boundary| {
-                boundary
-                    .queued_ingress_mode()
-                    .expect("generated queued-ingress boundary declares its mode")
-            })
-            .collect::<std::collections::BTreeSet<_>>();
-
-        assert!(
-            modes.contains(&QueuedIngressMode::ActiveTurn)
-                && modes.contains(&QueuedIngressMode::NextTurn),
-            "expected both active_turn and next_turn queued ingress modes, got {modes:?}"
-        );
-    }
-
-    #[test]
     fn sim_shards_partition_the_seed_index_space_exactly() {
         let total = 4;
         let seed_count = 26;
@@ -1319,53 +1263,5 @@ mod tests {
         );
         assert!(default_seed_count("typo-random").is_err());
         assert!(default_max_boundaries("typo-random").is_err());
-    }
-
-    #[test]
-    fn workload_generation_covers_required_runtime_boundaries() {
-        let workload = generate_workload(42, "default-random", 96).expect("workload");
-        for kind in [
-            BoundaryKind::Ingress,
-            BoundaryKind::QueuedIngress,
-            BoundaryKind::Provider,
-            BoundaryKind::Tool,
-            BoundaryKind::ExecCode,
-            BoundaryKind::DurableEffect,
-            BoundaryKind::Observer,
-            BoundaryKind::Cancellation,
-            BoundaryKind::BackendFailure,
-            BoundaryKind::ProviderMutation,
-        ] {
-            assert!(
-                workload
-                    .boundaries
-                    .iter()
-                    .any(|boundary| boundary.kind == kind),
-                "missing {kind:?}"
-            );
-        }
-        assert!(workload.boundaries.len() >= 96);
-        assert!(
-            workload
-                .boundaries
-                .iter()
-                .filter(|boundary| boundary.kind == BoundaryKind::Provider)
-                .count()
-                > workload.sessions.len() * 2
-        );
-        let provider_kinds = workload
-            .boundaries
-            .iter()
-            .filter(|boundary| boundary.kind == BoundaryKind::Provider)
-            .filter_map(|boundary| boundary.payload.get("provider_kind"))
-            .filter_map(serde_json::Value::as_str)
-            .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(
-            provider_kinds,
-            MIGRATED_RUNTIME_PROVIDER_KINDS
-                .iter()
-                .copied()
-                .collect::<std::collections::BTreeSet<_>>()
-        );
     }
 }

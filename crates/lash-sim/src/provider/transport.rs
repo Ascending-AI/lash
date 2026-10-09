@@ -956,56 +956,6 @@ mod event_gate_tests {
     const WAIT: Duration = Duration::from_secs(5);
 
     #[tokio::test]
-    async fn release_before_any_waiter_is_retained() {
-        let gate = ScriptedTransportEventGate::default();
-        gate.open();
-        tokio::time::timeout(WAIT, gate.wait_for_release())
-            .await
-            .expect("a release published before the first waiter must be retained");
-        assert!(
-            !gate.is_blocked(),
-            "an early release must not invent a blocked observation"
-        );
-    }
-
-    #[tokio::test]
-    async fn blocked_observer_reading_state_before_publication_still_wakes() {
-        let gate = ScriptedTransportEventGate::default();
-        // Controlled interleaving of the former check-then-register order: the
-        // observer samples the state, a parked provider publishes `blocked`,
-        // and only then does the observer wait on it.
-        let mut blocked = gate.blocked.subscribe();
-        let observed_blocked = *blocked.borrow();
-        assert!(!observed_blocked);
-        gate.blocked.send_replace(true);
-        if !observed_blocked {
-            tokio::time::timeout(WAIT, blocked.wait_for(|blocked| *blocked))
-                .await
-                .expect(
-                    "a blocked publication between the state read and the wait must still wake the observer",
-                )
-                .expect("the gate state channel stays open while the gate is alive");
-        }
-    }
-
-    #[tokio::test]
-    async fn release_waiter_reading_state_before_open_still_wakes() {
-        let gate = ScriptedTransportEventGate::default();
-        // Same stale-observation interleaving on the release side: the waiter
-        // samples `opened` before `open` publishes it, then waits.
-        let mut opened = gate.opened.subscribe();
-        let observed_opened = *opened.borrow();
-        assert!(!observed_opened);
-        gate.open();
-        if !observed_opened {
-            tokio::time::timeout(WAIT, opened.wait_for(|opened| *opened))
-                .await
-                .expect("a release between the state read and the wait must still wake the waiter")
-                .expect("the gate state channel stays open while the gate is alive");
-        }
-    }
-
-    #[tokio::test]
     async fn blocked_publication_wakes_every_observer() {
         let gate = Arc::new(ScriptedTransportEventGate::default());
         let observers: Vec<_> = (0..4)

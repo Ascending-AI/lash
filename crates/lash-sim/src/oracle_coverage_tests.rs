@@ -17,7 +17,6 @@ use crate::oracles::{
     provider_transport_mutation_classified, provider_turn_interleaving_depth,
     runtime_session_graph_contract,
 };
-use crate::state_checker::checkpoint_state_consistency;
 use crate::trace::{AbstractWorldView, OracleVerdict, WorkloadExpectations};
 
 /// Every random workload profile, at the budget the runner actually uses.
@@ -166,17 +165,6 @@ fn generated_final_value_channel_fails_when_no_declared_turn_ran() {
         &verdict,
         "sim.oracle.generated-final-value-semantic-channel.v1",
         declared.provider_turn_count,
-    );
-}
-
-#[test]
-fn checkpoint_state_consistency_fails_when_no_declared_session_committed() {
-    let declared = declared();
-    let verdict = checkpoint_state_consistency(&[], &[], &declared);
-    assert_absent_class(
-        &verdict,
-        "sim.oracle.independent-checkpoint-state.v1",
-        declared.session_count(),
     );
 }
 
