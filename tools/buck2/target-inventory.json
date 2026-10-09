@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 0,
   "cargo_package_count": 53,
-  "cargo_target_count": 218,
+  "cargo_target_count": 219,
   "facade_production_check_targets": [
     "//crates/lash-core-effect:lash-core-effect__fv_48d34494[check]",
     "//crates/lash-core-effect:lash-core-effect__fv_e38b9031[check]",
@@ -41893,7 +41893,7 @@
       "//crates/lash:lash__fv_f474fc78"
     ]
   },
-  "generated_label_count": 280,
+  "generated_label_count": 282,
   "main_test_exclusions": {
     "//crates/lash-s3-store:lash-s3-store__unit_test": "requires an external service or credentials"
   },
@@ -44434,6 +44434,22 @@
         "default"
       ],
       "targets": [
+        {
+          "build_label": "//crates/lash-perf:build_script",
+          "clippy_exempt": "the run action has no compile subtargets; its build.rs compile is linted as :build_script__build",
+          "kind": "custom-build",
+          "label": "//crates/lash-perf:build_script"
+        },
+        {
+          "build_label": "//crates/lash-perf:build_script__build",
+          "check_label": "//crates/lash-perf:build_script__build[check]",
+          "clippy_label": "//crates/lash-perf:build_script__build__clippy[clippy.txt]",
+          "kind": "custom-build-compile",
+          "label": "//crates/lash-perf:build_script__build",
+          "tags": [
+            "manual"
+          ]
+        },
         {
           "build_label": "//crates/lash-perf:lash-perf[static]",
           "cargo": "lash_perf",
@@ -48137,6 +48153,8 @@
     "//crates/lash-llm-transport:lash-llm-transport[static]",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test",
     "//crates/lash-llm-transport:property__test",
+    "//crates/lash-perf:build_script",
+    "//crates/lash-perf:build_script__build",
     "//crates/lash-perf:durable-substrate__bin",
     "//crates/lash-perf:lash-perf[static]",
     "//crates/lash-perf:lash-perf__bin",
@@ -48438,6 +48456,7 @@
     "//crates/lash-llm-transport:lash-llm-transport__fv_a69c3e20[check]",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test[check]",
     "//crates/lash-llm-transport:property__test[check]",
+    "//crates/lash-perf:build_script__build[check]",
     "//crates/lash-perf:durable-substrate__bin[check]",
     "//crates/lash-perf:lash-perf[check]",
     "//crates/lash-perf:lash-perf__bin[check]",
@@ -48748,6 +48767,7 @@
     "//crates/lash-llm-transport:lash-llm-transport__clippy[clippy.txt]",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test__clippy[clippy.txt]",
     "//crates/lash-llm-transport:property__test__clippy[clippy.txt]",
+    "//crates/lash-perf:build_script__build__clippy[clippy.txt]",
     "//crates/lash-perf:durable-substrate__bin__clippy[clippy.txt]",
     "//crates/lash-perf:lash-perf__clippy[clippy.txt]",
     "//crates/lash-perf:lash-perf__bin__clippy[clippy.txt]",
@@ -49029,6 +49049,7 @@
     "//crates/lash-llm-transport:lash-llm-transport",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test",
     "//crates/lash-llm-transport:property__test",
+    "//crates/lash-perf:build_script__build",
     "//crates/lash-perf:durable-substrate__bin",
     "//crates/lash-perf:lash-perf",
     "//crates/lash-perf:lash-perf__bin",
@@ -49310,6 +49331,8 @@
     "//crates/lash-llm-transport:lash-llm-transport",
     "//crates/lash-llm-transport:lash-llm-transport__unit_test",
     "//crates/lash-llm-transport:property__test",
+    "//crates/lash-perf:build_script",
+    "//crates/lash-perf:build_script__build",
     "//crates/lash-perf:durable-substrate__bin",
     "//crates/lash-perf:lash-perf",
     "//crates/lash-perf:lash-perf__bin",

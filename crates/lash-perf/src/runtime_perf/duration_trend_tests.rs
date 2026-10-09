@@ -125,66 +125,6 @@ fn a_swinging_series_distinguishes_per_run_windows_from_one_shared_baseline() {
     assert!(shared_streak < DRIFT_CONSECUTIVE_RUNS);
 }
 
-/// The closing edge the module documentation promises, pinned as
-/// behaviour rather than left as prose: a regression is loud for a
-/// bounded number of main runs and then becomes the new normal.
-#[test]
-fn a_step_change_is_loud_for_a_bounded_window_then_ages_into_the_baseline() {
-    let stepped = |multiplier: f64, post_step_runs: usize| {
-        let mut series = flat(10.0, TREND_WINDOW_RUNS * 2);
-        series.extend(flat(10.0 * multiplier, post_step_runs));
-        verdict(&series)
-    };
-
-    // A doubling: Elevated 1-4, DRIFTING 5-10, Stable from 11.
-    for post_step_runs in 1..DRIFT_CONSECUTIVE_RUNS {
-        assert_eq!(
-            stepped(2.0, post_step_runs),
-            DriftVerdict::Elevated {
-                streak: post_step_runs
-            },
-            "post-step run {post_step_runs}"
-        );
-    }
-    for post_step_runs in DRIFT_CONSECUTIVE_RUNS..=10 {
-        assert_eq!(
-            stepped(2.0, post_step_runs),
-            DriftVerdict::Drifting {
-                streak: post_step_runs
-            },
-            "post-step run {post_step_runs}"
-        );
-    }
-    for post_step_runs in 11..=14 {
-        assert_eq!(
-            stepped(2.0, post_step_runs),
-            DriftVerdict::Stable,
-            "post-step run {post_step_runs}"
-        );
-    }
-
-    // Magnitude buys exactly one extra run and no more, and the boundary
-    // is not a tuning choice: at run 11 the window holds ten pre-step and
-    // ten post-step runs, so the median is (B + E) / 2 and the run is
-    // elevated iff E > 1.5 * (B + E) / 2, i.e. iff E > 3B. Pinned either
-    // side of exactly 3x.
-    assert_eq!(
-        stepped(3.0, 11),
-        DriftVerdict::Stable,
-        "exactly 3x does not clear the straddling median"
-    );
-    assert_eq!(
-        stepped(3.01, 11),
-        DriftVerdict::Drifting { streak: 11 },
-        "just past 3x does"
-    );
-    // The extra run is all it buys, at any magnitude.
-    assert_eq!(stepped(3.01, 12), DriftVerdict::Stable);
-    assert_eq!(stepped(10.0, 11), DriftVerdict::Drifting { streak: 11 });
-    assert_eq!(stepped(10.0, 12), DriftVerdict::Stable);
-    assert_eq!(stepped(100.0, 12), DriftVerdict::Stable);
-}
-
 #[test]
 fn the_baseline_window_is_bounded_to_the_trailing_runs() {
     // A very old, very slow era must not hold the baseline up forever.
@@ -307,7 +247,13 @@ fn an_older_build_carries_newer_records_through_the_rewrite_verbatim() {
     )
     .expect("write");
 
-    record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
+    record_and_report(
+        &path,
+        "quick",
+        DurationTrendGeometry::current(2, 0, 3),
+        &fixture_identity(),
+        &[],
+    );
 
     let rewritten = std::fs::read_to_string(&path).expect("read back");
     let lines = rewritten.lines().collect::<Vec<_>>();
@@ -334,7 +280,13 @@ fn a_scratch_file_left_by_a_killed_rewrite_is_swept_on_the_next_run() {
     append_records(&path, &[record("standard", "quick", 1, 10.0)]).expect("append");
     std::fs::write(rewrite_temp_path(&path), "stale\n").expect("write orphan");
 
-    record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
+    record_and_report(
+        &path,
+        "quick",
+        DurationTrendGeometry::current(2, 0, 3),
+        &fixture_identity(),
+        &[],
+    );
 
     assert!(
         !rewrite_temp_path(&path).exists(),
@@ -382,7 +334,13 @@ fn a_poisoned_history_is_healed_instead_of_carried_forward() {
 
     // The run path must return normally *and* leave a clean file behind,
     // or the bad line rides into every future cache entry.
-    record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
+    record_and_report(
+        &path,
+        "quick",
+        DurationTrendGeometry::current(2, 0, 3),
+        &fixture_identity(),
+        &[],
+    );
 
     let healed = load_history(&path).expect("history is parseable again");
     assert_eq!(healed.len(), 1);
@@ -397,7 +355,13 @@ fn an_unwritable_history_disables_the_signal_without_failing_the_run() {
     let path = dir.path().join("history.jsonl");
     std::fs::create_dir(&path).expect("occupy the path");
 
-    record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
+    record_and_report(
+        &path,
+        "quick",
+        DurationTrendGeometry::current(2, 0, 3),
+        &fixture_identity(),
+        &[],
+    );
 
     assert!(run_duration_trend_cli(&path, Some("quick")).is_err());
 }
@@ -463,7 +427,13 @@ fn a_long_history_is_truncated_on_disk_by_the_run_path() {
         .collect::<Vec<_>>();
     append_records(&path, &overlong).expect("append");
 
-    record_and_report(&path, "quick", DurationTrendGeometry::current(2, 0, 3), &[]);
+    record_and_report(
+        &path,
+        "quick",
+        DurationTrendGeometry::current(2, 0, 3),
+        &fixture_identity(),
+        &[],
+    );
 
     let healed = load_history(&path).expect("history loads");
     assert_eq!(healed.len(), RETAINED_RUNS_PER_SERIES);
@@ -560,6 +530,8 @@ fn acceptance(scenario: Option<&str>, effective_from: &str) -> LevelShift {
         commit: "2dea44485f0".to_string(),
         effective_from: effective_from.to_string(),
         reason: "FIG-3157 runs a second physical turn on purpose".to_string(),
+        who: "reviewer".to_string(),
+        disposition: ShiftDisposition::Accepted,
     }
 }
 
@@ -614,6 +586,7 @@ fn an_accepted_level_shift_stops_its_own_warning_on_the_very_next_read() {
         Some(BaselineReset {
             commit: "2dea44485".to_string(),
             reason: "FIG-3157 runs a second physical turn on purpose".to_string(),
+            who: "reviewer".to_string(),
         })
     );
 }
@@ -820,32 +793,44 @@ fn the_checked_in_acceptances_parse_and_are_complete() {
 fn an_acceptance_nobody_can_audit_is_refused() {
     let cases = [
         (
+            "missing reviewer",
+            r#"{"level_shifts":[{"disposition":"accepted","commit":"abc","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
+        ),
+        (
+            "blank reviewer",
+            r#"{"level_shifts":[{"who":" ","disposition":"accepted","commit":"abc","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
+        ),
+        (
+            "missing disposition",
+            r#"{"level_shifts":[{"who":"reviewer","commit":"abc","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
+        ),
+        (
             "missing commit",
-            r#"{"level_shifts":[{"effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
+            r#"{"level_shifts":[{"who":"reviewer","disposition":"accepted","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
         ),
         (
             "blank commit",
-            r#"{"level_shifts":[{"commit":"  ","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
+            r#"{"level_shifts":[{"commit":"  ","who":"reviewer","disposition":"accepted","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
         ),
         (
             "missing reason",
-            r#"{"level_shifts":[{"commit":"abc","effective_from":"2026-01-01T00:00:00Z"}]}"#,
+            r#"{"level_shifts":[{"commit":"abc","who":"reviewer","disposition":"accepted","effective_from":"2026-01-01T00:00:00Z"}]}"#,
         ),
         (
             "blank reason",
-            r#"{"level_shifts":[{"commit":"abc","effective_from":"2026-01-01T00:00:00Z","reason":" "}]}"#,
+            r#"{"level_shifts":[{"commit":"abc","who":"reviewer","disposition":"accepted","effective_from":"2026-01-01T00:00:00Z","reason":" "}]}"#,
         ),
         (
             "unparseable effective_from",
-            r#"{"level_shifts":[{"commit":"abc","effective_from":"yesterday","reason":"why"}]}"#,
+            r#"{"level_shifts":[{"commit":"abc","who":"reviewer","disposition":"accepted","effective_from":"yesterday","reason":"why"}]}"#,
         ),
         (
             "empty selector instead of an omitted one",
-            r#"{"level_shifts":[{"scenario":"","commit":"abc","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
+            r#"{"level_shifts":[{"scenario":"","commit":"abc","who":"reviewer","disposition":"accepted","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
         ),
         (
             "unknown field",
-            r#"{"level_shifts":[{"until":"2026-02-01T00:00:00Z","commit":"abc","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
+            r#"{"level_shifts":[{"until":"2026-02-01T00:00:00Z","commit":"abc","who":"reviewer","disposition":"accepted","effective_from":"2026-01-01T00:00:00Z","reason":"why"}]}"#,
         ),
     ];
     for (name, json) in cases {
@@ -857,7 +842,7 @@ fn an_acceptance_nobody_can_audit_is_refused() {
 
     // And the shape that carries its audit trail is accepted.
     let accepted = parse_level_shifts(
-        r#"{"level_shifts":[{"profile":"full","scenario":"deep_turn_composition","commit":"2dea44485","effective_from":"2026-09-16T12:30:19+00:00","reason":"FIG-3157"}]}"#,
+        r#"{"level_shifts":[{"profile":"full","scenario":"deep_turn_composition","commit":"2dea44485","who":"reviewer","disposition":"accepted","effective_from":"2026-09-16T12:30:19+00:00","reason":"FIG-3157"}]}"#,
     )
     .expect("a complete marker parses");
     assert_eq!(accepted.len(), 1);
@@ -869,6 +854,7 @@ fn an_acceptance_nobody_can_audit_is_refused() {
 fn record(scenario: &str, profile: &str, index: usize, total_ms: f64) -> DurationHistoryRecord {
     DurationHistoryRecord {
         version: HISTORY_RECORD_VERSION,
+        identity: fixture_identity().for_scenario(scenario),
         scenario: scenario.to_string(),
         profile: profile.to_string(),
         runs: 2,
@@ -882,4 +868,114 @@ fn record(scenario: &str, profile: &str, index: usize, total_ms: f64) -> Duratio
         total_p95_ms: Some(total_ms + 5.0),
         duration_metrics_ms: BTreeMap::new(),
     }
+}
+
+#[test]
+fn an_unacknowledged_shift_survives_many_runs_and_compaction() {
+    let (mut history, _) = stepped_series("standard", "quick");
+    for index in 25..225 {
+        history.push(record("standard", "quick", index, 20.0));
+        history = retained_records(&history);
+        let row = only_row(
+            &trend_rows_against(&history, Some("quick"), &[]),
+            "standard",
+        );
+        assert!(
+            row.verdict.is_drifting(),
+            "unacknowledged shift vanished at run {index}: {:?}",
+            row.verdict
+        );
+        assert_eq!(row.baseline_median_ms, Some(10.0));
+    }
+    // Recovery alone cannot close an issue nobody acknowledged.
+    history.push(record("standard", "quick", 225, 10.0));
+    assert!(
+        only_row(
+            &trend_rows_against(&history, Some("quick"), &[]),
+            "standard"
+        )
+        .verdict
+        .is_drifting()
+    );
+}
+
+fn fixture_identity() -> ExperimentIdentity {
+    let mut identity =
+        ExperimentIdentity::capture(serde_json::json!({"fixture": true})).for_scenario("standard");
+    identity.host = "fixture-host".to_string();
+    identity.compiler = "fixture-compiler".to_string();
+    identity.build_profile = "fixture-build".to_string();
+    identity
+}
+
+#[test]
+fn unlike_experiment_identities_are_refused_by_dimension() {
+    use identity::{ComparisonRefusal, IdentityDimension as D};
+    let baseline = fixture_identity();
+    for (dimension, change) in [
+        (D::Host, 0),
+        (D::Compiler, 1),
+        (D::Allocator, 2),
+        (D::BuildProfile, 3),
+        (D::Backend, 4),
+        (D::Durability, 5),
+        (D::Workload, 6),
+        (D::Geometry, 7),
+    ] {
+        let mut other = baseline.clone();
+        let field = match change {
+            0 => &mut other.host,
+            1 => &mut other.compiler,
+            2 => &mut other.allocator,
+            3 => &mut other.build_profile,
+            4 => &mut other.backend,
+            5 => &mut other.configured_durability,
+            6 => &mut other.workload,
+            _ => &mut other.configured_geometry,
+        };
+        field.clear();
+        assert_eq!(
+            baseline.compare(&other),
+            Err(ComparisonRefusal::MissingIdentity(dimension))
+        );
+        let field = match change {
+            0 => &mut other.host,
+            1 => &mut other.compiler,
+            2 => &mut other.allocator,
+            3 => &mut other.build_profile,
+            4 => &mut other.backend,
+            5 => &mut other.configured_durability,
+            6 => &mut other.workload,
+            _ => &mut other.configured_geometry,
+        };
+        field.push_str("different");
+        assert_eq!(
+            baseline.compare(&other),
+            Err(ComparisonRefusal::IdentityMismatch(dimension))
+        );
+    }
+    let mut history = (0..20)
+        .map(|index| record("standard", "quick", index, 10.0))
+        .collect::<Vec<_>>();
+    let mut other = record("standard", "quick", 20, 100.0);
+    other.identity.host = "different-host".to_string();
+    history.push(other);
+    let rows = trend_rows(&history, None);
+    assert_eq!(rows.len(), 2);
+    assert!(rows.iter().all(|row| !row.verdict.is_drifting()));
+    assert!(render_trend_table(&rows).contains("IdentityMismatch(Host)"));
+}
+
+#[test]
+fn a_bug_acknowledgement_keeps_the_shift_open_until_accepted() {
+    let (history, at) = stepped_series("standard", "quick");
+    let mut marker = acceptance(Some("standard"), &at);
+    marker.disposition = ShiftDisposition::Bug;
+    let rows = trend_rows_against(&history, None, &[marker.clone()]);
+    assert!(only_row(&rows, "standard").verdict.is_drifting());
+    assert!(render_trend_table(&rows).contains("open bug:"));
+    let accepted = acceptance(Some("standard"), &at);
+    let rows = trend_rows_against(&history, None, &[marker, accepted]);
+    assert!(!only_row(&rows, "standard").verdict.is_drifting());
+    assert!(!render_trend_table(&rows).contains("open bug:"));
 }

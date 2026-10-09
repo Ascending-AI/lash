@@ -1,71 +1,11 @@
-//! Durable per-scenario wall-clock history and the sustained-drift signal
-//! computed from it.
+//! Comparable duration history with advisory, acknowledged level shifts.
 //!
-//! FIG-1385 demoted every runtime duration ceiling to advisory: on shared
-//! runners the same binary measured 7.67 ms and then 1.625 ms against the same
-//! 0.25 ms phase ceiling, so a hard single-run duration gate either flakes or
-//! is widened until it detects nothing. That ruling stands. It left one real
-//! hole: a wall-clock regression that allocates nothing — added blocking I/O,
-//! lock contention, an accidental sleep — has no gate at all, because the
-//! allocation ceilings cannot see it.
-//!
-//! This module closes the hole the only way single-run measurement allows:
-//! trend, not threshold. Every main-branch perf run appends one record per
-//! scenario to an append-only history, and the drift signal fires only when a
-//! scenario has sat above its own trailing median for several consecutive main
-//! runs. Nothing here can fail a run — the signal is advisory by construction,
-//! which is what keeps it from re-litigating FIG-1385.
-//!
-//! They use the same advisory series logic.
-//! Ratios, worker counts, queue depths, and park counts do not fit this duration contract and
-//! are not trended here.
-//!
-//! # What this signal does not see
-//!
-//! **It is a transition detector, not a level check.** A step change is loud
-//! for a bounded window and then goes quiet, because the new level walks into
-//! the trailing baseline it is compared against. With the constants below, a
-//! step reads `Elevated` on post-step runs 1-4, `DRIFTING` on runs 5-10, and
-//! `Stable` from run 11 — the point where more than half the twenty-run window
-//! is post-step, so the median has moved. Magnitude buys almost nothing: a step
-//! from `B` to `E` stays `DRIFTING` for exactly one extra run (quiet from run
-//! 12) iff `E > 3B`, and never for more than that. That boundary is not a
-//! tuning choice, it falls out of the straddling median: at run 11 the window
-//! holds ten pre-step and ten post-step runs, so the median is `(B + E) / 2`
-//! and the run is elevated iff `E > 1.5 * (B + E) / 2`, i.e. `E > 3B`. Six or
-//! seven main runs of loud output is the whole visibility budget; a regression
-//! nobody looks at in that window becomes the new normal silently.
-//!
-//! # Accepted level shifts
-//!
-//! The other half of that transition is the *intended* step: a change that
-//! makes a scenario legitimately slower, or a runner generation swap. The
-//! signal reads it as drift and says so for six main runs, and those six runs
-//! of expected red are what teaches an operator to stop reading the section --
-//! which costs the next real regression its only audience.
-//!
-//! [`LevelShift`] is the acknowledgement. A marker in
-//! `scripts/perf_duration_level_shifts.json` names the commit that shifted the
-//! level, the instant from which observations are comparable again, and why it
-//! is accepted; every observation recorded before that instant leaves the
-//! series' comparison window. The series then behaves exactly like a fresh
-//! one: no verdict until [`MIN_BASELINE_RUNS`] observations have accumulated
-//! past the marker, so the accepted step stops warning on the very next run,
-//! and a *further* shift on top of it trips the signal again once it has built
-//! its own streak.
-//!
-//! The marker is checked in rather than written into the history because the
-//! history is a CI cache entry: it can be evicted, it is not reviewed, and
-//! nothing in it can be pointed at afterwards. A file in the tree is reviewed
-//! in the pull request that causes the shift, carries a mandatory reason, and
-//! survives a `gh cache delete`. Anchoring is by timestamp, not by commit,
-//! because a perf run does not exist for most commits -- a commit-anchored
-//! marker whose commit never reached the series would be a silent no-op.
-//!
-//! The quick-profile main-push smoke supplies its cache-backed history path.
-//! Full and release profiles write a sibling ledger next to their uploaded
-//! report. Records carry their size preset and series are keyed by it, so full
-//! observations cannot contaminate the quick one.
+//! A five-run elevation opens a shift. Its detection evidence survives
+//! compaction and recovery; only a reviewed acknowledgement can close it.
+//! Host, compiler, allocator, build, storage policy and workload geometry
+//! partition observations. This is functional evidence, never certification
+//! of shared-host timings. Run totals and pooled operation medians remain
+//! separate named populations.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -83,49 +23,17 @@ use crate::perf_support::report as report_support;
 use crate::perf_support::time::round3;
 
 use super::measurement::RuntimePerfScenarioSummary;
+#[path = "duration_identity.rs"]
+mod identity;
+pub(crate) use identity::ExperimentIdentity;
 
-/// Trailing main-branch runs the baseline median is taken over (N).
-///
-/// Twenty runs is roughly a day of trunk traffic. Long enough that a couple of
-/// loaded-runner outliers cannot move the median; short enough that the
-/// baseline tracks the current runner generation instead of comparing today
-/// against a months-old machine.
-///
-/// It also sets the closing edge of the signal: once more than half this window
-/// is post-regression the median moves and the verdict returns to `Stable`, at
-/// post-step run `N / 2 + 1` — one run later for a step larger than 3x, where
-/// the even-length median straddles the step at exactly that boundary.
+/// Maximum preceding observations used to detect an elevation.
 pub(crate) const TREND_WINDOW_RUNS: usize = 20;
 
-/// How far above its trailing median a run must sit to count as elevated (X).
-///
-/// Runner noise here is multiplicative and one-sided — a shared runner gets
-/// slower, never faster than its own hardware — and FIG-1385's evidence puts
-/// the single-run spread at several-fold. So 50% is not, on its own, the
-/// discriminator between noise and regression; the streak below is. 50% is
-/// picked as the level a genuine wall-clock regression worth a human's
-/// attention clears, while staying above the everyday jitter band so the
-/// streak is not fed by ordinary scheduling.
-///
-/// Magnitude decides almost nothing about how long the signal lasts: a step is
-/// loud for six main runs, or seven if it is larger than 3x, because either way
-/// it is simply "above the baseline" until the baseline itself moves.
+/// Advisory elevation relative to the preceding median, in percent.
 pub(crate) const DRIFT_THRESHOLD_PCT: f64 = 50.0;
 
-/// Consecutive elevated main runs before the signal fires (K).
-///
-/// One loaded run clears 50% often enough to be worthless as a signal. Five in
-/// a row does not: even at a generous one-in-five chance of a single run being
-/// elevated by noise alone, five consecutive is ~3e-4 per scenario per run,
-/// which across the whole scenario list is a false signal every few hundred
-/// main commits — rare enough that a human still reads it. A real regression
-/// is present on every subsequent run, so it trips on the fifth main commit
-/// after it lands.
-///
-/// This is the opening edge; [`TREND_WINDOW_RUNS`] sets the closing one. The
-/// two together give a visibility window of
-/// `TREND_WINDOW_RUNS / 2 + 1 - DRIFT_CONSECUTIVE_RUNS` = 6 main runs, seven
-/// for a step larger than 3x.
+/// Consecutive elevated observations required to open a shift.
 pub(crate) const DRIFT_CONSECUTIVE_RUNS: usize = 5;
 
 /// Prior runs required before any verdict is issued at all.
@@ -134,24 +42,10 @@ pub(crate) const DRIFT_CONSECUTIVE_RUNS: usize = 5;
 /// so a short history reports "insufficient data" rather than a verdict.
 pub(crate) const MIN_BASELINE_RUNS: usize = 5;
 
-/// Observations kept per `(profile, scenario)` series when the history is
-/// rewritten.
-///
-/// Comfortably more than the `TREND_WINDOW_RUNS + DRIFT_CONSECUTIVE_RUNS` the
-/// verdict actually reads, so truncation can never change a verdict, while
-/// still bounding a file that would otherwise grow forever inside a CI cache
-/// entry that is never evicted.
+/// Recent observations retained in addition to open-shift detection evidence.
 pub(crate) const RETAINED_RUNS_PER_SERIES: usize = 50;
 
-/// Schema generation of a history record.
-///
-/// A schema bump regenerates the local history file with the new record shape;
-/// there is intentionally no migration arm for older local history. Forwards:
-/// a record whose `version` is *newer* than this build's is neither read through
-/// a schema it does not match nor deleted — it is excluded from verdicts and
-/// carried through any rewrite byte-for-byte, because an older binary meets
-/// newer records on any revert or rerun of a pre-bump commit, and it is not
-/// entitled to destroy them.
+/// Frozen pre-1.0 history baseline; shapes change in place.
 pub(crate) const HISTORY_RECORD_VERSION: u32 = 3;
 
 /// The checked-in accepted level shifts. See the module documentation: this
@@ -193,6 +87,15 @@ pub(crate) struct LevelShift {
     /// acknowledgement must not have.
     effective_from: String,
     reason: String,
+    who: String,
+    disposition: ShiftDisposition,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum ShiftDisposition {
+    Accepted,
+    Bug,
 }
 
 impl LevelShift {
@@ -230,6 +133,9 @@ fn parse_level_shifts(json: &str) -> anyhow::Result<Vec<LevelShift>> {
     for shift in &file.level_shifts {
         if shift.commit.trim().is_empty() {
             anyhow::bail!("an accepted level shift must name the commit that moved the level");
+        }
+        if shift.who.trim().is_empty() {
+            anyhow::bail!("a level shift must name who acknowledged it");
         }
         if shift.reason.trim().is_empty() {
             anyhow::bail!(
@@ -285,7 +191,10 @@ fn applicable_level_shift<'a>(
 ) -> Option<&'a LevelShift> {
     shifts
         .iter()
-        .filter(|shift| shift.matches(profile, scenario, metric))
+        .filter(|shift| {
+            shift.disposition == ShiftDisposition::Accepted
+                && shift.matches(profile, scenario, metric)
+        })
         .max_by_key(|shift| shift.effective_from())
 }
 
@@ -295,6 +204,7 @@ fn applicable_level_shift<'a>(
 pub(crate) struct BaselineReset {
     pub(crate) commit: String,
     pub(crate) reason: String,
+    pub(crate) who: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -358,6 +268,7 @@ pub(crate) struct DurationMetricHistoryValue {
 pub(crate) struct DurationHistoryRecord {
     /// See [`HISTORY_RECORD_VERSION`].
     pub(crate) version: u32,
+    pub(crate) identity: ExperimentIdentity,
     pub(crate) scenario: String,
     /// The benchmark size preset (`quick`, `full`, ...). Durations are only
     /// comparable within one preset, so it is part of the series key rather
@@ -410,8 +321,8 @@ pub(crate) enum DriftVerdict {
     /// Elevated, but for fewer than [`DRIFT_CONSECUTIVE_RUNS`] runs — the shape
     /// a single loaded runner produces, so it is reported and nothing more.
     Elevated { streak: usize },
-    /// Elevated for [`DRIFT_CONSECUTIVE_RUNS`] consecutive runs: sustained
-    /// drift a human can act on.
+    /// A detected shift remains open. `streak` counts retained observations
+    /// since its onset, even after recovery; it is not a current elevation streak.
     Drifting { streak: usize },
 }
 
@@ -429,7 +340,10 @@ impl fmt::Display for DriftVerdict {
             }
             Self::Stable => write!(formatter, "stable"),
             Self::Elevated { streak } => write!(formatter, "elevated ({streak} run(s))"),
-            Self::Drifting { streak } => write!(formatter, "DRIFTING ({streak} run(s))"),
+            Self::Drifting { streak } => write!(
+                formatter,
+                "DRIFTING (open; {streak} retained observations since onset)"
+            ),
         }
     }
 }
@@ -442,6 +356,7 @@ pub(crate) struct DurationTrendRow {
     pub(crate) profile: String,
     pub(crate) metric: String,
     pub(crate) geometry: DurationTrendGeometry,
+    pub(crate) identity: ExperimentIdentity,
     pub(crate) current_ms: f64,
     pub(crate) current_p95_ms: Option<f64>,
     pub(crate) baseline_median_ms: Option<f64>,
@@ -452,6 +367,7 @@ pub(crate) struct DurationTrendRow {
     /// the renderer so the table and the verdict can never disagree about
     /// which window was used.
     pub(crate) baseline_reset: Option<BaselineReset>,
+    pub(crate) bug_acknowledgement: Option<BaselineReset>,
 }
 
 /// The per-scenario records this run contributes to the history.
@@ -459,6 +375,7 @@ pub(crate) fn records_for_run(
     summaries: &[RuntimePerfScenarioSummary],
     profile: &str,
     geometry: DurationTrendGeometry,
+    identity: &ExperimentIdentity,
 ) -> Vec<DurationHistoryRecord> {
     let commit = history_commit();
     let run_id = history_run_id();
@@ -475,6 +392,7 @@ pub(crate) fn records_for_run(
         })
         .map(|(summary, total)| DurationHistoryRecord {
             version: HISTORY_RECORD_VERSION,
+            identity: identity.for_scenario(&summary.scenario),
             scenario: summary.scenario.clone(),
             profile: profile.to_string(),
             runs: geometry.runs,
@@ -486,19 +404,10 @@ pub(crate) fn records_for_run(
             recorded_at: recorded_at.clone(),
             total_ms: total.duration_ms.median,
             total_p95_ms: Some(total.duration_ms.p95),
-            duration_metrics_ms: summary
-                .metric_summary
-                .iter()
-                .filter(|(key, _)| key.ends_with("_ms"))
-                .map(|(key, value)| {
-                    (
-                        key.clone(),
-                        DurationMetricHistoryValue {
-                            median_ms: value.median,
-                            p95_ms: value.p95,
-                        },
-                    )
-                })
+            duration_metrics_ms: summary.metric_summary.iter().filter(|(key, _)| key.ends_with("_ms"))
+                .map(|(key, value)| (key.clone(), value))
+                .chain(summary.metric_summary_ms.iter().map(|(key, value)| (format!("sampled_operations/{key}"), value)))
+                .map(|(key, value)| (key, DurationMetricHistoryValue { median_ms: value.median, p95_ms: value.p95 }))
                 .collect(),
         })
         .collect()
@@ -596,26 +505,69 @@ pub(crate) fn load_history_lenient(path: &Path) -> anyhow::Result<LoadedHistory>
     })
 }
 
-/// The trailing [`RETAINED_RUNS_PER_SERIES`] observations of every
-/// `(profile, scenario, geometry)` series, in the original chronological order.
+/// The trailing [`RETAINED_RUNS_PER_SERIES`] observations of every experiment
+/// series, plus the bounded witness for each open shift, in chronological order.
 pub(crate) fn retained_records(records: &[DurationHistoryRecord]) -> Vec<DurationHistoryRecord> {
-    let mut seen_from_newest: BTreeMap<(&str, &str, usize, usize, usize, BuildMode), usize> =
-        BTreeMap::new();
-    let mut keep = vec![false; records.len()];
-    for (index, record) in records.iter().enumerate().rev() {
-        let count = seen_from_newest
+    let mut groups = BTreeMap::new();
+    for (index, record) in records.iter().enumerate() {
+        groups
             .entry((
-                record.profile.as_str(),
-                record.scenario.as_str(),
+                &record.profile,
+                &record.scenario,
                 record.runs,
                 record.warmups,
                 record.turns,
                 record.build_mode,
+                &record.identity,
             ))
-            .or_default();
-        if *count < RETAINED_RUNS_PER_SERIES {
-            *count += 1;
+            .or_insert_with(Vec::new)
+            .push(index);
+    }
+    let mut keep = vec![false; records.len()];
+    for indices in groups.values() {
+        for &index in indices.iter().rev().take(RETAINED_RUNS_PER_SERIES) {
             keep[index] = true;
+        }
+        let mut metrics = BTreeMap::<&str, Vec<(usize, f64)>>::new();
+        for &index in indices {
+            let record = &records[index];
+            metrics
+                .entry("total_ms")
+                .or_default()
+                .push((index, record.total_ms));
+            for (metric, value) in &record.duration_metrics_ms {
+                metrics
+                    .entry(metric)
+                    .or_default()
+                    .push((index, value.median_ms));
+            }
+        }
+        for (metric, observations) in metrics {
+            let record = &records[indices[0]];
+            let reset = applicable_level_shift(
+                checked_in_level_shifts(),
+                &record.profile,
+                &record.scenario,
+                metric,
+            )
+            .and_then(LevelShift::effective_from);
+            let observations: Vec<_> = observations
+                .into_iter()
+                .filter(|(index, _)| {
+                    reset.is_none_or(|reset| {
+                        DateTime::parse_from_rfc3339(&records[*index].recorded_at)
+                            .is_ok_and(|at| at >= reset)
+                    })
+                })
+                .collect();
+            let values: Vec<_> = observations.iter().map(|(_, value)| *value).collect();
+            if let Some((start, _)) = open_shift(&values) {
+                for &(index, _) in &observations
+                    [start.saturating_sub(TREND_WINDOW_RUNS)..start + DRIFT_CONSECUTIVE_RUNS]
+                {
+                    keep[index] = true;
+                }
+            }
         }
     }
     records
@@ -694,10 +646,23 @@ fn trend_rows_against(
     shifts: &[LevelShift],
 ) -> Vec<DurationTrendRow> {
     let mut series = BTreeMap::<
-        (String, String, String, DurationTrendGeometry),
+        (
+            String,
+            String,
+            String,
+            DurationTrendGeometry,
+            ExperimentIdentity,
+        ),
         Vec<(String, f64, Option<f64>)>,
     >::new();
     for record in history {
+        if let Err(reason) = record.identity.compare(&record.identity) {
+            eprintln!(
+                "warning: duration comparison refused: {reason:?} for {}",
+                record.scenario
+            );
+            continue;
+        }
         if profile_filter.is_some_and(|profile| profile != record.profile) {
             continue;
         }
@@ -712,6 +677,7 @@ fn trend_rows_against(
                     turns: record.turns,
                     build_mode: record.build_mode,
                 },
+                record.identity.clone(),
             ))
             .or_default()
             .push((
@@ -731,6 +697,7 @@ fn trend_rows_against(
                         turns: record.turns,
                         build_mode: record.build_mode,
                     },
+                    record.identity.clone(),
                 ))
                 .or_default()
                 .push((
@@ -742,30 +709,51 @@ fn trend_rows_against(
     }
     series
         .into_iter()
-        .filter_map(|((profile, scenario, metric, geometry), observations)| {
-            let (_, newest_ms, newest_p95_ms) = observations.last()?.clone();
-            let shift = applicable_level_shift(shifts, &profile, &scenario, &metric);
-            let values = comparison_window(&observations, shift, newest_ms);
-            let current_ms = *values.last()?;
-            let baseline_median_ms = baseline_median(&values, values.len() - 1);
-            Some(DurationTrendRow {
-                scenario,
-                profile,
-                metric,
-                geometry,
-                current_ms: round3(current_ms),
-                current_p95_ms: newest_p95_ms.map(round3),
-                baseline_median_ms: baseline_median_ms.map(round3),
-                delta_pct: baseline_median_ms
-                    .filter(|median| *median > 0.0)
-                    .map(|median| round3((current_ms - median) / median * 100.0)),
-                verdict: verdict(&values),
-                baseline_reset: shift.map(|shift| BaselineReset {
-                    commit: shift.short_commit(),
-                    reason: shift.reason.clone(),
-                }),
-            })
-        })
+        .filter_map(
+            |((profile, scenario, metric, geometry, identity), observations)| {
+                let (_, newest_ms, newest_p95_ms) = observations.last()?.clone();
+                let shift = applicable_level_shift(shifts, &profile, &scenario, &metric);
+                let values = comparison_window(&observations, shift, newest_ms);
+                let current_ms = *values.last()?;
+                let baseline_median_ms = open_shift(&values)
+                    .map(|(_, baseline)| baseline)
+                    .or_else(|| baseline_median(&values, values.len() - 1));
+                Some(DurationTrendRow {
+                    scenario: scenario.clone(),
+                    profile: profile.clone(),
+                    metric: metric.clone(),
+                    geometry,
+                    identity,
+                    current_ms: round3(current_ms),
+                    current_p95_ms: newest_p95_ms.map(round3),
+                    baseline_median_ms: baseline_median_ms.map(round3),
+                    delta_pct: baseline_median_ms
+                        .filter(|median| *median > 0.0)
+                        .map(|median| round3((current_ms - median) / median * 100.0)),
+                    verdict: verdict(&values),
+                    bug_acknowledgement: shifts
+                        .iter()
+                        .filter(|marker| {
+                            marker.disposition == ShiftDisposition::Bug
+                                && shift.is_none_or(|accepted| {
+                                    marker.effective_from() > accepted.effective_from()
+                                })
+                                && marker.matches(&profile, &scenario, &metric)
+                        })
+                        .max_by_key(|marker| marker.effective_from())
+                        .map(|marker| BaselineReset {
+                            commit: marker.short_commit(),
+                            reason: marker.reason.clone(),
+                            who: marker.who.clone(),
+                        }),
+                    baseline_reset: shift.map(|shift| BaselineReset {
+                        commit: shift.short_commit(),
+                        reason: shift.reason.clone(),
+                        who: shift.who.clone(),
+                    }),
+                })
+            },
+        )
         .collect()
 }
 
@@ -810,6 +798,11 @@ pub(crate) fn verdict(series: &[f64]) -> DriftVerdict {
     if baseline_median(series, current_index).is_none() {
         return DriftVerdict::InsufficientData { runs: series.len() };
     }
+    if let Some((start, _)) = open_shift(series) {
+        return DriftVerdict::Drifting {
+            streak: series.len() - start,
+        };
+    }
     let streak = drift_streak(series);
     if streak >= DRIFT_CONSECUTIVE_RUNS {
         DriftVerdict::Drifting { streak }
@@ -818,6 +811,26 @@ pub(crate) fn verdict(series: &[f64]) -> DriftVerdict {
     } else {
         DriftVerdict::Stable
     }
+}
+
+/// Earliest unacknowledged detection and the baseline before its first elevated run.
+/// Replaying retained evidence keeps the finding open even after recovery.
+fn open_shift(series: &[f64]) -> Option<(usize, f64)> {
+    let mut streak = 0;
+    for (index, value) in series.iter().enumerate() {
+        if baseline_median(series, index)
+            .is_some_and(|baseline| exceeds_threshold(*value, baseline))
+        {
+            streak += 1;
+        } else {
+            streak = 0;
+        }
+        if streak >= DRIFT_CONSECUTIVE_RUNS {
+            let start = index + 1 - streak;
+            return baseline_median(series, start).map(|baseline| (start, baseline));
+        }
+    }
+    None
 }
 
 /// How many consecutive runs, counting back from the newest, sat above their
@@ -874,9 +887,10 @@ fn geometry_label(geometry: DurationTrendGeometry) -> String {
 /// The trend table, as printed by the run path and by the standalone CLI.
 pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
     let mut out = format!(
-        "runtime perf duration trend (advisory; baseline = median of the last {TREND_WINDOW_RUNS} runs, \
+        "quantities: total_ms = scenario run envelope; *_ms = per-run metric; sampled_operations/* = pooled operation samples within one receipt; baseline = median of receipt medians; all durations in ms\n\
+         runtime perf duration trend (advisory; baseline = preceding median, frozen while a shift is open, \
          drift = >{DRIFT_THRESHOLD_PCT:.0}% for {DRIFT_CONSECUTIVE_RUNS} consecutive runs; \
-         reset_at = accepted level shift, scripts/perf_duration_level_shifts.json)\n"
+         reset_at = reviewed accepted level shift, scripts/perf_duration_level_shifts.json)\n"
     );
     if rows.is_empty() {
         out.push_str("  (no history records)\n");
@@ -915,7 +929,7 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
         .max("reset_at".len());
     out.push_str(&format!(
         "  {:scenario_width$}  {:profile_width$}  {:metric_width$}  {:geometry_width$}  {:>12}  {:>12}  {:>12}  {:>9}  {:reset_width$}  {}\n",
-        "scenario", "profile", "metric", "geometry", "current_ms", "p95_ms", "median_ms", "delta", "reset_at", "verdict"
+        "scenario", "profile", "metric", "geometry", "current_median_ms", "current_p95_ms", "baseline_median_ms", "delta", "reset_at", "verdict"
     ));
     for row in rows {
         let p95 = row
@@ -941,6 +955,39 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
             row.scenario, row.profile, row.metric, geometry, row.current_ms, p95, median, delta, reset, row.verdict
         ));
     }
+    for (index, row) in rows.iter().enumerate() {
+        if let Some(marker) = &row.bug_acknowledgement {
+            out.push_str(&format!(
+                "  open bug: {} {} {} reported by {} at {}: {}\n",
+                row.profile, row.scenario, row.metric, marker.who, marker.commit, marker.reason
+            ));
+        }
+        out.push_str(&format!(
+            "  population {index}: {}\n",
+            serde_json::to_string(&row.identity).unwrap_or_default()
+        ));
+        for other in &rows[..index] {
+            if row.profile == other.profile
+                && row.scenario == other.scenario
+                && row.metric == other.metric
+            {
+                let comparable = row.identity.compare(&other.identity).and_then(|()| {
+                    if row.geometry == other.geometry {
+                        Ok(())
+                    } else {
+                        Err(identity::ComparisonRefusal::IdentityMismatch(
+                            identity::IdentityDimension::Geometry,
+                        ))
+                    }
+                });
+                if let Err(reason) = comparable {
+                    out.push_str(&format!(
+                        "  comparison refused: {reason:?} (populations are separate)\n"
+                    ));
+                }
+            }
+        }
+    }
     out.push_str(&render_accepted_level_shifts(rows));
     out
 }
@@ -951,20 +998,22 @@ pub(crate) fn render_trend_table(rows: &[DurationTrendRow]) -> String {
 /// why. Without it a short baseline is indistinguishable from an evicted
 /// cache, and an operator has to go read a JSON file to tell the two apart.
 fn render_accepted_level_shifts(rows: &[DurationTrendRow]) -> String {
-    let mut reasons = BTreeMap::<&str, (&str, usize)>::new();
+    let mut reasons = BTreeMap::<&str, (&str, &str, usize)>::new();
     for reset in rows.iter().filter_map(|row| row.baseline_reset.as_ref()) {
-        let entry = reasons
-            .entry(reset.commit.as_str())
-            .or_insert((reset.reason.as_str(), 0));
-        entry.1 += 1;
+        let entry = reasons.entry(reset.commit.as_str()).or_insert((
+            reset.reason.as_str(),
+            reset.who.as_str(),
+            0,
+        ));
+        entry.2 += 1;
     }
     if reasons.is_empty() {
         return String::new();
     }
     let mut out = String::from("  accepted level shifts in effect:\n");
-    for (commit, (reason, series)) in reasons {
+    for (commit, (reason, who, series)) in reasons {
         out.push_str(&format!(
-            "    {commit}: {reason} ({series} series measured against a window that starts there)\n"
+            "    {commit}: {who} accepted: {reason} ({series} series measured against a window that starts there)\n"
         ));
     }
     out
@@ -986,7 +1035,7 @@ pub(crate) fn report_drift(rows: &[DurationTrendRow]) {
             .map(|value| format!("{value:+.1}%"))
             .unwrap_or_else(|| "unknown".to_string());
         let message = format!(
-            "runtime perf duration drift: {} {} ({}) is {} against a trailing median of {} ms over the last {} runs ({})",
+            "runtime perf duration drift: {} {} ({}) is {} against the frozen pre-shift median of {} ms ({})",
             row.scenario,
             row.metric,
             row.profile,
@@ -994,7 +1043,6 @@ pub(crate) fn report_drift(rows: &[DurationTrendRow]) {
             row.baseline_median_ms
                 .map(|value| format!("{value:.3}"))
                 .unwrap_or_else(|| "-".to_string()),
-            TREND_WINDOW_RUNS,
             row.verdict,
         );
         // Annotations go to stderr like every other perf warning: this
@@ -1009,7 +1057,7 @@ pub(crate) fn report_drift(rows: &[DurationTrendRow]) {
     eprintln!(
         "warning: duration drift is advisory and never fails the run (FIG-1385): \
          it reports sustained wall-clock movement that allocation ceilings cannot see. \
-         It is loud for about six main runs after a step change and then goes quiet."
+         A detected shift stays open until a committed acknowledgement accepts it."
     );
 }
 
@@ -1026,9 +1074,10 @@ pub(crate) fn record_and_report(
     path: &Path,
     profile: &str,
     geometry: DurationTrendGeometry,
+    identity: &ExperimentIdentity,
     summaries: &[RuntimePerfScenarioSummary],
 ) {
-    if let Err(error) = record_and_render(path, profile, geometry, summaries) {
+    if let Err(error) = record_and_render(path, profile, geometry, identity, summaries) {
         eprintln!(
             "warning: runtime perf duration trend unavailable ({error:#}); \
              the drift signal is silent for this run, which is not an all-clear"
@@ -1040,6 +1089,7 @@ fn record_and_render(
     path: &Path,
     profile: &str,
     geometry: DurationTrendGeometry,
+    identity: &ExperimentIdentity,
     summaries: &[RuntimePerfScenarioSummary],
 ) -> anyhow::Result<()> {
     // Sweep any scratch file a previously killed rewrite left behind. It sits
@@ -1047,7 +1097,10 @@ fn record_and_render(
     // remove it.
     let _ = std::fs::remove_file(rewrite_temp_path(path));
 
-    append_records(path, &records_for_run(summaries, profile, geometry))?;
+    append_records(
+        path,
+        &records_for_run(summaries, profile, geometry, identity),
+    )?;
     let loaded = load_history_lenient(path)?;
     if !loaded.skipped.is_empty() {
         eprintln!(
@@ -1104,6 +1157,69 @@ pub fn run_duration_trend_cli(history: &Path, profile: Option<&str>) -> anyhow::
     print!("{}", render_trend_table(&rows));
     report_drift(&rows);
     Ok(())
+}
+
+/// Export the same identity-partitioned history for offline review.
+pub fn export_duration_history_csv(
+    history: &Path,
+    profile: Option<&str>,
+    out: &Path,
+) -> anyhow::Result<()> {
+    let records = load_history(history)?;
+    let mut csv = String::from(
+        "recorded_at,commit,run_id,profile,workload,host,compiler,allocator,build_profile,backend,configured_durability,configured_geometry,runs,warmups,turns,build_mode,quantity,unit,window,statistic,value\n",
+    );
+    for record in records
+        .iter()
+        .filter(|record| profile.is_none_or(|profile| profile == record.profile))
+    {
+        let identity = &record.identity;
+        let common = [
+            record.recorded_at.clone(),
+            record.commit.clone(),
+            record.run_id.clone(),
+            record.profile.clone(),
+            record.scenario.clone(),
+            identity.host.clone(),
+            identity.compiler.clone(),
+            identity.allocator.clone(),
+            identity.build_profile.clone(),
+            identity.backend.clone(),
+            identity.configured_durability.clone(),
+            identity.configured_geometry.clone(),
+            record.runs.to_string(),
+            record.warmups.to_string(),
+            record.turns.to_string(),
+            record.build_mode.to_string(),
+        ];
+        let mut observations = vec![("total_ms".to_string(), "median", record.total_ms)];
+        if let Some(value) = record.total_p95_ms {
+            observations.push(("total_ms".to_string(), "p95", value));
+        }
+        for (metric, values) in &record.duration_metrics_ms {
+            observations.push((metric.clone(), "median", values.median_ms));
+            observations.push((metric.clone(), "p95", values.p95_ms));
+        }
+        for (metric, statistic, value) in observations {
+            let mut fields = common.to_vec();
+            fields.extend([
+                metric,
+                "ms".to_string(),
+                "one_perf_receipt".to_string(),
+                statistic.to_string(),
+                value.to_string(),
+            ]);
+            csv.push_str(
+                &fields
+                    .iter()
+                    .map(|field| format!("\"{}\"", field.replace('"', "\"\"")))
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            csv.push('\n');
+        }
+    }
+    std::fs::write(out, csv).context("writing duration history CSV")
 }
 
 fn history_commit() -> String {

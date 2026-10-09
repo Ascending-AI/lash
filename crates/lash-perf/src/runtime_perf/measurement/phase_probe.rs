@@ -813,7 +813,7 @@ async fn run_once_inner(
     }))
 }
 
-pub(super) fn configured_postgres_database_url() -> Option<String> {
+pub(crate) fn configured_postgres_database_url() -> Option<String> {
     std::env::var("LASH_POSTGRES_DATABASE_URL")
         .ok()
         .filter(|url| !url.trim().is_empty())

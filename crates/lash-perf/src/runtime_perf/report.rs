@@ -27,6 +27,7 @@ use guards::{
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RuntimePerfReport {
     kind: &'static str,
+    experiments: BTreeMap<String, duration_trend::ExperimentIdentity>,
     created_at: String,
     version: String,
     warmups: usize,
@@ -144,6 +145,18 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
         &high_traffic_knee_populations,
         high_traffic_knee_threshold,
     )?;
+    let mut experiment = duration_trend::ExperimentIdentity::capture(serde_json::json!({
+        "runs": runs, "warmups": warmups, "turns": chat_turns,
+        "worker_stack_bytes": worker_stack_bytes,
+        "checkpoint_transcript_bytes": checkpoint_transcript_bytes,
+        "checkpoint_messages": checkpoint_messages, "checkpoint_graph_rows": checkpoint_graph_rows,
+        "checkpoint_components": checkpoint_components,
+        "load_population": high_traffic_population, "arrival_rate": high_traffic_arrival_rate,
+        "mix": high_traffic_mix, "knee_populations": high_traffic_knee_populations,
+        "knee_threshold": high_traffic_knee_threshold, "smoke": smoke,
+        "dhat_frames": dhat_frames,
+    }));
+    experiment.read_postgres_settings(&scenarios).await;
     let stack_profile = stack_profile(worker_stack_bytes);
 
     for _ in 0..warmups {
@@ -213,6 +226,15 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
     let budget_results = evaluate_budgets(&summary, &scenarios);
     let report = RuntimePerfReport {
         kind: "runtime-perf",
+        experiments: scenarios
+            .iter()
+            .map(|scenario| {
+                (
+                    scenario.name().to_string(),
+                    experiment.for_scenario(scenario.name()),
+                )
+            })
+            .collect(),
         created_at: Utc::now().to_rfc3339(),
         version,
         warmups,
@@ -248,6 +270,7 @@ pub async fn run_cli(run: RuntimePerfRun) -> anyhow::Result<()> {
             history_path,
             &duration_profile,
             duration_geometry,
+            &experiment,
             &report.summary,
         );
     }
@@ -857,6 +880,7 @@ mod tests {
         let scenario_harness_summary = summarize_scenario_harnesses(&results, &scenarios);
         let report = RuntimePerfReport {
             kind: "runtime-perf",
+            experiments: BTreeMap::new(),
             created_at: "test".to_string(),
             version: "test".to_string(),
             warmups: 0,
@@ -1046,6 +1070,7 @@ mod tests {
             std::slice::from_ref(&summary),
             "full",
             duration_trend::DurationTrendGeometry::current(1, 0, 1),
+            &duration_trend::ExperimentIdentity::capture(serde_json::json!({"test": true})),
         );
         assert_eq!(records.len(), 1);
         let total = summary
@@ -1125,6 +1150,7 @@ mod tests {
             std::slice::from_ref(&summary),
             "full",
             duration_trend::DurationTrendGeometry::current(1, 0, 1),
+            &duration_trend::ExperimentIdentity::capture(serde_json::json!({"test": true})),
         );
         assert!(records.is_empty());
     }
@@ -1186,6 +1212,14 @@ mod tests {
         assert_eq!(wait.min, -4.0);
         assert_eq!(wait.p50, 3.0);
         assert_eq!(wait.p95, 14.8);
+        let records = duration_trend::records_for_run(
+            &summary,
+            "test",
+            duration_trend::DurationTrendGeometry::current(1, 0, 1),
+            &duration_trend::ExperimentIdentity::capture(serde_json::json!({"test": true})),
+        );
+        assert_eq!(records[0].duration_metrics_ms["sampled_operations/writer_contention.same_session.wait_ms"].median_ms, 3.0);
+        assert_eq!(records[0].duration_metrics_ms["sampled_operations/writer_contention.same_session.wait_ms"].p95_ms, 14.8);
     }
 
     #[test]

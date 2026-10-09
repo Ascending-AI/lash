@@ -131,6 +131,16 @@ struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
+    /// Read raw operation tails from a runtime or latency receipt.
+    ReceiptTail {
+        #[arg(long)]
+        receipt: std::path::PathBuf,
+        /// Explicit raw latency ledger, when stored separately from its receipt.
+        #[arg(long)]
+        samples: Option<std::path::PathBuf>,
+        #[arg(long, default_value_t = 5)]
+        slowest: usize,
+    },
     /// Run one synthetic 1.0 boundary population and write its functional receipt.
     Boundary(lash_perf::boundary::Args),
     #[command(hide = true)]
@@ -156,6 +166,10 @@ enum Command {
     DurationTrend {
         #[arg(long, value_name = "HISTORY.jsonl")]
         history: std::path::PathBuf,
+
+        /// Export the retained observations and identities as CSV.
+        #[arg(long)]
+        csv: Option<std::path::PathBuf>,
 
         /// Limit the table to one benchmark size preset. Default: every preset
         /// present in the file, each as its own series.
@@ -225,6 +239,13 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     match &args.command {
+        Some(Command::ReceiptTail {
+            receipt,
+            samples,
+            slowest,
+        }) => {
+            return lash_perf::receipt_tail::run(receipt, samples.as_deref(), *slowest);
+        }
         Some(Command::Boundary(options)) => {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
@@ -258,7 +279,18 @@ fn main() -> anyhow::Result<()> {
                 .build()?;
             return runtime.block_on(lash_perf::string_scaling::run(out.as_deref()));
         }
-        Some(Command::DurationTrend { history, profile }) => {
+        Some(Command::DurationTrend {
+            history,
+            profile,
+            csv,
+        }) => {
+            if let Some(out) = csv {
+                lash_perf::runtime_perf::export_duration_history_csv(
+                    history,
+                    profile.as_deref(),
+                    out,
+                )?;
+            }
             // Pure history reading: no runtime, no measurement, no exit code.
             return lash_perf::runtime_perf::run_duration_trend_cli(history, profile.as_deref());
         }

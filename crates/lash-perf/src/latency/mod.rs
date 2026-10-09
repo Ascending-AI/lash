@@ -258,11 +258,10 @@ pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
         }
     }
     dhat::finish_dhat_profiler(profiler);
-    let report = runner::build_report(env.describe(), reports);
+    let mut report = runner::build_report(env.describe(), reports);
     if let Some(parent) = run.out.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(&run.out, serde_json::to_string_pretty(&report)? + "\n")?;
     let samples_path = run.samples_out.clone().unwrap_or_else(|| {
         run.out.with_file_name(format!(
             "{}.samples.json",
@@ -276,8 +275,35 @@ pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
         &samples_path,
         serde_json::to_string_pretty(&samples)? + "\n",
     )?;
+    report.samples_file = Some(samples_reference(&run.out, &samples_path)?);
+    std::fs::write(&run.out, serde_json::to_string_pretty(&report)? + "\n")?;
     print_summary(&report);
     Ok(if report.verdict.pass { 0 } else { 2 })
+}
+
+/// Relative references survive moving a receipt and its retained ledger together.
+pub(crate) fn samples_reference(
+    receipt: &std::path::Path,
+    samples: &std::path::Path,
+) -> anyhow::Result<std::path::PathBuf> {
+    let directory = std::fs::canonicalize(
+        receipt
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new(".")),
+    )?;
+    let samples = std::fs::canonicalize(samples)?;
+    for (hops, ancestor) in directory.ancestors().enumerate() {
+        if let Ok(suffix) = samples.strip_prefix(ancestor) {
+            let mut reference = std::path::PathBuf::new();
+            for _ in 0..hops {
+                reference.push("..");
+            }
+            reference.push(suffix);
+            return Ok(reference);
+        }
+    }
+    anyhow::bail!("receipt and raw samples have no common artifact root")
 }
 
 /// The human-readable gate summary on stdout.

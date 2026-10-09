@@ -9,6 +9,7 @@
 pub mod boundary;
 pub mod latency;
 pub mod perf_support;
+pub mod receipt_tail;
 pub mod runtime_perf;
 pub mod string_scaling;
 pub mod vm_worker_matrix;

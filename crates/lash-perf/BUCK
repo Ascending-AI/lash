@@ -16,9 +16,24 @@ load(
     "test_batch_budget",
 )
 
+lash_rust_build_script(
+    name = "build_script",
+    crate_features = [
+        "default",
+    ],
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    data = ["build.rs"] + glob(["src/**/*.rs"]),
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    version = "0.0.0-dev",
+)
+
 lash_rust_library(
     name = "lash-perf",
-    build_script = None,
+    build_script = ":build_script",
     crate_features = [
         "default",
     ],
@@ -49,7 +64,7 @@ lash_rust_doc(
 
 lash_rust_unit_test(
     name = "lash-perf__unit_test",
-    build_script = None,
+    build_script = ":build_script",
     crate_features = [
         "default",
     ],
@@ -578,7 +593,7 @@ lash_rust_feature_test(
 
 lash_rust_feature_library(
     name = "lash-perf__fv_303c741d",
-    build_script = None,
+    build_script = ":build_script",
     crate_features = [
         "dhat-heap",
     ],
@@ -608,7 +623,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_library(
     name = "lash-perf__fv_6364e4d9",
-    build_script = None,
+    build_script = ":build_script",
     crate_features = [],
     crate_name = "lash_perf",
     declared_features = [
@@ -635,7 +650,7 @@ lash_rust_feature_library(
 
 lash_rust_feature_test(
     name = "lash-perf__unit_test__fv_303c741d",
-    build_script = None,
+    build_script = ":build_script",
     crate_features = [
         "dhat-heap",
     ],
@@ -670,7 +685,7 @@ lash_rust_feature_test(
 
 lash_rust_feature_test(
     name = "lash-perf__unit_test__fv_6364e4d9",
-    build_script = None,
+    build_script = ":build_script",
     crate_features = [],
     crate_name = "lash_perf",
     crate_root = "src/lib.rs",

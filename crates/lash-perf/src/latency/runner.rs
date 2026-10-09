@@ -907,6 +907,8 @@ pub(crate) struct GateVerdict {
 /// The run report: config, environment, every case and the verdict.
 #[derive(Debug, Serialize)]
 pub(crate) struct LatencyReport {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) samples_file: Option<std::path::PathBuf>,
     pub(crate) kind: &'static str,
     pub(crate) schema: u32,
     pub(crate) crate_version: &'static str,
@@ -958,6 +960,7 @@ pub(crate) fn build_report(
         }
     }
     LatencyReport {
+        samples_file: None,
         kind: "lash.send-latency",
         schema: 1,
         crate_version: env!("CARGO_PKG_VERSION"),
