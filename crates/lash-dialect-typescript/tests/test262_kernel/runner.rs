@@ -702,3 +702,14 @@ fn borrowed_bind_rejects_non_callable_targets() {
         Datum::Float(lash_kernel_doc::Float::new(7.0)),
     );
 }
+
+/// Map prototype methods require the Map internal slot, even for other containers.
+#[test]
+fn borrowed_map_methods_require_map_receivers() {
+    assert_finished(
+        execute(
+            "let count = 0; const set = []; try { Map.prototype.set.call(set, 1, 2); } catch (e) { if (e.name === 'TypeError') count++; } try { Map.prototype.clear.call(set); } catch (e) { if (e.name === 'TypeError') count++; } finish(count);",
+        ),
+        Datum::Float(lash_kernel_doc::Float::new(2.0)),
+    );
+}

@@ -97,6 +97,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   return num.to_float(map.len(this))
 }
 
@@ -105,6 +106,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let args = invoke ts.pad(args, 2)
   let builtin_arg_0 = args[0]
 let key = invoke ts.map.key(builtin_arg_0)
@@ -117,6 +119,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let builtin_arg_1 = args[0]
 let key = invoke ts.map.key(builtin_arg_1)
@@ -129,6 +132,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let builtin_arg_2 = args[0]
 let key = invoke ts.map.key(builtin_arg_2)
@@ -140,6 +144,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let args = invoke ts.pad(args, 1)
   let builtin_arg_3 = args[0]
 let key = invoke ts.map.key(builtin_arg_3)
@@ -153,6 +158,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   for key in map.keys(this) { remove this[key] }
   return absent
 }
@@ -162,6 +168,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let output = []
   for map_key in this {
     let builtin_arg_4 = map_key
@@ -176,6 +183,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let output = []
   for map_key in this {
     let builtin_arg_5 = map_key
@@ -190,6 +198,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let output = []
   for map_key in this {
     let builtin_arg_6 = map_key
@@ -204,6 +213,7 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
+  if same(kind(this), "map") {} else { throw error.new("type_error", "Map receiver required", null) }
   let args = invoke ts.pad(args, 2)
   let callback = args[0]
   let receiver = args[1]
