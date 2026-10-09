@@ -232,9 +232,10 @@ errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
   let args = invoke ts.pad(args, 2)
+  let callback = args[1]
+  if same(kind(callback), "closure") {} else { throw error.new("type_error", "GroupBy callback must be callable", null) }
   let builtin_arg_8 = args[0]
 let source = invoke ts.iterate(builtin_arg_8)
-  let callback = args[1]
   let output = map{}
   let index = 0.0
   for item in source {

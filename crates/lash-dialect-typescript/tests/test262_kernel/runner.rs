@@ -792,3 +792,14 @@ fn function_to_string_rejects_non_callable_receivers() {
         Datum::Float(lash_kernel_doc::Float::new(3.0)),
     );
 }
+
+/// Map.groupBy validates the callback even when its input is empty.
+#[test]
+fn map_group_by_checks_the_callback_before_iteration() {
+    assert_finished(
+        execute(
+            "let count = 0; for (const callback of [undefined, null, {}]) { try { Map.groupBy([], callback); } catch (e) { if (e.name === 'TypeError') count++; } } finish(count);",
+        ),
+        Datum::Float(lash_kernel_doc::Float::new(3.0)),
+    );
+}
