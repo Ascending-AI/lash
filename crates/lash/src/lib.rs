@@ -749,6 +749,26 @@ pub mod prompt {
 ///
 /// Compare [`SessionReadView::current_frame()`](crate::persistence::SessionReadView::current_frame)
 /// in your before-turn hook to detect compaction or a frame switch.
+///
+/// A plugin must honour the host's telemetry content policy for content it
+/// puts in custom trace payloads. Lash applies that policy to built-in
+/// telemetry and passes plugin-authored custom payloads without inspecting
+/// or classifying them. Read the policy in your factory's context:
+///
+/// ```
+/// use lash::plugins::PluginSessionContext;
+///
+/// fn custom_payload(ctx: &PluginSessionContext, text: &str) -> serde_json::Value {
+///     serde_json::json!({
+///         "text": ctx.telemetry_content().capture(|| text.to_owned()),
+///     })
+/// }
+/// ```
+///
+/// The accessor follows the current deployment's policy, including on
+/// reopen. Hosts can drop or redact custom records before export by wrapping
+/// their [`TraceSink`](crate::tracing::TraceSink) and installing it through
+/// [`LashCoreBuilder::trace_sink`](crate::core::LashCoreBuilder::trace_sink).
 pub mod plugins {
     // The vocabulary this module's signatures name (the facade-completeness rule).
     pub use lash_core::ConfigRegistry;

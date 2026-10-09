@@ -10,6 +10,87 @@ use lash_core::testing::runtime_helpers::{EchoTool, MockCall, mock_provider};
 use lash_trace::{TelemetryContent, TraceRecord, TraceSink, TraceSinkError};
 use std::sync::Mutex as StdMutex;
 
+/// FIG-5616: a plugin reads the deployment's privacy policy when it is built.
+#[derive(Default)]
+struct PolicyProbe(StdMutex<Vec<TelemetryContent>>);
+
+impl crate::plugins::PluginDefinition for PolicyProbe {
+    fn declaration() -> crate::plugins::PluginDeclaration {
+        crate::plugins::PluginDeclaration::initial("telemetry-policy-probe")
+    }
+}
+
+impl PluginFactory for PolicyProbe {
+    fn id(&self) -> &'static str {
+        "telemetry-policy-probe"
+    }
+
+    fn build(
+        &self,
+        ctx: &crate::plugins::PluginSessionContext,
+    ) -> std::result::Result<Arc<dyn crate::plugins::SessionPlugin>, crate::plugins::PluginError>
+    {
+        self.0.lock_recover().push(ctx.telemetry_content());
+        Ok(Arc::new(PolicyProbePlugin))
+    }
+}
+
+struct PolicyProbePlugin;
+
+impl crate::plugins::SessionPlugin for PolicyProbePlugin {
+    fn id(&self) -> &'static str {
+        "telemetry-policy-probe"
+    }
+
+    fn register(
+        &self,
+        _: &mut crate::plugins::PluginRegistrar,
+    ) -> std::result::Result<(), crate::plugins::PluginError> {
+        Ok(())
+    }
+}
+
+/// A reopened session sees its receiving deployment's policy, including
+/// when the operator turns content off for a session created with it on.
+#[tokio::test]
+async fn plugin_context_reads_host_telemetry_policy_after_reopen() -> Result<()> {
+    let stores = sqlite_memory_store_set().await;
+    let probe = Arc::new(PolicyProbe::default());
+    for (index, policy) in [TelemetryContent::Captured, TelemetryContent::Omitted]
+        .into_iter()
+        .enumerate()
+    {
+        let core = explicit_ephemeral_facets(LashCore::standard_builder(
+            lash_conformance::backend_over(stores.clone()),
+        ))
+        .serve_test_llm_profile(super::mock_provider(), mock_llm_profile_spec())
+        .plugin(probe.clone())
+        .telemetry_content(policy)
+        .build(crate::testing::runtime_lease_owner())?;
+        let builder = core.session(crate::SessionId::fixture("plugin-telemetry-policy"));
+        let builder = if index == 0 {
+            builder.created().await
+        } else {
+            builder
+        };
+        probe.0.lock_recover().clear();
+        let session = builder.open().await?;
+        session
+            .send(TurnInput::text("read policy"))
+            .output()
+            .await?;
+        let observed = probe.0.lock_recover().clone();
+        assert!(!observed.is_empty(), "the session built the plugin");
+        assert!(
+            observed.iter().all(|content| *content == policy),
+            "the plugin must see the host policy {policy:?}: {observed:?}"
+        );
+        drop(session);
+        core.shutdown().await?;
+    }
+    Ok(())
+}
+
 const PROMPT: &str = "PROMPT-MARKER";
 const ARGUMENT: &str = "ARGUMENT-MARKER";
 const RESPONSE: &str = "RESPONSE-MARKER";

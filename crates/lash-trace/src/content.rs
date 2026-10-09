@@ -26,9 +26,19 @@ use lash_sansio::llm::types::StreamBlockEvent;
 /// It governs telemetry only. Durable requests and results, session history,
 /// product observations and the app's own responses keep their contracts.
 ///
-/// Opaque [`TraceEvent::Custom`] payloads are the emitting host's or plugin's
-/// own structured evidence and pass through unread; a producer that would put
-/// content in one consults the policy first.
+/// Opaque [`TraceEvent::Custom`] payloads are plugin-authored (or host-authored)
+/// output. Lash does not inspect or classify them. A plugin must honour the
+/// policy for content it includes in custom payloads; its factory reads the
+/// current deployment policy through
+/// `lash::plugins::PluginSessionContext::telemetry_content()`. This operational
+/// privacy setting follows the receiving host on reopen, rather than a
+/// session's recorded execution config.
+///
+/// A host has the final say over custom payloads at its exporter: install a
+/// wrapping [`TraceSink`](crate::TraceSink) through
+/// `LashCoreBuilder::trace_sink` that drops custom records or clones and
+/// redacts their payloads before forwarding them to the export sink. The
+/// wrapper should also forward [`TraceSink::flush`](crate::TraceSink::flush).
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema,
 )]

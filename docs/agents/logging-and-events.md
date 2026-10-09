@@ -93,5 +93,11 @@ existing contracts. A new content-bearing trace field is emptied in
 builds it through `TelemetryContent::capture`. See
 [durable tracing](../architecture/tracing.md#telemetry-content).
 
+Custom trace payloads are plugin-authored output; Lash does not inspect or
+classify them. Plugins must honour the current host policy, available through
+`PluginSessionContext::telemetry_content()`. Hosts retain the final export
+decision by wrapping their `TraceSink` to drop or redact custom records before
+forwarding, as shown in the [host filtering example](../architecture/tracing.md#plugin-custom-payloads-and-host-filtering).
+
 Tests pin a named rule or a demonstrated bug, not vocabulary snapshots or coverage
 counts.

@@ -490,6 +490,16 @@ pub struct PluginSessionContext {
 }
 
 impl PluginSessionContext {
+    /// The deployment's current policy for content in built-in telemetry.
+    ///
+    /// Custom trace payloads are plugin-authored and pass through Lash
+    /// without inspection. A plugin must honour this policy for content it
+    /// includes in those payloads. Reopening under another host uses that
+    /// host's policy; this operational setting is not session config.
+    pub fn telemetry_content(&self) -> lash_trace::TelemetryContent {
+        self.tracing.content()
+    }
+
     pub fn trace_runtime(&self) -> &crate::trace::TraceRuntime {
         &self.tracing
     }

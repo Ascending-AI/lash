@@ -41,11 +41,56 @@ captured. The same records exist under either value.
 
 The setting governs telemetry only. Durable requests and results, session
 history, product observations (the process and language graph) and the
-responses a host's own calls return keep their contracts. An opaque `custom`
-payload is its producer's own structured evidence and passes through unread; a
-producer that would put content in one reads `TraceStanding::content` first.
+responses a host's own calls return keep their contracts.
 `DirectLlmClient` is its own telemetry path with the same default
 (`with_telemetry_content`).
+
+### Plugin custom payloads and host filtering
+
+The policy covers built-in telemetry. A `custom` payload is plugin-authored
+(or host-authored) output: Lash does not inspect or classify its fields. A
+plugin must honour the policy for content it puts in custom payloads. Its
+factory reads `PluginSessionContext::telemetry_content()` before building
+content, for example with `ctx.telemetry_content().capture(|| text.to_owned())`.
+The accessor reads the receiving host's current `TraceRuntime` policy. This
+deployment privacy setting is not recorded session configuration: reopening a
+session under a host that turned content off must expose `Omitted`, even if
+the session was created with capture on.
+
+The host has the final say at its trace exporter. Wrap the export sink and
+install the wrapper with `LashCoreBuilder::trace_sink(...)`. The wrapper can
+drop custom records or clone and redact their payloads before forwarding to
+the inner sink. For example, a host that exports no custom records can use:
+
+```rust
+use std::sync::Arc;
+use lash::tracing::{TraceEvent, TraceRecord, TraceSink, TraceSinkError};
+
+struct FilterCustom {
+    inner: Arc<dyn TraceSink>,
+}
+
+impl TraceSink for FilterCustom {
+    fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
+        if matches!(&record.event, TraceEvent::Custom { .. }) {
+            return Ok(());
+        }
+        self.inner.append(record)
+    }
+
+    fn flush(&self) -> Result<(), TraceSinkError> {
+        self.inner.flush()
+    }
+}
+
+// `builder` and `exporter` are the host's core builder and export sink.
+let builder = builder.trace_sink(Arc::new(FilterCustom { inner: exporter }));
+```
+
+Place the wrapper before any sink fan-out whose exporters require this
+filtering. It governs the sinks it wraps; a separately installed telemetry
+adapter or sink retains its own export policy. Lash ships no custom-payload
+filter or presentation policy.
 
 The [logging and event practice](../agents/logging-and-events.md) defines diagnostic
 fields, failure ownership, levels and correlation with domain observations.
