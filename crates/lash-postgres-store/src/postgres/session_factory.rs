@@ -852,6 +852,9 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
     }
 }
 
+/// Fence each deleted session's frames and arm their cleanups, the session's
+/// own among them, at `now`: the store clock's, which the cleanup relay
+/// claims with.
 async fn fence_deleted_session_frames_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_ids: &[SessionId],

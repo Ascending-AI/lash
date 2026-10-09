@@ -24,12 +24,13 @@ use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
 use lash_core::{
     AttachmentId, BlobRef, Clock, DeliveryPolicy, DeploymentStore, EffectAddress, ExecutionScope,
     ForkSessionRequest, HydratedSessionCheckpoint, LlmUsage, PendingTurnInputDraft,
-    PluginNamespaceState, PluginState, ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent,
+    PluginNamespaceState, ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent,
     QueuedWorkAuthority, RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
     SessionCatalogStore as _, SessionCreationHead, SessionHistoryRecord, SessionMeta,
     SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, StoreError,
     ToolState, TurnInput, TurnInputApplication, TurnInputIngress, TurnInputStateKind,
 };
+use lash_core_store::plugin_state::{NamespaceBody, PluginStateMap, namespace_component_key};
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
 use sqlx::{Connection, PgConnection, PgPool};
@@ -601,26 +602,33 @@ struct CheckpointComponentRefs {
     clippy::expect_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
+/// The one plugin namespace the checkpoint bodies carry.
+const DIFFERENTIAL_PLUGIN: &str = "differential-plugin";
+
 fn checkpoint_bodies() -> HydratedSessionCheckpoint {
     let tool_state = serde_json::from_value::<ToolState>(serde_json::json!({
         "generation": 7,
         "tools": {}
     }))
     .expect("build differential tool state");
-    let plugin_state = PluginState {
+    // The head's namespace map names each namespace's values body by content
+    // address, and the body is a component of its own.
+    let namespace = PluginNamespaceState {
+        format_version: lash_core::FormatVersion::ONE,
+        generation: 11,
+        publication: Default::default(),
+        fork: Default::default(),
+        values: std::collections::BTreeMap::from([(
+            "state".into(),
+            serde_json::json!({"mode": "durable"}),
+        )])
+        .into(),
+    };
+    let namespace_body = NamespaceBody::encode(&namespace.values);
+    let plugin_state = PluginStateMap {
         plugins: [(
-            "differential-plugin".to_string(),
-            PluginNamespaceState {
-                format_version: lash_core::FormatVersion::ONE,
-                generation: 11,
-                publication: Default::default(),
-                fork: Default::default(),
-                values: std::collections::BTreeMap::from([(
-                    "state".into(),
-                    serde_json::json!({"mode": "durable"}),
-                )])
-                .into(),
-            },
+            DIFFERENTIAL_PLUGIN.to_string(),
+            namespace.entry(namespace_body.values.clone()),
         )]
         .into_iter()
         .collect(),
@@ -636,8 +644,12 @@ fn checkpoint_bodies() -> HydratedSessionCheckpoint {
             lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_string(),
             lash_core::HydratedCheckpointComponent::changed(
                 rmp_serde::to_vec_named(&plugin_state)
-                    .expect("encode differential plugin snapshot"),
+                    .expect("encode differential plugin namespace map"),
             ),
+        ),
+        (
+            namespace_component_key(DIFFERENTIAL_PLUGIN),
+            lash_core::HydratedCheckpointComponent::changed(namespace_body.bytes.to_vec()),
         ),
         (
             lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
@@ -930,6 +942,40 @@ impl BackendRunner {
             ))
             .expect("build differential lifecycle core")
     }
+    /// Deliver every due artifact cleanup until none is due. A delete arms
+    /// its session's cleanup, which a core's recovery slot otherwise delivers
+    /// on its own task at whatever moment its lease allows; settling it here
+    /// makes every backend compare the deleted session's settled state.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+    )]
+    async fn settle_artifact_cleanups(&self) {
+        let relay = lash_core::runtime::artifact_cleanup::ArtifactCleanupRelay::over_backend(
+            &self.lifecycle_backend,
+            lash_core::ProcessEngineRegistry::default(),
+        );
+        let clock = self.lifecycle_backend.clock();
+        for _ in 0..8 {
+            let pass = lash_core::runtime::obligations::relay::relay_due(
+                &relay,
+                clock.as_ref(),
+                std::num::NonZeroUsize::new(256).expect("a nonzero page"),
+            )
+            .await
+            .expect("relay a due cleanup pass");
+            assert_eq!(
+                pass.stalled, 0,
+                "{}: a cleanup stalled: {pass:?}",
+                self.name
+            );
+            if pass.claimed == 0 {
+                return;
+            }
+        }
+        panic!("{}: the artifact cleanups never settled", self.name);
+    }
+
     async fn close_reopened_postgres_pool(&mut self) {
         if let Some(pool) = self.reopened_postgres_pool.take() {
             pool.close().await;
@@ -1217,19 +1263,20 @@ impl BackendRunner {
                     self.name
                 );
                 assert_eq!(
-                    checkpoint
-                        .decode_component::<PluginState>(
-                            lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
-                        )?
-                        .as_ref()
-                        .map(|snapshot| serde_json::to_value(snapshot).expect("encode snapshot")),
-                    expected
-                        .decode_component::<PluginState>(
-                            lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
-                        )?
-                        .as_ref()
-                        .map(|snapshot| serde_json::to_value(snapshot).expect("encode snapshot")),
-                    "{} cold reopen must rehydrate the plugin-snapshot body",
+                    checkpoint.decode_component::<PluginStateMap>(
+                        lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
+                    )?,
+                    expected.decode_component::<PluginStateMap>(
+                        lash_core::store::PLUGIN_STATE_CHECKPOINT_COMPONENT,
+                    )?,
+                    "{} cold reopen must rehydrate the plugin namespace map",
+                    self.name
+                );
+                let namespace = namespace_component_key(DIFFERENTIAL_PLUGIN);
+                assert_eq!(
+                    checkpoint.component_body(&namespace),
+                    expected.component_body(&namespace),
+                    "{} cold reopen must rehydrate the plugin namespace's values body",
                     self.name
                 );
                 assert_eq!(
@@ -1247,6 +1294,7 @@ impl BackendRunner {
                     .delete_session(&self.session_id)
                     .await
                     .map_err(|error| StoreError::Backend(error.to_string()))?;
+                self.settle_artifact_cleanups().await;
                 self.lifecycle_core = Some(self.build_lifecycle_core());
                 Ok(None)
             }
@@ -1416,7 +1464,8 @@ impl BackendRunner {
             ComparisonMode::RawOnly => None,
         };
         let surface_answer = self.surface.answer.clone();
-        let changed_tables = before.changed_tables(&self.residue_digest().await);
+        let after = self.residue_digest().await;
+        let changed_tables = before.changed_tables(&after);
         let refusal_mutated = store_error.is_some().then_some(!changed_tables.is_empty());
         (
             StepObservation {
@@ -1428,7 +1477,7 @@ impl BackendRunner {
                 durable_state,
                 raw_changed_tables: match comparison {
                     ComparisonMode::Decoded => None,
-                    ComparisonMode::RawOnly => Some(changed_tables.clone()),
+                    ComparisonMode::RawOnly => Some(before.changed_session_tables(&after)),
                 },
             },
             changed_tables,

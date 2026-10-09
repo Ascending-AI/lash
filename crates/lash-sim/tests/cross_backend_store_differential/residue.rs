@@ -15,7 +15,12 @@
 //!   across backends, so no normalization is required and no physical layout
 //!   choice can read as drift;
 //! * what crosses the backend boundary is the mutated-or-not verdict and the
-//!   set of logical tables that moved, which are backend-neutral.
+//!   set of the session's logical tables that moved, which are
+//!   backend-neutral. A store-wide table is not in that set: one PostgreSQL
+//!   database serves every case while each SQLite case opens a fresh one, so
+//!   a store-wide fact (a plugin's writer range) is first written by
+//!   different cases on the two, and PostgreSQL sequences a change feed's
+//!   clock when a reader reads (FIG-5276) where SQLite moves it at commit.
 //!
 //! The tables come from each backend's own catalog, never from a list here: a
 //! table with a `session_id` column is read for this session, every other
@@ -24,6 +29,8 @@
 //! shared database's advisory lock, so no other writer moves a store-wide row
 //! between a step's two digests.
 
+use std::collections::BTreeSet;
+
 use super::*;
 
 /// One backend's durable rows, keyed by logical table, rendered without
@@ -31,6 +38,8 @@ use super::*;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct ResidueDigest {
     tables: BTreeMap<String, Vec<String>>,
+    /// The logical tables read for this session alone.
+    session_scoped: BTreeSet<String>,
 }
 
 impl ResidueDigest {
@@ -44,6 +53,16 @@ impl ResidueDigest {
         }
         changed.sort_unstable();
         changed
+    }
+
+    /// The session's logical tables whose rows differ between `self`
+    /// (pre-call) and `after`: what a cross-backend comparison may hold the
+    /// backends to.
+    pub(super) fn changed_session_tables(&self, after: &Self) -> Vec<String> {
+        self.changed_tables(after)
+            .into_iter()
+            .filter(|table| self.session_scoped.contains(table))
+            .collect()
     }
 }
 
@@ -162,6 +181,7 @@ fn sqlite_connection_residue_digest(
     session_id: &SessionId,
 ) -> ResidueDigest {
     let mut tables = BTreeMap::new();
+    let mut session_scoped = BTreeSet::new();
     for (table, sql) in sqlite_residue_reads(connection) {
         let mut statement = connection
             .prepare(&sql)
@@ -178,6 +198,7 @@ fn sqlite_connection_residue_digest(
         let mut rows: Vec<String> = if statement.parameter_count() == 0 {
             statement.query_map([], render)
         } else {
+            session_scoped.insert(table.clone());
             statement.query_map([session_id.as_str()], render)
         }
         .unwrap_or_else(|error| panic!("read SQLite residue rows for `{table}`: {error}"))
@@ -186,7 +207,10 @@ fn sqlite_connection_residue_digest(
         rows.sort();
         tables.insert(table, rows);
     }
-    ResidueDigest { tables }
+    ResidueDigest {
+        tables,
+        session_scoped,
+    }
 }
 
 /// The catalog read of the Postgres schema the installation is anchored in.
@@ -258,11 +282,13 @@ async fn postgres_connection_residue_digest(
     session_id: &SessionId,
 ) -> ResidueDigest {
     let mut tables = BTreeMap::new();
+    let mut session_scoped = BTreeSet::new();
     for (table, sql) in postgres_residue_reads(connection).await {
         // `$1` is the session id; a whole-table read declares no parameter,
         // and Postgres refuses a bind it does not declare.
         let query = sqlx::query_scalar::<_, String>(&sql);
         let query = if sql.contains("$1") {
+            session_scoped.insert(table.clone());
             query.bind(session_id.as_str())
         } else {
             query
@@ -274,7 +300,10 @@ async fn postgres_connection_residue_digest(
         rows.sort();
         tables.insert(table, rows);
     }
-    ResidueDigest { tables }
+    ResidueDigest {
+        tables,
+        session_scoped,
+    }
 }
 
 /// A table the harness has never heard of is digested the moment the schema

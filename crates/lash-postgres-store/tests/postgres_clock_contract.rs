@@ -414,3 +414,96 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
     .expect("read persisted final-turn commit timestamp");
     assert_eq!(committed_at_ms, INJECTED_COMMIT_MS as i64);
 }
+
+/// An artifact cleanup's due instant is on the clock its relay claims with:
+/// the store's injected clock, as every SQLite arm and the PostgreSQL
+/// ledger's own arm stamp it. A session delete and a guarded artifact
+/// publish armed theirs at the database's transaction time, so under a
+/// clock behind the database (a test clock, or a host behind its server)
+/// the cleanup was not due to the relay that claims it (FIG-5193, found by
+/// the cross-backend differential).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn artifact_cleanups_are_armed_on_the_injected_store_clock() {
+    let Some((_lock, storage)) =
+        configured_storage("artifact-cleanup injected-clock contract").await
+    else {
+        return;
+    };
+    const INJECTED_MS: u64 = 1_234_567_900_000;
+    assert!(
+        db_now_ms(&storage).await > INJECTED_MS,
+        "the injected clock is behind the database"
+    );
+    let clock = Arc::new(TestClock::new(INJECTED_MS)) as Arc<dyn Clock>;
+    let due_at = |kind: &'static str, id: String| {
+        let pool = storage.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, Option<i64>>(
+                "SELECT obligation_due_at_ms FROM lash_artifact_cleanup_obligations
+                 WHERE referrer_kind = $1 AND referrer_id = $2",
+            )
+            .bind(kind)
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .expect("read the armed cleanup's due instant")
+        }
+    };
+
+    // A session delete arms its session's retirement cleanup.
+    let session_id = SessionId::fixture(unique_id("clock-contract-cleanup-delete"));
+    let factory = storage
+        .session_store_factory()
+        .with_clock(Arc::clone(&clock));
+    factory
+        .admit_session(&SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: session_id.clone(),
+            relation: SessionRelation::Root,
+            config: lash_core_execution::SessionPolicy::new(
+                lash_core_execution::TurnBudget::Unbounded,
+                lash_core_execution::MaxToolCalls::new(1024),
+            )
+            .into(),
+            head: SessionCreationHead::Config,
+        })
+        .await
+        .expect("create the session to delete");
+    factory
+        .delete_session(&session_id)
+        .await
+        .expect("delete the session");
+    assert_eq!(
+        due_at("session", session_id.as_str().to_owned()).await,
+        Some(INJECTED_MS as i64),
+        "the deleted session's cleanup is due at the injected clock's now"
+    );
+
+    // A guarded publish arms its reader's cleanup.
+    let scope = lash_core_execution::ExecutionScope::turn(
+        SessionId::fixture(unique_id("clock-contract-cleanup-publish")),
+        "turn",
+    );
+    let journal = scope.journal_identity().expect("a turn journal identity");
+    let referrer = lash_core_execution::ArtifactReferrer::Execution(journal.clone());
+    let claim = lash_core_execution::ReferrerClaim::guarded(
+        lash_core_execution::ReferrerGuard::Journal(journal),
+    );
+    let artifacts = storage
+        .lashlang_artifact_store()
+        .with_clock(Arc::clone(&clock));
+    lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+        &artifacts,
+        &claim,
+        &unique_id("clock-contract-module"),
+        b"module bytes",
+    )
+    .await
+    .expect("publish under a guarded claim");
+    assert_eq!(
+        due_at(referrer.kind().as_str(), referrer.canonical_id()).await,
+        Some(INJECTED_MS as i64),
+        "the guarded reader's cleanup is due at the injected clock's now"
+    );
+}
