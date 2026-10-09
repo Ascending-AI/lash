@@ -33,8 +33,8 @@ pub use super::actor::round::{Material, NamesMaterial, SettledOutput, SettledOut
 /// Why a process actor is parked: the typed reason its observed state carries.
 pub use crate::runtime::actor::process::ProcessParkReason;
 pub use awaiter::{
-    ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, ProcessEventSinkRegistration,
-    WatchedRegistry, watch_process_registry,
+    ProcessChangeHub, ProcessChangeSubscription, ProcessEventSink, WatchedRegistry,
+    watch_process_registry,
 };
 pub use declared_start::{
     DeclaredStartObligation, DeclaredStartObligationRefusal, DeclaredStartPhase,

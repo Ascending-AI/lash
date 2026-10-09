@@ -104,8 +104,8 @@ pub use lash_vm::{
     WorkflowRunDriver, workflow_node_statement, workflow_program_from_graph,
 };
 pub use lash_vm::{
-    WorkflowAdmissionDiagnostic, WorkflowAdmissionDiagnosticKind, WorkflowAdmissionLocation,
-    WorkflowAdmissionRefusal,
+    WorkflowAdmission, WorkflowAdmissionDiagnostic, WorkflowAdmissionDiagnosticKind,
+    WorkflowAdmissionLocation, WorkflowAdmissionRefusal,
 };
 pub use lash_vm::{
     WorkflowBindingRef, WorkflowBodyRef, WorkflowCorrespondence, WorkflowCorrespondenceEntry,

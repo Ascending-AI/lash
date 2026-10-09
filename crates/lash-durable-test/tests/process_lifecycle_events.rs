@@ -764,10 +764,7 @@ impl Fleet {
         node: &str,
         inner: Arc<dyn lash_core::ProcessRegistry>,
         heard: &Heard,
-    ) -> (
-        lash_core_execution::WatchedRegistry,
-        lash_core_execution::runtime::ProcessEventSinkRegistration,
-    ) {
+    ) -> (lash_core_execution::WatchedRegistry, impl Send + Sync) {
         let watched = lash_core_execution::runtime::watch_process_registry(inner);
         let registration = watched.add_event_sink(Arc::new(heard.clone()));
         self.nodes

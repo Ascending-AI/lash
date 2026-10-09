@@ -46,7 +46,7 @@ pub struct LashCore {
     pub(crate) process_lifecycle_feed: Arc<crate::process_lifecycle::ProcessLifecycleFeed>,
     /// The core's lifecycle feed, attached to the registry's process events
     /// while any clone of the core lives.
-    pub(crate) _process_event_registration: Arc<facade_support::ProcessEventSinkRegistration>,
+    pub(crate) _process_event_registration: Arc<dyn Send + Sync>,
     /// Whether process lifecycle is available; threaded into rebuilt session plugin hosts.
     pub(crate) process_lifecycle_available: bool,
     /// Base plugin-contributed engines available to host-level process APIs.

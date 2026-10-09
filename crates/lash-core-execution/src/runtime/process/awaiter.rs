@@ -87,7 +87,7 @@ pub struct WatchedRegistry {
 }
 
 /// Detaches an observer from a shared watched registry when the last owner drops.
-pub struct ProcessEventSinkRegistration {
+struct ProcessEventSinkRegistration {
     sinks: Weak<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
     sink: Arc<dyn ProcessEventSink>,
 }
@@ -131,7 +131,6 @@ impl WatchedRegistry {
         &self.hub
     }
 
-    /// Attach a live event observer to this watched registry and its bound port.
     /// How many event sinks are attached: what the registration-detach law in
     /// `tests/store_backed` reads, since the sink list is private.
     #[cfg(feature = "testing")]
@@ -139,7 +138,9 @@ impl WatchedRegistry {
         self.sinks.lock_recover().len()
     }
 
-    pub fn add_event_sink(&self, sink: Arc<dyn ProcessEventSink>) -> ProcessEventSinkRegistration {
+    /// Attach a live event observer to this watched registry and its bound port.
+    /// The returned guard detaches the observer on drop and can outlive this handle.
+    pub fn add_event_sink(&self, sink: Arc<dyn ProcessEventSink>) -> impl Send + Sync + use<> {
         self.sinks.lock_recover().push(Arc::clone(&sink));
         ProcessEventSinkRegistration {
             sinks: Arc::downgrade(&self.sinks),
