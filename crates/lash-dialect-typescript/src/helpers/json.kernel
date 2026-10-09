@@ -110,12 +110,14 @@ body {
     let k = kind(value)
     if same(k, "record") {
       let to_json = value.toJSON
-      if same(kind(to_json), "closure") { let passed = [key] set value = apply to_json(value, passed) }
-    }
-    if same(k, "record") {
-      let brand = value.brand
-      if same(brand, "date.invalid") { set value = null }
-      if same(brand, "url.whatwg") { set value = value.state.href }
+      if same(kind(to_json), "closure") {
+        let passed = [key]
+        set value = apply to_json(value, passed)
+      } else {
+        let brand = value.brand
+        if same(brand, "date.invalid") { set value = null }
+        if same(brand, "url.whatwg") { set value = value.state.href }
+      }
     }
     if same(k, "timestamp") { set value = date.ecma.format(value, "iso") }
     if same(kind(replacer), "closure") { let passed = [key, value] set value = apply replacer(holder, passed) }

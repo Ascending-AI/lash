@@ -566,3 +566,19 @@ fn ordinary_to_primitive_uses_defaults_only_for_missing_methods() {
         ]),
     );
 }
+
+/// SerializeJSONProperty continues with the value returned by toJSON, including
+/// omitted object properties and null array entries when it returns undefined.
+#[test]
+fn json_stringify_rechecks_the_kind_after_to_json() {
+    assert_finished(
+        execute(
+            "const obj = {toJSON() { return undefined; }}; finish([JSON.stringify(obj) === undefined, JSON.stringify([1, obj, 3]), JSON.stringify({key: obj})]);",
+        ),
+        Datum::List(vec![
+            Datum::Bool(true),
+            Datum::Text("[1,null,3]".into()),
+            Datum::Text("{}".into()),
+        ]),
+    );
+}
