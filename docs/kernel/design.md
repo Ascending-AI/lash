@@ -145,7 +145,7 @@ A dialect is a package of a front end, a printer and the functions (helpers and 
 
 ## 6. Parked runs
 
-A parked run is saved in the document's vocabulary. Its schema is derived from today's `VmContinuation` (`crates/lash-vm/src/runtime/vm/continuation.rs:216`) and the broker's snapshot (`crates/lash-vm-broker/src/snapshot.rs`). Every field of both gets a row or a stated reason for having none; the table below is the starting point and is completed as the first act of settling this section.
+A parked run is saved in the document's vocabulary. Its schema is derived from today's `VmContinuation` (`crates/lash-vm/src/runtime/vm/continuation.rs:216`) and the broker's snapshot (`crates/lash-vm-broker/src/snapshot.rs`). Every field of both gets a row or a stated reason for having none; the table below is the starting point, and [parked-state.md](parked-state.md) is the completed one, held by laws.
 
 | Today | In the kernel schema |
 | --- | --- |

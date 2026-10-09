@@ -1,0 +1,35 @@
+[package]
+name = "lash-kernel-state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "The lash kernel's parked run: its schema in the document's terms and its encoding as one fragment per root."
+keywords = ["lash", "kernel", "workflow", "state"]
+categories = ["data-structures", "encoding"]
+publish = false
+
+[lib]
+name = "lash_kernel_state"
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lash-kernel-doc = { workspace = true }
+schemars = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive", "rc"] }
+# `unbounded_depth`: the decoder bounds nesting itself, at a depth
+# serde_json's fixed limit of 128 would refuse (a value nests 128 deep,
+# `K-VAL-034`, and each level is two of JSON's).
+serde_json = { workspace = true, features = ["unbounded_depth"] }
+thiserror = { workspace = true }
+
+[[bin]]
+name = "parked_schema_generator"
+path = "src/bin/parked_schema_generator.rs"

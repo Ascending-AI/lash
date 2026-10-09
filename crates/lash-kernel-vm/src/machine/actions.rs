@@ -79,14 +79,18 @@ impl KernelMachine {
                 for value in &values {
                     copied.push(self.copy_out(value)?);
                 }
-                let (wait, identity) = self.request(task, exe, stmt, &action.site, false)?;
-                self.requests.push(Request::Effect(EffectRequest {
+                let (wait, identity) = self.request(task, exe, stmt, &action.site)?;
+                self.issue(
+                    task,
                     wait,
-                    identity,
-                    effect: effect.clone(),
-                    args: copied,
-                    result: result.clone(),
-                }));
+                    Request::Effect(EffectRequest {
+                        wait,
+                        identity,
+                        effect: effect.clone(),
+                        args: copied,
+                        result: result.clone(),
+                    }),
+                );
                 Ok(None)
             }
             ActionKind::Sleep(duration) => {
@@ -105,12 +109,16 @@ impl KernelMachine {
                     }
                     _ => return raise("type_error", "`sleep` takes a number of milliseconds"),
                 };
-                let (wait, identity) = self.request(task, exe, stmt, &action.site, true)?;
-                self.requests.push(Request::Sleep(SleepRequest {
+                let (wait, identity) = self.request(task, exe, stmt, &action.site)?;
+                self.issue(
+                    task,
                     wait,
-                    identity,
-                    duration,
-                }));
+                    Request::Sleep(SleepRequest {
+                        wait,
+                        identity,
+                        duration,
+                    }),
+                );
                 Ok(None)
             }
             ActionKind::Join(handle) => {
@@ -273,7 +281,6 @@ impl KernelMachine {
         exe: &Executable,
         stmt: StmtId,
         site: &Site,
-        sleep: bool,
     ) -> Result<(WaitId, EffectIdentity), Halt> {
         let limit = u64::from(self.bounds.requests_per_park);
         if self.requests.len() as u64 >= limit {
@@ -308,16 +315,21 @@ impl KernelMachine {
         };
         let wait = WaitId(self.next_wait);
         self.next_wait += 1;
+        self.suspend(task, stmt, Wait::Request(wait))?;
+        Ok((wait, identity))
+    }
+
+    /// Records what a wait asks for, for the next park to hand out.
+    fn issue(&mut self, task: TaskId, wait: WaitId, request: Request) {
         self.waits.insert(
             wait,
             PendingWait {
                 task,
-                sleep,
+                request,
                 handed_out: false,
             },
         );
-        self.suspend(task, stmt, Wait::Request(wait))?;
-        Ok((wait, identity))
+        self.requests.push(wait);
     }
 
     /// `spawn`: the new task runs at once, and the spawning task goes on
@@ -523,10 +535,7 @@ impl KernelMachine {
                         self.withdrawn.push(wait);
                         self.withdrawn_ever.insert(wait);
                     } else {
-                        self.requests.retain(|request| match request {
-                            Request::Effect(effect) => effect.wait != wait,
-                            Request::Sleep(sleep) => sleep.wait != wait,
-                        });
+                        self.requests.retain(|requested| *requested != wait);
                     }
                 }
             }

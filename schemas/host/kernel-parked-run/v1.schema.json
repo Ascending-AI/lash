@@ -1,0 +1,1647 @@
+{
+  "$defs": {
+    "Binding": {
+      "additionalProperties": false,
+      "description": "One bound variable of a call.",
+      "properties": {
+        "declared": {
+          "$ref": "#/$defs/Site",
+          "description": "The node that declares the variable: the `let` statement, or the\nblock whose parameter, loop binding or `catch` binding it is. A\nvariable a closure captured is declared by the closure's body."
+        },
+        "name": {
+          "$ref": "#/$defs/Name"
+        },
+        "value": {
+          "$ref": "#/$defs/Bound"
+        }
+      },
+      "required": [
+        "name",
+        "declared",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Bound": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "value": {
+              "$ref": "#/$defs/Value"
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A variable a closure shares: the [`Object::Variable`] that holds it\n(`K-CLO-001`).",
+          "properties": {
+            "shared": {
+              "$ref": "#/$defs/ObjectId"
+            }
+          },
+          "required": [
+            "shared"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Bytes": {
+      "pattern": "^([0-9a-f]{2})*$",
+      "type": "string"
+    },
+    "Call": {
+      "additionalProperties": false,
+      "description": "One active call: where it stands, its variables, and the loops and\ncleanup blocks it is inside.\n\nThe call runs the function body that holds `statement`: a unit's, or\nthe closure body nearest above it. The blocks, `try` statements and\nhandlers around the statement are derived from its site.",
+      "properties": {
+        "bindings": {
+          "description": "The call's bound variables, in the order the function body\ndeclares them.",
+          "items": {
+            "$ref": "#/$defs/Binding"
+          },
+          "type": "array"
+        },
+        "finally": {
+          "description": "The `finally` blocks being run around the statement inside this\ncall, outermost first.",
+          "items": {
+            "$ref": "#/$defs/Finally"
+          },
+          "type": "array"
+        },
+        "loops": {
+          "description": "The loops around the statement inside this call, outermost first.",
+          "items": {
+            "$ref": "#/$defs/Loop"
+          },
+          "type": "array"
+        },
+        "statement": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the call's pending statement (`K-SITE-001`). For every\ncall but a task's innermost it is the calling statement, whose\naction is under way. For the innermost the task's state says which:\na task that is merely ready issues the statement, and any other\ncontinues it with its action's value. An index one past the last\nstatement of a block stands for the block's end."
+        }
+      },
+      "required": [
+        "statement"
+      ],
+      "type": "object"
+    },
+    "ClosureObject": {
+      "additionalProperties": false,
+      "description": "A closure as data: the closure expression it was made from and the\nvariables it shares.",
+      "properties": {
+        "captures": {
+          "description": "Each captured variable, as the [`Object::Variable`] it shares.",
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "$ref": "#/$defs/Name"
+              },
+              {
+                "$ref": "#/$defs/ObjectId"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the closure expression."
+        }
+      },
+      "required": [
+        "site",
+        "captures"
+      ],
+      "type": "object"
+    },
+    "Datum": {
+      "description": "A value copied across the effect boundary: an effect argument, an effect\nresult, a host read's answer, a run's result (`K-EFF-002`).\n\nA datum is a tree. It has no identity and no cycle; an object reached\ntwice in the run is written twice.",
+      "oneOf": [
+        {
+          "enum": [
+            "null",
+            "absent"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bool": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "bool"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "int": {
+              "$ref": "#/$defs/Integer"
+            }
+          },
+          "required": [
+            "int"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "float": {
+              "$ref": "#/$defs/Float"
+            }
+          },
+          "required": [
+            "float"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A number not yet decoded: an effect result's JSON number\n(`K-EFF-005`). A run never writes one out.",
+          "properties": {
+            "number": {
+              "$ref": "#/$defs/NumberToken"
+            }
+          },
+          "required": [
+            "number"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "$ref": "#/$defs/Bytes"
+            }
+          },
+          "required": [
+            "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "timestamp": {
+              "$ref": "#/$defs/Timestamp"
+            }
+          },
+          "required": [
+            "timestamp"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "tuple": {
+              "items": {
+                "$ref": "#/$defs/Datum"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "tuple"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "list": {
+              "items": {
+                "$ref": "#/$defs/Datum"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "list"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "map": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "$ref": "#/$defs/Datum"
+                  },
+                  {
+                    "$ref": "#/$defs/Datum"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "map"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set": {
+              "items": {
+                "$ref": "#/$defs/Datum"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "record": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/Datum"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/ErrorDatum"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/Handle"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "EffectIdentity": {
+      "additionalProperties": false,
+      "description": "Which wait of a run: one execution of a `perform` or a `sleep`.",
+      "properties": {
+        "loops": {
+          "description": "The loops the task was inside when it ran the site, outermost first,\nacross its active calls.",
+          "items": {
+            "$ref": "#/$defs/LoopIteration"
+          },
+          "type": "array"
+        },
+        "occurrence": {
+          "description": "How many times the task had run that site before, from 0.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `perform` or the `sleep`."
+        },
+        "task": {
+          "$ref": "#/$defs/TaskIdentity"
+        }
+      },
+      "required": [
+        "task",
+        "site",
+        "occurrence"
+      ],
+      "type": "object"
+    },
+    "Ended": {
+      "description": "How a task ended.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "returned": {
+              "$ref": "#/$defs/Value"
+            }
+          },
+          "required": [
+            "returned"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "raised": {
+              "$ref": "#/$defs/Value"
+            }
+          },
+          "required": [
+            "raised"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Entered": {
+      "description": "How control reached a `finally`, which is how it leaves when the block\ncompletes (`K-FORM-017`). A `throw` and a `return` carry a value, held\nin [`Held::departing`]; a `break` and a `continue` go to the innermost\nloop around the `try`.",
+      "enum": [
+        "normal",
+        "throw",
+        "return",
+        "break",
+        "continue"
+      ],
+      "type": "string"
+    },
+    "ErrorDatum": {
+      "additionalProperties": false,
+      "description": "An error value copied across the effect boundary.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/Datum"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message",
+        "data"
+      ],
+      "type": "object"
+    },
+    "ErrorValue": {
+      "additionalProperties": false,
+      "description": "An error value: what `throw` raises and `catch` binds.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/Value"
+        },
+        "kind": {
+          "description": "The error's kind: a kernel kind (`K-ERR-002`), one a library function\ndeclares, or one a program chose.",
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "message",
+        "data"
+      ],
+      "type": "object"
+    },
+    "Finally": {
+      "additionalProperties": false,
+      "description": "One `finally` block a call is running.",
+      "properties": {
+        "entered": {
+          "$ref": "#/$defs/Entered"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `try` statement."
+        }
+      },
+      "required": [
+        "site",
+        "entered"
+      ],
+      "type": "object"
+    },
+    "Float": {
+      "pattern": "^(nan|-?inf|-?(0|[1-9][0-9]*)\\.[0-9]+|-?[1-9](\\.[0-9]+)?e-?[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Handle": {
+      "additionalProperties": false,
+      "description": "A typed reference to a host resource or a host projection. The kernel\nreads neither field; a host gives them meaning.",
+      "properties": {
+        "id": {
+          "description": "The host's own identifier for the resource.",
+          "type": "string"
+        },
+        "kind": {
+          "description": "The handle's type, as the type grammar's `Handle(\"\u2026\")` names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "type": "object"
+    },
+    "Held": {
+      "additionalProperties": false,
+      "description": "The values a call's control state holds and no variable does.",
+      "properties": {
+        "arguments": {
+          "description": "The arguments of a call of a library function's body, which its\ncharge formula measures when the call ends (`K-CHG-003`).",
+          "items": {
+            "$ref": "#/$defs/Value"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "departing": {
+          "description": "The value each `finally` entered by a `throw` or a `return` leaves\nwith, outermost first.",
+          "items": {
+            "$ref": "#/$defs/Value"
+          },
+          "type": "array"
+        },
+        "iterated": {
+          "description": "What each `for` of the call iterates, outermost first: the list,\nmap or set, or the tuple whose elements the loop takes.",
+          "items": {
+            "$ref": "#/$defs/Value"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Identity": {
+      "description": "The thing an identity key names (`K-KEY-004`).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "object": {
+              "$ref": "#/$defs/ObjectId"
+            }
+          },
+          "required": [
+            "object"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "required": [
+            "task"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Incoming": {
+      "description": "What a ready task's pending statement continues with.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "The value of its action.",
+          "properties": {
+            "value": {
+              "$ref": "#/$defs/Value"
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A raise at its action: a list `join` that failed, a cancel.",
+          "properties": {
+            "raise": {
+              "$ref": "#/$defs/Value"
+            }
+          },
+          "required": [
+            "raise"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The result of this task, which has ended (`K-TASK-009`).",
+          "properties": {
+            "joined": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "required": [
+            "joined"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Integer": {
+      "pattern": "^(0|-?[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "JoinMode": {
+      "oneOf": [
+        {
+          "const": "all",
+          "description": "Every member has ended, or the first failure.",
+          "type": "string"
+        },
+        {
+          "const": "all_settled",
+          "description": "Every member has ended.",
+          "type": "string"
+        },
+        {
+          "const": "race",
+          "description": "The first member to end.",
+          "type": "string"
+        },
+        {
+          "const": "any",
+          "description": "The first member to succeed.",
+          "type": "string"
+        }
+      ]
+    },
+    "ListJoin": {
+      "additionalProperties": false,
+      "description": "A `join` on a list that has not been decided. Which members have ended\nis each member's own state, and when the join wakes is its place among\neach running member's joiners.",
+      "properties": {
+        "members": {
+          "items": {
+            "$ref": "#/$defs/TaskId"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "$ref": "#/$defs/JoinMode"
+        }
+      },
+      "required": [
+        "mode",
+        "members"
+      ],
+      "type": "object"
+    },
+    "Loop": {
+      "additionalProperties": false,
+      "description": "One loop a call is inside.",
+      "properties": {
+        "position": {
+          "description": "For a `for`: how many of the collection's elements the loop has\npassed. In a list or a tuple it is the next index; in a map or a\nset, the number of present entries at or before the one last\nvisited (`K-ITER-002`, `K-ITER-003`). Absent for a `while`.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `for` or the `while` (`K-SITE-003`)."
+        },
+        "started": {
+          "description": "How many iterations the loop has started. The one it is in is this\nless one (`K-EFF-008`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "site",
+        "started"
+      ],
+      "type": "object"
+    },
+    "LoopIteration": {
+      "additionalProperties": false,
+      "description": "One enclosing loop and the iteration it was on.",
+      "properties": {
+        "iteration": {
+          "description": "The iteration, from 0.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `for` or the `while`."
+        }
+      },
+      "required": [
+        "site",
+        "iteration"
+      ],
+      "type": "object"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "NumberToken": {
+      "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?([eE][+-]?[0-9]+)?$",
+      "type": "string"
+    },
+    "Object": {
+      "description": "What a heap object holds.\n\nA map, a set and a record list their contents in insertion order. A map\nkey and a set member are legal keys (`K-KEY-001`).",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "list": {
+              "items": {
+                "$ref": "#/$defs/Value"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "list"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "map": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "$ref": "#/$defs/Value"
+                  },
+                  {
+                    "$ref": "#/$defs/Value"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "map"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set": {
+              "items": {
+                "$ref": "#/$defs/Value"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "record": {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/Value"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "closure": {
+              "$ref": "#/$defs/ClosureObject"
+            }
+          },
+          "required": [
+            "closure"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A variable a closure shares with its defining scope (`K-CLO-001`).",
+          "properties": {
+            "variable": {
+              "$ref": "#/$defs/Value"
+            }
+          },
+          "required": [
+            "variable"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ObjectId": {
+      "description": "The identity of a heap object within one run.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "Occurrence": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "site": {
+          "$ref": "#/$defs/Site"
+        }
+      },
+      "required": [
+        "site",
+        "count"
+      ],
+      "type": "object"
+    },
+    "Outcome": {
+      "description": "How a wait ended.",
+      "oneOf": [
+        {
+          "enum": [
+            "elapsed"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "completed": {
+              "$ref": "#/$defs/Datum"
+            }
+          },
+          "required": [
+            "completed"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "failed": {
+              "$ref": "#/$defs/ErrorDatum"
+            }
+          },
+          "required": [
+            "failed"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ParkedCall": {
+      "additionalProperties": false,
+      "description": "An active call with the values its control state alone holds.",
+      "properties": {
+        "call": {
+          "$ref": "#/$defs/Call"
+        },
+        "held": {
+          "$ref": "#/$defs/Held"
+        }
+      },
+      "required": [
+        "call"
+      ],
+      "type": "object"
+    },
+    "ParkedTask": {
+      "additionalProperties": false,
+      "description": "A task with its active calls.",
+      "properties": {
+        "calls": {
+          "description": "The task's active calls, the outermost first. Empty once it ended.",
+          "items": {
+            "$ref": "#/$defs/ParkedCall"
+          },
+          "type": "array"
+        },
+        "handle": {
+          "$ref": "#/$defs/Task"
+        }
+      },
+      "required": [
+        "handle"
+      ],
+      "type": "object"
+    },
+    "Pause": {
+      "additionalProperties": false,
+      "description": "A sleep's length.",
+      "properties": {
+        "nanoseconds": {
+          "description": "Below one second.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "seconds": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seconds",
+        "nanoseconds"
+      ],
+      "type": "object"
+    },
+    "Perform": {
+      "additionalProperties": false,
+      "description": "One wait: a `perform` or a `sleep` a task is in.",
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/Request"
+        },
+        "state": {
+          "$ref": "#/$defs/PerformState"
+        },
+        "wait": {
+          "$ref": "#/$defs/WaitId"
+        }
+      },
+      "required": [
+        "wait",
+        "request",
+        "state"
+      ],
+      "type": "object"
+    },
+    "PerformState": {
+      "description": "How far a wait has come.",
+      "oneOf": [
+        {
+          "const": "requested",
+          "description": "Requested since the last park. The embedder has not seen it: the\nnext park hands it out.",
+          "type": "string"
+        },
+        {
+          "const": "admitted",
+          "description": "Handed out at a park, which the embedder admitted with the state\nit saved (`K-TASK-024`). Its outcome has not been delivered.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Its outcome is committed and delivered, and the task has not yet\nrun with it.",
+          "properties": {
+            "committed": {
+              "$ref": "#/$defs/Outcome"
+            }
+          },
+          "required": [
+            "committed"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "QualifiedName": {
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+      "type": "string"
+    },
+    "Request": {
+      "description": "What a wait asked for.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "effect": {
+              "additionalProperties": false,
+              "properties": {
+                "args": {
+                  "description": "The arguments, copied out of the run (`K-EFF-002`).",
+                  "items": {
+                    "$ref": "#/$defs/Datum"
+                  },
+                  "type": "array"
+                },
+                "effect": {
+                  "$ref": "#/$defs/QualifiedName"
+                },
+                "identity": {
+                  "$ref": "#/$defs/EffectIdentity"
+                }
+              },
+              "required": [
+                "identity",
+                "effect",
+                "args"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "effect"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sleep": {
+              "additionalProperties": false,
+              "properties": {
+                "duration": {
+                  "$ref": "#/$defs/Pause"
+                },
+                "identity": {
+                  "$ref": "#/$defs/EffectIdentity"
+                }
+              },
+              "required": [
+                "identity",
+                "duration"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "sleep"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Run": {
+      "additionalProperties": false,
+      "description": "What a parked run pins and what it has used: the part of the state\nthat belongs to no root.",
+      "properties": {
+        "charged": {
+          "description": "What the run has been charged, in charge units (`K-CHG-001`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "document": {
+          "$ref": "#/$defs/DocumentId",
+          "description": "The document the run executes (`K-ID-001`)."
+        },
+        "functions": {
+          "description": "Every library function the document's manifest lists. A function's\nidentity covers its charge formula and its guard.",
+          "items": {
+            "$ref": "#/$defs/FunctionId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "kernel": {
+          "description": "The kernel version the run executes under (`K-VER-001`). It owns\nthis schema.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objects_allocated": {
+          "description": "How many heap objects the run has allocated: the identity its next\nobject takes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ready": {
+          "description": "The tasks that are ready, in the order they run (`K-TASK-003`).",
+          "items": {
+            "$ref": "#/$defs/TaskId"
+          },
+          "type": "array"
+        },
+        "unreported": {
+          "description": "The withdrawn waits the next park reports (`K-MACH-003`), in the\norder they were withdrawn.",
+          "items": {
+            "$ref": "#/$defs/WaitId"
+          },
+          "type": "array"
+        },
+        "waits_issued": {
+          "description": "How many waits the run has issued: the number its next wait takes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "withdrawn": {
+          "description": "Every wait the run withdrew after handing it out. An outcome that\narrives for one is dropped (`K-MACH-004`).",
+          "items": {
+            "$ref": "#/$defs/WaitId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "kernel",
+        "document",
+        "charged",
+        "objects_allocated",
+        "waits_issued"
+      ],
+      "type": "object"
+    },
+    "Site": {
+      "additionalProperties": false,
+      "description": "A node's address: the code it belongs to and the chain of\n[`Node::children`] indexes that reaches it from that code's body.\n\nA site is derived from the document and is never written by a host\n(`K-ID-004`). An empty chain addresses the body itself.",
+      "properties": {
+        "path": {
+          "items": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "unit": {
+          "$ref": "#/$defs/Unit"
+        }
+      },
+      "required": [
+        "unit"
+      ],
+      "type": "object"
+    },
+    "SpawnIdentity": {
+      "additionalProperties": false,
+      "properties": {
+        "occurrence": {
+          "description": "How many times the parent had run that site before, from 0.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parent": {
+          "$ref": "#/$defs/TaskIdentity",
+          "description": "The task that ran the `spawn`."
+        },
+        "site": {
+          "$ref": "#/$defs/Site",
+          "description": "The site of the `spawn`."
+        }
+      },
+      "required": [
+        "parent",
+        "site",
+        "occurrence"
+      ],
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "description": "A task's handle: who the task is, what it waits on or how it ended,\nand who waits on it.",
+      "properties": {
+        "failed": {
+          "description": "The task ended in an error. It outlives the error itself, which is\ndropped once no handle reaches the task.",
+          "type": "boolean"
+        },
+        "identity": {
+          "$ref": "#/$defs/TaskIdentity"
+        },
+        "joiners": {
+          "description": "The tasks waiting in a `join` on this handle, alone or in a list, in\nthe order their joins began: its ending wakes them in this order\n(`K-TASK-008`).",
+          "items": {
+            "$ref": "#/$defs/TaskId"
+          },
+          "type": "array"
+        },
+        "observed": {
+          "description": "A `join` on the handle raised the task's error (`K-TASK-016`).",
+          "type": "boolean"
+        },
+        "occurrences": {
+          "description": "How many times the task has run each `spawn`, `perform` and\n`sleep`, by the action's site, in site order (`K-SITE-002`).",
+          "items": {
+            "$ref": "#/$defs/Occurrence"
+          },
+          "type": "array"
+        },
+        "passed": {
+          "description": "The task is or was a member of a list `join` that has returned or\nraised: its error counts as observed and the run's end cancels it\n(`K-TASK-016`, `K-TASK-018`).",
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskState"
+        }
+      },
+      "required": [
+        "identity",
+        "state",
+        "observed",
+        "passed",
+        "failed"
+      ],
+      "type": "object"
+    },
+    "TaskId": {
+      "description": "A task's handle within one run. `main` is task 0 and every `spawn` takes\nthe next number (`K-TASK-002`).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "TaskIdentity": {
+      "description": "Which task of a run: `main`, or the task one execution of a `spawn`\nstarted.",
+      "oneOf": [
+        {
+          "enum": [
+            "main"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "spawned": {
+              "$ref": "#/$defs/SpawnIdentity"
+            }
+          },
+          "required": [
+            "spawned"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "TaskState": {
+      "description": "Where a task is in its life.",
+      "oneOf": [
+        {
+          "const": "ready",
+          "description": "Ready: its pending statement runs next.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Ready: its pending statement continues with this.",
+          "properties": {
+            "resuming": {
+              "$ref": "#/$defs/Incoming"
+            }
+          },
+          "required": [
+            "resuming"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "In a `perform` or a `sleep`. The task is ready once the wait's\noutcome is committed, and waits until then.",
+          "properties": {
+            "performing": {
+              "$ref": "#/$defs/Perform"
+            }
+          },
+          "required": [
+            "performing"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Waiting in a `join` on one handle.",
+          "properties": {
+            "joining": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "required": [
+            "joining"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Waiting in a `join` on a list.",
+          "properties": {
+            "joining_many": {
+              "$ref": "#/$defs/ListJoin"
+            }
+          },
+          "required": [
+            "joining_many"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "ended": {
+              "$ref": "#/$defs/Ended"
+            }
+          },
+          "required": [
+            "ended"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Timestamp": {
+      "$ref": "#/$defs/Integer",
+      "description": "An instant: nanoseconds since 1970-01-01T00:00:00Z, with no zone\n(`K-VAL-009`). Stored as its decimal spelling."
+    },
+    "Unit": {
+      "description": "The code a node belongs to.",
+      "oneOf": [
+        {
+          "const": "main",
+          "description": "The document's `main`.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A declared function of the document.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The kernel-code body of a library function.",
+          "properties": {
+            "library": {
+              "$ref": "#/$defs/FunctionId"
+            }
+          },
+          "required": [
+            "library"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Value": {
+      "description": "A kernel value: immutable data in place, or the identity of a heap\nobject.\n\nCloning is cheap: text, bytes, tuples and errors are shared.",
+      "oneOf": [
+        {
+          "enum": [
+            "null",
+            "absent"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bool": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "bool"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "int": {
+              "$ref": "#/$defs/Integer"
+            }
+          },
+          "required": [
+            "int"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "float": {
+              "$ref": "#/$defs/Float"
+            }
+          },
+          "required": [
+            "float"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "$ref": "#/$defs/Bytes"
+            }
+          },
+          "required": [
+            "bytes"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "timestamp": {
+              "$ref": "#/$defs/Timestamp"
+            }
+          },
+          "required": [
+            "timestamp"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "tuple": {
+              "items": {
+                "$ref": "#/$defs/Value"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "tuple"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "list": {
+              "$ref": "#/$defs/ObjectId"
+            }
+          },
+          "required": [
+            "list"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "map": {
+              "$ref": "#/$defs/ObjectId"
+            }
+          },
+          "required": [
+            "map"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set": {
+              "$ref": "#/$defs/ObjectId"
+            }
+          },
+          "required": [
+            "set"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "record": {
+              "$ref": "#/$defs/ObjectId"
+            }
+          },
+          "required": [
+            "record"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "closure": {
+              "$ref": "#/$defs/ObjectId"
+            }
+          },
+          "required": [
+            "closure"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/$defs/ErrorValue"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "required": [
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A closed declared function of the document, by name.",
+          "properties": {
+            "function": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "function"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "handle": {
+              "$ref": "#/$defs/Handle"
+            }
+          },
+          "required": [
+            "handle"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The identity of a heap object or a task, as `ref(x)` takes it: an\nimmutable value that is a legal map key (`K-KEY-004`).",
+          "properties": {
+            "ref": {
+              "$ref": "#/$defs/Identity"
+            }
+          },
+          "required": [
+            "ref"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WaitId": {
+      "description": "One wait a machine handed out, within one run. Numbers are taken in\nrequest order from 0.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-parked-run/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A parked run, whole: what it pins, its meters, its tasks and every\nheap object they reach.\n\nIt is stored as one document, or as the parts [`ParkedRun::save`]\nwrites, of which a later save rewrites only those that changed.",
+  "properties": {
+    "objects": {
+      "additionalProperties": false,
+      "description": "Every heap object a root reaches, by identity.",
+      "patternProperties": {
+        "^\\d+$": {
+          "$ref": "#/$defs/Object"
+        }
+      },
+      "type": "object"
+    },
+    "run": {
+      "$ref": "#/$defs/Run"
+    },
+    "session": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Value"
+      },
+      "description": "The session's bindings (`K-SES-001`). Empty for a run of an entry.",
+      "type": "object"
+    },
+    "tasks": {
+      "description": "Every task the run has started, by handle number: `main` first.",
+      "items": {
+        "$ref": "#/$defs/ParkedTask"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "run",
+    "tasks"
+  ],
+  "title": "ParkedRun",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

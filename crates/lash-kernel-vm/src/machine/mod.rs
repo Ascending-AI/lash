@@ -8,15 +8,18 @@
 mod actions;
 mod eval;
 mod exec;
+mod parked;
 mod session;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, ErrorValue, Identity, JoinMode, Name, ObjectId, TaskId, TaskIdentity, Value,
+    Datum, DocumentId, ErrorValue, Identity, JoinMode, Name, ObjectId, TaskId, TaskIdentity, Value,
 };
+use lash_kernel_state::{Baseline, ParkedRun, Saved};
 
+use crate::Layout;
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
 use crate::data::{Raised, copy_out};
 use crate::heap::{Heap, Obj, object_bytes, refs, value_bytes};
@@ -25,7 +28,6 @@ use crate::interface::{
     Machine, MachineError, Meters, Outcome, Park, Program, Request, RunError, Start, StartError,
     Step, WaitId,
 };
-use crate::{Layout, Unparked};
 
 /// What a frame is accounted before its variables.
 const FRAME_BYTES: u64 = 64;
@@ -182,7 +184,8 @@ enum TaskState {
 enum Incoming {
     Value(Value),
     Raise(Value),
-    Outcome(Outcome),
+    /// The outcome of the wait the task was in.
+    Outcome(Box<Answered>),
     /// The result of this task, which has ended.
     Join(TaskId),
 }
@@ -192,6 +195,15 @@ enum Incoming {
 enum Joiner {
     Single(TaskId),
     List(u64),
+}
+
+/// A wait whose outcome has been delivered and whose task has not yet run
+/// with it.
+#[derive(Debug)]
+struct Answered {
+    wait: WaitId,
+    request: Request,
+    outcome: Outcome,
 }
 
 #[derive(Debug)]
@@ -223,7 +235,10 @@ struct ListJoin {
 #[derive(Debug)]
 struct PendingWait {
     task: TaskId,
-    sleep: bool,
+    /// What the wait asked for. The embedder holds it too once it is
+    /// handed out; the machine keeps it so that a parked run says what
+    /// each task waits on.
+    request: Request,
     handed_out: bool,
 }
 
@@ -231,6 +246,9 @@ struct PendingWait {
 /// `run` and `deliver`.
 pub struct KernelMachine {
     program: Program,
+    /// The document's identity, which a parked run pins, once it has been
+    /// taken.
+    document: Option<DocumentId>,
     exe: Arc<Executable>,
     bounds: Bounds,
     heap: Heap,
@@ -241,8 +259,9 @@ pub struct KernelMachine {
     next_join: u64,
     waits: BTreeMap<WaitId, PendingWait>,
     next_wait: u64,
-    /// The effects and sleeps requested since the last park.
-    requests: Vec<Request>,
+    /// The effects and sleeps requested since the last park, in request
+    /// order.
+    requests: Vec<WaitId>,
     /// The waits withdrawn since the last park, and every one ever.
     withdrawn: Vec<WaitId>,
     withdrawn_ever: BTreeSet<WaitId>,
@@ -303,6 +322,28 @@ impl KernelMachine {
         layout: Layout,
     ) -> Result<Self, StartError> {
         session::start(program, bounds, start, layout)
+    }
+
+    /// Rebuilds a run from a parked state against an executable laid out
+    /// as `layout` says. A test uses it to show that nothing saved names a
+    /// position in an executable; [`Machine::import`] is layout 0.
+    pub fn import_with_layout(
+        program: Program,
+        bounds: Bounds,
+        parked: ParkedRun,
+        layout: Layout,
+    ) -> Result<Self, ImportError> {
+        parked::import(program, bounds, parked, layout)
+    }
+
+    /// Writes the run's state at this safe point as a header and one
+    /// fragment per root, rewriting only the fragments that changed since
+    /// `since`: the baseline of this machine's last save, or the one
+    /// `ParkedRun::load` returned for the state it was imported from.
+    ///
+    /// [`Machine::export`] gives the same state whole.
+    pub fn save(&mut self, since: &Baseline) -> Result<Saved, ExportError> {
+        parked::save(self, since)
     }
 
     fn task(&mut self, task: TaskId) -> Result<&mut Task, Halt> {
@@ -584,17 +625,15 @@ impl KernelMachine {
         if host.cancel_requested() {
             return self.finish_with(End::Cancelled);
         }
-        for request in &self.requests {
-            let wait = match request {
-                Request::Effect(effect) => effect.wait,
-                Request::Sleep(sleep) => sleep.wait,
-            };
+        let mut requests = Vec::with_capacity(self.requests.len());
+        for wait in std::mem::take(&mut self.requests) {
             if let Some(pending) = self.waits.get_mut(&wait) {
                 pending.handed_out = true;
+                requests.push(pending.request.clone());
             }
         }
         Step::Parked(Park {
-            requests: std::mem::take(&mut self.requests),
+            requests,
             withdrawn: std::mem::take(&mut self.withdrawn),
         })
     }
@@ -606,7 +645,7 @@ impl KernelMachine {
 }
 
 impl Machine for KernelMachine {
-    type Parked = Unparked;
+    type Parked = ParkedRun;
 
     fn start(program: Program, bounds: Bounds, start: Start) -> Result<Self, StartError> {
         Self::start_with_layout(program, bounds, start, Layout::default())
@@ -675,28 +714,30 @@ impl Machine for KernelMachine {
         if !pending.handed_out {
             return Err(DeliverError::UnknownWait { wait });
         }
-        if pending.sleep != matches!(outcome, Outcome::Elapsed) {
+        if matches!(pending.request, Request::Sleep(_)) != matches!(outcome, Outcome::Elapsed) {
             return Err(DeliverError::WrongOutcome { wait });
         }
-        let task = pending.task;
-        self.waits.remove(&wait);
+        let Some(PendingWait { task, request, .. }) = self.waits.remove(&wait) else {
+            return Err(DeliverError::UnknownWait { wait });
+        };
         if let Some(woken) = self.tasks.get_mut(task.0 as usize) {
             woken.state = TaskState::Ready;
-            woken.incoming = Some(Incoming::Outcome(outcome));
+            woken.incoming = Some(Incoming::Outcome(Box::new(Answered {
+                wait,
+                request,
+                outcome,
+            })));
             self.ready.push_back(task);
         }
         Ok(Delivered::Accepted)
     }
 
     fn export(&mut self) -> Result<Self::Parked, ExportError> {
-        if self.ended {
-            return Err(ExportError::Ended);
-        }
-        Err(ExportError::NoEncoding)
+        parked::export(self)
     }
 
-    fn import(_: Program, _: Bounds, parked: Self::Parked) -> Result<Self, ImportError> {
-        match parked {}
+    fn import(program: Program, bounds: Bounds, parked: Self::Parked) -> Result<Self, ImportError> {
+        Self::import_with_layout(program, bounds, parked, Layout::default())
     }
 
     fn meters(&self) -> Meters {

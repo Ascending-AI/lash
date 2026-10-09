@@ -6,10 +6,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, ErrorDatum, ErrorValue, FunctionId, FunctionRegistry, Handle, Integer, NativeCall,
-    NativeError, NativeFunction, NumberToken, Object, Site, Timestamp, Unit, Value,
+    Datum, Document, ErrorDatum, ErrorValue, FunctionId, FunctionRegistry, Handle, Integer,
+    NativeCall, NativeError, NativeFunction, NumberToken, Object, Site, Timestamp, Unit, Value,
     parse_definition, parse_document,
 };
+use lash_kernel_state::{Baseline, ParkedRun};
 
 use crate::{
     Bounds, Delivered, End, Host, KernelMachine, Layout, Machine, Outcome, Program, Request,
@@ -193,6 +194,16 @@ pub(crate) fn library(native_twice: bool) -> Library {
     )
     .unwrap();
     ids.insert("each.twice", registry.register(each, None).unwrap());
+    // Charged by the size of what it maps, when it returns.
+    let map = parse_definition(&format!(
+        "function each.map(f: Fn(x: Any) -> Any, xs: Any) -> Any\nkernel 1\ncharge size(xs)\n\
+         use list.len = @{}\n\
+         body {{ let out = [] for x in xs {{ let y = apply f(x) set out[list.len(out)] = y }} \
+         return out }}\n",
+        ids["list.len"]
+    ))
+    .unwrap();
+    ids.insert("each.map", registry.register(map, None).unwrap());
     let mut header = String::from(
         "kernel 1\neffect echo(x?: Any) -> Any\neffect boom(x?: Any) -> Any\n\
          effect num(x: Text) -> Any\n",
@@ -284,6 +295,8 @@ pub(crate) struct Embedder {
     pub(crate) machine: KernelMachine,
     pub(crate) world: World,
     pub(crate) library: Library,
+    document: Arc<Document>,
+    bounds: Bounds,
     /// Every request the machine handed out, in order.
     pub(crate) requests: Vec<Request>,
     /// The requests handed out and not yet answered.
@@ -341,8 +354,9 @@ impl Embedder {
         let library = library(setup.native_twice);
         let text = format!("numbers {}\n{}{text}", setup.numbers, library.header);
         let document = parse_document(&text).unwrap_or_else(|error| panic!("{error}\n{text}"));
+        let document = Arc::new(document);
         let program = Program {
-            document: Arc::new(document),
+            document: Arc::clone(&document),
             registry: Arc::clone(&library.registry),
         };
         let machine =
@@ -352,11 +366,55 @@ impl Embedder {
             machine,
             world: World::default(),
             library,
+            document,
+            bounds: setup.bounds,
             requests: Vec::new(),
             pending: Vec::new(),
             withdrawn: Vec::new(),
             slice: setup.slice,
         }
+    }
+
+    /// The run's document with a registry built afresh, in which
+    /// `pair.twice` runs natively or not.
+    pub(crate) fn program(&self, native_twice: bool) -> (Program, Library) {
+        let library = library(native_twice);
+        let program = Program {
+            document: Arc::clone(&self.document),
+            registry: Arc::clone(&library.registry),
+        };
+        (program, library)
+    }
+
+    /// An embedder that resumes `parked` in a machine built afresh, with
+    /// this one's pending requests and nothing printed.
+    pub(crate) fn resumed(&self, parked: ParkedRun) -> Result<Self, crate::ImportError> {
+        let (program, library) = self.program(true);
+        Ok(Self {
+            machine: KernelMachine::import(program, self.bounds, parked)?,
+            world: World::default(),
+            library,
+            document: Arc::clone(&self.document),
+            bounds: self.bounds,
+            requests: Vec::new(),
+            pending: self.pending.clone(),
+            withdrawn: Vec::new(),
+            slice: self.slice,
+        })
+    }
+
+    /// Parks the run and resumes it in another machine: the state is
+    /// exported, written as its parts, read back, and imported against an
+    /// executable compiled afresh under `layout`.
+    pub(crate) fn relay(&mut self, layout: Layout, native_twice: bool) {
+        let parked = self.machine.export().unwrap();
+        let saved = parked.save(&Baseline::default()).unwrap();
+        let (loaded, _) = ParkedRun::load(&saved.header, saved.changed()).unwrap();
+        assert_eq!(loaded, parked);
+        let (program, library) = self.program(native_twice);
+        self.machine =
+            KernelMachine::import_with_layout(program, self.bounds, loaded, layout).unwrap();
+        self.library = library;
     }
 
     /// Runs the machine once and keeps what a park hands out.

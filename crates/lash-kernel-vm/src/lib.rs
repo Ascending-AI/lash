@@ -8,6 +8,10 @@
 //! the [`Host`] the embedder passes to [`Machine::run`]. The machine parks;
 //! the embedder commits.
 //!
+//! A run that is not executing is a `ParkedRun` of `lash-kernel-state`:
+//! [`Machine::export`] writes one at any safe point and [`Machine::import`]
+//! resumes it against an executable compiled afresh.
+//!
 //! [`KernelMachine`] is the machine; [`Machine`] is the interface an embedder
 //! and the conformance harness drive it through. Its rules are the `K-MACH` rules of
 //! `docs/kernel/semantics.md`.
@@ -31,10 +35,3 @@ pub use interface::{
     ExportError, Finished, Host, ImportError, Machine, MachineError, Meters, Outcome, Park,
     Program, Request, RunError, SleepRequest, Start, StartError, Step, Target, WaitId,
 };
-
-/// The parked state of [`KernelMachine`]: none yet. The machine runs a
-/// document from its start to its end; it writes and reads no parked
-/// state, so this type has no value and [`Machine::import`] cannot be
-/// called.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Unparked {}

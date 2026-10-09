@@ -2845,12 +2845,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "lash-kernel-state"
+version = "0.0.0-dev"
+dependencies = [
+ "lash-kernel-doc",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "lash-kernel-vm"
 version = "0.0.0-dev"
 dependencies = [
  "lash-kernel-doc",
+ "lash-kernel-state",
  "num-bigint",
  "num-traits",
+ "serde_json",
  "thiserror",
 ]
 

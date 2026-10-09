@@ -163,6 +163,8 @@ impl KernelMachine {
                 Completion::Break | Completion::Continue => {}
             }
             let frame = self.frame(task)?;
+            // The statement the call stood in is left behind.
+            frame.awaiting = None;
             let Some(control) = frame.control.last_mut() else {
                 let result = match departure {
                     Completion::Return(value) => Ok(value),
@@ -654,8 +656,14 @@ impl KernelMachine {
             Incoming::Value(value) => Ok(value),
             Incoming::Raise(value) => Err(Interrupt::Raise(value)),
             Incoming::Join(joined) => self.join_result(joined),
-            Incoming::Outcome(Outcome::Elapsed) => Ok(Value::Null),
-            Incoming::Outcome(Outcome::Failed(error)) => {
+            Incoming::Outcome(answered) => self.resume_outcome(task, exe, answered.outcome),
+        }
+    }
+
+    fn resume_outcome(&mut self, task: TaskId, exe: &Executable, outcome: Outcome) -> Eval<Value> {
+        match outcome {
+            Outcome::Elapsed => Ok(Value::Null),
+            Outcome::Failed(error) => {
                 let datum = lash_kernel_doc::Datum::Error(Box::new(error));
                 Err(Interrupt::Raise(self.decode(
                     exe,
@@ -663,7 +671,7 @@ impl KernelMachine {
                     &lash_kernel_doc::Type::Any,
                 )?))
             }
-            Incoming::Outcome(Outcome::Completed(datum)) => {
+            Outcome::Completed(datum) => {
                 let awaiting = self.frame(task)?.awaiting;
                 let ty = awaiting.and_then(|stmt| match &exe.stmts[stmt.0 as usize] {
                     Stmt::Let {

@@ -28,14 +28,17 @@ pub(super) fn start(
         }
     }
     validate_document(&program.document, program.registry.as_ref())?;
-    let exe = compile(&program.document, &program.registry, layout).map_err(|missing| {
-        StartError::MissingFunction {
-            function: missing.0,
-        }
-    })?;
+    let in_flight = BTreeSet::new();
+    let exe =
+        compile(&program.document, &program.registry, layout, &in_flight).map_err(|missing| {
+            StartError::MissingFunction {
+                function: missing.0,
+            }
+        })?;
     let exe = Arc::new(exe);
     let mut machine = KernelMachine {
         heap: Heap::new(bounds.memory),
+        document: None,
         exe: Arc::clone(&exe),
         bounds,
         tasks: vec![Task {

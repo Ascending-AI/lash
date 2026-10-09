@@ -132,6 +132,12 @@ impl Table {
             .map(|(sequence, (key, _))| (*sequence, key))
     }
 
+    /// How many entries sit at or before sequence number `last`: a loop's
+    /// position as a count, which outlives the numbering.
+    pub(crate) fn passed(&self, last: Option<u64>) -> u64 {
+        last.map_or(0, |last| self.entries.range(..=last).count() as u64)
+    }
+
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&Value, &Value)> {
         self.entries.values().map(|(key, value)| (key, value))
     }
@@ -220,10 +226,21 @@ pub(crate) fn refs(value: &Value, out: &mut Vec<Identity>) {
     }
 }
 
+/// An object and when it was last written.
+#[derive(Debug)]
+struct Held {
+    object: Obj,
+    /// The heap's write clock at the object's last write: a save rewrites
+    /// the fragment of an object whose stamp has moved.
+    written: u64,
+}
+
 #[derive(Debug)]
 pub(crate) struct Heap {
-    objects: BTreeMap<u64, Obj>,
+    objects: BTreeMap<u64, Held>,
     next: u64,
+    /// Counts writes: every allocation and every mutable borrow.
+    clock: u64,
     /// The accounted memory: exact after a collection, an upper bound of
     /// what is live between two.
     pub(crate) memory: u64,
@@ -236,25 +253,67 @@ impl Heap {
         Self {
             objects: BTreeMap::new(),
             next: 0,
+            clock: 0,
             memory: 0,
             collect_at: bound.min(MIN_COLLECT_BYTES),
         }
     }
 
     pub(crate) fn get(&self, id: ObjectId) -> Option<&Obj> {
-        self.objects.get(&id.0)
+        self.objects.get(&id.0).map(|held| &held.object)
     }
 
+    /// Borrows an object to write it, and stamps it written.
     pub(crate) fn get_mut(&mut self, id: ObjectId) -> Option<&mut Obj> {
-        self.objects.get_mut(&id.0)
+        let held = self.objects.get_mut(&id.0)?;
+        self.clock += 1;
+        held.written = self.clock;
+        Some(&mut held.object)
     }
 
     /// Stores an object. The caller has accounted its bytes.
     pub(crate) fn insert(&mut self, object: Obj) -> ObjectId {
         let id = self.next;
         self.next += 1;
-        self.objects.insert(id, object);
+        self.clock += 1;
+        let written = self.clock;
+        self.objects.insert(id, Held { object, written });
         ObjectId(id)
+    }
+
+    /// Puts back an object of a parked run under the identity it had,
+    /// unwritten: stamp 0 is what a loaded baseline holds for it. Returns
+    /// whether the identity was free.
+    pub(crate) fn restore(&mut self, id: ObjectId, object: Obj) -> bool {
+        let held = Held { object, written: 0 };
+        self.objects.insert(id.0, held).is_none()
+    }
+
+    /// How many objects the run has allocated: the next identity.
+    pub(crate) fn allocated(&self) -> u64 {
+        self.next
+    }
+
+    /// Sets the next identity, when a parked run is put back. Returns
+    /// whether every object the heap holds is below it.
+    pub(crate) fn set_allocated(&mut self, allocated: u64) -> bool {
+        self.next = allocated;
+        self.objects
+            .keys()
+            .next_back()
+            .is_none_or(|last| *last < allocated)
+    }
+
+    /// Every object the heap holds, ascending by identity.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (ObjectId, &Obj)> {
+        self.objects
+            .iter()
+            .map(|(id, held)| (ObjectId(*id), &held.object))
+    }
+
+    /// The write stamp of an object.
+    pub(crate) fn written(&self, id: ObjectId) -> u64 {
+        self.objects.get(&id.0).map_or(0, |held| held.written)
     }
 
     pub(crate) fn list(&self, id: ObjectId) -> Option<&Vec<Value>> {
@@ -305,7 +364,7 @@ impl Heap {
         mut seeds: Vec<Identity>,
         task: &mut dyn FnMut(TaskId, &mut Vec<Identity>),
     ) -> u64 {
-        let mut live: BTreeMap<u64, Obj> = BTreeMap::new();
+        let mut live: BTreeMap<u64, Held> = BTreeMap::new();
         let mut bytes = 0u64;
         while let Some(seed) = seeds.pop() {
             let id = match seed {
@@ -315,11 +374,11 @@ impl Heap {
                     continue;
                 }
             };
-            let Some(object) = self.objects.remove(&id.0) else {
+            let Some(held) = self.objects.remove(&id.0) else {
                 continue;
             };
-            bytes = bytes.saturating_add(object_bytes(&object));
-            match &object {
+            bytes = bytes.saturating_add(object_bytes(&held.object));
+            match &held.object {
                 Obj::List(items) => items.iter().for_each(|item| refs(item, &mut seeds)),
                 Obj::Map(table) | Obj::Set(table) => {
                     for (key, value) in table.iter() {
@@ -333,7 +392,7 @@ impl Heap {
                 }
                 Obj::Variable(value) => refs(value, &mut seeds),
             }
-            live.insert(id.0, object);
+            live.insert(id.0, held);
         }
         self.objects = live;
         bytes

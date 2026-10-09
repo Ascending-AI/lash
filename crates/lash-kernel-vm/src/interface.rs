@@ -117,10 +117,7 @@ pub trait Host {
     fn cancel_requested(&mut self) -> bool;
 }
 
-/// One wait the machine handed out, within one run. Numbers are taken in
-/// request order from 0 and are part of the parked state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct WaitId(pub u64);
+pub use lash_kernel_state::WaitId;
 
 /// Something a task asked for and waits on.
 #[derive(Clone, Debug, PartialEq)]
@@ -281,15 +278,18 @@ pub enum MachineError {
 pub enum ExportError {
     #[error("the run has ended; there is nothing to park")]
     Ended,
-    /// The machine has no parked-state encoding.
-    #[error("this machine cannot write a parked state")]
-    NoEncoding,
+    /// The machine found its own state inconsistent: a defect in the
+    /// machine, never in the document.
+    #[error("the machine is in a state it cannot write: {problem}")]
+    Fault { problem: String },
 }
 
 /// A parked state the machine refuses to resume.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ImportError {
+    #[error("the document is not admitted: {0}")]
+    NotAdmitted(#[from] Invalid),
     #[error("the state was parked under document {parked}, not {given}")]
     DocumentMismatch {
         parked: DocumentId,
@@ -313,7 +313,8 @@ pub enum ImportError {
 /// The conformance harness runs its corpus against any implementation of
 /// this trait.
 pub trait Machine: Sized {
-    /// The parked state this machine writes and reads: the schema of
+    /// The parked state this machine writes and reads: for
+    /// [`KernelMachine`](crate::KernelMachine), the `ParkedRun` of
     /// `lash-kernel-state`.
     type Parked;
 

@@ -1,0 +1,211 @@
+{
+  "$defs": {
+    "DocumentId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "FunctionId": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "Name": {
+      "description": "A variable, parameter or declared-function name.\n\nAny text is a name; the kernel gives none of them meaning. Structural\nvalidation refuses the empty name.",
+      "type": "string"
+    },
+    "Root": {
+      "description": "A root of the saved state: what one fragment is of.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A session binding, by name.",
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/Name"
+            }
+          },
+          "required": [
+            "session"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A task's handle.",
+          "properties": {
+            "task": {
+              "$ref": "#/$defs/TaskId"
+            }
+          },
+          "required": [
+            "task"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The bindings and position of a task's active call; depth 0 is the\noutermost.",
+          "properties": {
+            "call": {
+              "additionalProperties": false,
+              "properties": {
+                "depth": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "task": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "task",
+                "depth"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "call"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The values that call's control state alone holds.",
+          "properties": {
+            "held": {
+              "additionalProperties": false,
+              "properties": {
+                "depth": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "task": {
+                  "$ref": "#/$defs/TaskId"
+                }
+              },
+              "required": [
+                "task",
+                "depth"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "held"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Run": {
+      "additionalProperties": false,
+      "description": "What a parked run pins and what it has used: the part of the state\nthat belongs to no root.",
+      "properties": {
+        "charged": {
+          "description": "What the run has been charged, in charge units (`K-CHG-001`).",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "document": {
+          "$ref": "#/$defs/DocumentId",
+          "description": "The document the run executes (`K-ID-001`)."
+        },
+        "functions": {
+          "description": "Every library function the document's manifest lists. A function's\nidentity covers its charge formula and its guard.",
+          "items": {
+            "$ref": "#/$defs/FunctionId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "kernel": {
+          "description": "The kernel version the run executes under (`K-VER-001`). It owns\nthis schema.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "objects_allocated": {
+          "description": "How many heap objects the run has allocated: the identity its next\nobject takes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ready": {
+          "description": "The tasks that are ready, in the order they run (`K-TASK-003`).",
+          "items": {
+            "$ref": "#/$defs/TaskId"
+          },
+          "type": "array"
+        },
+        "unreported": {
+          "description": "The withdrawn waits the next park reports (`K-MACH-003`), in the\norder they were withdrawn.",
+          "items": {
+            "$ref": "#/$defs/WaitId"
+          },
+          "type": "array"
+        },
+        "waits_issued": {
+          "description": "How many waits the run has issued: the number its next wait takes.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "withdrawn": {
+          "description": "Every wait the run withdrew after handing it out. An outcome that\narrives for one is dropped (`K-MACH-004`).",
+          "items": {
+            "$ref": "#/$defs/WaitId"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "kernel",
+        "document",
+        "charged",
+        "objects_allocated",
+        "waits_issued"
+      ],
+      "type": "object"
+    },
+    "TaskId": {
+      "description": "A task's handle within one run. `main` is task 0 and every `spawn` takes\nthe next number (`K-TASK-002`).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "WaitId": {
+      "description": "One wait a machine handed out, within one run. Numbers are taken in\nrequest order from 0.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "$id": "https://lash.dev/schemas/kernel-parked-header/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The stored header: the run's pins and meters, and every root in the\norder ownership is decided in. It is written at every save.",
+  "properties": {
+    "roots": {
+      "description": "The session bindings by name, then each task by handle number: its\nhandle, then each of its calls from the outermost, a call's\nbindings before its held values.",
+      "items": {
+        "$ref": "#/$defs/Root"
+      },
+      "type": "array"
+    },
+    "run": {
+      "$ref": "#/$defs/Run"
+    }
+  },
+  "required": [
+    "run",
+    "roots"
+  ],
+  "title": "Header",
+  "type": "object",
+  "x-lash-schema-version": 1,
+  "x-lash-version-constant": "KERNEL_VERSION"
+}

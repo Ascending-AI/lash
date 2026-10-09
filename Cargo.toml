@@ -52,6 +52,7 @@ members = [
     "crates/lash-kernel-doc",
     "crates/lash-kernel-edit",
     "crates/lash-kernel-lib",
+    "crates/lash-kernel-state",
     "crates/lash-kernel-vm",
     "crates/lash-ext-regex-ecma",
     "examples/agent-workbench",
@@ -323,6 +324,7 @@ lash-kernel-check = { path = "crates/lash-kernel-check", version = "=0.0.0-dev" 
 lash-kernel-dialect = { path = "crates/lash-kernel-dialect", version = "=0.0.0-dev" }
 lash-kernel-doc = { path = "crates/lash-kernel-doc", version = "=0.0.0-dev" }
 lash-kernel-edit = { path = "crates/lash-kernel-edit", version = "=0.0.0-dev" }
+lash-kernel-state = { path = "crates/lash-kernel-state", version = "=0.0.0-dev" }
 lash-kernel-vm = { path = "crates/lash-kernel-vm", version = "=0.0.0-dev" }
 lash-ext-regex-ecma = { path = "crates/lash-ext-regex-ecma", version = "=0.0.0-dev" }
 swc_common = "=25.0.0"

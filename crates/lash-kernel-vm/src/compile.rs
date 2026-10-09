@@ -11,7 +11,7 @@
 //! identity or charge may depend on it; the laws compile one document under
 //! several layouts and compare the runs.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_kernel_doc as doc;
@@ -47,11 +47,17 @@ pub(crate) struct Executable {
     pub(crate) libs: Vec<Lib>,
     pub(crate) main: CodeId,
     pub(crate) declared: BTreeMap<Name, CodeId>,
+    /// Each function body by its site, and each block by its own: how a
+    /// parked run's coordinates find their place in this layout.
+    pub(crate) code_at: BTreeMap<Site, CodeId>,
+    pub(crate) block_at: BTreeMap<Site, BlockId>,
 }
 
 /// One function body: `main`, a declared function, a library body or a
 /// closure.
 pub(crate) struct Code {
+    /// The site of the body: a unit's, or a closure expression's child.
+    pub(crate) site: Site,
     pub(crate) params: Vec<Slot>,
     pub(crate) body: BlockId,
     pub(crate) slots: Vec<SlotInfo>,
@@ -66,6 +72,10 @@ pub(crate) struct Code {
 
 pub(crate) struct SlotInfo {
     pub(crate) name: Name,
+    /// The node that declares the variable: its `let`, the block it is a
+    /// parameter, a loop binding or a `catch` binding of, or, for a
+    /// captured variable, the closure's body.
+    pub(crate) declared: Site,
     /// A closure shares the variable, so it lives in a heap cell.
     pub(crate) shared: bool,
 }
@@ -78,6 +88,7 @@ pub(crate) struct Capture {
 }
 
 pub(crate) struct Block {
+    pub(crate) site: Site,
     pub(crate) stmts: Vec<StmtId>,
     /// The variables the block declares; they end with it.
     pub(crate) declares: Vec<Slot>,
@@ -135,6 +146,7 @@ pub(crate) enum Stmt {
     Continue,
     Return(Expr),
     Try {
+        site: Site,
         body: BlockId,
         catch: Option<(Slot, BlockId)>,
         finally: Option<BlockId>,
@@ -247,6 +259,8 @@ impl Shuffler {
 /// The scopes of one code while it is compiled.
 struct Scopes {
     main: bool,
+    /// The site of the code's body.
+    body: Site,
     /// The innermost block last; in each, the latest declaration last.
     blocks: Vec<Vec<(Name, Declared)>>,
     slots: Vec<SlotInfo>,
@@ -280,10 +294,14 @@ enum UnitSource<'a> {
     Library(FunctionId, &'a Arc<FunctionDefinition>),
 }
 
+/// Compiles `document`. `in_flight` names library functions whose kernel
+/// body gets a code even where a native implementation runs their calls:
+/// a parked run that is inside such a body resumes there (`K-MACH-008`).
 pub(crate) fn compile(
     document: &Document,
     registry: &FunctionRegistry,
     layout: Layout,
+    in_flight: &BTreeSet<FunctionId>,
 ) -> Result<Executable, Missing> {
     // Every library function the document reaches, through bodies too.
     let mut reached: BTreeMap<FunctionId, &doc::RegisteredFunction> = BTreeMap::new();
@@ -312,7 +330,7 @@ pub(crate) fn compile(
         lib_ids.insert(*function, LibId(index as u32));
         // Filled in below, once every unit has its code id.
         libs.push((*function, *registered));
-        let runs_body = registered.native.is_none()
+        let runs_body = (registered.native.is_none() || in_flight.contains(function))
             && machine_function(&registered.definition).is_none()
             && registered.definition.body().is_some();
         if runs_body {
@@ -394,13 +412,27 @@ pub(crate) fn compile(
             }
         })
         .collect();
+    let codes: Vec<Code> = compiler.codes.into_iter().flatten().collect();
+    let code_at = codes
+        .iter()
+        .enumerate()
+        .map(|(index, code)| (code.site.clone(), CodeId(index as u32)))
+        .collect();
+    let block_at = compiler
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(index, block)| (block.site.clone(), BlockId(index as u32)))
+        .collect();
     Ok(Executable {
-        codes: compiler.codes.into_iter().flatten().collect(),
+        codes,
         blocks: compiler.blocks,
         stmts: compiler.stmts,
         libs,
         main,
         declared: compiler.declared,
+        code_at,
+        block_at,
     })
 }
 
@@ -428,8 +460,10 @@ impl Compiler<'_> {
     /// Compiles a function body in a scope of its own. The path addresses
     /// the body block.
     fn code(&mut self, params: &[Name], body: &doc::Block, main: bool, charged: bool) -> Code {
+        let site = self.site();
         self.scopes.push(Scopes {
             main,
+            body: site.clone(),
             blocks: Vec::new(),
             slots: Vec::new(),
             captures: Vec::new(),
@@ -437,6 +471,7 @@ impl Compiler<'_> {
         let (body, params) = self.block(body, params);
         let scopes = self.scopes.pop().unwrap_or(Scopes {
             main,
+            body: site.clone(),
             blocks: Vec::new(),
             slots: Vec::new(),
             captures: Vec::new(),
@@ -444,6 +479,7 @@ impl Compiler<'_> {
         let mut positions: Vec<u32> = (0..scopes.slots.len() as u32).collect();
         self.shuffler.shuffle(self.layout, &mut positions);
         Code {
+            site,
             params,
             body,
             slots: scopes.slots,
@@ -453,13 +489,16 @@ impl Compiler<'_> {
         }
     }
 
+    /// Declares a variable at the node being compiled.
     fn declare(&mut self, name: &Name) -> Slot {
+        let declared = self.site();
         let Some(scopes) = self.scopes.last_mut() else {
             return 0;
         };
         let slot = scopes.slots.len() as Slot;
         scopes.slots.push(SlotInfo {
             name: name.clone(),
+            declared,
             shared: false,
         });
         if let Some(block) = scopes.blocks.last_mut() {
@@ -498,6 +537,7 @@ impl Compiler<'_> {
         // the units, so they differ between layouts.
         let id = BlockId(self.blocks.len() as u32);
         self.blocks.push(Block {
+            site: self.site(),
             stmts: Vec::new(),
             declares,
         });
@@ -604,6 +644,7 @@ impl Compiler<'_> {
                     .as_ref()
                     .map(|finally| self.child(next, |c| c.block(finally, &[]).0));
                 Stmt::Try {
+                    site: self.site(),
                     body,
                     catch,
                     finally,
@@ -806,6 +847,7 @@ impl Compiler<'_> {
                 let inner = scopes.slots.len() as Slot;
                 scopes.slots.push(SlotInfo {
                     name: name.clone(),
+                    declared: scopes.body.clone(),
                     shared: true,
                 });
                 scopes.captures.push(Capture { outer, inner });
