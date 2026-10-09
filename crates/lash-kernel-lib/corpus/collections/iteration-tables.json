@@ -1,0 +1,47 @@
+{
+  "cases": [
+    {
+      "name": "map skips a removed entry and sees an addition, replacement keeps position",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = map{1: 1, 2: 2} let first = true for x in xs { print x if first { set first = false remove xs[2] set xs[3] = 3 set xs[1] = 9 } } finish null }\n",
+      "expected": {
+        "end": {
+          "finished": "null"
+        },
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "3"
+          }
+        ],
+        "trace": []
+      }
+    },
+    {
+      "name": "set visits a removed and reinserted member at the end",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = set{1, 2, 3} let first = true for x in xs { print x if first { set first = false remove xs[2] set xs[2] = true set xs[4] = true } } finish null }\n",
+      "expected": {
+        "end": {
+          "finished": "null"
+        },
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "3"
+          },
+          {
+            "int": "2"
+          },
+          {
+            "int": "4"
+          }
+        ],
+        "trace": []
+      }
+    }
+  ],
+  "library_law": "K-COL-010"
+}

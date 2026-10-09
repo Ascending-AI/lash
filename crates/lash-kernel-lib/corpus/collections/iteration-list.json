@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "name": "list sees appended elements and skips shifted elements",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let xs = [1, 2] let first = true for x in xs { print x if first { set first = false set xs[2] = 3 remove xs[0] } } finish xs }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "list": [
+              {
+                "int": "2"
+              },
+              {
+                "int": "3"
+              }
+            ]
+          }
+        },
+        "prints": [
+          {
+            "int": "1"
+          },
+          {
+            "int": "3"
+          }
+        ],
+        "trace": []
+      }
+    }
+  ],
+  "library_law": "K-COL-010"
+}

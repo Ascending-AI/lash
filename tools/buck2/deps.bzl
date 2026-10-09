@@ -1029,7 +1029,9 @@ PACKAGE_DEPS = {
     },
     "lash-kernel-lib": {
         "build": {},
-        "dev": {},
+        "dev": {
+            "lash_kernel_vm": "//crates/lash-kernel-vm:lash-kernel-vm"
+        },
         "normal": {
             "lash_kernel_doc": "//crates/lash-kernel-doc:lash-kernel-doc",
             "libm": "//third-party/rust:p0189",
