@@ -1045,6 +1045,13 @@ class ShardTests(unittest.TestCase):
             self.assertNotEqual(self.shard(4, 0, weights=weights).returncode, 0)
         self.assertFalse(self.calls.exists())
 
+    def test_plan_balances_reported_modes_as_listed_cases(self):
+        row = {'heavy - should panic': 10000, 'middle - compile fail': 9000, 'light': 8000}
+        self.assertEqual(shard_weights.plan({'//pkg:t': row}, '//pkg:t', 2), [
+            'shard 1/2: 1 cases, 10000 ms',
+            'shard 2/2: 2 cases, 17000 ms',
+        ])
+
     def test_reported_case_times_refresh_the_table(self):
         def report(name, runs):
             results = {}

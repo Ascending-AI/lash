@@ -77,12 +77,7 @@ PERMANENT = (
                re.compile(r"do not restate conclusions")),
 )
 
-PENDING = (
-    Allowance(("tools/buck2/test-shard-weights.json",),
-               "a measured table nobody hand-edits; the next `tools/buck2/shard_weights.py "
-               "--refresh` drops the deleted case's name",
-               re.compile(r"foreground_trace_carries_the_enclosing_restate_process_invocation")),
-)
+PENDING = ()
 
 
 @dataclass(frozen=True)

@@ -41,6 +41,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
+from libtest_selection import match_name
 from test_shard import VARIANT, shard_assignments
 
 HERE = Path(__file__).resolve().parent
@@ -93,7 +94,7 @@ def refreshed(table, times):
 
 
 def plan(table, label, count):
-    row = table.get(label, {})
+    row = {match_name(name): weight for name, weight in table.get(label, {}).items()}
     assignments = shard_assignments(list(row), count, row)
     lines = []
     for shard in range(count):
