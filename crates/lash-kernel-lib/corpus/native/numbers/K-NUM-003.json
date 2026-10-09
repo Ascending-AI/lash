@@ -1,0 +1,41 @@
+{
+  "rule": "K-NUM-003",
+  "cases": [
+    {
+      "name": "int.to_float: K-NUM-003 edge",
+      "function": "485d09f604ae80a6eff75d07d0ea55546433121519d203563aeae3fd9c5cee44",
+      "args": [
+        {
+          "int": "9007199254740993"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "9007199254740992.0"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.to_float: K-NUM-003 edge",
+      "function": "4aded399acbd1712946c2ccb69bc4a659d55812f41c112d7373899ad049c0658",
+      "args": [
+        {
+          "int": "1"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "1.0"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    }
+  ]
+}

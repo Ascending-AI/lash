@@ -1,0 +1,2 @@
+# Pure Rust configuration only; no host math library or native compiler.
+buildscript.run = true

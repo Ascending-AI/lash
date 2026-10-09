@@ -1,0 +1,173 @@
+{
+  "rule": "K-NUM-005",
+  "cases": [
+    {
+      "name": "div_floor: K-NUM-005 edge",
+      "function": "83306b3a20d5564088f2e56e2d21b058034fced15dbf22df0bd3f74017159d8d",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "0"
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.div_floor: K-NUM-005 edge",
+      "function": "18389ec843b589630108bfc02858b4d8790b8d630e1c53bd47152c94046e94bd",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "0.0"
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.rem_floor: K-NUM-005 edge",
+      "function": "a4b49c18837c6fc48fd74cd5121f4ad598376b86384667dcf399e3be83b74c88",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "2.0"
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.div_floor: K-NUM-005 edge",
+      "function": "55bc8173a398425bf7db667c7d09422dc7eca188d231e69be4d751c454adb62c",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "0"
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.rem_floor: K-NUM-005 edge",
+      "function": "c82b170a2f30ead493b167e4fffaf7d6f78d69fe2450fd07373285f5b721c9c1",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.div_floor: K-NUM-005 edge",
+      "function": "d886208a38c577e9c9077cc5c587f2cc0749f11133035918d28719d8d297db74",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "0"
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.rem_floor: K-NUM-005 edge",
+      "function": "0db02487ea389281abf85464df85d4bf6d638a4af16ec9fe76b37db8c1781b71",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "rem_floor: K-NUM-005 edge",
+      "function": "f07a0fa6b2f34d777f8b4d3646e615b575368a349026da774dab08d2d555e672",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    }
+  ]
+}

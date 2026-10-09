@@ -1,0 +1,35 @@
+{
+  "rule": "K-KEY-003",
+  "cases": [
+    {
+      "name": "replace retains first key and position",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let m = map{1: \"a\", 2: \"b\"}\n set m[1.0] = \"c\"\n finish m }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "map": [
+              [
+                {
+                  "int": "1"
+                },
+                {
+                  "text": "c"
+                }
+              ],
+              [
+                {
+                  "int": "2"
+                },
+                {
+                  "text": "b"
+                }
+              ]
+            ]
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
+    }
+  ]
+}

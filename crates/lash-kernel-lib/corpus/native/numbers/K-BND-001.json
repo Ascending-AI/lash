@@ -1,0 +1,68 @@
+{
+  "rule": "K-BND-001",
+  "cases": [
+    {
+      "name": "pow: K-BND-001 edge",
+      "function": "61dc080291652fe7c0b384ce3cfd5e190e693ad918f457c7008d5fdde7279f52",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "1073741824"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "guard": {
+            "limit": 1048576
+          }
+        },
+        "charged": 0,
+        "work": 524311
+      }
+    },
+    {
+      "name": "num.pow: K-BND-001 edge",
+      "function": "0ce1fce014c1a52df4f73e53b544d82ae975e4cb071674d4e3724228ffb5ee61",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "1073741824"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "guard": {
+            "limit": 1048576
+          }
+        },
+        "charged": 0,
+        "work": 524311
+      }
+    },
+    {
+      "name": "int.pow: K-BND-001 edge",
+      "function": "1b87ad428b141dda598a9f2ba8ecadeb8bc5780db8263b638f85bd6379316607",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "1073741824"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "guard": {
+            "limit": 1048576
+          }
+        },
+        "charged": 0,
+        "work": 524311
+      }
+    }
+  ]
+}

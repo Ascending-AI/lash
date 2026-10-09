@@ -1,0 +1,18 @@
+{
+  "rule": "K-KEY-004",
+  "cases": [
+    {
+      "name": "object identity ref is distinct from contents",
+      "document": "kernel 1\nnumbers by_spelling\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nuse ref = @153e944ca1091d91e3ca964a3f8eba0e8ace1517880176d10fab14781a6cd663\nmain { let a = []\n let b = []\n finish eq(ref(a), ref(b)) }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "bool": false
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
+    }
+  ]
+}

@@ -46532,6 +46532,7 @@
       "declared_features": [],
       "dependencies": [
         "lash-kernel-doc",
+        "libm",
         "num-bigint",
         "num-traits",
         "serde_json"

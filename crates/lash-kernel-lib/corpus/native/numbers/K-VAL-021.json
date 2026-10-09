@@ -1,0 +1,209 @@
+{
+  "rule": "K-VAL-021",
+  "cases": [
+    {
+      "name": "eq: K-VAL-021 edge",
+      "function": "f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.eq: K-VAL-021 edge",
+      "function": "e09f57061086bd716c91d204ac096751db912141eac75f8acb834daf30d5769d",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.to_int: K-VAL-021 edge",
+      "function": "6a338642645b5032722c23bab67cab2345e26384542c4a8404c410e54fcb4311",
+      "args": [
+        {
+          "float": "1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "1"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.eq: K-VAL-021 edge",
+      "function": "2222f153f75e38d529399c56f56f76d88890818e3a1f29807e6623f8aa1024bc",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.eq: K-VAL-021 edge",
+      "function": "bf59c936e072d9a9cf7f4efe510df95b828a4ca5da69b677c5cc7d521bd3087f",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.to_int: K-VAL-021 edge",
+      "function": "67082924bcfe8d819423af782f8464c5ef38e98b16cf2083901b7e955e8672fa",
+      "args": [
+        {
+          "float": "1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "1"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "eq: K-VAL-021 edge witness 2",
+      "function": "f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25",
+      "args": [
+        {
+          "int": "9007199254740993"
+        },
+        {
+          "float": "9007199254740992.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "compare: K-VAL-021 edge",
+      "function": "0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b",
+      "args": [
+        {
+          "int": "13582985290493858492773514283592667786034938469317445497485196697278130927542418487205392083207560592298578262953847383475038725543234929971155548342800628721885763499406390331782864144164680730766837160526223176512798435772129956553355286032203080380775759732320198985094884004069116123084147875437183658467465148948790552744165376"
+        },
+        {
+          "float": "inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 403,
+        "work": 0
+      }
+    },
+    {
+      "name": "eq: K-VAL-021 edge witness 3",
+      "function": "f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25",
+      "args": [
+        {
+          "float": "-0.0"
+        },
+        {
+          "float": "0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "eq: K-VAL-021 edge witness 4",
+      "function": "f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25",
+      "args": [
+        {
+          "float": "nan"
+        },
+        {
+          "float": "nan"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,173 @@
+{
+  "rule": "K-NUM-006",
+  "cases": [
+    {
+      "name": "div_trunc: K-NUM-006 edge",
+      "function": "14bed014672e47e0f025a2598bcfd4d7530594753d17b5c120103db0133488a5",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "0"
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.div_trunc: K-NUM-006 edge",
+      "function": "9dd38eaa1fabc8a5f975a9a274b99fd47c791bfd2283a8fd46ec38e58b5a8f37",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "0.0"
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.rem_trunc: K-NUM-006 edge",
+      "function": "5784e558e0c6c78315bf5195f479f454d55ec1e4d329ccb5409573a44364c4f0",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "2.0"
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.div_trunc: K-NUM-006 edge",
+      "function": "c1c1dca11cc8658961b454ea49d2147c71510526a99e3e69c0b27120549551ed",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "0"
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.rem_trunc: K-NUM-006 edge",
+      "function": "f606b63f7c0ddaa1d645f312bafa3184c601ac63f6d452ac91a671952460ec82",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.div_trunc: K-NUM-006 edge",
+      "function": "b591f2dac7100e61e7321785ba1dcfc8a015eb1be47f0f40c5c454b28e08b386",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "0"
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.rem_trunc: K-NUM-006 edge",
+      "function": "1df0b5cb76059eaabf6bb757f86144ccf344849a5445878e6d463b3b2f304262",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "rem_trunc: K-NUM-006 edge",
+      "function": "418efa003407974409069fc77475df673eaba2ba7aec7068c5cfff03d1433c8d",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    }
+  ]
+}

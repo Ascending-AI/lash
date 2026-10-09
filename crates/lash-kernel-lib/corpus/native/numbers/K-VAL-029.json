@@ -1,0 +1,425 @@
+{
+  "rule": "K-VAL-029",
+  "cases": [
+    {
+      "name": "compare: K-VAL-029 edge",
+      "function": "0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.compare: K-VAL-029 edge",
+      "function": "46711427542ca080fef1fd4817f52f910214894c4270c603efba56ce11b01202",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.ge: K-VAL-029 edge",
+      "function": "f5aebccfcdaff9baf039f0b8224eb3f439c845efd59ff0b94bb446413b2f8156",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.gt: K-VAL-029 edge",
+      "function": "464e96d4923b9582456576dcd98cbd217433e53d77350be59ec7ed4a3864ce3b",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.le: K-VAL-029 edge",
+      "function": "7bf3e513651cd83984d37d770af60e06fcc1495b0538ab0a4f0254ffab6fed4f",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.lt: K-VAL-029 edge",
+      "function": "3d53601b75c2e41e7e04e5ef64e438b24be137125bc9858fcd88f9d2e8478e9c",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "ge: K-VAL-029 edge",
+      "function": "9cf86d966494dd132fad5d585679d8ea86f726f9901b1cb27318731a44a4e44d",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "gt: K-VAL-029 edge",
+      "function": "2a2deaaf97b77fe2c69fb34c7a1f2b78e2eee019dbe5b6399a7dcf85977b3568",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.compare: K-VAL-029 edge",
+      "function": "65297caf3573877c3979f6e5cde4edc2840cbb89b3bd38ce62e6757d930b2ba3",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.ge: K-VAL-029 edge",
+      "function": "68308c8253ba9b8785fceaa5ad0c0f43f792593461d9a3fc5b76501afde0e7d9",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.gt: K-VAL-029 edge",
+      "function": "03a84afcf4455c332a776dab95fed757383539a0a3275f2ec13e373f977b5a5d",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.le: K-VAL-029 edge",
+      "function": "154532c4294d331bef29ee4731ce1b0afc5e28101e3dea31045b1f8d1192e1a0",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.lt: K-VAL-029 edge",
+      "function": "422d9fb527779185b74b06f812c138cf1894354b46f36d58ffb5c47a2ad75724",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "le: K-VAL-029 edge",
+      "function": "9f4fc336157e5e0f9ecf00cd12129c7cee4d6986e0e49fabee543c55e1820c2d",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "lt: K-VAL-029 edge",
+      "function": "aa1c2bd01c227cabc0158e2ca5039894f4ba41c234f66d27c0503174a6df1ec1",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.compare: K-VAL-029 edge",
+      "function": "2d05b61fe7faefb30eda840e7d13b4467eb8f7836322f0a20af6cb7ff92cdf98",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.ge: K-VAL-029 edge",
+      "function": "d2720530ccab6ace84091d8c4271eb488ec62bc286957f04d37bb09cd453bdc2",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.gt: K-VAL-029 edge",
+      "function": "3b8f08b10bbe76d04671b2a4ed36929e99247583c29cbd9dc6ea9dc8805a6b82",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.le: K-VAL-029 edge",
+      "function": "9e37b0a06ce8af89bc1a17893d834f481e57e54cf667173e3b9f3cf3e067624c",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.lt: K-VAL-029 edge",
+      "function": "ac0b950f8ebc42c5f047ac562c5cc1c1d60cf50bd87a5b94d5d5fc387f5d5c50",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 18,
+        "work": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "rule": "K-KEY-005",
+  "cases": [
+    {
+      "name": "remove and reinsert moves key to end",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let m = map{1: \"a\", 2: \"b\"}\n remove m[1]\n set m[1] = \"c\"\n finish m }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "map": [
+              [
+                {
+                  "int": "2"
+                },
+                {
+                  "text": "b"
+                }
+              ],
+              [
+                {
+                  "int": "1"
+                },
+                {
+                  "text": "c"
+                }
+              ]
+            ]
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
+    }
+  ]
+}

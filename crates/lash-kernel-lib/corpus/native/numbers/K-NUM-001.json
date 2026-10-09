@@ -1,0 +1,1085 @@
+{
+  "rule": "K-NUM-001",
+  "cases": [
+    {
+      "name": "abs: K-NUM-001 edge",
+      "function": "92fd4b72ec55490e9f874d2a67e05211b84a7d2ebc1405ab63e2dcc8a22d3134",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "add: K-NUM-001 edge",
+      "function": "4f6c490dbe79a55eb2012d5b3f04e6915666dc4b5af14b8d9d1142eabfe1b773",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "5"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "ceil: K-NUM-001 edge",
+      "function": "850ae67e790ffe7a8a822347336877ad2fcf77b4c055dbe5cfa6a2c14590f64b",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "floor: K-NUM-001 edge",
+      "function": "5d4b794994651611aefe8bfdfb3e5872207ac66381b1491d5270486cf403b852",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.abs: K-NUM-001 edge",
+      "function": "cd59ab94146428caf225b6e6ad17f4b50d9e39c37f43d86e710912bc3fe134e1",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.add: K-NUM-001 edge",
+      "function": "e0fd352fb1d4eb1e887d063fba3e8b2b6b503ab2caab41c1f00903ba8e7affda",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "5"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.ceil: K-NUM-001 edge",
+      "function": "08e4d63a3d7ac9fca5d8f8a8a8859c058823e4e98a30c8bb28fa5ad0c50f63c4",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.floor: K-NUM-001 edge",
+      "function": "1da982736eae5695b9a083fad5900c74f53255c3c131965f0f3cc16a3b2881f6",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.is_finite: K-NUM-001 edge",
+      "function": "1a4c4f124c7aba4d0cfa68d70e697dcbcb2dc7a52f6377cf18beda6dbb60d5a8",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.is_infinite: K-NUM-001 edge",
+      "function": "761bde9e404016b8ad6e7f71deddd97e00d2135293f87cb648710430eebc3ed2",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.is_integer: K-NUM-001 edge",
+      "function": "48a7b561c4ff50114f3c5ad178432bdae8cd15c019d7e620de96607733e4d162",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.is_nan: K-NUM-001 edge",
+      "function": "e97d290ddd3c23b24069cca2f8eca0d6840776d17e644d03f0fc49c1a0437a9e",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.max: K-NUM-001 edge",
+      "function": "1d1b703360ecf56f4dcbed63e031fa5bbdd94725df27275a8ba1c918ff37fc55",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "3"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.min: K-NUM-001 edge",
+      "function": "6d5e158a3f7df4d0861b73095c14e54a0285a441fa2661eea81a18ed3ccc4476",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.mul: K-NUM-001 edge",
+      "function": "b3e634c6e03ac5f27721f9bbcfdc475feab0e9541c7d17a8f9b2a64bef0d5d9c",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "6"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.neg: K-NUM-001 edge",
+      "function": "dd91212a3eee1c7bc02e0f5b1de4bb8a527bfc428285aad8861f4762122f524a",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.pow: K-NUM-001 edge",
+      "function": "1b87ad428b141dda598a9f2ba8ecadeb8bc5780db8263b638f85bd6379316607",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "8"
+          }
+        },
+        "charged": 15,
+        "work": 3
+      }
+    },
+    {
+      "name": "int.round_away: K-NUM-001 edge",
+      "function": "0ece5d02a3ba5d78a71ecae2004838092a7f310e73b6919803e3e3ee25dac86c",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.round_even: K-NUM-001 edge",
+      "function": "4f5e48d659cac2d9a4f27810db02310c9e6e777b0ab730524c219c0c2be3a86a",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.round_up: K-NUM-001 edge",
+      "function": "0f21eb029983f321fbe5c071f2d3a90147af092311ebfaf3cb082e22dfc8cba3",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.sign: K-NUM-001 edge",
+      "function": "68e3ef8cb4408bfb1b583c460b2f35f44c78af7a275d38b063977b57e7dd3a27",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.sub: K-NUM-001 edge",
+      "function": "2c610e00f61ca2207a7116fe2316414536c857fbd2f61b4bb64c63ffc88a8eb2",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.trunc: K-NUM-001 edge",
+      "function": "4ce7f25233fd28502288f6bd4cb1a5903af0537c3e43c8777218fc6b34996076",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "is_finite: K-NUM-001 edge",
+      "function": "44d860558d31ab13c564fe0781ec40a917c38f6316f9784f4b16cb1d5a8ed491",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "is_infinite: K-NUM-001 edge",
+      "function": "324d6838d85938914d17ee6389a646ad55acc4e14167589d7296d27bcbea9c20",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "is_integer: K-NUM-001 edge",
+      "function": "5c6f73462edd737b41a622f58232fca7300cc821aea5bc7bfe03d7c1021cae79",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "is_nan: K-NUM-001 edge",
+      "function": "eed86c8d456561204c79baaf37c949008c526ce283b6930144568f2599e6c450",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "max: K-NUM-001 edge",
+      "function": "1625fc570c8824a84bbd8352dc420214e015729fcb5cb81fdaeb23ab9158d196",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "3"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "min: K-NUM-001 edge",
+      "function": "5969da502b454c6e03e9536902eba0684ec3e50d5a0a8feafd7dc6dc270ce062",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "mul: K-NUM-001 edge",
+      "function": "3262358baaf57e850452cb7c4e73d49f2659d940b8a1b4bbf36ac75a442e327a",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "6"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "neg: K-NUM-001 edge",
+      "function": "89cf83afba2684947e9cf44c3cc125a29ae489c4b5e064af1f60b48e51b03c97",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.abs: K-NUM-001 edge",
+      "function": "2eaaf72dcbfecf49110ed4029494f0302d22c6b72fbdf68f775880303c32bf35",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.add: K-NUM-001 edge",
+      "function": "89dab30320e88b6dd6d2b76b50b27939aae8808a0b90bd32e67a52365d7276d5",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "5"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.ceil: K-NUM-001 edge",
+      "function": "a792fab09b168fea7afb50fafbf30489ad69918b45a751c92fdda20c4c71dbe4",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.floor: K-NUM-001 edge",
+      "function": "a60738bb3a3fac2c55d69978d26340ea3db0ec20ae93bd61aa0662054078aec0",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.is_finite: K-NUM-001 edge",
+      "function": "11dc759f50b8adc121893e707db4f2e798ad19638e36e4355c1d8b145af93c00",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.is_infinite: K-NUM-001 edge",
+      "function": "0ef2c1616f49027ee236f31f54e82471e3b2dc0a69c521839fbac21ea3c39707",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.is_integer: K-NUM-001 edge",
+      "function": "f2b5bbec255cc04e37863aedeb0c9354bf7c0312a23a12af294858fb414eda05",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.is_nan: K-NUM-001 edge",
+      "function": "f3d0b5e32cbaa680077c3f5a13c2b0c48862b19037848be811de75322ecd33e1",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.max: K-NUM-001 edge",
+      "function": "4aee5da657c528c7e64b9c8677c78f8af5da4e943b658b042ccfd656e07fb3ef",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "3"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.min: K-NUM-001 edge",
+      "function": "8f1368e3994722916c4a246f7e725022620426e897497003648d6e18f79ec743",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.mul: K-NUM-001 edge",
+      "function": "853d0c905646092160600b904a4f6373bdd7343a7ac1440f07421258cd07ae28",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "6"
+          }
+        },
+        "charged": 19,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.neg: K-NUM-001 edge",
+      "function": "28a8a0d0c392cc4e81751cae1c500671857de8f66814e79723a16b9293f1000e",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.pow: K-NUM-001 edge",
+      "function": "0ce1fce014c1a52df4f73e53b544d82ae975e4cb071674d4e3724228ffb5ee61",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "8"
+          }
+        },
+        "charged": 15,
+        "work": 3
+      }
+    },
+    {
+      "name": "num.round_away: K-NUM-001 edge",
+      "function": "a38c9903ed9749fc01107c29206e3fdf5374966d116304126aaa41c62bea0a46",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.round_even: K-NUM-001 edge",
+      "function": "566cbe827690f0fde75f94b4c220c17fc156ec2fdbb8c37a89dc6062fe67342b",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.round_up: K-NUM-001 edge",
+      "function": "e121b162ced40a78e7433b9bdf6b6337f9805932a927b059756e9d1e4b43a38a",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.sign: K-NUM-001 edge",
+      "function": "6c5a1426314c7fdad34f21e7e92ababa74d2469f94e00d609b76f251069d9f99",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.sub: K-NUM-001 edge",
+      "function": "ed03e86c49c7091b0b451c2cb6ca69ad315eaf1bbad1fa7da140d278d2e24ab8",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.trunc: K-NUM-001 edge",
+      "function": "160b34add904a9427c6cb38b0948b5a54db48551bd311ed7fbb8aad235fcd520",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "pow: K-NUM-001 edge",
+      "function": "61dc080291652fe7c0b384ce3cfd5e190e693ad918f457c7008d5fdde7279f52",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "8"
+          }
+        },
+        "charged": 15,
+        "work": 3
+      }
+    },
+    {
+      "name": "round_away: K-NUM-001 edge",
+      "function": "51077620faa4d52a677a4209d131477274ec9556e89a970bcfd02143bc6019fd",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "round_even: K-NUM-001 edge",
+      "function": "f41c1c1e34031e3016ec38aa37accf19572059a522b6a3339eabdf6a44c60a3b",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "round_up: K-NUM-001 edge",
+      "function": "eee348ded95379871017671cec5019aa8ee506a568fd2db8651567bc36be9cfb",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "sign: K-NUM-001 edge",
+      "function": "fbcc93733bbec2b6264d38f20a27e1d72f4716fbfbd434181942e6dbca35a3e8",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "sub: K-NUM-001 edge",
+      "function": "c27cdb3e7e1eaf81192a11fe66a2cb68096d6fc2859c61efb0357be5ce843668",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "3"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-1"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "trunc: K-NUM-001 edge",
+      "function": "8b99b944a668c4ac294fc30e4759db9268348105a913cf33e673a12a0c7b59a8",
+      "args": [
+        {
+          "int": "-2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "-2"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    }
+  ]
+}

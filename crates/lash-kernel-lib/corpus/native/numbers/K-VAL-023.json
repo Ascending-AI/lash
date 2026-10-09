@@ -1,0 +1,40 @@
+{
+  "rule": "K-VAL-023",
+  "cases": [
+    {
+      "name": "eq: K-VAL-023 edge",
+      "function": "f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25",
+      "args": [
+        {
+          "tuple": [
+            {
+              "int": "1"
+            },
+            {
+              "text": "x"
+            }
+          ]
+        },
+        {
+          "tuple": [
+            {
+              "float": "1.0"
+            },
+            {
+              "text": "x"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 171,
+        "work": 0
+      }
+    }
+  ]
+}

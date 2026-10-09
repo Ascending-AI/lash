@@ -1,0 +1,365 @@
+{
+  "rule": "K-NUM-002",
+  "cases": [
+    {
+      "name": "float.abs: K-NUM-002 edge",
+      "function": "93b26cdc2976a6ad4090a02e6879a98cff737bbc19b94063dea3e6f181328120",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "2.5"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.add: K-NUM-002 edge",
+      "function": "52933fe234e57c0faf210aa00c8a6f984c17dcd2d53410af78647a9890a0ed3e",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "5.0"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.ceil: K-NUM-002 edge",
+      "function": "65201e1d61f5885b217388a79eaa0fe81dfa5662355bb60095908d8a310c09ec",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-2.0"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.floor: K-NUM-002 edge",
+      "function": "e6219405424bc469235c12464e276d4d1bfe52798e790d041ac3ae89ca2319c6",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-3.0"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.is_finite: K-NUM-002 edge",
+      "function": "f27e7b0babdc32b6066d2be142303c96dd5a6a65354c0620ec4a05d51cf2d24c",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.is_infinite: K-NUM-002 edge",
+      "function": "e0763a58eb14f63b22ddfbd3a65ef1824e7982aad14eb0ab8579212606ec84a0",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.is_integer: K-NUM-002 edge",
+      "function": "cd3c56b65cef80318bac945094aad76428acb82e5188bcc9d19eaf0233c6138e",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.is_nan: K-NUM-002 edge",
+      "function": "2ddac091e1e40138bb86e1b4baede30fd7e8cb0ccfb9d534e6d46daa7523a92c",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.max: K-NUM-002 edge",
+      "function": "e56c7fc399cd5f606417b1f91f0f1f7f4d25814f4e43d17e2a2205903a062f50",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "3.0"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.min: K-NUM-002 edge",
+      "function": "3707edf868f5c6b66ca78f2a83985386f83678f4ed91ee423d0f64abe24c2f5b",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "2.0"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.mul: K-NUM-002 edge",
+      "function": "2a3e5f92edfc81d6dda36ee06d3fac31ad874ac56970343d61b1db6a38a30527",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "6.0"
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.neg: K-NUM-002 edge",
+      "function": "f337f394a3edc0375a8c9ede164a8b5db235d82a2da3c5e27440a95e94c8ca2a",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "2.5"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.pow: K-NUM-002 edge",
+      "function": "1e1538591ca30ca140e245dad20ac171ba36972df42627d591283c285fad3917",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "8.0"
+          }
+        },
+        "charged": 8,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.round_away: K-NUM-002 edge",
+      "function": "8f88135a2a7802d1bccb941c96df840a45f029d0730b41ed8bfeada9e5ad26ec",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-3.0"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.round_even: K-NUM-002 edge",
+      "function": "b74df818b87ea25ed69d14a100a6b468cb2e5bfd6a80ce11f59958ed684d448f",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-2.0"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.round_up: K-NUM-002 edge",
+      "function": "39c9193a8e30a170908da26a98b5d60ed27920e48adf1e161ea3ce799ada84d6",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-2.0"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.sign: K-NUM-002 edge",
+      "function": "b6d7eacae50794fe25055a79696aa8045f61d2a5617bad9fcbcd954660b6f526",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-1.0"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.sub: K-NUM-002 edge",
+      "function": "81ac08ead57b63b04a9ec020148c6cc3ad24c6b01bb93be92b0e09190a42c506",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        {
+          "float": "3.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-1.0"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.trunc: K-NUM-002 edge",
+      "function": "ed8c8e35d4391ef1690dfe1394f4af62bf12122df5c6cd7ee9235bacc0f714a8",
+      "args": [
+        {
+          "float": "-2.5"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-2.0"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    }
+  ]
+}

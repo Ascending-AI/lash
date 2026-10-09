@@ -320,6 +320,12 @@ packages = ["lash-internal-protocol-rlm"]
 kinds = ["unit-test"]
 compile_data = ["//crates/lash-typescript:session_oracle_corpus", "//:Cargo.toml"]
 
+# Numeric conformance cases are compiled into their owning unit laws.
+[[rule]]
+packages = ["lash-kernel-lib"]
+kinds = ["unit-test"]
+compile_data = ["//crates/lash-kernel-lib:package_files"]
+
 # --- Binary and integration-test support -------------------------------------
 
 # The checked-in workspace fact that replaces a nested `cargo metadata` call

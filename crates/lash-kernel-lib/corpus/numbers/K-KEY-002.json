@@ -1,0 +1,56 @@
+{
+  "rule": "K-KEY-002",
+  "cases": [
+    {
+      "name": "integer and float use one map key",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let m = map{1: \"a\", 1.0: \"b\"}\n finish m }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "map": [
+              [
+                {
+                  "int": "1"
+                },
+                {
+                  "text": "b"
+                }
+              ]
+            ]
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
+    },
+    {
+      "name": "NaN and mixed tuples use one key",
+      "document": "kernel 1\nnumbers by_spelling\nmain { let m = map{(1, nan): \"a\", (1.0, nan): \"b\"}\n finish m }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "map": [
+              [
+                {
+                  "tuple": [
+                    {
+                      "int": "1"
+                    },
+                    {
+                      "float": "nan"
+                    }
+                  ]
+                },
+                {
+                  "text": "b"
+                }
+              ]
+            ]
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
+    }
+  ]
+}

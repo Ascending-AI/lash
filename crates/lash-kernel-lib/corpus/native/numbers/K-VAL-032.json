@@ -1,0 +1,65 @@
+{
+  "rule": "K-VAL-032",
+  "cases": [
+    {
+      "name": "int.parse: K-VAL-032 edge",
+      "function": "48559372aba6cd51167c0293314905609657749d3d71dba6672461035774e8ff",
+      "args": [
+        {
+          "text": "+00FF"
+        },
+        {
+          "int": "16"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "255"
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.to_text: K-VAL-032 edge",
+      "function": "b958df935e596bb4ba0be59691ac8b076ac2d4a42873ba744ee23c81413bbdfe",
+      "args": [
+        {
+          "int": "-255"
+        },
+        {
+          "int": "16"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "-ff"
+          }
+        },
+        "charged": 9,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.to_text: K-VAL-032 edge",
+      "function": "c744fb50583e699b64c675de37437dc1ef17b2d9af72d17ec0b9fce50f052db5",
+      "args": [
+        {
+          "int": "-123"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "-123"
+          }
+        },
+        "charged": 8,
+        "work": 0
+      }
+    }
+  ]
+}

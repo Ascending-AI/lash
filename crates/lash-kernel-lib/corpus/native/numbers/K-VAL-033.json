@@ -1,0 +1,112 @@
+{
+  "rule": "K-VAL-033",
+  "cases": [
+    {
+      "name": "lt: K-VAL-033 edge",
+      "function": "aa1c2bd01c227cabc0158e2ca5039894f4ba41c234f66d27c0503174a6df1ec1",
+      "args": [
+        {
+          "float": "nan"
+        },
+        {
+          "int": "1"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "le: K-VAL-033 edge",
+      "function": "9f4fc336157e5e0f9ecf00cd12129c7cee4d6986e0e49fabee543c55e1820c2d",
+      "args": [
+        {
+          "float": "nan"
+        },
+        {
+          "int": "1"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "gt: K-VAL-033 edge",
+      "function": "2a2deaaf97b77fe2c69fb34c7a1f2b78e2eee019dbe5b6399a7dcf85977b3568",
+      "args": [
+        {
+          "float": "nan"
+        },
+        {
+          "int": "1"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "ge: K-VAL-033 edge",
+      "function": "9cf86d966494dd132fad5d585679d8ea86f726f9901b1cb27318731a44a4e44d",
+      "args": [
+        {
+          "float": "nan"
+        },
+        {
+          "int": "1"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "compare: K-VAL-033 edge",
+      "function": "0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b",
+      "args": [
+        {
+          "float": "nan"
+        },
+        {
+          "int": "1"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "unordered",
+            "message": "NaN has no ordering",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "rule": "K-VAL-020",
+  "cases": [
+    {
+      "name": "eq: K-VAL-020 edge",
+      "function": "f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25",
+      "args": [
+        "null",
+        "absent"
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 6,
+        "work": 0
+      }
+    }
+  ]
+}

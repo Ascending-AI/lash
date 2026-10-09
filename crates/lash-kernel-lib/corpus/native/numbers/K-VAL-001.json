@@ -1,0 +1,324 @@
+{
+  "rule": "K-VAL-001",
+  "cases": [
+    {
+      "name": "kind null",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "null"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind absent",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        "absent"
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "absent"
+          }
+        },
+        "charged": 9,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind bool",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "bool": false
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "bool"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind integer",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "int": "1"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "integer"
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind float",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "float": "1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "float"
+          }
+        },
+        "charged": 8,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind text",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "text": "x"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "text"
+          }
+        },
+        "charged": 8,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind bytes",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "bytes": "00ff"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "bytes"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind timestamp",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "timestamp": "0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "timestamp"
+          }
+        },
+        "charged": 12,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind tuple",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "tuple": [
+            {
+              "int": "1"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "tuple"
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind list",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "list": [
+            {
+              "int": "1"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "list"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind map",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "map": [
+            [
+              {
+                "int": "1"
+              },
+              {
+                "text": "x"
+              }
+            ]
+          ]
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "map"
+          }
+        },
+        "charged": 12,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind set",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "set": [
+            {
+              "int": "1"
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "set"
+          }
+        },
+        "charged": 9,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind record",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "record": [
+            [
+              "x",
+              {
+                "int": "1"
+              }
+            ]
+          ]
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "record"
+          }
+        },
+        "charged": 12,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind error",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "error": {
+            "kind": "example",
+            "message": "message",
+            "data": "null"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "error"
+          }
+        },
+        "charged": 23,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind function",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "function": "f"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "function"
+          }
+        },
+        "charged": 11,
+        "work": 0
+      }
+    },
+    {
+      "name": "kind handle",
+      "function": "c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6",
+      "args": [
+        {
+          "handle": {
+            "kind": "h",
+            "id": "1"
+          }
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "handle"
+          }
+        },
+        "charged": 9,
+        "work": 0
+      }
+    }
+  ]
+}

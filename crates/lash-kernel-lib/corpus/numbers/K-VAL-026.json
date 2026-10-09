@@ -1,0 +1,18 @@
+{
+  "rule": "K-VAL-026",
+  "cases": [
+    {
+      "name": "cyclic list bisimulation",
+      "document": "kernel 1\nnumbers by_spelling\nuse eq = @f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25\nmain { let a = []\n set a[0] = a\n let b = []\n set b[0] = b\n finish eq(a, b) }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "bool": true
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "rule": "K-VAL-030",
+  "cases": [
+    {
+      "name": "compare: K-VAL-030 edge",
+      "function": "0e53c62151487bcea62cb8db985915d52c96f7c519eab3c26afd8d598b8b585b",
+      "args": [
+        {
+          "text": "𐀀"
+        },
+        {
+          "text": ""
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "int": "1"
+          }
+        },
+        "charged": 84,
+        "work": 0
+      }
+    }
+  ]
+}

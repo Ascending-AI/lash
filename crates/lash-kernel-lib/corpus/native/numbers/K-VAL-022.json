@@ -1,0 +1,26 @@
+{
+  "rule": "K-VAL-022",
+  "cases": [
+    {
+      "name": "eq: K-VAL-022 edge",
+      "function": "f537bb3edf9746f3847d63ebb49e6f4f440f52d258e658ed3e1f57336dba4a25",
+      "args": [
+        {
+          "bytes": "00ff"
+        },
+        {
+          "bytes": "00ff"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": true
+          }
+        },
+        "charged": 38,
+        "work": 0
+      }
+    }
+  ]
+}

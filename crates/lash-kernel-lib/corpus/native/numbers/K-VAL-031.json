@@ -1,0 +1,41 @@
+{
+  "rule": "K-VAL-031",
+  "cases": [
+    {
+      "name": "float.parse: K-VAL-031 edge",
+      "function": "0d6d056e29f127d0fd4f1220f6e004ab76aefcda472b21ee2a4a21b5e20a4196",
+      "args": [
+        {
+          "text": "-0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-0.0"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.to_text: K-VAL-031 edge",
+      "function": "d3bd6883206ac6ae6eccd75351460d531a39b730f5b59edcbce62f7fea0afb7e",
+      "args": [
+        {
+          "float": "1e16"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "text": "1e16"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    }
+  ]
+}

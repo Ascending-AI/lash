@@ -1,0 +1,4529 @@
+{
+  "rule": "K-FN-007",
+  "cases": [
+    {
+      "name": "abs: K-FN-007 wrong-kind operand 0",
+      "function": "92fd4b72ec55490e9f874d2a67e05211b84a7d2ebc1405ab63e2dcc8a22d3134",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "add: K-FN-007 wrong-kind operand 0",
+      "function": "4f6c490dbe79a55eb2012d5b3f04e6915666dc4b5af14b8d9d1142eabfe1b773",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "add: K-FN-007 wrong-kind operand 1",
+      "function": "4f6c490dbe79a55eb2012d5b3f04e6915666dc4b5af14b8d9d1142eabfe1b773",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "ceil: K-FN-007 wrong-kind operand 0",
+      "function": "850ae67e790ffe7a8a822347336877ad2fcf77b4c055dbe5cfa6a2c14590f64b",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "div: K-FN-007 wrong-kind operand 0",
+      "function": "ccfc7ada2c3ee9ebf74ed4c4ac62e664fc6d29d1e3f43a594cca4349261ce84d",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "div: K-FN-007 wrong-kind operand 1",
+      "function": "ccfc7ada2c3ee9ebf74ed4c4ac62e664fc6d29d1e3f43a594cca4349261ce84d",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "div_floor: K-FN-007 wrong-kind operand 0",
+      "function": "83306b3a20d5564088f2e56e2d21b058034fced15dbf22df0bd3f74017159d8d",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "div_floor: K-FN-007 wrong-kind operand 1",
+      "function": "83306b3a20d5564088f2e56e2d21b058034fced15dbf22df0bd3f74017159d8d",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "div_trunc: K-FN-007 wrong-kind operand 0",
+      "function": "14bed014672e47e0f025a2598bcfd4d7530594753d17b5c120103db0133488a5",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "div_trunc: K-FN-007 wrong-kind operand 1",
+      "function": "14bed014672e47e0f025a2598bcfd4d7530594753d17b5c120103db0133488a5",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.abs: K-FN-007 wrong-kind operand 0",
+      "function": "93b26cdc2976a6ad4090a02e6879a98cff737bbc19b94063dea3e6f181328120",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.add: K-FN-007 wrong-kind operand 0",
+      "function": "52933fe234e57c0faf210aa00c8a6f984c17dcd2d53410af78647a9890a0ed3e",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.add: K-FN-007 wrong-kind operand 1",
+      "function": "52933fe234e57c0faf210aa00c8a6f984c17dcd2d53410af78647a9890a0ed3e",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.ceil: K-FN-007 wrong-kind operand 0",
+      "function": "65201e1d61f5885b217388a79eaa0fe81dfa5662355bb60095908d8a310c09ec",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.compare: K-FN-007 wrong-kind operand 0",
+      "function": "46711427542ca080fef1fd4817f52f910214894c4270c603efba56ce11b01202",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.compare: K-FN-007 wrong-kind operand 1",
+      "function": "46711427542ca080fef1fd4817f52f910214894c4270c603efba56ce11b01202",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.div: K-FN-007 wrong-kind operand 0",
+      "function": "ae9efc2d5dfa95eeab95f9cc8d586679ec6b32225ff57fa2af313913e1f232e4",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.div: K-FN-007 wrong-kind operand 1",
+      "function": "ae9efc2d5dfa95eeab95f9cc8d586679ec6b32225ff57fa2af313913e1f232e4",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.div_floor: K-FN-007 wrong-kind operand 0",
+      "function": "18389ec843b589630108bfc02858b4d8790b8d630e1c53bd47152c94046e94bd",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.div_floor: K-FN-007 wrong-kind operand 1",
+      "function": "18389ec843b589630108bfc02858b4d8790b8d630e1c53bd47152c94046e94bd",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.div_trunc: K-FN-007 wrong-kind operand 0",
+      "function": "9dd38eaa1fabc8a5f975a9a274b99fd47c791bfd2283a8fd46ec38e58b5a8f37",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.div_trunc: K-FN-007 wrong-kind operand 1",
+      "function": "9dd38eaa1fabc8a5f975a9a274b99fd47c791bfd2283a8fd46ec38e58b5a8f37",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.eq: K-FN-007 wrong-kind operand 0",
+      "function": "e09f57061086bd716c91d204ac096751db912141eac75f8acb834daf30d5769d",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.eq: K-FN-007 wrong-kind operand 1",
+      "function": "e09f57061086bd716c91d204ac096751db912141eac75f8acb834daf30d5769d",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.floor: K-FN-007 wrong-kind operand 0",
+      "function": "e6219405424bc469235c12464e276d4d1bfe52798e790d041ac3ae89ca2319c6",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.ge: K-FN-007 wrong-kind operand 0",
+      "function": "f5aebccfcdaff9baf039f0b8224eb3f439c845efd59ff0b94bb446413b2f8156",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.ge: K-FN-007 wrong-kind operand 1",
+      "function": "f5aebccfcdaff9baf039f0b8224eb3f439c845efd59ff0b94bb446413b2f8156",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.gt: K-FN-007 wrong-kind operand 0",
+      "function": "464e96d4923b9582456576dcd98cbd217433e53d77350be59ec7ed4a3864ce3b",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.gt: K-FN-007 wrong-kind operand 1",
+      "function": "464e96d4923b9582456576dcd98cbd217433e53d77350be59ec7ed4a3864ce3b",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.is_finite: K-FN-007 wrong-kind operand 0",
+      "function": "f27e7b0babdc32b6066d2be142303c96dd5a6a65354c0620ec4a05d51cf2d24c",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.is_infinite: K-FN-007 wrong-kind operand 0",
+      "function": "e0763a58eb14f63b22ddfbd3a65ef1824e7982aad14eb0ab8579212606ec84a0",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.is_integer: K-FN-007 wrong-kind operand 0",
+      "function": "cd3c56b65cef80318bac945094aad76428acb82e5188bcc9d19eaf0233c6138e",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.is_nan: K-FN-007 wrong-kind operand 0",
+      "function": "2ddac091e1e40138bb86e1b4baede30fd7e8cb0ccfb9d534e6d46daa7523a92c",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.le: K-FN-007 wrong-kind operand 0",
+      "function": "7bf3e513651cd83984d37d770af60e06fcc1495b0538ab0a4f0254ffab6fed4f",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.le: K-FN-007 wrong-kind operand 1",
+      "function": "7bf3e513651cd83984d37d770af60e06fcc1495b0538ab0a4f0254ffab6fed4f",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.lt: K-FN-007 wrong-kind operand 0",
+      "function": "3d53601b75c2e41e7e04e5ef64e438b24be137125bc9858fcd88f9d2e8478e9c",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.lt: K-FN-007 wrong-kind operand 1",
+      "function": "3d53601b75c2e41e7e04e5ef64e438b24be137125bc9858fcd88f9d2e8478e9c",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.max: K-FN-007 wrong-kind operand 0",
+      "function": "e56c7fc399cd5f606417b1f91f0f1f7f4d25814f4e43d17e2a2205903a062f50",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.max: K-FN-007 wrong-kind operand 1",
+      "function": "e56c7fc399cd5f606417b1f91f0f1f7f4d25814f4e43d17e2a2205903a062f50",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.min: K-FN-007 wrong-kind operand 0",
+      "function": "3707edf868f5c6b66ca78f2a83985386f83678f4ed91ee423d0f64abe24c2f5b",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.min: K-FN-007 wrong-kind operand 1",
+      "function": "3707edf868f5c6b66ca78f2a83985386f83678f4ed91ee423d0f64abe24c2f5b",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.mul: K-FN-007 wrong-kind operand 0",
+      "function": "2a3e5f92edfc81d6dda36ee06d3fac31ad874ac56970343d61b1db6a38a30527",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.mul: K-FN-007 wrong-kind operand 1",
+      "function": "2a3e5f92edfc81d6dda36ee06d3fac31ad874ac56970343d61b1db6a38a30527",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.neg: K-FN-007 wrong-kind operand 0",
+      "function": "f337f394a3edc0375a8c9ede164a8b5db235d82a2da3c5e27440a95e94c8ca2a",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.parse: K-FN-007 wrong-kind operand 0",
+      "function": "0d6d056e29f127d0fd4f1220f6e004ab76aefcda472b21ee2a4a21b5e20a4196",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.pow: K-FN-007 wrong-kind operand 0",
+      "function": "1e1538591ca30ca140e245dad20ac171ba36972df42627d591283c285fad3917",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.pow: K-FN-007 wrong-kind operand 1",
+      "function": "1e1538591ca30ca140e245dad20ac171ba36972df42627d591283c285fad3917",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 1,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.rem_floor: K-FN-007 wrong-kind operand 0",
+      "function": "a4b49c18837c6fc48fd74cd5121f4ad598376b86384667dcf399e3be83b74c88",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.rem_floor: K-FN-007 wrong-kind operand 1",
+      "function": "a4b49c18837c6fc48fd74cd5121f4ad598376b86384667dcf399e3be83b74c88",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.rem_trunc: K-FN-007 wrong-kind operand 0",
+      "function": "5784e558e0c6c78315bf5195f479f454d55ec1e4d329ccb5409573a44364c4f0",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.rem_trunc: K-FN-007 wrong-kind operand 1",
+      "function": "5784e558e0c6c78315bf5195f479f454d55ec1e4d329ccb5409573a44364c4f0",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.round_away: K-FN-007 wrong-kind operand 0",
+      "function": "8f88135a2a7802d1bccb941c96df840a45f029d0730b41ed8bfeada9e5ad26ec",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.round_even: K-FN-007 wrong-kind operand 0",
+      "function": "b74df818b87ea25ed69d14a100a6b468cb2e5bfd6a80ce11f59958ed684d448f",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.round_up: K-FN-007 wrong-kind operand 0",
+      "function": "39c9193a8e30a170908da26a98b5d60ed27920e48adf1e161ea3ce799ada84d6",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.sign: K-FN-007 wrong-kind operand 0",
+      "function": "b6d7eacae50794fe25055a79696aa8045f61d2a5617bad9fcbcd954660b6f526",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.sub: K-FN-007 wrong-kind operand 0",
+      "function": "81ac08ead57b63b04a9ec020148c6cc3ad24c6b01bb93be92b0e09190a42c506",
+      "args": [
+        "null",
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.sub: K-FN-007 wrong-kind operand 1",
+      "function": "81ac08ead57b63b04a9ec020148c6cc3ad24c6b01bb93be92b0e09190a42c506",
+      "args": [
+        {
+          "float": "2.0"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 3,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.to_int: K-FN-007 wrong-kind operand 0",
+      "function": "6a338642645b5032722c23bab67cab2345e26384542c4a8404c410e54fcb4311",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.to_text: K-FN-007 wrong-kind operand 0",
+      "function": "d3bd6883206ac6ae6eccd75351460d531a39b730f5b59edcbce62f7fea0afb7e",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "float.trunc: K-FN-007 wrong-kind operand 0",
+      "function": "ed8c8e35d4391ef1690dfe1394f4af62bf12122df5c6cd7ee9235bacc0f714a8",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "floor: K-FN-007 wrong-kind operand 0",
+      "function": "5d4b794994651611aefe8bfdfb3e5872207ac66381b1491d5270486cf403b852",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.abs: K-FN-007 wrong-kind operand 0",
+      "function": "cd59ab94146428caf225b6e6ad17f4b50d9e39c37f43d86e710912bc3fe134e1",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.add: K-FN-007 wrong-kind operand 0",
+      "function": "e0fd352fb1d4eb1e887d063fba3e8b2b6b503ab2caab41c1f00903ba8e7affda",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.add: K-FN-007 wrong-kind operand 1",
+      "function": "e0fd352fb1d4eb1e887d063fba3e8b2b6b503ab2caab41c1f00903ba8e7affda",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.ceil: K-FN-007 wrong-kind operand 0",
+      "function": "08e4d63a3d7ac9fca5d8f8a8a8859c058823e4e98a30c8bb28fa5ad0c50f63c4",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.compare: K-FN-007 wrong-kind operand 0",
+      "function": "65297caf3573877c3979f6e5cde4edc2840cbb89b3bd38ce62e6757d930b2ba3",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.compare: K-FN-007 wrong-kind operand 1",
+      "function": "65297caf3573877c3979f6e5cde4edc2840cbb89b3bd38ce62e6757d930b2ba3",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.div: K-FN-007 wrong-kind operand 0",
+      "function": "105fada6076cf43e0cbd72eacc473cc833d13373db700e2a3f89110451a1b17c",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.div: K-FN-007 wrong-kind operand 1",
+      "function": "105fada6076cf43e0cbd72eacc473cc833d13373db700e2a3f89110451a1b17c",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.div_floor: K-FN-007 wrong-kind operand 0",
+      "function": "55bc8173a398425bf7db667c7d09422dc7eca188d231e69be4d751c454adb62c",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.div_floor: K-FN-007 wrong-kind operand 1",
+      "function": "55bc8173a398425bf7db667c7d09422dc7eca188d231e69be4d751c454adb62c",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.div_trunc: K-FN-007 wrong-kind operand 0",
+      "function": "c1c1dca11cc8658961b454ea49d2147c71510526a99e3e69c0b27120549551ed",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.div_trunc: K-FN-007 wrong-kind operand 1",
+      "function": "c1c1dca11cc8658961b454ea49d2147c71510526a99e3e69c0b27120549551ed",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.eq: K-FN-007 wrong-kind operand 0",
+      "function": "2222f153f75e38d529399c56f56f76d88890818e3a1f29807e6623f8aa1024bc",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.eq: K-FN-007 wrong-kind operand 1",
+      "function": "2222f153f75e38d529399c56f56f76d88890818e3a1f29807e6623f8aa1024bc",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.floor: K-FN-007 wrong-kind operand 0",
+      "function": "1da982736eae5695b9a083fad5900c74f53255c3c131965f0f3cc16a3b2881f6",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.ge: K-FN-007 wrong-kind operand 0",
+      "function": "68308c8253ba9b8785fceaa5ad0c0f43f792593461d9a3fc5b76501afde0e7d9",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.ge: K-FN-007 wrong-kind operand 1",
+      "function": "68308c8253ba9b8785fceaa5ad0c0f43f792593461d9a3fc5b76501afde0e7d9",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.gt: K-FN-007 wrong-kind operand 0",
+      "function": "03a84afcf4455c332a776dab95fed757383539a0a3275f2ec13e373f977b5a5d",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.gt: K-FN-007 wrong-kind operand 1",
+      "function": "03a84afcf4455c332a776dab95fed757383539a0a3275f2ec13e373f977b5a5d",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.is_finite: K-FN-007 wrong-kind operand 0",
+      "function": "1a4c4f124c7aba4d0cfa68d70e697dcbcb2dc7a52f6377cf18beda6dbb60d5a8",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.is_infinite: K-FN-007 wrong-kind operand 0",
+      "function": "761bde9e404016b8ad6e7f71deddd97e00d2135293f87cb648710430eebc3ed2",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.is_integer: K-FN-007 wrong-kind operand 0",
+      "function": "48a7b561c4ff50114f3c5ad178432bdae8cd15c019d7e620de96607733e4d162",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.is_nan: K-FN-007 wrong-kind operand 0",
+      "function": "e97d290ddd3c23b24069cca2f8eca0d6840776d17e644d03f0fc49c1a0437a9e",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.le: K-FN-007 wrong-kind operand 0",
+      "function": "154532c4294d331bef29ee4731ce1b0afc5e28101e3dea31045b1f8d1192e1a0",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.le: K-FN-007 wrong-kind operand 1",
+      "function": "154532c4294d331bef29ee4731ce1b0afc5e28101e3dea31045b1f8d1192e1a0",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.lt: K-FN-007 wrong-kind operand 0",
+      "function": "422d9fb527779185b74b06f812c138cf1894354b46f36d58ffb5c47a2ad75724",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.lt: K-FN-007 wrong-kind operand 1",
+      "function": "422d9fb527779185b74b06f812c138cf1894354b46f36d58ffb5c47a2ad75724",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.max: K-FN-007 wrong-kind operand 0",
+      "function": "1d1b703360ecf56f4dcbed63e031fa5bbdd94725df27275a8ba1c918ff37fc55",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.max: K-FN-007 wrong-kind operand 1",
+      "function": "1d1b703360ecf56f4dcbed63e031fa5bbdd94725df27275a8ba1c918ff37fc55",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.min: K-FN-007 wrong-kind operand 0",
+      "function": "6d5e158a3f7df4d0861b73095c14e54a0285a441fa2661eea81a18ed3ccc4476",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.min: K-FN-007 wrong-kind operand 1",
+      "function": "6d5e158a3f7df4d0861b73095c14e54a0285a441fa2661eea81a18ed3ccc4476",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.mul: K-FN-007 wrong-kind operand 0",
+      "function": "b3e634c6e03ac5f27721f9bbcfdc475feab0e9541c7d17a8f9b2a64bef0d5d9c",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.mul: K-FN-007 wrong-kind operand 1",
+      "function": "b3e634c6e03ac5f27721f9bbcfdc475feab0e9541c7d17a8f9b2a64bef0d5d9c",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.neg: K-FN-007 wrong-kind operand 0",
+      "function": "dd91212a3eee1c7bc02e0f5b1de4bb8a527bfc428285aad8861f4762122f524a",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.parse: K-FN-007 wrong-kind operand 0",
+      "function": "48559372aba6cd51167c0293314905609657749d3d71dba6672461035774e8ff",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.parse: K-FN-007 wrong-kind operand 1",
+      "function": "48559372aba6cd51167c0293314905609657749d3d71dba6672461035774e8ff",
+      "args": [
+        {
+          "text": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.pow: K-FN-007 wrong-kind operand 0",
+      "function": "1b87ad428b141dda598a9f2ba8ecadeb8bc5780db8263b638f85bd6379316607",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.pow: K-FN-007 wrong-kind operand 1",
+      "function": "1b87ad428b141dda598a9f2ba8ecadeb8bc5780db8263b638f85bd6379316607",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 1,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.rem_floor: K-FN-007 wrong-kind operand 0",
+      "function": "c82b170a2f30ead493b167e4fffaf7d6f78d69fe2450fd07373285f5b721c9c1",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.rem_floor: K-FN-007 wrong-kind operand 1",
+      "function": "c82b170a2f30ead493b167e4fffaf7d6f78d69fe2450fd07373285f5b721c9c1",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.rem_trunc: K-FN-007 wrong-kind operand 0",
+      "function": "f606b63f7c0ddaa1d645f312bafa3184c601ac63f6d452ac91a671952460ec82",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.rem_trunc: K-FN-007 wrong-kind operand 1",
+      "function": "f606b63f7c0ddaa1d645f312bafa3184c601ac63f6d452ac91a671952460ec82",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.round_away: K-FN-007 wrong-kind operand 0",
+      "function": "0ece5d02a3ba5d78a71ecae2004838092a7f310e73b6919803e3e3ee25dac86c",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.round_even: K-FN-007 wrong-kind operand 0",
+      "function": "4f5e48d659cac2d9a4f27810db02310c9e6e777b0ab730524c219c0c2be3a86a",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.round_up: K-FN-007 wrong-kind operand 0",
+      "function": "0f21eb029983f321fbe5c071f2d3a90147af092311ebfaf3cb082e22dfc8cba3",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.sign: K-FN-007 wrong-kind operand 0",
+      "function": "68e3ef8cb4408bfb1b583c460b2f35f44c78af7a275d38b063977b57e7dd3a27",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.sub: K-FN-007 wrong-kind operand 0",
+      "function": "2c610e00f61ca2207a7116fe2316414536c857fbd2f61b4bb64c63ffc88a8eb2",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.sub: K-FN-007 wrong-kind operand 1",
+      "function": "2c610e00f61ca2207a7116fe2316414536c857fbd2f61b4bb64c63ffc88a8eb2",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.to_float: K-FN-007 wrong-kind operand 0",
+      "function": "485d09f604ae80a6eff75d07d0ea55546433121519d203563aeae3fd9c5cee44",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.to_text: K-FN-007 wrong-kind operand 0",
+      "function": "b958df935e596bb4ba0be59691ac8b076ac2d4a42873ba744ee23c81413bbdfe",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.to_text: K-FN-007 wrong-kind operand 1",
+      "function": "b958df935e596bb4ba0be59691ac8b076ac2d4a42873ba744ee23c81413bbdfe",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "int.trunc: K-FN-007 wrong-kind operand 0",
+      "function": "4ce7f25233fd28502288f6bd4cb1a5903af0537c3e43c8777218fc6b34996076",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "is_finite: K-FN-007 wrong-kind operand 0",
+      "function": "44d860558d31ab13c564fe0781ec40a917c38f6316f9784f4b16cb1d5a8ed491",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "is_infinite: K-FN-007 wrong-kind operand 0",
+      "function": "324d6838d85938914d17ee6389a646ad55acc4e14167589d7296d27bcbea9c20",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "is_integer: K-FN-007 wrong-kind operand 0",
+      "function": "5c6f73462edd737b41a622f58232fca7300cc821aea5bc7bfe03d7c1021cae79",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "is_nan: K-FN-007 wrong-kind operand 0",
+      "function": "eed86c8d456561204c79baaf37c949008c526ce283b6930144568f2599e6c450",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.acos: K-FN-007 wrong-kind operand 0",
+      "function": "3e974e9e22624f576708fb7aa5e8796e3b6823674270721d1573d015203938f6",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.acosh: K-FN-007 wrong-kind operand 0",
+      "function": "3c545acb5b878d2ea290cd5651de50add31674811db4d780d8583a6394960a8b",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.asin: K-FN-007 wrong-kind operand 0",
+      "function": "3a2d632fe47eadeb86ad84e3305dd2645f782db649f7b3f829cd0bd9c3a17383",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.asinh: K-FN-007 wrong-kind operand 0",
+      "function": "1c5642674edd2035a6ad1893c0f4709981df0fe5ed14421fb097e7d27a8b7053",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.atan: K-FN-007 wrong-kind operand 0",
+      "function": "94d4680cfdf4744b382f7de4b9395e218f735ea5d06f5990047d9cdcd790a178",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.atan2: K-FN-007 wrong-kind operand 0",
+      "function": "b993ac94a36eb1e9ca97067abd21230d6602c79a3a39974427e25626284fac8c",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.atan2: K-FN-007 wrong-kind operand 1",
+      "function": "b993ac94a36eb1e9ca97067abd21230d6602c79a3a39974427e25626284fac8c",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.atanh: K-FN-007 wrong-kind operand 0",
+      "function": "ed6d914004ba9b683a8b8526517c0b01f93feb4662f531195f6df9bbbeba8517",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.cbrt: K-FN-007 wrong-kind operand 0",
+      "function": "0a3545ead0cd43f90384a1820f518b1e3b137180509114758298882a288b10eb",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.copysign: K-FN-007 wrong-kind operand 0",
+      "function": "27e671ad447880b7ce3392e2f368b239180052e472e7a981224220f20e03a27e",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.copysign: K-FN-007 wrong-kind operand 1",
+      "function": "27e671ad447880b7ce3392e2f368b239180052e472e7a981224220f20e03a27e",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.cos: K-FN-007 wrong-kind operand 0",
+      "function": "e8859ec1651902f10bbad6d0df23c0e4a746a4ece673f6358baff209f1b89b08",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.cosh: K-FN-007 wrong-kind operand 0",
+      "function": "d7ac4dd1b6c4878cd485cd45bd93b07abd72650c5f845002351988e9e8ca3b2f",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.erf: K-FN-007 wrong-kind operand 0",
+      "function": "681c321d327bdbb6faad6c719b5235837b753e4be63c699597a68f0b1396edfc",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.erfc: K-FN-007 wrong-kind operand 0",
+      "function": "4d6a347ce7455b129dfb7fa57e8a14a8632172ab2f79045473ea4b962bd53c52",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.exp: K-FN-007 wrong-kind operand 0",
+      "function": "3a7b6d872f5f4f34e94346c6298360ff7c9f92a33a0a163754db921197174a63",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.exp2: K-FN-007 wrong-kind operand 0",
+      "function": "81231c8842a8185c2629954151cb13b3b11a282688b44bfd5a7d91476f5099ed",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.expm1: K-FN-007 wrong-kind operand 0",
+      "function": "c4606963134d3d8158b2ad8d22fbf6b4228fb2526e94356c9a853b40fbb062fa",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.fma: K-FN-007 wrong-kind operand 0",
+      "function": "8561068ab1fe94ecad8c656f6ffd0797a13af07f1a95a57661c8879c9fce546c",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        },
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 70,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.fma: K-FN-007 wrong-kind operand 1",
+      "function": "8561068ab1fe94ecad8c656f6ffd0797a13af07f1a95a57661c8879c9fce546c",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 70,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.fma: K-FN-007 wrong-kind operand 2",
+      "function": "8561068ab1fe94ecad8c656f6ffd0797a13af07f1a95a57661c8879c9fce546c",
+      "args": [
+        {
+          "int": "2"
+        },
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 70,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.gamma: K-FN-007 wrong-kind operand 0",
+      "function": "b1a54f67a9aef8b5ce0faad030b314ca1f8cc2b7da50199922bf607684e59ef4",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.hypot: K-FN-007 wrong-kind operand 0",
+      "function": "b8ea9582f2335c23295aae83dd6de79a2e43fd15fb374dc239e34244c32f689c",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.hypot: K-FN-007 wrong-kind operand 1",
+      "function": "b8ea9582f2335c23295aae83dd6de79a2e43fd15fb374dc239e34244c32f689c",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.lgamma: K-FN-007 wrong-kind operand 0",
+      "function": "e9ebeee3a21d3c3e1190aaf6e1baccfb0f6482bdc442cea2d8ec37156ed485e5",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.log: K-FN-007 wrong-kind operand 0",
+      "function": "e950fd0fbcad2169800dbe17d3f66a2236125bcee1aa0255d9f8bc1229364940",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.log10: K-FN-007 wrong-kind operand 0",
+      "function": "d4c2c17bc8ca1029695995ebc076afef239a517e41585fbfd714d0ccab11f714",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.log1p: K-FN-007 wrong-kind operand 0",
+      "function": "e50e21d5dee0c8a0dbfb6279f9f0b015e7457d96909061f216825118a9525166",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.log2: K-FN-007 wrong-kind operand 0",
+      "function": "7f2b1000bee96d68793ab6192e1320ea144e8a5d729aaf60a811beb7c1f364ee",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.nextafter: K-FN-007 wrong-kind operand 0",
+      "function": "4bad741f843b414f57fbc3d6606df9c6d3972679500f67d935040a8eb1e8a5e1",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.nextafter: K-FN-007 wrong-kind operand 1",
+      "function": "4bad741f843b414f57fbc3d6606df9c6d3972679500f67d935040a8eb1e8a5e1",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.pow: K-FN-007 wrong-kind operand 0",
+      "function": "7318c0f4f5669ba713415bddfc3bf210d7c80419f5c7bccd9af3d1abc5fb0562",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.pow: K-FN-007 wrong-kind operand 1",
+      "function": "7318c0f4f5669ba713415bddfc3bf210d7c80419f5c7bccd9af3d1abc5fb0562",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.remainder: K-FN-007 wrong-kind operand 0",
+      "function": "1be1878e954850f0e2124e13ca1cb6fd2d782b22334c8d344b13e99478491748",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.remainder: K-FN-007 wrong-kind operand 1",
+      "function": "1be1878e954850f0e2124e13ca1cb6fd2d782b22334c8d344b13e99478491748",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.sin: K-FN-007 wrong-kind operand 0",
+      "function": "a1b1913e8ad237ba11860aaaefa6ae5ebf2a7ac5d8e371f7d3eeed9dbd547735",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.sinh: K-FN-007 wrong-kind operand 0",
+      "function": "7e88e80154ebe40c1ffe9550ed8f9060bfd15b818a3bd0994614097a4fdb8dad",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.sqrt: K-FN-007 wrong-kind operand 0",
+      "function": "4125885e8052ee7170dbf2aa41996f7e6bddc2ba8f80c7a59482c3f086374889",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.tan: K-FN-007 wrong-kind operand 0",
+      "function": "2c0120bafdd57e6adcd99e7a486c3931e34b63f9854684469ff5f5f475e3e8bc",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.tanh: K-FN-007 wrong-kind operand 0",
+      "function": "775d85112e3df5669452c3c0e9754e4994980bb8af11a0484f897a497c482db6",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 66,
+        "work": 0
+      }
+    },
+    {
+      "name": "max: K-FN-007 wrong-kind operand 0",
+      "function": "1625fc570c8824a84bbd8352dc420214e015729fcb5cb81fdaeb23ab9158d196",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "max: K-FN-007 wrong-kind operand 1",
+      "function": "1625fc570c8824a84bbd8352dc420214e015729fcb5cb81fdaeb23ab9158d196",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "min: K-FN-007 wrong-kind operand 0",
+      "function": "5969da502b454c6e03e9536902eba0684ec3e50d5a0a8feafd7dc6dc270ce062",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "min: K-FN-007 wrong-kind operand 1",
+      "function": "5969da502b454c6e03e9536902eba0684ec3e50d5a0a8feafd7dc6dc270ce062",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "mul: K-FN-007 wrong-kind operand 0",
+      "function": "3262358baaf57e850452cb7c4e73d49f2659d940b8a1b4bbf36ac75a442e327a",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "mul: K-FN-007 wrong-kind operand 1",
+      "function": "3262358baaf57e850452cb7c4e73d49f2659d940b8a1b4bbf36ac75a442e327a",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "neg: K-FN-007 wrong-kind operand 0",
+      "function": "89cf83afba2684947e9cf44c3cc125a29ae489c4b5e064af1f60b48e51b03c97",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.abs: K-FN-007 wrong-kind operand 0",
+      "function": "2eaaf72dcbfecf49110ed4029494f0302d22c6b72fbdf68f775880303c32bf35",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.add: K-FN-007 wrong-kind operand 0",
+      "function": "89dab30320e88b6dd6d2b76b50b27939aae8808a0b90bd32e67a52365d7276d5",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.add: K-FN-007 wrong-kind operand 1",
+      "function": "89dab30320e88b6dd6d2b76b50b27939aae8808a0b90bd32e67a52365d7276d5",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.ceil: K-FN-007 wrong-kind operand 0",
+      "function": "a792fab09b168fea7afb50fafbf30489ad69918b45a751c92fdda20c4c71dbe4",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.compare: K-FN-007 wrong-kind operand 0",
+      "function": "2d05b61fe7faefb30eda840e7d13b4467eb8f7836322f0a20af6cb7ff92cdf98",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.compare: K-FN-007 wrong-kind operand 1",
+      "function": "2d05b61fe7faefb30eda840e7d13b4467eb8f7836322f0a20af6cb7ff92cdf98",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.div: K-FN-007 wrong-kind operand 0",
+      "function": "0bbaa2a75bb84565def8d0b19bd1b2d23c1e5180f7964bb823aab47212d0aa64",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.div: K-FN-007 wrong-kind operand 1",
+      "function": "0bbaa2a75bb84565def8d0b19bd1b2d23c1e5180f7964bb823aab47212d0aa64",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.div_floor: K-FN-007 wrong-kind operand 0",
+      "function": "d886208a38c577e9c9077cc5c587f2cc0749f11133035918d28719d8d297db74",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.div_floor: K-FN-007 wrong-kind operand 1",
+      "function": "d886208a38c577e9c9077cc5c587f2cc0749f11133035918d28719d8d297db74",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.div_trunc: K-FN-007 wrong-kind operand 0",
+      "function": "b591f2dac7100e61e7321785ba1dcfc8a015eb1be47f0f40c5c454b28e08b386",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.div_trunc: K-FN-007 wrong-kind operand 1",
+      "function": "b591f2dac7100e61e7321785ba1dcfc8a015eb1be47f0f40c5c454b28e08b386",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.eq: K-FN-007 wrong-kind operand 0",
+      "function": "bf59c936e072d9a9cf7f4efe510df95b828a4ca5da69b677c5cc7d521bd3087f",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.eq: K-FN-007 wrong-kind operand 1",
+      "function": "bf59c936e072d9a9cf7f4efe510df95b828a4ca5da69b677c5cc7d521bd3087f",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.floor: K-FN-007 wrong-kind operand 0",
+      "function": "a60738bb3a3fac2c55d69978d26340ea3db0ec20ae93bd61aa0662054078aec0",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.ge: K-FN-007 wrong-kind operand 0",
+      "function": "d2720530ccab6ace84091d8c4271eb488ec62bc286957f04d37bb09cd453bdc2",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.ge: K-FN-007 wrong-kind operand 1",
+      "function": "d2720530ccab6ace84091d8c4271eb488ec62bc286957f04d37bb09cd453bdc2",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.gt: K-FN-007 wrong-kind operand 0",
+      "function": "3b8f08b10bbe76d04671b2a4ed36929e99247583c29cbd9dc6ea9dc8805a6b82",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.gt: K-FN-007 wrong-kind operand 1",
+      "function": "3b8f08b10bbe76d04671b2a4ed36929e99247583c29cbd9dc6ea9dc8805a6b82",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.is_finite: K-FN-007 wrong-kind operand 0",
+      "function": "11dc759f50b8adc121893e707db4f2e798ad19638e36e4355c1d8b145af93c00",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.is_infinite: K-FN-007 wrong-kind operand 0",
+      "function": "0ef2c1616f49027ee236f31f54e82471e3b2dc0a69c521839fbac21ea3c39707",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.is_integer: K-FN-007 wrong-kind operand 0",
+      "function": "f2b5bbec255cc04e37863aedeb0c9354bf7c0312a23a12af294858fb414eda05",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.is_nan: K-FN-007 wrong-kind operand 0",
+      "function": "f3d0b5e32cbaa680077c3f5a13c2b0c48862b19037848be811de75322ecd33e1",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.le: K-FN-007 wrong-kind operand 0",
+      "function": "9e37b0a06ce8af89bc1a17893d834f481e57e54cf667173e3b9f3cf3e067624c",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.le: K-FN-007 wrong-kind operand 1",
+      "function": "9e37b0a06ce8af89bc1a17893d834f481e57e54cf667173e3b9f3cf3e067624c",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.lt: K-FN-007 wrong-kind operand 0",
+      "function": "ac0b950f8ebc42c5f047ac562c5cc1c1d60cf50bd87a5b94d5d5fc387f5d5c50",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.lt: K-FN-007 wrong-kind operand 1",
+      "function": "ac0b950f8ebc42c5f047ac562c5cc1c1d60cf50bd87a5b94d5d5fc387f5d5c50",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.max: K-FN-007 wrong-kind operand 0",
+      "function": "4aee5da657c528c7e64b9c8677c78f8af5da4e943b658b042ccfd656e07fb3ef",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.max: K-FN-007 wrong-kind operand 1",
+      "function": "4aee5da657c528c7e64b9c8677c78f8af5da4e943b658b042ccfd656e07fb3ef",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.min: K-FN-007 wrong-kind operand 0",
+      "function": "8f1368e3994722916c4a246f7e725022620426e897497003648d6e18f79ec743",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.min: K-FN-007 wrong-kind operand 1",
+      "function": "8f1368e3994722916c4a246f7e725022620426e897497003648d6e18f79ec743",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.mul: K-FN-007 wrong-kind operand 0",
+      "function": "853d0c905646092160600b904a4f6373bdd7343a7ac1440f07421258cd07ae28",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.mul: K-FN-007 wrong-kind operand 1",
+      "function": "853d0c905646092160600b904a4f6373bdd7343a7ac1440f07421258cd07ae28",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.neg: K-FN-007 wrong-kind operand 0",
+      "function": "28a8a0d0c392cc4e81751cae1c500671857de8f66814e79723a16b9293f1000e",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.pow: K-FN-007 wrong-kind operand 0",
+      "function": "0ce1fce014c1a52df4f73e53b544d82ae975e4cb071674d4e3724228ffb5ee61",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.pow: K-FN-007 wrong-kind operand 1",
+      "function": "0ce1fce014c1a52df4f73e53b544d82ae975e4cb071674d4e3724228ffb5ee61",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 1,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.rem_floor: K-FN-007 wrong-kind operand 0",
+      "function": "0db02487ea389281abf85464df85d4bf6d638a4af16ec9fe76b37db8c1781b71",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.rem_floor: K-FN-007 wrong-kind operand 1",
+      "function": "0db02487ea389281abf85464df85d4bf6d638a4af16ec9fe76b37db8c1781b71",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.rem_trunc: K-FN-007 wrong-kind operand 0",
+      "function": "1df0b5cb76059eaabf6bb757f86144ccf344849a5445878e6d463b3b2f304262",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.rem_trunc: K-FN-007 wrong-kind operand 1",
+      "function": "1df0b5cb76059eaabf6bb757f86144ccf344849a5445878e6d463b3b2f304262",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.round_away: K-FN-007 wrong-kind operand 0",
+      "function": "a38c9903ed9749fc01107c29206e3fdf5374966d116304126aaa41c62bea0a46",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.round_even: K-FN-007 wrong-kind operand 0",
+      "function": "566cbe827690f0fde75f94b4c220c17fc156ec2fdbb8c37a89dc6062fe67342b",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.round_up: K-FN-007 wrong-kind operand 0",
+      "function": "e121b162ced40a78e7433b9bdf6b6337f9805932a927b059756e9d1e4b43a38a",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.sign: K-FN-007 wrong-kind operand 0",
+      "function": "6c5a1426314c7fdad34f21e7e92ababa74d2469f94e00d609b76f251069d9f99",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.sub: K-FN-007 wrong-kind operand 0",
+      "function": "ed03e86c49c7091b0b451c2cb6ca69ad315eaf1bbad1fa7da140d278d2e24ab8",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.sub: K-FN-007 wrong-kind operand 1",
+      "function": "ed03e86c49c7091b0b451c2cb6ca69ad315eaf1bbad1fa7da140d278d2e24ab8",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.to_float: K-FN-007 wrong-kind operand 0",
+      "function": "4aded399acbd1712946c2ccb69bc4a659d55812f41c112d7373899ad049c0658",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.to_int: K-FN-007 wrong-kind operand 0",
+      "function": "67082924bcfe8d819423af782f8464c5ef38e98b16cf2083901b7e955e8672fa",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.to_text: K-FN-007 wrong-kind operand 0",
+      "function": "c744fb50583e699b64c675de37437dc1ef17b2d9af72d17ec0b9fce50f052db5",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "num.trunc: K-FN-007 wrong-kind operand 0",
+      "function": "160b34add904a9427c6cb38b0948b5a54db48551bd311ed7fbb8aad235fcd520",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "pow: K-FN-007 wrong-kind operand 0",
+      "function": "61dc080291652fe7c0b384ce3cfd5e190e693ad918f457c7008d5fdde7279f52",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 7,
+        "work": 0
+      }
+    },
+    {
+      "name": "pow: K-FN-007 wrong-kind operand 1",
+      "function": "61dc080291652fe7c0b384ce3cfd5e190e693ad918f457c7008d5fdde7279f52",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 1,
+        "work": 0
+      }
+    },
+    {
+      "name": "rem_floor: K-FN-007 wrong-kind operand 0",
+      "function": "f07a0fa6b2f34d777f8b4d3646e615b575368a349026da774dab08d2d555e672",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "rem_floor: K-FN-007 wrong-kind operand 1",
+      "function": "f07a0fa6b2f34d777f8b4d3646e615b575368a349026da774dab08d2d555e672",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "rem_trunc: K-FN-007 wrong-kind operand 0",
+      "function": "418efa003407974409069fc77475df673eaba2ba7aec7068c5cfff03d1433c8d",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "rem_trunc: K-FN-007 wrong-kind operand 1",
+      "function": "418efa003407974409069fc77475df673eaba2ba7aec7068c5cfff03d1433c8d",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 10,
+        "work": 0
+      }
+    },
+    {
+      "name": "round_away: K-FN-007 wrong-kind operand 0",
+      "function": "51077620faa4d52a677a4209d131477274ec9556e89a970bcfd02143bc6019fd",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "round_even: K-FN-007 wrong-kind operand 0",
+      "function": "f41c1c1e34031e3016ec38aa37accf19572059a522b6a3339eabdf6a44c60a3b",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "round_up: K-FN-007 wrong-kind operand 0",
+      "function": "eee348ded95379871017671cec5019aa8ee506a568fd2db8651567bc36be9cfb",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "sign: K-FN-007 wrong-kind operand 0",
+      "function": "fbcc93733bbec2b6264d38f20a27e1d72f4716fbfbd434181942e6dbca35a3e8",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    },
+    {
+      "name": "sub: K-FN-007 wrong-kind operand 0",
+      "function": "c27cdb3e7e1eaf81192a11fe66a2cb68096d6fc2859c61efb0357be5ce843668",
+      "args": [
+        "null",
+        {
+          "int": "2"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "sub: K-FN-007 wrong-kind operand 1",
+      "function": "c27cdb3e7e1eaf81192a11fe66a2cb68096d6fc2859c61efb0357be5ce843668",
+      "args": [
+        {
+          "int": "2"
+        },
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 4,
+        "work": 0
+      }
+    },
+    {
+      "name": "trunc: K-FN-007 wrong-kind operand 0",
+      "function": "8b99b944a668c4ac294fc30e4759db9268348105a913cf33e673a12a0c7b59a8",
+      "args": [
+        "null"
+      ],
+      "expected": {
+        "outcome": {
+          "raised": {
+            "kind": "type_error",
+            "message": "argument has the wrong kind",
+            "data": "null"
+          }
+        },
+        "charged": 2,
+        "work": 0
+      }
+    }
+  ]
+}

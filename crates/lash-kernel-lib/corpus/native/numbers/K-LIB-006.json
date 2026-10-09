@@ -1,0 +1,605 @@
+{
+  "rule": "K-LIB-006",
+  "cases": [
+    {
+      "name": "math.acos: K-LIB-006 edge",
+      "function": "3e974e9e22624f576708fb7aa5e8796e3b6823674270721d1573d015203938f6",
+      "args": [
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "nan"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.acosh: K-LIB-006 edge",
+      "function": "3c545acb5b878d2ea290cd5651de50add31674811db4d780d8583a6394960a8b",
+      "args": [
+        {
+          "float": "0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "nan"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.asin: K-LIB-006 edge",
+      "function": "3a2d632fe47eadeb86ad84e3305dd2645f782db649f7b3f829cd0bd9c3a17383",
+      "args": [
+        {
+          "float": "-2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "nan"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.asinh: K-LIB-006 edge",
+      "function": "1c5642674edd2035a6ad1893c0f4709981df0fe5ed14421fb097e7d27a8b7053",
+      "args": [
+        {
+          "float": "-inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-inf"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.atan: K-LIB-006 edge",
+      "function": "94d4680cfdf4744b382f7de4b9395e218f735ea5d06f5990047d9cdcd790a178",
+      "args": [
+        {
+          "float": "-0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-0.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.atan2: K-LIB-006 edge",
+      "function": "b993ac94a36eb1e9ca97067abd21230d6602c79a3a39974427e25626284fac8c",
+      "args": [
+        {
+          "float": "-0.0"
+        },
+        {
+          "float": "0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-0.0"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.atanh: K-LIB-006 edge",
+      "function": "ed6d914004ba9b683a8b8526517c0b01f93feb4662f531195f6df9bbbeba8517",
+      "args": [
+        {
+          "float": "-1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-inf"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.cbrt: K-LIB-006 edge",
+      "function": "0a3545ead0cd43f90384a1820f518b1e3b137180509114758298882a288b10eb",
+      "args": [
+        {
+          "float": "-8.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-2.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.copysign: K-LIB-006 edge",
+      "function": "27e671ad447880b7ce3392e2f368b239180052e472e7a981224220f20e03a27e",
+      "args": [
+        {
+          "float": "0.0"
+        },
+        {
+          "float": "-1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-0.0"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.cos: K-LIB-006 edge",
+      "function": "e8859ec1651902f10bbad6d0df23c0e4a746a4ece673f6358baff209f1b89b08",
+      "args": [
+        {
+          "float": "inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "nan"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.cosh: K-LIB-006 edge",
+      "function": "d7ac4dd1b6c4878cd485cd45bd93b07abd72650c5f845002351988e9e8ca3b2f",
+      "args": [
+        {
+          "float": "-inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "inf"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.erf: K-LIB-006 edge",
+      "function": "681c321d327bdbb6faad6c719b5235837b753e4be63c699597a68f0b1396edfc",
+      "args": [
+        {
+          "float": "-inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-1.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.erfc: K-LIB-006 edge",
+      "function": "4d6a347ce7455b129dfb7fa57e8a14a8632172ab2f79045473ea4b962bd53c52",
+      "args": [
+        {
+          "float": "inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "0.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.exp: K-LIB-006 edge",
+      "function": "3a7b6d872f5f4f34e94346c6298360ff7c9f92a33a0a163754db921197174a63",
+      "args": [
+        {
+          "float": "-inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "0.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.exp2: K-LIB-006 edge",
+      "function": "81231c8842a8185c2629954151cb13b3b11a282688b44bfd5a7d91476f5099ed",
+      "args": [
+        {
+          "float": "-1075.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "0.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.expm1: K-LIB-006 edge",
+      "function": "c4606963134d3d8158b2ad8d22fbf6b4228fb2526e94356c9a853b40fbb062fa",
+      "args": [
+        {
+          "float": "-0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-0.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.fma: K-LIB-006 edge",
+      "function": "8561068ab1fe94ecad8c656f6ffd0797a13af07f1a95a57661c8879c9fce546c",
+      "args": [
+        {
+          "float": "1.0000000000000002"
+        },
+        {
+          "float": "0.9999999999999998"
+        },
+        {
+          "float": "-1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-4.930380657631324e-32"
+          }
+        },
+        "charged": 69,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.gamma: K-LIB-006 edge",
+      "function": "b1a54f67a9aef8b5ce0faad030b314ca1f8cc2b7da50199922bf607684e59ef4",
+      "args": [
+        {
+          "float": "-1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "nan"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.hypot: K-LIB-006 edge",
+      "function": "b8ea9582f2335c23295aae83dd6de79a2e43fd15fb374dc239e34244c32f689c",
+      "args": [
+        {
+          "float": "nan"
+        },
+        {
+          "float": "inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "inf"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.lgamma: K-LIB-006 edge",
+      "function": "e9ebeee3a21d3c3e1190aaf6e1baccfb0f6482bdc442cea2d8ec37156ed485e5",
+      "args": [
+        {
+          "float": "-1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "inf"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.log: K-LIB-006 edge",
+      "function": "e950fd0fbcad2169800dbe17d3f66a2236125bcee1aa0255d9f8bc1229364940",
+      "args": [
+        {
+          "float": "0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-inf"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.log10: K-LIB-006 edge",
+      "function": "d4c2c17bc8ca1029695995ebc076afef239a517e41585fbfd714d0ccab11f714",
+      "args": [
+        {
+          "float": "-0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-inf"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.log1p: K-LIB-006 edge",
+      "function": "e50e21d5dee0c8a0dbfb6279f9f0b015e7457d96909061f216825118a9525166",
+      "args": [
+        {
+          "float": "-0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-0.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.log2: K-LIB-006 edge",
+      "function": "7f2b1000bee96d68793ab6192e1320ea144e8a5d729aaf60a811beb7c1f364ee",
+      "args": [
+        {
+          "float": "-1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "nan"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.nextafter: K-LIB-006 edge",
+      "function": "4bad741f843b414f57fbc3d6606df9c6d3972679500f67d935040a8eb1e8a5e1",
+      "args": [
+        {
+          "float": "0.0"
+        },
+        {
+          "float": "1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "5e-324"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.pow: K-LIB-006 edge",
+      "function": "7318c0f4f5669ba713415bddfc3bf210d7c80419f5c7bccd9af3d1abc5fb0562",
+      "args": [
+        {
+          "float": "nan"
+        },
+        {
+          "float": "0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "1.0"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.remainder: K-LIB-006 edge",
+      "function": "1be1878e954850f0e2124e13ca1cb6fd2d782b22334c8d344b13e99478491748",
+      "args": [
+        {
+          "float": "7.0"
+        },
+        {
+          "float": "2.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-1.0"
+          }
+        },
+        "charged": 68,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.sin: K-LIB-006 edge",
+      "function": "a1b1913e8ad237ba11860aaaefa6ae5ebf2a7ac5d8e371f7d3eeed9dbd547735",
+      "args": [
+        {
+          "float": "inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "nan"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.sinh: K-LIB-006 edge",
+      "function": "7e88e80154ebe40c1ffe9550ed8f9060bfd15b818a3bd0994614097a4fdb8dad",
+      "args": [
+        {
+          "float": "-inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-inf"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.sqrt: K-LIB-006 edge",
+      "function": "4125885e8052ee7170dbf2aa41996f7e6bddc2ba8f80c7a59482c3f086374889",
+      "args": [
+        {
+          "float": "-0.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-0.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.tan: K-LIB-006 edge",
+      "function": "2c0120bafdd57e6adcd99e7a486c3931e34b63f9854684469ff5f5f475e3e8bc",
+      "args": [
+        {
+          "float": "inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "nan"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    },
+    {
+      "name": "math.tanh: K-LIB-006 edge",
+      "function": "775d85112e3df5669452c3c0e9754e4994980bb8af11a0484f897a497c482db6",
+      "args": [
+        {
+          "float": "-inf"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "float": "-1.0"
+          }
+        },
+        "charged": 67,
+        "work": 0
+      }
+    }
+  ]
+}

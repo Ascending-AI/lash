@@ -1,0 +1,26 @@
+{
+  "rule": "K-VAL-027",
+  "cases": [
+    {
+      "name": "same: K-VAL-027 edge",
+      "function": "4b53af9910fbabcb85c7d85f4aa35b8993d52b14d553e6d7b39696bbeb329df9",
+      "args": [
+        {
+          "int": "1"
+        },
+        {
+          "float": "1.0"
+        }
+      ],
+      "expected": {
+        "outcome": {
+          "returned": {
+            "bool": false
+          }
+        },
+        "charged": 5,
+        "work": 0
+      }
+    }
+  ]
+}

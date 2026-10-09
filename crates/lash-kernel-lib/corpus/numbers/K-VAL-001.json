@@ -1,0 +1,44 @@
+{
+  "rule": "K-VAL-001",
+  "cases": [
+    {
+      "name": "kind closure",
+      "document": "kernel 1\nnumbers by_spelling\nuse kind = @c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6\nmain { let f = fn() { return null }\n finish kind(f) }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "text": "closure"
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
+    },
+    {
+      "name": "kind ref",
+      "document": "kernel 1\nnumbers by_spelling\nuse kind = @c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6\nuse ref = @153e944ca1091d91e3ca964a3f8eba0e8ace1517880176d10fab14781a6cd663\nmain { let a = []\n finish kind(ref(a)) }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "text": "ref"
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
+    },
+    {
+      "name": "kind task",
+      "document": "kernel 1\nnumbers by_spelling\nuse kind = @c28eecc85bad363c613d67ae6fa651de6a23e2491273d9a0244431ebf80de3a6\nfn f() { return null }\nmain { let task = spawn call f()\n do join task\n finish kind(task) }\n",
+      "expected": {
+        "end": {
+          "finished": {
+            "text": "task"
+          }
+        },
+        "prints": [],
+        "trace": []
+      }
+    }
+  ]
+}
