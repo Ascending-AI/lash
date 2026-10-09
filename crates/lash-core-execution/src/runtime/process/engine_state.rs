@@ -232,7 +232,8 @@ pub trait EngineSteps: Send + Sync {
 }
 
 /// Why an engine step was refused before admission.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, thiserror::Error)]
+#[serde(tag = "reason", rename_all = "snake_case")]
 pub enum EngineStepRefusal {
     /// No engine of this kind is registered.
     #[error("no process engine `{engine}` is registered")]

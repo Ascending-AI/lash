@@ -159,13 +159,7 @@ impl DurableProcessWorker {
             },
             process,
         ))
-        .await
-        .map_err(|err| {
-            PluginError::attempt_fault(format!(
-                "failed to build the runtime of process `{}`: {err}",
-                process.id
-            ))
-        })?;
+        .await?;
         let plugins = self.admit_plugins().await?;
         self.config
             .plugin_host

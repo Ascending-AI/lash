@@ -293,6 +293,14 @@ fn vm_run_settled(
             serde_json::from_str::<VmRunOutput>(output.payload())
                 .map_err(|error| infra(format!("vm_run answered {error}")))?
         }
+        SettledOutput::Failed(failure) => {
+            let output = serde_json::from_str::<lash_core::ToolCallOutput>(failure.payload())
+                .map_err(|error| infra(format!("vm_run failure answered {error}")))?;
+            state.phase = Phase::Ended;
+            return Ok(EngineAction::Terminal(
+                lash_core::ProcessOutcome::from_tool_output(output),
+            ));
+        }
         SettledOutput::TimedOut { cause, .. } => {
             state.phase = Phase::Ended;
             return Ok(EngineAction::Terminal(
@@ -303,7 +311,7 @@ fn vm_run_settled(
                 ),
             ));
         }
-        // A failed, interrupted or stopped run reached no quiet point, after
+        // An interrupted or stopped run reached no quiet point, after
         // every retry its step kind's policy allowed (`vm_run`'s
         // declaration, which the host may override): the process ends.
         unsettled => {

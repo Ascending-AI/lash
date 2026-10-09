@@ -4,6 +4,25 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolFailureCause {
     Interrupted,
+    /// An admitted engine step has no registered body on this deployment.
+    /// Its exact registration refusal is retained in the failure's raw value.
+    EngineStepRegistrationUnavailable {
+        engine: String,
+        step: String,
+        step_kind: String,
+    },
+    /// An engine step could not reconstruct its process's catalog. The
+    /// plugin error is retained as a typed command failure in the raw value.
+    EngineStepCatalogUnreadable {
+        engine: String,
+        step: String,
+        step_kind: String,
+    },
+    /// A body for an engine step was requested for a non-engine process.
+    EngineStepWithoutEngine {
+        step: String,
+        step_kind: String,
+    },
     ExecutionLimit {
         cause: crate::LimitCause,
     },

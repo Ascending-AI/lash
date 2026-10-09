@@ -281,9 +281,9 @@ impl ProcessSteps for WorkerSteps {
                             .tool_step(runtime, process, step, execution, token)
                             .await
                     }
-                    StepRequest::Engine { .. } => {
+                    StepRequest::Engine { step, kind, input } => {
                         worker
-                            .engine_step(runtime.cx().clone(), process, step, token)
+                            .engine_step(runtime.cx().clone(), process, step, kind, input, token)
                             .await
                     }
                 }
@@ -328,13 +328,23 @@ impl DurableProcessWorker {
         &self,
         cx: ActorContext,
         process: ProcessRecord,
-        step: StepRequest,
+        step: lash_core_execution::StepName,
+        kind: lash_core_execution::EngineStepKind,
+        input: serde_json::Value,
         token: tokio_util::sync::CancellationToken,
     ) -> MemberResult {
-        let StepRequest::Engine { kind, input, .. } = step else {
-            return SettledOutput::Interrupted.into();
+        let Some(engine) = engine_kind(&process) else {
+            return engine_step_failure(
+                &process,
+                "engine_step_without_engine",
+                "an engine step belongs to a process with no engine".to_owned(),
+                crate::ToolFailureCause::EngineStepWithoutEngine {
+                    step: step.0,
+                    step_kind: kind.0,
+                },
+                None,
+            );
         };
-        let engine = engine_kind(&process).unwrap_or_default();
         let steps = match self
             .config
             .runtime_host
@@ -346,14 +356,43 @@ impl DurableProcessWorker {
             // holds: the body cannot run here.
             Err(refusal) => {
                 tracing::warn!(process_id = %process.id, %refusal, "an admitted engine step has no body here");
-                return SettledOutput::Interrupted.into();
+                let code = match &refusal {
+                    crate::EngineStepRefusal::UnknownEngine { .. } => "engine_step_engine_missing",
+                    crate::EngineStepRefusal::NoEngineSteps { .. } => {
+                        "engine_step_registration_missing"
+                    }
+                    crate::EngineStepRefusal::UndeclaredStep { .. } => "engine_step_undeclared",
+                };
+                return engine_step_failure(
+                    &process,
+                    code,
+                    refusal.to_string(),
+                    crate::ToolFailureCause::EngineStepRegistrationUnavailable {
+                        engine: engine.to_owned(),
+                        step: step.0,
+                        step_kind: kind.0,
+                    },
+                    Some(serde_json::json!({ "registration_refusal": refusal })),
+                );
             }
         };
         let tool_catalog = match self.step_catalog(&process).await {
             Ok(catalog) => catalog,
             Err(error) => {
                 tracing::warn!(process_id = %process.id, %error, "an engine step could not read its catalog");
-                return SettledOutput::Interrupted.into();
+                return engine_step_failure(
+                    &process,
+                    "engine_step_catalog_unreadable",
+                    error.to_string(),
+                    crate::ToolFailureCause::EngineStepCatalogUnreadable {
+                        engine: engine.to_owned(),
+                        step: step.0,
+                        step_kind: kind.0,
+                    },
+                    Some(
+                        serde_json::json!({ "catalog_error": crate::ToolIntentCommandFailure::from(&error) }),
+                    ),
+                );
             }
         };
         let backend = cx.backend().clone();
@@ -369,4 +408,31 @@ impl DurableProcessWorker {
         };
         steps.run(run, token).await.into()
     }
+}
+
+/// Retain the known pre-body failure as process-owned attempt material.
+#[expect(clippy::expect_used, reason = "a tool failure is serializable data")]
+fn engine_step_failure(
+    process: &ProcessRecord,
+    code: &str,
+    message: String,
+    cause: crate::ToolFailureCause,
+    source: Option<serde_json::Value>,
+) -> MemberResult {
+    use lash_core_execution::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
+    let mut failure = crate::ToolFailure::runtime(crate::ToolFailureClass::Internal, code, message)
+        .with_cause(cause);
+    failure.raw = source.map(crate::ToolValue::untrusted_json);
+    let output = crate::ToolCallOutput::failure(failure);
+    SettledOutput::Failed(
+        Material::journal_local(
+            MaterialOwner::Process {
+                process_id: process.id.clone(),
+            },
+            MaterialRole::AttemptOutput,
+            serde_json::to_string(&output).expect("an engine step failure encodes"),
+        )
+        .failure(KnownFailureReason::Reported, None),
+    )
+    .into()
 }

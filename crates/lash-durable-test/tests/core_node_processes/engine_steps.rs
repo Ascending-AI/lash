@@ -40,12 +40,21 @@ const BARE_ENGINE: &str = "core-node-bare-engine";
 /// The `double` body: it answers twice its input, counting its runs.
 struct Double {
     runs: Arc<AtomicUsize>,
+    declarations: Option<Arc<AtomicUsize>>,
 }
 
 #[async_trait::async_trait]
 impl lash_core::EngineSteps for Double {
     fn kinds(&self) -> Vec<lash_core::EngineStepKind> {
-        vec![lash_core::EngineStepKind::new(DOUBLE)]
+        if self
+            .declarations
+            .as_ref()
+            .is_some_and(|reads| reads.fetch_add(1, Ordering::SeqCst) > 0)
+        {
+            Vec::new()
+        } else {
+            vec![lash_core::EngineStepKind::new(DOUBLE)]
+        }
     }
 
     fn execution(&self, _kind: &lash_core::EngineStepKind) -> std::time::Duration {
@@ -78,6 +87,8 @@ impl lash_core::EngineSteps for Double {
 /// host's engine plugin does.
 struct EnginePlugin {
     runs: Arc<AtomicUsize>,
+    declarations: Option<Arc<AtomicUsize>>,
+    catalog_failure: bool,
 }
 
 struct NoSessionPlugin;
@@ -107,10 +118,15 @@ impl lash_core::plugin::PluginFactory for EnginePlugin {
         Ok(vec![
             lash_core::ProcessEngineRegistration::accepting(Arc::new(ScriptEngine {
                 kind: PLUGIN_ENGINE,
-                advance: engine_step_advance,
+                advance: if self.declarations.is_some() || self.catalog_failure {
+                    failed_step_advance
+                } else {
+                    engine_step_advance
+                },
             }))
             .with_engine_steps(Arc::new(Double {
                 runs: Arc::clone(&self.runs),
+                declarations: self.declarations.clone(),
             })),
         ])
     }
@@ -119,6 +135,11 @@ impl lash_core::plugin::PluginFactory for EnginePlugin {
         &self,
         _ctx: &lash_core::plugin::PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::plugin::SessionPlugin>, lash_core::PluginError> {
+        if self.catalog_failure {
+            return Err(lash_core::PluginError::Registration(
+                "catalog law refusal".to_owned(),
+            ));
+        }
         Ok(Arc::new(NoSessionPlugin))
     }
 }
@@ -136,6 +157,8 @@ async fn plugin_engine_step_runs_through_its_registration(tier: Tier) {
     let runs = Arc::new(AtomicUsize::new(0));
     let plugin = Arc::new(EnginePlugin {
         runs: Arc::clone(&runs),
+        declarations: None,
+        catalog_failure: false,
     });
     let deployment = deploy(tier, Vec::new(), |builder| builder.plugin(plugin)).await;
     let process = start(&deployment.core, PLUGIN_ENGINE, serde_json::json!(21)).await;
@@ -367,3 +390,135 @@ async fn an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides(t
 }
 
 on_every_tier!(an_engine_step_retries_as_its_kind_declares_unless_its_host_overrides);
+
+/// FIG-5600: a registration lost between admission and execution is a
+/// known failure, retained through the facade and the canonical terminal.
+async fn a_missing_engine_step_registration_ends_failed_with_its_typed_reason(tier: Tier) {
+    let runs = Arc::new(AtomicUsize::new(0));
+    let plugin = Arc::new(EnginePlugin {
+        runs: Arc::clone(&runs),
+        declarations: Some(Arc::new(AtomicUsize::new(0))),
+        catalog_failure: false,
+    });
+    let deployment = deploy(tier, Vec::new(), |builder| builder.plugin(plugin)).await;
+    let process = start(&deployment.core, PLUGIN_ENGINE, serde_json::json!(21)).await;
+    let output = ended(&deployment.core, &process).await;
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("the unavailable registration fails the process: {output:?}");
+    };
+    assert_eq!(failure.code, "engine_step_undeclared");
+    let cause = serde_json::to_value(&failure.cause).expect("the typed cause encodes");
+    assert_eq!(
+        cause,
+        serde_json::json!({
+            "kind": "engine_step_registration_unavailable",
+            "engine": PLUGIN_ENGINE,
+            "step": "double",
+            "step_kind": DOUBLE,
+        })
+    );
+    let source: lash_core::EngineStepRefusal = serde_json::from_value(
+        failure
+            .raw
+            .as_ref()
+            .expect("the registration refusal is retained")
+            .to_json_value()["registration_refusal"]
+            .clone(),
+    )
+    .expect("the refusal remains typed");
+    assert_eq!(
+        source,
+        lash_core::EngineStepRefusal::UndeclaredStep {
+            engine: PLUGIN_ENGINE.to_owned(),
+            kind: lash_core::EngineStepKind::new(DOUBLE),
+        }
+    );
+    let record = deployment
+        .backend
+        .process_registry()
+        .get_process(&process)
+        .await
+        .expect("the process is read")
+        .expect("the process exists");
+    let lash_core::ProcessLifecycleState::Terminal { outcome: end, .. } = &record.lifecycle else {
+        panic!("the failed process has a canonical terminal: {record:?}");
+    };
+    assert_eq!(*end, lash_core::ProcessTerminal::from_tool_output(output));
+    assert_eq!(runs.load(Ordering::SeqCst), 0, "no body ran");
+}
+
+on_every_tier!(a_missing_engine_step_registration_ends_failed_with_its_typed_reason);
+
+/// A process engine retains a failed step's output as its terminal answer.
+fn failed_step_advance(
+    state: &mut serde_json::Value,
+    event: lash_core::EngineEvent,
+) -> lash_core::EngineAction {
+    if let lash_core::EngineEvent::StepSettled {
+        outcome: lash_core::SettledOutput::Failed(failure),
+        ..
+    } = &event
+    {
+        let output =
+            serde_json::from_str(failure.payload()).expect("a failed body retains its output");
+        return lash_core::EngineAction::Terminal(lash_core::ProcessOutcome::from_tool_output(
+            output,
+        ));
+    }
+    engine_step_advance(state, event)
+}
+
+/// FIG-5600: an unreadable catalog remains a known failure, with the
+/// original typed plugin cause retained in the facade's terminal output.
+async fn an_unreadable_engine_step_catalog_ends_failed_with_its_typed_reason(tier: Tier) {
+    let runs = Arc::new(AtomicUsize::new(0));
+    let plugin = Arc::new(EnginePlugin {
+        runs: Arc::clone(&runs),
+        declarations: None,
+        catalog_failure: true,
+    });
+    let deployment = deploy(tier, Vec::new(), |builder| builder.plugin(plugin)).await;
+    let process = start(&deployment.core, PLUGIN_ENGINE, serde_json::json!(21)).await;
+    let output = ended(&deployment.core, &process).await;
+    let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+        panic!("the unreadable catalog fails the process: {output:?}");
+    };
+    assert_eq!(failure.code, "engine_step_catalog_unreadable");
+    assert_eq!(
+        failure.cause.as_deref(),
+        Some(&lash_core::ToolFailureCause::EngineStepCatalogUnreadable {
+            engine: PLUGIN_ENGINE.to_owned(),
+            step: "double".to_owned(),
+            step_kind: DOUBLE.to_owned(),
+        })
+    );
+    let source: lash_core::ToolIntentCommandFailure = serde_json::from_value(
+        failure
+            .raw
+            .as_ref()
+            .expect("the plugin cause is retained")
+            .to_json_value()["catalog_error"]
+            .clone(),
+    )
+    .expect("the plugin cause remains typed");
+    assert!(
+        matches!(source, lash_core::ToolIntentCommandFailure::Registration(message) if message == "catalog law refusal")
+    );
+    let record = deployment
+        .backend
+        .process_registry()
+        .get_process(&process)
+        .await
+        .expect("the process is read")
+        .expect("the process exists");
+    let lash_core::ProcessLifecycleState::Terminal { outcome, .. } = &record.lifecycle else {
+        panic!("the process has its canonical terminal: {record:?}");
+    };
+    assert_eq!(
+        *outcome,
+        lash_core::ProcessTerminal::from_tool_output(output)
+    );
+    assert_eq!(runs.load(Ordering::SeqCst), 0, "no body ran");
+}
+
+on_every_tier!(an_unreadable_engine_step_catalog_ends_failed_with_its_typed_reason);

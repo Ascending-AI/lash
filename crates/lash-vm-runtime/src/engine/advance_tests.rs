@@ -563,10 +563,16 @@ fn a_failed_vm_run_ends_the_process_typed() {
         site: None,
     });
     driven.on(EngineEvent::Woke);
-    let EngineAction::Terminal(outcome) = driven.on(step("vm_run.1", fault())) else {
+    let failed = fault();
+    let expected: lash_core::ToolCallOutput =
+        serde_json::from_str(failed.payload().unwrap()).unwrap();
+    let EngineAction::Terminal(outcome) = driven.on(step("vm_run.1", failed)) else {
         panic!("the process ends");
     };
-    assert_eq!(failure_code(&outcome), "process_segment_resume_failed");
+    assert_eq!(
+        outcome,
+        lash_core::ProcessOutcome::from_tool_output(expected)
+    );
     assert_eq!(driven.phase(), Phase::Ended);
     driven.refuses(EngineEvent::Woke);
 }

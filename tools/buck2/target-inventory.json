@@ -43294,6 +43294,7 @@
         "lash-internal-core-execution",
         "lash-internal-core-ids",
         "lash-internal-trace",
+        "serde_json",
         "tokio-util",
         "tracing"
       ],

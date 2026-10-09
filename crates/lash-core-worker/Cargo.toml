@@ -30,5 +30,6 @@ lash-core = { workspace = true }
 lash-core-ids = { workspace = true }
 lash-core-execution = { workspace = true }
 lash-trace = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
