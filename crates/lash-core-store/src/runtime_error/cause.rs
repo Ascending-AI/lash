@@ -67,6 +67,14 @@ pub enum RuntimeErrorCause {
     VmWorker {
         outcome: Box<lash_vm_protocol::InfrastructureOutcome>,
     },
+    /// The VM state a stopped code cell resumes from is refused by this
+    /// build's worker: another build wrote it. Nothing of the cell is
+    /// recorded for it, and it is no outcome of the cell: its turn parks on
+    /// the cell's snapshot, and a build that reads the state resumes it
+    /// (FIG-5613).
+    CellSnapshotUndecodable {
+        refusal: Box<lash_vm_protocol::RunRefusal>,
+    },
     PluginExecution {
         refusal: Box<crate::store::plugin_writers::PluginExecutionRefusal>,
     },

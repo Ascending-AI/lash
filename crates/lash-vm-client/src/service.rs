@@ -37,6 +37,12 @@ pub enum Request {
     ContinuationInfo {
         bytes: Vec<u8>,
     },
+    /// Whether this worker's VM reads `state`: its contract versions against
+    /// the VM's read ranges, then its bytes through the VM's own decoder.
+    /// A holder of parked state asks before it hands the state to a run.
+    CheckState {
+        state: lash_vm_protocol::OpaqueVmState,
+    },
     #[cfg(feature = "testing")]
     ContinuationProbe {
         bytes: Vec<u8>,
@@ -140,6 +146,11 @@ pub enum Response {
     },
     ContinuationInfo {
         iterator_count: usize,
+    },
+    /// The answer to [`Request::CheckState`]: the refusal a run handed the
+    /// state would meet, or `None` when the VM reads it.
+    StateCheck {
+        refusal: Option<lash_vm_protocol::RunRefusal>,
     },
     #[cfg(feature = "testing")]
     ContinuationProbe {

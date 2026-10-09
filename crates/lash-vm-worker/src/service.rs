@@ -151,6 +151,9 @@ pub(crate) fn perform(
                 policy: false,
             },
         },
+        Request::CheckState { state } => Response::StateCheck {
+            refusal: state_refusal(vm, &state)?,
+        },
         Request::References { source } => match frontend.parse(&source, None) {
             Ok(program) => Response::References(lash_vm::referenced_receiver_call_paths(&program)),
             Err(error) => refusal(error),
@@ -235,6 +238,38 @@ pub(crate) fn perform(
     Ok(EncodedPayload(rmp_serde::to_vec_named(&response).map_err(
         |error| PoolError::payload(PayloadKind::ServiceResponse, error),
     )?))
+}
+/// The refusal a run handed `state` would meet, as the worker's start makes
+/// it: the state's contract versions against the VM's read ranges, then its
+/// bytes through the decoder its kind names. `Err` is a fault of the check
+/// itself.
+fn state_refusal(
+    vm: &VmInstance,
+    state: &lash_vm_protocol::OpaqueVmState,
+) -> Result<Option<RunRefusal>, PoolError> {
+    if let Err(refusal) = lash_vm::vm_contract_reads().admit(*state.vm_contract()) {
+        return Ok(Some(RunRefusal::State { refusal }));
+    }
+    let decoded = match state.kind() {
+        VmStateKind::Continuation => {
+            crate::worker::ParkedRun::decode(state.bytes()).and_then(|parked| {
+                vm.open_continuation(&parked.vm.0)
+                    .map(drop)
+                    .map_err(|error| undecodable_state(VmStateKind::Continuation, error))
+            })
+        }
+        VmStateKind::Snapshot => vm
+            .open_snapshot(state.bytes())
+            .map(drop)
+            .map_err(|error| undecodable_state(VmStateKind::Snapshot, error)),
+    };
+    match decoded {
+        Ok(()) => Ok(None),
+        Err(PoolError::Infrastructure(lash_vm_protocol::InfrastructureOutcome::RunRefused {
+            refusal,
+        })) => Ok(Some(refusal)),
+        Err(error) => Err(error),
+    }
 }
 fn undecodable_artifact(error: impl std::fmt::Display) -> PoolError {
     PoolError::refused(RunRefusal::Undecodable {

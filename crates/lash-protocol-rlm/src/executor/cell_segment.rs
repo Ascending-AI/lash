@@ -126,10 +126,77 @@ pub(crate) fn snapshot_tool_calls(
 }
 
 /// Whether this build decodes `snapshot`, a cell's stored snapshot: the
-/// broker's checkpoint and the envelope a resumed cell runs on with. The VM
-/// bytes are the worker's to read.
-pub(crate) fn check_cell_snapshot(snapshot: &str) -> Result<(), String> {
-    stored_envelope(snapshot).map(drop)
+/// broker's checkpoint, the envelope a resumed cell runs on with, and the VM
+/// state the cell resumes from. The VM bytes are the worker's to read, so a
+/// worker of `workers` answers for them through the VM's own decoder; the
+/// inner `Err` is the account of whichever does not decode.
+///
+/// # Errors
+///
+/// The worker's failure to answer: nothing is known of the VM state.
+pub(crate) async fn check_cell_snapshot(
+    workers: &lash_vm_client::service::Service,
+    snapshot: &str,
+) -> Result<Result<(), String>, lash_core::RuntimeError> {
+    use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
+    use lash_vm_client::service::{Request, Response};
+
+    let checkpoint: lash_vm_broker::Checkpoint = match serde_json::from_str(snapshot) {
+        Ok(checkpoint) => checkpoint,
+        Err(error) => return Ok(Err(error.to_string())),
+    };
+    if let Err(error) = envelope_of(&checkpoint) {
+        return Ok(Err(error));
+    }
+    match workers
+        .request_accounted(Request::CheckState {
+            state: checkpoint.vm,
+        })
+        .await
+        .map_err(lash_vm_client::PoolError::into_runtime_error)?
+    {
+        Response::StateCheck { refusal: None } => Ok(Ok(())),
+        Response::StateCheck {
+            refusal: Some(refusal),
+        } => Ok(Err(refusal.to_string())),
+        other => Err(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::VmWorkerFailed,
+            format!("the worker answered a state check with {other:?}"),
+        )),
+    }
+}
+
+/// The refusal of the VM state a resumed cell was handed, if `failure` is
+/// one: the state's structural refusal, or the worker's refusal to decode
+/// its bytes. Another build wrote that state, so it is no failure of the
+/// cell's program and no fault of this attempt.
+pub(super) fn resumed_state_refusal(
+    failure: &lash_vm_broker::BrokerFailure,
+) -> Option<lash_vm_protocol::RunRefusal> {
+    use lash_vm_broker::{BrokerFailure, CheckoutRefusal};
+    use lash_vm_protocol::{InfrastructureOutcome, RunInput, RunRefusal};
+    match failure {
+        BrokerFailure::StateRefused { refusal } => Some(RunRefusal::State {
+            refusal: refusal.clone(),
+        }),
+        BrokerFailure::WorkerLost {
+            outcome: InfrastructureOutcome::RunRefused { refusal },
+        }
+        | BrokerFailure::Unavailable {
+            refusal: CheckoutRefusal::Infrastructure(InfrastructureOutcome::RunRefused { refusal }),
+        } if matches!(
+            refusal,
+            RunRefusal::State { .. }
+                | RunRefusal::Undecodable {
+                    input: RunInput::State { .. },
+                    ..
+                }
+        ) =>
+        {
+            Some(refusal.clone())
+        }
+        _ => None,
+    }
 }
 
 /// The envelope `snapshot`, a cell's stored snapshot, holds, if it holds
@@ -137,6 +204,13 @@ pub(crate) fn check_cell_snapshot(snapshot: &str) -> Result<(), String> {
 fn stored_envelope(snapshot: &str) -> Result<Option<CellSegmentState>, String> {
     let checkpoint: lash_vm_broker::Checkpoint =
         serde_json::from_str(snapshot).map_err(|error| error.to_string())?;
+    envelope_of(&checkpoint)
+}
+
+/// The envelope `checkpoint` holds, if it holds one.
+fn envelope_of(
+    checkpoint: &lash_vm_broker::Checkpoint,
+) -> Result<Option<CellSegmentState>, String> {
     checkpoint
         .host
         .as_ref()
@@ -178,6 +252,36 @@ impl lash_core::store::DurableRecord for CellSegmentState {
 
 #[cfg(test)]
 mod tests {
+    /// FIG-5613: a worker's refusal to decode the state a resumed cell was
+    /// handed is that state's refusal, which parks the cell's turn; a
+    /// refusal of any other input of the run stays the run's own.
+    #[test]
+    fn only_a_refusal_of_the_resumed_state_is_the_cell_snapshots() {
+        use lash_vm_protocol::{Detail, RunInput, RunRefusal, VmStateKind};
+        let lost = |refusal: RunRefusal| lash_vm_broker::BrokerFailure::WorkerLost {
+            outcome: refusal.into(),
+        };
+        let undecodable = RunRefusal::Undecodable {
+            input: RunInput::State {
+                kind: VmStateKind::Continuation,
+            },
+            detail: Detail::new("invalid type: map, expected a sequence"),
+        };
+        assert_eq!(
+            super::resumed_state_refusal(&lost(undecodable.clone())),
+            Some(undecodable)
+        );
+        for other in [
+            RunRefusal::UnknownContext,
+            RunRefusal::Undecodable {
+                input: RunInput::Artifact,
+                detail: Detail::new("truncated"),
+            },
+        ] {
+            assert_eq!(super::resumed_state_refusal(&lost(other)), None);
+        }
+    }
+
     #[test]
     fn segment_bindings_refuse_untyped_payloads() {
         for value in [

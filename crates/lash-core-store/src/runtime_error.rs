@@ -1062,6 +1062,7 @@ impl RuntimeError {
             | RuntimeErrorCause::MaterialRefused { .. }
             | RuntimeErrorCause::ProviderFailure { .. }
             | RuntimeErrorCause::VmWorker { .. }
+            | RuntimeErrorCause::CellSnapshotUndecodable { .. }
             | RuntimeErrorCause::ArtifactReferrerEnded { .. }
             | RuntimeErrorCause::Compat { .. }
             | RuntimeErrorCause::IngressReservedSourceKey { .. }

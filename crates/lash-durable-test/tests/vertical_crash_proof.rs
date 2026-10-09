@@ -1469,6 +1469,24 @@ impl Activation for StaleCheckpoint {
 async fn resumed_with_a_stale_checkpoint(
     stale: fn(&str) -> String,
 ) -> (V0, Arc<dyn DurableStore>, SimNodes, Arc<SimClock>) {
+    resumed_with_stale_state(|database, session| {
+        Arc::new(StaleCheckpoint {
+            rewritten: std::sync::atomic::AtomicBool::new(false),
+            database,
+            session,
+            stale,
+        })
+    })
+    .await
+}
+
+/// The 1.0 session image resumed on one node until its session parks or
+/// goes idle, under the activation `stale` builds over its store and its
+/// session's own activation: the scenario, its store, its nodes and its
+/// clock.
+async fn resumed_with_stale_state(
+    stale: impl FnOnce(Arc<dyn DurableStore>, Arc<dyn Activation>) -> Arc<dyn Activation>,
+) -> (V0, Arc<dyn DurableStore>, SimNodes, Arc<SimClock>) {
     let mut resumed = V0::new(Protocol::Code, Dialect::SqliteFile, None);
     resumed.image = Some(&images::SESSION);
     let clock = SimClock::new();
@@ -1478,12 +1496,7 @@ async fn resumed_with_a_stale_checkpoint(
         Arc::clone(&clock),
         Script::new(),
         resumed.config(),
-        Arc::new(StaleCheckpoint {
-            rewritten: std::sync::atomic::AtomicBool::new(false),
-            database: Arc::clone(&database),
-            session: resumed.activation(),
-            stale,
-        }),
+        stale(Arc::clone(&database), resumed.activation()),
     );
     nodes.start("b");
     let horizon = clock.logical_ms() + 600_000;
@@ -1587,6 +1600,167 @@ async fn a_parked_driver_state_this_build_cannot_decode_is_refused_at_restore_be
     assert!(
         violations.is_empty(),
         "the stale driver state's resume:\n  {}\n{}",
+        violations.join("\n  "),
+        nodes.script().rendered_trace()
+    );
+}
+
+/// A session activation whose first claim rewrites the snapshot its
+/// unfinished turn's cell resumes from, leaving the VM continuation inside
+/// it as a build with another continuation shape wrote it.
+struct StaleCellContinuation {
+    rewritten: std::sync::atomic::AtomicBool,
+    database: Arc<dyn DurableStore>,
+    session: Arc<dyn Activation>,
+}
+
+/// The execution of the cell the 1.0 session image stopped in.
+fn image_cell() -> lash_durable::domain::ExecKey {
+    lash_durable::domain::ExecKey::Cell(
+        session(),
+        run(),
+        lash_durable::domain::CellId::new("v0-session:v0-turn:1:0:exec_code:3"),
+    )
+}
+
+/// `snapshot`, a cell's stored snapshot, with its VM continuation's
+/// occurrence counters in the map another build wrote them as. Everything
+/// the parent checks still holds: the checkpoint and the cell's envelope
+/// decode, and the state is sealed again over the changed bytes, so its
+/// hash matches them.
+fn with_a_stale_continuation(snapshot: &str) -> String {
+    let mut stale: serde_json::Value =
+        serde_json::from_str(snapshot).expect("the image's cell snapshot is JSON");
+    let vm: lash_vm_protocol::OpaqueVmState =
+        serde_json::from_value(stale["vm"].clone()).expect("the cell snapshot holds VM state");
+    assert_eq!(
+        vm.kind(),
+        lash_vm_protocol::VmStateKind::Continuation,
+        "the image's cell did not stop on a continuation"
+    );
+    let (current, other_build): (&[u8], &[u8]) = (
+        br#""occurrence_counters":[]"#,
+        br#""occurrence_counters":{}"#,
+    );
+    let mut bytes = vm.bytes().to_vec();
+    let at = bytes
+        .windows(current.len())
+        .position(|window| window == current)
+        .expect("the image's continuation holds its occurrence counters");
+    bytes[at..at + current.len()].copy_from_slice(other_build);
+    stale["vm"] = serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
+        vm.kind(),
+        vm.owner().clone(),
+        *vm.vm_contract(),
+        bytes,
+    ))
+    .expect("the stale VM state encodes");
+    stale.to_string()
+}
+
+#[async_trait::async_trait]
+impl Activation for StaleCellContinuation {
+    async fn activate(&self, owned: lash_durable::runner::Owned) -> lash_durable::runner::Exit {
+        use lash_durable::DomainWrite;
+        use lash_durable::domain::SnapshotWrite;
+        if !self
+            .rewritten
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            let row = self
+                .database
+                .snapshot(&image_cell())
+                .await
+                .expect("the cell's snapshot reads")
+                .expect("the image holds its cell's snapshot");
+            let mut tx = owned
+                .begin()
+                .await
+                .expect("the first claim reads its actor");
+            tx.write(DomainWrite::Snapshot(SnapshotWrite::Put {
+                exec: row.exec.clone(),
+                expected: Some(row.rev),
+                snapshot_ref: with_a_stale_continuation(&row.snapshot_ref),
+                executable_identity: row.executable_identity.clone(),
+                format_version: row.format_version,
+            }));
+            owned
+                .commit(tx, CommitLabel::CELL_SNAPSHOT)
+                .await
+                .expect("the stale cell snapshot commits");
+        }
+        self.session.activate(owned).await
+    }
+}
+
+/// D-PARKREFUSE (FIG-5613): a session whose stopped cell holds a VM
+/// continuation this build does not decode is refused when its turn is
+/// restored, through the VM's own decoder, before the cell is re-delivered.
+/// The cell's refusal never reaches the model as a failed cell: no model
+/// call is made, nothing of the turn commits, and the session parks with the
+/// typed refusal of its cell snapshot, its turn open.
+#[tokio::test]
+async fn a_parked_cell_continuation_this_build_cannot_decode_is_refused_at_restore_before_any_model_call()
+ {
+    let (resumed, database, nodes, _clock) = resumed_with_stale_state(|database, session| {
+        Arc::new(StaleCellContinuation {
+            rewritten: std::sync::atomic::AtomicBool::new(false),
+            database,
+            session,
+        })
+    })
+    .await;
+    nodes.quiesce().await;
+
+    let mut violations = Vec::new();
+    let labels: Vec<CommitLabel> = nodes
+        .script()
+        .trace()
+        .iter()
+        .filter(|write| write.kind == WriteKind::Actor && write.committed())
+        .map(|write| write.point.label)
+        .collect();
+    // The first claim's rewrite of the cell's snapshot, then the park.
+    if labels != [CommitLabel::CELL_SNAPSHOT, CommitLabel::SESSION_RELEASE] {
+        violations.push(format!(
+            "the refused session committed {labels:?}, not its park alone: its model was called or its turn committed"
+        ));
+    }
+    let requests = resumed.seen.lock_recover().requests.len();
+    if requests != 0 {
+        violations.push(format!("the model was called {requests} times"));
+    }
+    let programs: usize = resumed.tripwire.counts().vm_programs.values().sum();
+    if programs != 0 {
+        violations.push(format!("the cell's program was entered {programs} times"));
+    }
+    let writes = resumed.world.writes();
+    if !writes.is_empty() {
+        violations.push(format!("the cell's operation ran again: {writes:?}"));
+    }
+    match database.actor(&actor()).await {
+        Ok(Some(snapshot)) if snapshot.state == ActorState::Parked => {}
+        other => violations.push(format!("the session is not parked: {other:?}")),
+    }
+    match facade_park(&resumed).await {
+        Some(lash::SessionParkReason::UndecodableState {
+            state: lash::ParkedTurnState::CellSnapshot,
+            message,
+        }) if message.contains("continuation") => {}
+        other => violations.push(format!(
+            "the facade reads the park {other:?}, not the refused cell snapshot"
+        )),
+    }
+    if !matches!(database.turn(&session()).await, Ok(Some(row)) if row.run == run()) {
+        violations.push("the refused turn is no longer open".to_owned());
+    }
+    match database.turn_end(&session(), &run()).await {
+        Ok(None) => {}
+        other => violations.push(format!("the run ended: {other:?}")),
+    }
+    assert!(
+        violations.is_empty(),
+        "the stale cell continuation's resume:\n  {}\n{}",
         violations.join("\n  "),
         nodes.script().rendered_trace()
     );

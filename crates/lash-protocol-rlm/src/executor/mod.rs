@@ -821,6 +821,7 @@ async fn execute_code_in_worker_scope(
     ));
     // A resumed cell runs on from its snapshot; a fresh one starts from the
     // session's VM state.
+    let runs_on = resumed.is_some();
     let from = match resumed {
         Some(resumed) => {
             if let Err(error) = hold_continuation_definitions(&ctx, &resumed.from.vm).await {
@@ -1023,6 +1024,30 @@ async fn execute_code_in_worker_scope(
                         lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
                             .with_worker_limit(limit),
                     ),
+                );
+            }
+            // The state a resumed cell runs on from is refused: another
+            // build wrote it. That is no failure the model sees and nothing
+            // the cell records: the cell aborts with the typed refusal, and
+            // its turn parks on the cell's snapshot (FIG-5613).
+            if runs_on && let Some(refusal) = cell_segment::resumed_state_refusal(&error) {
+                let mut refused = lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::VmWorkerFailed,
+                    error.to_string(),
+                );
+                refused.cause = Some(lash_core::RuntimeErrorCause::CellSnapshotUndecodable {
+                    refusal: Box::new(refusal),
+                });
+                ctx.record_nested_effect_error(
+                    lash_core::RuntimeEffectControllerError::from(refused)
+                        .retryable_uncommitted_derivation(),
+                );
+                return exec_response_from(
+                    host.into_collected(),
+                    lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                        lash_core::CellFailureKind::Host,
+                        error.to_string(),
+                    )),
                 );
             }
             let deployment = match &error {

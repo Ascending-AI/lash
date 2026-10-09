@@ -380,8 +380,11 @@ impl CodeExecutorPlugin for RlmCodeExecutor {
         crate::executor::snapshot_tool_calls(snapshot).map_err(SessionError::Protocol)
     }
 
-    fn check_cell_snapshot(&self, snapshot: &str) -> Result<(), SessionError> {
-        crate::executor::check_cell_snapshot(snapshot).map_err(SessionError::Protocol)
+    async fn check_cell_snapshot(
+        &self,
+        snapshot: &str,
+    ) -> Result<Result<(), String>, lash_core::RuntimeError> {
+        crate::executor::check_cell_snapshot(&self.state.dialect.worker_service(), snapshot).await
     }
 
     async fn frame_switch_carries(

@@ -19,6 +19,7 @@ impl RuntimeErrorCause {
                 !outcome.is_retryable() && outcome.deployment_fault().is_none()
             }
             Self::LlmProfileUnavailable { .. }
+            | Self::CellSnapshotUndecodable { .. }
             | Self::PluginExecution { .. }
             | Self::PluginStatePublicationFenced { .. } => false,
             Self::AttachmentRetention { failure } => !failure.is_retryable(),

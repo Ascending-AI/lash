@@ -259,17 +259,23 @@ pub trait CodeExecutorPlugin: Send + Sync {
     }
 
     /// Check `snapshot`, the stored snapshot a cell resumes from, as this
-    /// executor wrote it: whether this build decodes it. A turn restored on
-    /// the cell asks before the cell runs again, so a snapshot another build
+    /// executor wrote it: whether this build decodes all of it, the state
+    /// its language runtime resumes from included. A turn restored on the
+    /// cell asks before the cell runs again, so a snapshot another build
     /// wrote is refused before any of the cell's work is re-delivered
-    /// (FIG-5601). An executor whose cells snapshot nothing keeps the
-    /// default.
+    /// (FIG-5601, FIG-5613). The inner `Err` is the decoder's account of a
+    /// snapshot this build does not decode. An executor whose cells
+    /// snapshot nothing keeps the default.
     ///
     /// # Errors
     ///
-    /// [`crate::SessionError`] when the snapshot does not decode.
-    fn check_cell_snapshot(&self, _snapshot: &str) -> Result<(), crate::SessionError> {
-        Ok(())
+    /// [`crate::RuntimeError`] when the check itself could not run: nothing
+    /// is known of the snapshot, and the restore is tried again.
+    async fn check_cell_snapshot(
+        &self,
+        _snapshot: &str,
+    ) -> Result<Result<(), String>, crate::RuntimeError> {
+        Ok(Ok(()))
     }
 
     /// The executable generation this executor runs cells under (FIG-3571):

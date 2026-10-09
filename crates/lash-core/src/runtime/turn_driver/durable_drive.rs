@@ -259,9 +259,11 @@ async fn check_cell_snapshot(
     };
     code_executor
         .check_cell_snapshot(&snapshot.snapshot_ref)
-        .map_err(|error| TurnError::UndecodableState {
+        .await
+        .map_err(runtime)?
+        .map_err(|reason| TurnError::UndecodableState {
             state: ParkedTurnState::CellSnapshot,
-            reason: error.to_string(),
+            reason,
         })
 }
 
@@ -282,6 +284,21 @@ fn fresh_machine(
 
 fn runtime(error: RuntimeError) -> TurnError {
     TurnError::Runtime(error)
+}
+
+/// A cell's abort as its turn's error. A worker that refuses the state the
+/// cell resumes from, after the restore's check read it, is the same typed
+/// refusal the restore gives: the turn parks on its cell snapshot.
+fn cell_abort(error: RuntimeError) -> TurnError {
+    match &error.cause {
+        Some(crate::RuntimeErrorCause::CellSnapshotUndecodable { refusal }) => {
+            TurnError::UndecodableState {
+                state: ParkedTurnState::CellSnapshot,
+                reason: refusal.to_string(),
+            }
+        }
+        _ => TurnError::Runtime(error),
+    }
 }
 
 #[async_trait::async_trait]
@@ -532,7 +549,7 @@ impl TurnDrive for RuntimeDrive {
             &self.observer,
         ))
         .await
-        .map_err(runtime)
+        .map_err(cell_abort)
     }
 
     fn answered_cell_calls(&mut self) -> CellToolCalls {
