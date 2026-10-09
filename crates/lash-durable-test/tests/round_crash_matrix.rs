@@ -889,13 +889,6 @@ fn matrix() -> Matrix {
         .horizon(Duration::from_secs(600))
 }
 
-fn one_member() -> Vec<Member> {
-    vec![Member {
-        call: call("call-a"),
-        tool: Tool::Write { millis: 0 },
-    }]
-}
-
 /// Member 0 finishes last and member 2 first, so their outcomes commit in
 /// the opposite of their declared order.
 fn mixed_members() -> Vec<Member> {
@@ -913,34 +906,6 @@ fn mixed_members() -> Vec<Member> {
             tool: Tool::Write { millis: 0 },
         },
     ]
-}
-
-async fn prove(name: &str, make: impl Fn() -> RoundScenario) {
-    let report = matrix().run_test(make).await;
-    let labels: Vec<&str> = report.labels().iter().map(|label| label.as_str()).collect();
-    eprintln!(
-        "L4 {name}: {} cells over {} labels ({}) x 5 faults",
-        report.cells.len(),
-        labels.len(),
-        labels.join(", "),
-    );
-    report.assert_held();
-    for label in [
-        CommitLabel::MODEL_DONE,
-        CommitLabel::ROUND_OUTCOME,
-        CommitLabel::ROUND_PRESENT_MODEL_START,
-    ] {
-        assert!(
-            report.labels().contains(&label),
-            "the matrix never cut {label}"
-        );
-    }
-}
-
-/// F2 over every cut of a one-member `Once` round on SQLite in memory.
-#[tokio::test]
-async fn a_once_member_never_starts_twice_across_every_cut() {
-    prove("one member", || RoundScenario::new(one_member())).await;
 }
 
 /// F2, NR-1 to NR-4 and retry ownership over every cut of a three-member

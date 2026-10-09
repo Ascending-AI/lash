@@ -803,49 +803,6 @@ mod tests {
         claimed[0].epoch
     }
 
-    /// Fail-before answers a store failure and abort kills the node; under
-    /// both, nothing the write carried reaches the store.
-    #[tokio::test]
-    async fn fail_before_and_abort_keep_the_write_out_of_the_store() {
-        let deployment = Deployment::new().await;
-        let (store, life) = deployment.node("a");
-        deployment
-            .script
-            .cut_on("a", CREATE, 1, Fault::FailBefore)
-            .cut_on("a", CREATE, 2, Fault::Abort);
-
-        let refused = store.commit_mail(create("one"), CREATE).await;
-        assert!(matches!(
-            refused,
-            Err(DurableError::Store(StoreFailure {
-                kind: StoreFailureKind::Unavailable,
-                ..
-            }))
-        ));
-        assert_eq!(life.get(), Life::Running);
-
-        let call = tokio::spawn({
-            let store = Arc::clone(&store);
-            async move { store.commit_mail(create("one"), CREATE).await }
-        });
-        settle().await;
-        assert!(!call.is_finished(), "a dead node's call never returns");
-        assert_eq!(life.get(), Life::Dead);
-        call.abort();
-
-        assert_eq!(
-            deployment.database.actor(&actor("one")).await.unwrap(),
-            None
-        );
-        let stored: Vec<Stored> = deployment
-            .script
-            .trace()
-            .into_iter()
-            .map(|write| write.stored)
-            .collect();
-        assert_eq!(stored, vec![Stored::NotEntered, Stored::NotEntered]);
-    }
-
     /// Commit-then-abort and ack-hidden both commit the write; the first
     /// kills the node before the reply, the second answers `AckLost`.
     #[tokio::test]

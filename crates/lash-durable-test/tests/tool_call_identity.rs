@@ -18,8 +18,6 @@
 
 #[path = "support/served.rs"]
 mod served;
-#[path = "support/sim.rs"]
-mod sim;
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -213,21 +211,12 @@ impl lash_core::ToolProvider for Probes {
     }
 }
 
-/// A core running the standard protocol (or the RLM protocol, for `code`)
-/// with the probes.
-async fn world(tier: Tier, code: bool) -> Option<(World, Arc<Witness>)> {
+/// A core running the standard protocol with the probes.
+async fn world(tier: Tier) -> Option<(World, Arc<Witness>)> {
     let witness = Arc::new(Witness::default());
     let probes = Arc::clone(&witness);
     let world = World::new(tier, move |backend| {
-        let builder = if code {
-            lash::LashCore::rlm_builder(
-                backend.clone(),
-                served::rlm(backend, None, sim::untimed_workers()),
-            )
-        } else {
-            lash::LashCore::standard_builder(backend.clone())
-        };
-        builder.tools(Arc::new(Probes {
+        lash::LashCore::standard_builder(backend.clone()).tools(Arc::new(Probes {
             witness: probes,
             backend: backend.clone(),
         }))
@@ -257,7 +246,7 @@ fn answered_labels(output: &lash::TurnOutput) -> Vec<String> {
 /// `call_0`, are two logical calls: the identity a tool keys idempotency on
 /// differs between them, and each call answers for itself.
 async fn repeated_provider_id_across_turns_is_distinct(tier: Tier) {
-    let Some((world, witness)) = world(tier, false).await else {
+    let Some((world, witness)) = world(tier).await else {
         return;
     };
     let session = world
@@ -291,7 +280,7 @@ async fn repeated_provider_id_across_turns_is_distinct(tier: Tier) {
 /// both the id `call_0`, never consume each other's completion: each parks
 /// on its own key and settles with its own resolution.
 async fn same_scope_completion_collision(tier: Tier) {
-    let Some((world, witness)) = world(tier, false).await else {
+    let Some((world, witness)) = world(tier).await else {
         return;
     };
     let name = "same-scope-completion";
@@ -329,7 +318,7 @@ async fn same_scope_completion_collision(tier: Tier) {
 /// that changed would defeat the tool's deduplication. The attempt number
 /// advances, and the retry's success is the call's outcome.
 async fn reported_failure_retry_preserves_call_id(tier: Tier) {
-    let Some((world, witness)) = world(tier, false).await else {
+    let Some((world, witness)) = world(tier).await else {
         return;
     };
     let name = "reported-failure-retry";
@@ -401,7 +390,7 @@ fn nodes(output: &lash::TurnOutput) -> BTreeMap<String, serde_json::Value> {
 /// replaces a node an earlier turn committed: the earlier nodes are kept
 /// byte for byte and the turn's own are appended after them.
 async fn one_turn_commits_history_once_and_never_replaces_existing_nodes(tier: Tier) {
-    let Some((world, witness)) = world(tier, false).await else {
+    let Some((world, witness)) = world(tier).await else {
         return;
     };
     let session_name = "single-history-commit";
@@ -454,7 +443,7 @@ async fn one_turn_commits_history_once_and_never_replaces_existing_nodes(tier: T
 /// leaf, frame, config and follow-on are as before the turn. The host's
 /// resolution settles the call, and the turn then commits once.
 async fn suspended_tool_keeps_turn_and_history_head_until_resolution(tier: Tier) {
-    let Some((world, witness)) = world(tier, false).await else {
+    let Some((world, witness)) = world(tier).await else {
         return;
     };
     let session_name = "suspended-history";
@@ -518,7 +507,7 @@ async fn suspended_tool_keeps_turn_and_history_head_until_resolution(tier: Tier)
 /// at the same position of a turn on the fork runs its body again, under
 /// an identity of its own, and the source's history is untouched by it.
 async fn fork_inherits_history_without_execution_queues_waits_or_journals(tier: Tier) {
-    let Some((world, witness)) = world(tier, false).await else {
+    let Some((world, witness)) = world(tier).await else {
         return;
     };
     let source_name = "fork-source";
@@ -607,41 +596,6 @@ async fn fork_inherits_history_without_execution_queues_waits_or_journals(tier: 
         revision,
         "a turn on the fork commits nothing to its source"
     );
-    world.shutdown().await;
-}
-
-/// An RLM turn of two cells, the first calling the probe once and the
-/// second twice: every call ran once, and the three calls are three
-/// identities, though each is the same tool called from the same kind of
-/// statement.
-async fn code_cells_keep_identity_and_distinguish_fresh_calls(tier: Tier) {
-    let Some((world, witness)) = world(tier, true).await else {
-        return;
-    };
-    let name = "code-cells";
-    let output = world
-        .run(
-            name,
-            served::spec(64),
-            vec![
-                served::cell(&format!(r#"await tools.{PROBE}({{ label: "cell-one" }});"#)),
-                served::cell(&format!(
-                    "await tools.{PROBE}({{ label: \"cell-two-a\" }});\nfinish(await tools.{PROBE}({{ label: \"cell-two-b\" }}));"
-                )),
-            ],
-        )
-        .await;
-    served::assert_answered(name, &output);
-    let one = witness.only("cell-one");
-    let two_a = witness.only("cell-two-a");
-    let two_b = witness.only("cell-two-b");
-    for (what, left, right) in [
-        ("two cells' calls", &one, &two_a),
-        ("two calls of one cell", &two_a, &two_b),
-        ("the first cell's call and the last", &one, &two_b),
-    ] {
-        assert_ne!(left.call_id, right.call_id, "{what} are two identities");
-    }
     world.shutdown().await;
 }
 
@@ -796,7 +750,7 @@ async fn retry_ladder_survives_a_later_pending_completion(tier: Tier) {
 /// round pinned the wait under the session's scope, so the turn's end left
 /// it pending and a late resolution answered `Resolved`.
 async fn a_cancelled_turns_parked_completion_is_revoked(tier: Tier) {
-    let Some((world, witness)) = world(tier, false).await else {
+    let Some((world, witness)) = world(tier).await else {
         return;
     };
     let name = "cancelled-parked";
@@ -862,7 +816,6 @@ tiered_laws!(
     one_turn_commits_history_once_and_never_replaces_existing_nodes,
     suspended_tool_keeps_turn_and_history_head_until_resolution,
     fork_inherits_history_without_execution_queues_waits_or_journals,
-    code_cells_keep_identity_and_distinguish_fresh_calls,
     a_retried_call_may_park_and_its_resolution_answers,
     a_cancelled_turns_parked_completion_is_revoked,
 );

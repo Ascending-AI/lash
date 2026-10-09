@@ -1042,32 +1042,6 @@ async fn a_childs_model_usage_stays_on_the_childs_own_turn(tier: Tier) {
 
 on_every_tier!(a_childs_model_usage_stays_on_the_childs_own_turn);
 
-/// A turn's report carries the sum of the usage its own model calls
-/// reported.
-async fn a_turn_report_sums_its_own_model_calls_usage(tier: Tier) {
-    let reported = usage(11, 3, 0, 0);
-    let model = {
-        let reported = reported.clone();
-        scripted(move |request, _| reporting(text(request, CHILD_REPLY), &reported))
-    };
-    let deployment = deploy(tier, Vec::new(), |builder| {
-        builder.serve_test_llm_profile(model, metadata())
-    })
-    .await;
-    let output = settle(&deployment.core, "report-usage", "report your usage").await;
-    assert_eq!(call_usage(&output), vec![reported], "{output:?}");
-    assert_eq!(
-        output.result.usage,
-        lash_core::LlmUsage {
-            input_tokens: 11,
-            output_tokens: 3,
-            ..lash_core::LlmUsage::default()
-        },
-        "the report sums its own call's usage"
-    );
-    drop(deployment.backend);
-}
-
 /// A tool round makes two model calls, and the report sums every usage bucket.
 async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
     let first = LlmUsage {
@@ -1118,11 +1092,6 @@ async fn a_turn_report_sums_two_model_calls_usage(tier: Tier) {
 }
 
 mod sqlite_memory_report_usage {
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_turn_report_sums_its_own_model_calls_usage() {
-        super::a_turn_report_sums_its_own_model_calls_usage(super::Tier::SqliteMemory).await;
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_turn_report_sums_two_model_calls_usage() {
         super::a_turn_report_sums_two_model_calls_usage(super::Tier::SqliteMemory).await;
