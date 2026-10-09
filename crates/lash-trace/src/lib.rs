@@ -40,6 +40,7 @@ mod content;
 mod content_block;
 mod domain;
 mod event;
+mod flight_recorder;
 mod jsonl_records;
 mod language_execution;
 mod language_execution_failure;
@@ -55,6 +56,10 @@ pub use domain::{
     TraceRuntimeStreamEvent, TraceRuntimeStreamPayload,
 };
 pub use event::{TraceEvent, TraceEventKind};
+pub use flight_recorder::{
+    FlightRecorderOutcome, FlightRecorderRecord, FlightRecorderSettings, FlightRecorderSink,
+    FlightRecorderSnapshot,
+};
 use jsonl_records::truncate_torn_tail;
 pub use jsonl_records::{
     JsonlTraceReadError, TraceRead, parse_jsonl_records, parse_trace_jsonl_records,

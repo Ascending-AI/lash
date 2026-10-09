@@ -47,9 +47,10 @@ pub use lash_trace::otel::registry::{
 #[cfg(feature = "otel-trace")]
 pub use lash_trace::otel::{OtelAdmissionLimits, OtelOptions, OtelSpanEnricher, OtelTelemetry};
 pub use lash_trace::{
-    CONTENT_POLICY_OMISSION, ObservationWorkLimits, StderrTraceSink, TeeTraceSink,
-    TelemetryContent, TraceContext, TraceLevel, TraceLimits, TraceSink, TraceToolCallOutcome,
-    TraceToolCallOutput,
+    CONTENT_POLICY_OMISSION, FlightRecorderOutcome, FlightRecorderRecord, FlightRecorderSettings,
+    FlightRecorderSink, FlightRecorderSnapshot, ObservationWorkLimits, StderrTraceSink,
+    TeeTraceSink, TelemetryContent, TraceContext, TraceLevel, TraceLimits, TraceSink,
+    TraceToolCallOutcome, TraceToolCallOutput,
 };
 /// Every type reachable from a [`TraceEvent`] payload, so a facade consumer
 /// can name — match on, take in a signature, or build in a test — what a
