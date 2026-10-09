@@ -549,6 +549,57 @@ async fn a_connection_lost_at_commit_is_reconciled_to_one_effect() {
     }
 }
 
+/// A `COMMIT` that landed, whose acknowledgement was lost and whose
+/// recorded outcome no read could learn within the policy's attempts, is
+/// unknown, not rolled back: the commit answers `Unavailable` and is never
+/// run again, so the mail it appended is there once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_lost_commit_whose_outcome_cannot_be_read_is_never_run_again() {
+    let mut config = crate::testing::fixture_config();
+    config.retry.durable = RetryPolicy {
+        attempts: 3,
+        initial_delay: Duration::from_millis(10),
+        max_delay: Duration::from_millis(10),
+        jitter: false,
+    };
+    let Some((_database, storage)) = storage(
+        "a_lost_commit_whose_outcome_cannot_be_read_is_never_run_again",
+        &config,
+    )
+    .await
+    else {
+        return;
+    };
+    let plain = storage.durable_store();
+    let target = actor("outcome-hidden");
+    create(&plain, &target).await;
+    let fault = CommitFault::hiding_outcome(LostCommit::AfterCommit);
+    let store = storage
+        .durable_store()
+        .with_commit_fault_for_testing(fault.clone());
+    let answered = append(&store, &target).await;
+    assert!(
+        matches!(
+            answered,
+            Err(DurableError::Store(StoreFailure {
+                kind: StoreFailureKind::Unavailable,
+                ..
+            }))
+        ),
+        "a commit whose outcome is unknown answers that it is: {answered:?}"
+    );
+    assert_eq!(
+        fault.outcome_reads(),
+        3,
+        "every read the policy allows was spent on the lost commit's outcome"
+    );
+    assert_eq!(
+        pending_mail(&plain, &target).await,
+        1,
+        "the commit that landed was not run again"
+    );
+}
+
 /// A commit that stays contended stops retrying at its operation's
 /// deadline, with the contention, however many attempts its policy allows.
 /// Freeze the operation's monotonic timer during off-clock PostgreSQL work.

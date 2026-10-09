@@ -1716,7 +1716,7 @@ features = []
 package = "rusqlite"
 version = "=0.37.0"
 default-features = false
-features = ["bundled", "modern_sqlite", "trace"]
+features = ["bundled", "hooks", "modern_sqlite", "trace"]
 
 [dependencies.p0285]
 package = "rustc-hash"

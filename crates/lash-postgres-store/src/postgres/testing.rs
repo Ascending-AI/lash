@@ -501,6 +501,9 @@ pub enum LostCommit {
 
 /// A connection lost at the next durable commit's `COMMIT`, once: the
 /// client cannot tell from the error whether the transaction committed.
+/// A fault that also [hides the outcome](Self::hiding_outcome) loses the
+/// connection of every read of the transaction's recorded outcome as well,
+/// so the commit cannot be reconciled either.
 ///
 /// Install it on a durable store with
 /// [`PostgresDurableStore::with_commit_fault_for_testing`](crate::PostgresDurableStore::with_commit_fault_for_testing).
@@ -508,20 +511,65 @@ pub enum LostCommit {
 pub struct CommitFault {
     lost: LostCommit,
     armed: std::sync::atomic::AtomicBool,
+    hides_outcome: bool,
+    outcome_reads: std::sync::atomic::AtomicU32,
 }
 
 impl CommitFault {
     /// Lose the next commit's connection where `lost` says.
     pub fn new(lost: LostCommit) -> std::sync::Arc<Self> {
+        Self::build(lost, false)
+    }
+
+    /// [`new`](Self::new), and lose the connection of every read of the
+    /// lost commit's recorded outcome too.
+    pub fn hiding_outcome(lost: LostCommit) -> std::sync::Arc<Self> {
+        Self::build(lost, true)
+    }
+
+    fn build(lost: LostCommit, hides_outcome: bool) -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
             lost,
             armed: std::sync::atomic::AtomicBool::new(true),
+            hides_outcome,
+            outcome_reads: std::sync::atomic::AtomicU32::new(0),
         })
     }
 
     /// Whether the fault has been taken.
     pub fn taken(&self) -> bool {
         !self.armed.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// How many reads of the recorded outcome lost their connection.
+    pub fn outcome_reads(&self) -> u32 {
+        self.outcome_reads
+            .load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// The connection a read of the lost commit's recorded outcome runs on
+    /// when this fault hides the outcome: one of `pool`'s whose server
+    /// session has ended, so the read's own statement meets a lost
+    /// connection. `None`: the read runs on the pool as it does unfaulted.
+    pub(crate) async fn outcome_connection(
+        &self,
+        pool: &sqlx::PgPool,
+    ) -> Option<Result<sqlx::pool::PoolConnection<sqlx::Postgres>, sqlx::Error>> {
+        if !self.hides_outcome {
+            return None;
+        }
+        self.outcome_reads
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        let mut connection = match pool.acquire().await {
+            Ok(connection) => connection,
+            Err(error) => return Some(Err(error)),
+        };
+        // The session ends itself; the statement's own error is the fatal
+        // notice.
+        let _ = sqlx::query("SELECT pg_terminate_backend(pg_backend_pid())")
+            .execute(&mut *connection)
+            .await;
+        Some(Ok(connection))
     }
 
     /// `COMMIT` `tx`, losing its connection the first time.

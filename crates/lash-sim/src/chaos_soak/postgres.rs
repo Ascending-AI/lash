@@ -7,58 +7,78 @@ use std::time::Duration;
 
 use crate::crash_matrix::world::World;
 
-/// Hold the writer fence from another session for `length` of wall time,
-/// released (rolled back) when the hold ends or the run does. PostgreSQL's
-/// lock waits use wall time, and blocked store calls stop virtual time;
-/// the fault's release must therefore run independently of virtual time.
-/// Every engine write takes that fence first, so each one
-/// meanwhile waits for its `lock_timeout` and fails as contended, and its
-/// caller retries.
-///
-/// # Errors
-///
-/// The holder could not connect or take the row.
-pub async fn hold_writer_fence(
-    world: &Arc<World>,
-    url: &str,
-    length: Duration,
-) -> Result<(), String> {
-    let pool = sqlx::PgPool::connect(url)
-        .await
-        .map_err(|error| error.to_string())?;
-    let held = lash_postgres_store::testing::HeldFinalize::begin(
-        &pool,
-        lash_core_execution::FleetFormat::current().version(),
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    world.spawn(async move {
-        tokio::time::sleep(length).await;
-        drop(held);
-        pool.close().await;
-    });
-    Ok(())
+/// What injects an epoch's database faults. An `Err` is a fault the
+/// deployment could take and did not get: the epoch that asked for it fails.
+#[async_trait::async_trait]
+pub(super) trait DatabaseFaults: Send + Sync {
+    /// Hold the writer fence from another session for `length` of wall
+    /// time, so every engine write meanwhile waits for its `lock_timeout`.
+    async fn hold_writer_fence(&self, world: &Arc<World>, length: Duration) -> Result<(), String>;
+
+    /// Terminate every other connection to the database, as a server
+    /// restart does; answers how many were terminated.
+    async fn terminate_connections(&self) -> Result<i64, String>;
 }
 
-/// Terminate every other connection to the database, as a server restart
-/// does; answers how many were terminated.
-///
-/// # Errors
-///
-/// The terminating session could not connect or run.
-pub async fn terminate_connections(url: &str) -> Result<i64, String> {
-    let pool = sqlx::PgPool::connect(url)
+/// The database faults of a PostgreSQL deployment, injected through its
+/// isolated database's URL.
+pub(super) struct Postgres {
+    url: String,
+}
+
+impl Postgres {
+    pub(super) fn new(url: String) -> Self {
+        Self { url }
+    }
+}
+
+#[async_trait::async_trait]
+impl DatabaseFaults for Postgres {
+    /// The hold is released (rolled back) when it ends or the run does.
+    /// PostgreSQL's lock waits use wall time, and blocked store calls stop
+    /// virtual time; the fault's release must therefore run independently
+    /// of virtual time. Every engine write takes that fence first, so each
+    /// one meanwhile waits for its `lock_timeout` and fails as contended,
+    /// and its caller retries.
+    ///
+    /// # Errors
+    ///
+    /// The holder could not connect or take the row.
+    async fn hold_writer_fence(&self, world: &Arc<World>, length: Duration) -> Result<(), String> {
+        let pool = sqlx::PgPool::connect(&self.url)
+            .await
+            .map_err(|error| error.to_string())?;
+        let held = lash_postgres_store::testing::HeldFinalize::begin(
+            &pool,
+            lash_core_execution::FleetFormat::current().version(),
+        )
         .await
         .map_err(|error| error.to_string())?;
-    let terminated: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM (SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
-         WHERE datname = current_database() AND pid <> pg_backend_pid()) AS terminated",
-    )
-    .fetch_one(&pool)
-    .await
-    .map_err(|error| error.to_string())?;
-    pool.close().await;
-    Ok(terminated)
+        world.spawn(async move {
+            tokio::time::sleep(length).await;
+            drop(held);
+            pool.close().await;
+        });
+        Ok(())
+    }
+
+    /// # Errors
+    ///
+    /// The terminating session could not connect or run.
+    async fn terminate_connections(&self) -> Result<i64, String> {
+        let pool = sqlx::PgPool::connect(&self.url)
+            .await
+            .map_err(|error| error.to_string())?;
+        let terminated: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM (SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+             WHERE datname = current_database() AND pid <> pg_backend_pid()) AS terminated",
+        )
+        .fetch_one(&pool)
+        .await
+        .map_err(|error| error.to_string())?;
+        pool.close().await;
+        Ok(terminated)
+    }
 }
 
 #[cfg(test)]
@@ -82,7 +102,8 @@ mod tests {
         world.set_parts(backend, Arc::clone(&clock));
         let url = deployment::isolated_url(&keep).expect("the isolated database");
         let pool = sqlx::PgPool::connect(&url).await.expect("a writer pool");
-        hold_writer_fence(&world, &url, Duration::from_millis(100))
+        Postgres::new(url.clone())
+            .hold_writer_fence(&world, Duration::from_millis(100))
             .await
             .expect("hold the writer fence");
         let mut blocked = pool.begin().await.expect("begin a blocked writer");
@@ -138,7 +159,8 @@ mod tests {
         let url = deployment::isolated_url(&keep).expect("the isolated database");
         // Past the store's 10 s lock timeout for ordinary calls, as the
         // soak's longest storms (12 s) are.
-        hold_writer_fence(&world, &url, Duration::from_secs(12))
+        Postgres::new(url)
+            .hold_writer_fence(&world, Duration::from_secs(12))
             .await
             .expect("hold the writer fence");
         let session = crate::crash_matrix::cases::admit_turn(

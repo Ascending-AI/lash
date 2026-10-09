@@ -11,6 +11,14 @@
 //! and every workload's own laws. A failed epoch replays from its seed; a
 //! shorter plan of the same seed is a prefix of a longer one.
 //!
+//! Only a fault that fired counts. A step the deployment gave nothing to
+//! act on (a database fault on SQLite, a pause of a node that is not
+//! running, a partition of one that is not serving, a database restart
+//! with no connection to end) is recorded and counts for nothing. A
+//! database fault the deployment could take and its executor did not
+//! inject fails the epoch, as does an epoch that reached none of the
+//! faults its plan asks the deployment for.
+//!
 //! [`SoakConfig::from_env`] reads `LASH_CHAOS_SOAK_SEED`,
 //! `LASH_CHAOS_SOAK_EPOCHS`, `LASH_CHAOS_SOAK_STEPS` and
 //! `LASH_CHAOS_SOAK_WITHOUT` (step kinds to leave out, comma-separated).

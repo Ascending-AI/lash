@@ -55,6 +55,13 @@ impl StepKind {
             Self::DatabaseRestart => "database_restart",
         }
     }
+
+    /// Whether the step is a fault in the database itself, which only a
+    /// deployment with a database fault executor can take.
+    #[must_use]
+    pub const fn needs_database(self) -> bool {
+        matches!(self, Self::LockTimeout(_) | Self::DatabaseRestart)
+    }
 }
 
 /// One step, at a virtual time from the epoch's start.

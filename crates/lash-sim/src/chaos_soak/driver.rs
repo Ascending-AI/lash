@@ -11,6 +11,7 @@ use lash_durable_test::{Script, SimClock, SimNodes, Stored, Write, WriteKind};
 
 use super::SoakConfig;
 use super::plan::{self, NODES, Step, StepKind};
+use super::postgres::DatabaseFaults;
 use crate::crash_matrix::Case;
 use crate::crash_matrix::deployment::{self, Keep, Workload, activation, nodes_config};
 use crate::crash_matrix::invariants;
@@ -42,6 +43,9 @@ pub struct Epoch {
     pub steps: Vec<Step>,
     /// What the driver did at each step.
     pub applied: Vec<String>,
+    /// How many of the plan's faults fired. A step the deployment gave
+    /// nothing to act on is not one of them.
+    pub reached: usize,
     /// Every invariant or law the epoch broke.
     pub violations: Vec<String>,
     /// Labelled writes the epoch made, and how many committed.
@@ -63,9 +67,10 @@ impl Epoch {
     #[must_use]
     pub fn evidence(&self) -> String {
         format!(
-            "epoch seed {:#x}: {} steps, {} writes ({} committed), ended at {} ms\n  applied: {}\n  violations:\n    {}",
+            "epoch seed {:#x}: {} steps ({} reached), {} writes ({} committed), ended at {} ms\n  applied: {}\n  violations:\n    {}",
             self.seed,
             self.steps.len(),
+            self.reached,
             self.writes,
             self.committed,
             self.end_ms,
@@ -83,14 +88,41 @@ struct Fenced {
     from_ms: u64,
 }
 
-/// Run one epoch of `config` at `seed`.
+/// What applying one step did.
+#[derive(Debug)]
+enum Applied {
+    /// The fault fired.
+    Reached(String),
+    /// The deployment gave the fault nothing to act on: a database fault on
+    /// a dialect that has none, a pause of a node that is not running, a
+    /// partition of one that is not serving, a database restart with no
+    /// connection to end. The step is recorded and counts for nothing.
+    Ineligible(String),
+    /// The deployment could take the fault and its executor did not inject
+    /// it: the epoch ran without a fault its plan claims, so it fails.
+    Failed(String),
+}
+
+/// Run one epoch of `config` at `seed`, its database faults injected by the
+/// dialect's own executor.
 pub async fn epoch(config: &SoakConfig, seed: u64) -> Epoch {
+    epoch_under(config, seed, None).await
+}
+
+/// [`epoch`] with its database faults injected by `faults` instead of the
+/// dialect's own executor.
+async fn epoch_under(
+    config: &SoakConfig,
+    seed: u64,
+    faults: Option<Box<dyn DatabaseFaults>>,
+) -> Epoch {
     let started = Instant::now();
     let steps = plan::draw(seed, config.steps, &config.without_names());
     let mut epoch = Epoch {
         seed,
         steps: steps.clone(),
         applied: Vec::new(),
+        reached: 0,
         violations: Vec::new(),
         writes: 0,
         committed: 0,
@@ -148,7 +180,18 @@ pub async fn epoch(config: &SoakConfig, seed: u64) -> Epoch {
         nodes.quiesce().await;
     }
 
-    let admin = deployment::isolated_url(&keep);
+    let faults = faults.or_else(|| {
+        deployment::isolated_url(&keep)
+            .map(|url| Box::new(super::postgres::Postgres::new(url)) as Box<dyn DatabaseFaults>)
+    });
+    // The first node step of a plan always finds its node running and
+    // serving, and a database fault with an executor fires or fails: a plan
+    // that asks this deployment for any fault reaches at least one.
+    let floor = usize::from(
+        steps
+            .iter()
+            .any(|step| faults.is_some() || !step.kind.needs_database()),
+    );
     let mut fenced = Vec::new();
     for (index, step) in steps.iter().enumerate() {
         advance_to(&nodes, &clock, step.at).await;
@@ -157,10 +200,29 @@ pub async fn epoch(config: &SoakConfig, seed: u64) -> Epoch {
                 .violations
                 .extend(wave(&world, &nodes, index / WAVE_EVERY, &mut workloads).await);
         }
-        let applied = apply(step, &nodes, &world, admin.as_deref(), &mut fenced).await;
+        let applied = match apply(step, &nodes, &world, faults.as_deref(), &mut fenced).await {
+            Applied::Reached(applied) => {
+                epoch.reached += 1;
+                applied
+            }
+            Applied::Ineligible(applied) => applied,
+            Applied::Failed(applied) => {
+                epoch
+                    .violations
+                    .push(format!("step {index} was not injected: {applied}"));
+                applied
+            }
+        };
         epoch
             .applied
             .push(format!("{}ms {}", clock.logical_ms(), applied));
+    }
+    if epoch.reached < floor {
+        epoch.violations.push(format!(
+            "the epoch reached {} of its plan's {} faults, below its floor of {floor}",
+            epoch.reached,
+            steps.len()
+        ));
     }
     // Every fault ends: partitions heal, paused nodes resume, dead ones
     // restart, as their supervisors would.
@@ -296,22 +358,22 @@ async fn apply(
     step: &Step,
     nodes: &Arc<SimNodes>,
     world: &Arc<World>,
-    admin: Option<&str>,
+    faults: Option<&dyn DatabaseFaults>,
     fenced: &mut Vec<Fenced>,
-) -> String {
+) -> Applied {
     let now = nodes.clock().logical_ms();
     match step.kind {
         StepKind::Kill(node) => {
             nodes.kill(node);
-            format!("kill {node}")
+            Applied::Reached(format!("kill {node}"))
         }
         StepKind::Restart(node) => {
             nodes.restart(node);
-            format!("restart {node}")
+            Applied::Reached(format!("restart {node}"))
         }
         StepKind::Pause(node, length) => {
             if nodes.life(node) != lash_durable_test::Life::Running {
-                return format!("pause {node}: not running");
+                return Applied::Ineligible(format!("pause {node}: not running"));
             }
             nodes.pause(node);
             fenced.push(Fenced { node, from_ms: now });
@@ -323,11 +385,11 @@ async fn apply(
                     nodes.resume(node);
                 }
             });
-            format!("pause {node} for {} ms", length.as_millis())
+            Applied::Reached(format!("pause {node} for {} ms", length.as_millis()))
         }
         StepKind::Partition(node, length) => {
             if !nodes.serving(node) {
-                return format!("partition {node}: not serving");
+                return Applied::Ineligible(format!("partition {node}: not serving"));
             }
             nodes.partition(node);
             fenced.push(Fenced { node, from_ms: now });
@@ -339,21 +401,27 @@ async fn apply(
                     nodes.heal(node);
                 }
             });
-            format!("partition {node} for {} ms", length.as_millis())
+            Applied::Reached(format!("partition {node} for {} ms", length.as_millis()))
         }
-        StepKind::LockTimeout(length) => match admin {
-            Some(url) => match super::postgres::hold_writer_fence(world, url, length).await {
-                Ok(()) => format!("hold the writer fence for {} ms", length.as_millis()),
-                Err(error) => format!("lock timeout not injected: {error}"),
+        StepKind::LockTimeout(length) => match faults {
+            Some(faults) => match faults.hold_writer_fence(world, length).await {
+                Ok(()) => Applied::Reached(format!(
+                    "hold the writer fence for {} ms",
+                    length.as_millis()
+                )),
+                Err(error) => Applied::Failed(format!("lock timeout: {error}")),
             },
-            None => "lock timeout: PostgreSQL only".to_owned(),
+            None => Applied::Ineligible("lock timeout: PostgreSQL only".to_owned()),
         },
-        StepKind::DatabaseRestart => match admin {
-            Some(url) => match super::postgres::terminate_connections(url).await {
-                Ok(terminated) => format!("database restart: {terminated} connections terminated"),
-                Err(error) => format!("database restart not injected: {error}"),
+        StepKind::DatabaseRestart => match faults {
+            Some(faults) => match faults.terminate_connections().await {
+                Ok(0) => Applied::Ineligible("database restart: no connection to end".to_owned()),
+                Ok(terminated) => Applied::Reached(format!(
+                    "database restart: {terminated} connections terminated"
+                )),
+                Err(error) => Applied::Failed(format!("database restart: {error}")),
             },
-            None => "database restart: PostgreSQL only".to_owned(),
+            None => Applied::Ineligible("database restart: PostgreSQL only".to_owned()),
         },
     }
 }
@@ -396,4 +464,66 @@ fn fencing(fenced: &[Fenced], trace: &[Write]) -> Vec<String> {
         }
     }
     violations
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crash_matrix::deployment::Dialect;
+
+    /// An executor whose database never takes a fault.
+    struct Refusing;
+
+    #[async_trait::async_trait]
+    impl DatabaseFaults for Refusing {
+        async fn hold_writer_fence(&self, _: &Arc<World>, _: Duration) -> Result<(), String> {
+            Err("the holder could not connect".to_owned())
+        }
+
+        async fn terminate_connections(&self) -> Result<i64, String> {
+            Err("the terminating session could not connect".to_owned())
+        }
+    }
+
+    /// A fault the plan asks an eligible deployment for and its executor
+    /// does not inject fails the epoch: every workload ran to its end
+    /// healthy, so nothing else is broken, and an epoch that passed would
+    /// count a lock-timeout storm that never happened. With no fault
+    /// reached the epoch is below its floor as well.
+    #[tokio::test]
+    async fn an_epoch_whose_requested_lock_fault_was_not_injected_fails() {
+        let config = SoakConfig {
+            seed: 0x5748,
+            epochs: 1,
+            steps: 1,
+            without: StepKind::NAMES
+                .into_iter()
+                .filter(|name| *name != "lock_timeout")
+                .map(str::to_owned)
+                .collect(),
+            dialect: Dialect::SqliteMemory,
+            cap: Duration::from_secs(60),
+        };
+        let epoch = epoch_under(&config, config.seed, Some(Box::new(Refusing))).await;
+        assert!(
+            matches!(
+                epoch.steps[..],
+                [Step {
+                    kind: StepKind::LockTimeout(_),
+                    ..
+                }]
+            ),
+            "the plan asks for one lock-timeout storm: {:?}",
+            epoch.steps
+        );
+        assert_eq!(
+            epoch.violations,
+            [
+                "step 0 was not injected: lock timeout: the holder could not connect",
+                "the epoch reached 0 of its plan's 1 faults, below its floor of 1",
+            ],
+            "{}",
+            epoch.evidence()
+        );
+    }
 }

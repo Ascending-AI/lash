@@ -190,10 +190,7 @@ async fn reconcile(
             };
             tokio::time::sleep(pause).await;
         }
-        let status =
-            sqlx::query_scalar::<_, Option<String>>(connection_sql().select_xact_status.sql())
-                .bind(&xact.0)
-                .fetch_one(crate::observed_sql::executor(settle.pool));
+        let status = recorded_status(xact, settle);
         let status = match settle.deadline {
             Some(deadline) => match tokio::time::timeout_at(deadline, status).await {
                 Ok(status) => status,
@@ -218,4 +215,25 @@ async fn reconcile(
         "whether transaction {} committed is unknown: {last}",
         xact.0
     )))
+}
+
+/// Read `xact`'s recorded outcome on a connection of the pool the commit
+/// ran on.
+async fn recorded_status(
+    xact: &XactId,
+    settle: &Settle<'_>,
+) -> Result<Option<String>, sqlx::Error> {
+    let status = sqlx::query_scalar::<_, Option<String>>(connection_sql().select_xact_status.sql())
+        .bind(&xact.0);
+    #[cfg(any(test, feature = "testing"))]
+    if let Some(fault) = settle.fault
+        && let Some(lost) = fault.outcome_connection(settle.pool).await
+    {
+        return status
+            .fetch_one(crate::observed_sql::executor(&mut *lost?))
+            .await;
+    }
+    status
+        .fetch_one(crate::observed_sql::executor(settle.pool))
+        .await
 }

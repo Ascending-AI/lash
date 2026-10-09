@@ -303,6 +303,154 @@ async fn writers_on_two_replicas_share_one_gap_free_order_that_both_observe() {
     );
 }
 
+/// The link between one replica's listener session and the database, which
+/// a law cuts and restores: a TCP relay the replica's session endpoint
+/// names. While it is cut it carries no connection and refuses new ones, so
+/// the replica cannot LISTEN however often it reconnects.
+struct ListenerLink {
+    port: u16,
+    up: tokio::sync::watch::Sender<bool>,
+    carried: Arc<std::sync::atomic::AtomicUsize>,
+    relay: tokio::task::JoinHandle<()>,
+}
+
+impl ListenerLink {
+    async fn to(database_url: &str) -> Self {
+        use std::sync::atomic::Ordering;
+
+        let database: sqlx::postgres::PgConnectOptions =
+            database_url.parse().expect("the database URL parses");
+        let database = (database.get_host().to_owned(), database.get_port());
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind the listener link");
+        let port = listener.local_addr().expect("the link's address").port();
+        let up = tokio::sync::watch::Sender::new(true);
+        let carried = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let relay = tokio::spawn({
+            let (up, carried) = (up.clone(), Arc::clone(&carried));
+            async move {
+                while let Ok((mut client, _)) = listener.accept().await {
+                    let mut state = up.subscribe();
+                    if !*state.borrow() {
+                        continue;
+                    }
+                    carried.fetch_add(1, Ordering::AcqRel);
+                    let (database, carried) = (database.clone(), Arc::clone(&carried));
+                    tokio::spawn(async move {
+                        if let Ok(mut server) = tokio::net::TcpStream::connect(database).await {
+                            tokio::select! {
+                                _ = tokio::io::copy_bidirectional(&mut client, &mut server) => {}
+                                _ = state.wait_for(|up| !up) => {}
+                            }
+                        }
+                        drop(client);
+                        carried.fetch_sub(1, Ordering::AcqRel);
+                    });
+                }
+            }
+        });
+        Self {
+            port,
+            up,
+            carried,
+            relay,
+        }
+    }
+
+    /// The session endpoint that reaches `database_url` through the link.
+    fn endpoint(&self, database_url: &str) -> sqlx::postgres::PgConnectOptions {
+        database_url
+            .parse::<sqlx::postgres::PgConnectOptions>()
+            .expect("the database URL parses")
+            .host("127.0.0.1")
+            .port(self.port)
+    }
+
+    fn carried(&self) -> usize {
+        self.carried.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Drop every connection the link carries and refuse new ones; answers
+    /// once it carries none.
+    async fn cut(&self) {
+        self.up.send_replace(false);
+        while self.carried() > 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    }
+
+    fn restore(&self) {
+        self.up.send_replace(true);
+    }
+}
+
+impl Drop for ListenerLink {
+    fn drop(&mut self) {
+        self.relay.abort();
+    }
+}
+
+/// Notifications sent while a replica cannot LISTEN are lost; the rows are
+/// not. B's listener session is cut and held down while A publishes twice;
+/// once B listens again, with no later publication to ring it, its
+/// subscriber receives exactly those two events, in order and once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_subscriber_receives_what_was_published_while_its_replica_could_not_listen() {
+    let database = IsolatedDatabase::create(&required_database_url()).await;
+    let schema = fresh_schema();
+    let link = ListenerLink::to(database.url()).await;
+    let a = connect(database.url(), config(&schema));
+    let mut through_link = config(&schema);
+    let policy = through_link
+        .live_replay
+        .as_mut()
+        .expect("the fixture configures live replay");
+    policy.reconnect.initial_delay = Duration::from_millis(20);
+    policy.reconnect.max_delay = Duration::from_millis(20);
+    policy.reconnect.jitter = false;
+    let b: Arc<dyn LiveReplayStore> = Arc::new(
+        PostgresLiveReplayStore::connect(
+            &endpoints(database.url()).with_session(link.endpoint(database.url())),
+            &through_link,
+        )
+        .await
+        .expect("connect B with its listener behind the link"),
+    );
+    assert_eq!(link.carried(), 1, "B's listener session runs over the link");
+
+    let session = SessionId::from("listener-down");
+    let start = b.current_cursor(&session, SessionRevision::new(0));
+    let mut on_b = subscribed(b.subscribe_after_cursor(&start).await);
+    // B's subscriber follows A by doorbell, and has no ring left to answer.
+    let before = publish(&a, &session, "k#0", "before").await;
+    assert_eq!(next(&mut on_b).await.cursor, before.cursor);
+
+    link.cut().await;
+    let during = [
+        publish(&a, &session, "k#1", "during one").await,
+        publish(&a, &session, "k#2", "during two").await,
+    ];
+    link.restore();
+    let received = [next(&mut on_b).await, next(&mut on_b).await];
+    assert_eq!(
+        received
+            .iter()
+            .map(|event| (event.cursor.clone(), label(event)))
+            .collect::<Vec<_>>(),
+        during
+            .iter()
+            .map(|event| (event.cursor.clone(), label(event)))
+            .collect::<Vec<_>>(),
+        "B's subscriber receives what A published while B could not listen"
+    );
+
+    // Once: the next thing B's subscriber sees is the next publication,
+    // which the reconnected listener's own doorbell delivers.
+    let after = publish(&a, &session, "k#3", "after").await;
+    assert_eq!(next(&mut on_b).await.cursor, after.cursor);
+}
+
 /// P5: crash recovery or failover truncates the unlogged log; the next
 /// writer rotates the incarnation, every older cursor gaps on both
 /// replicas, and a live subscription on the other replica ends.

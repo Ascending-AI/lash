@@ -62,7 +62,8 @@ lash-core = { workspace = true, features = ["testing"] }
 lash-core-store = { workspace = true, features = ["testing"] }
 lash-vm = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { package = "lash-internal-sqlite-store", path = ".", features = ["testing"] }
-rusqlite = { version = "0.37", features = ["bundled", "trace"] }
+# `hooks`: the commit hook a law refuses a `COMMIT` with (FIG-5748).
+rusqlite = { version = "0.37", features = ["bundled", "hooks", "trace"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 

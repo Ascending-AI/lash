@@ -1042,3 +1042,82 @@ async fn a_session_delete_and_fork_answer_inline_on_the_store_connection() {
         "a session fork answers at its first poll"
     );
 }
+
+/// A `COMMIT` SQLite refuses, after every statement of the transaction
+/// succeeded, is the write's storage failure, and the transaction leaves
+/// nothing behind: a reopened catalog has never held the session, and the
+/// same admission then creates it. SQLite's commit hook turns the store's
+/// own `COMMIT` into a rollback, so only the commit fails.
+#[tokio::test]
+async fn a_commit_sqlite_refuses_is_a_storage_failure_that_leaves_nothing_behind() {
+    let dir = tempfile::tempdir().expect("commit-fault tempdir");
+    let path = dir.path().join("lash.db");
+    let store = SqliteStore::open(&path, crate::SqliteSynchronous::Normal)
+        .await
+        .expect("open catalog");
+    let request = SessionStoreCreateRequest {
+        session_id: SessionId::fixture("commit-refused"),
+        relation: lash_core_execution::SessionRelation::Root,
+        config: lash_core_execution::PersistedSessionConfig::new(
+            lash_core_execution::TurnBudget::Unbounded,
+            lash_core_execution::MaxToolCalls::new(1024),
+            lash_core::NoProgressBudget::bounded(12),
+            lash_core_execution::SessionToolAccess::ambient(),
+        ),
+        head: lash_core_execution::SessionCreationHead::Config,
+        pending_observer_intents: Vec::new(),
+        owning_process_id: None,
+        retention: lash_core_execution::Retention::UntilGc,
+    };
+    let refuse_commits = |refuse: bool| {
+        store.conn.call(move |connection| {
+            connection.commit_hook(refuse.then_some(|| true));
+            Ok(())
+        })
+    };
+
+    refuse_commits(true).await.expect("refuse every COMMIT");
+    let refused = store.admit_session(&request).await;
+    refuse_commits(false).await.expect("accept COMMIT again");
+    assert!(
+        matches!(
+            refused,
+            Err(StoreError::StorageFailure {
+                backend: "sqlite",
+                ..
+            })
+        ),
+        "an admission whose COMMIT failed answers the storage failure: {refused:?}"
+    );
+
+    let reopened = SqliteStore::open(&path, crate::SqliteSynchronous::Normal)
+        .await
+        .expect("reopen catalog");
+    assert!(
+        matches!(
+            reopened
+                .lookup_session(&request.session_id)
+                .await
+                .expect("look the session up"),
+            lash_core_execution::SessionLookup::Absent
+        ),
+        "the refused transaction left no session behind"
+    );
+    assert!(
+        matches!(
+            store.admit_session(&request).await,
+            Ok(lash_core_execution::SessionAdmission::Created)
+        ),
+        "the same admission creates the session once COMMIT lands"
+    );
+    assert!(
+        matches!(
+            reopened
+                .lookup_session(&request.session_id)
+                .await
+                .expect("look the admitted session up"),
+            lash_core_execution::SessionLookup::Live(_)
+        ),
+        "the committed admission is complete"
+    );
+}
