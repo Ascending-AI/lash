@@ -880,6 +880,24 @@ pub fn escape(text: &str) -> String {
 mod deterministic_fuel_tests {
     use super::{MatchError, MeteredMatches, Regex};
 
+    /// Exhaustion is terminal for every supported public iterator encoding.
+    #[test]
+    fn exhausted_iterators_return_none_after_one_error() {
+        fn terminal(iterator: &mut impl Iterator<Item = Result<super::Match, MatchError>>) {
+            assert!(matches!(iterator.next(), Some(Err(MatchError::Exhausted))));
+            assert!(iterator.next().is_none());
+            assert!(iterator.next().is_none());
+        }
+        let regex = Regex::new("a").expect("compile");
+        terminal(&mut regex.try_find_from("a", 0, 0));
+        #[cfg(feature = "utf16")]
+        {
+            let input = [u16::from(b'a')];
+            terminal(&mut regex.try_find_from_utf16(&input, 0, 0));
+            terminal(&mut regex.try_find_from_ucs2(&input, 0, 0));
+        }
+    }
+
     #[test]
     fn consumed_fuel_is_the_smallest_allowance_that_finishes() {
         let regex = Regex::new("(a+)+b").expect("compile");

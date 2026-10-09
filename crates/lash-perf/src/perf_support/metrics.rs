@@ -105,6 +105,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn median_preserves_negative_samples() {
+        assert_eq!(basic_summary(vec![-5.0, -3.0, -1.0]).median, -3.0);
+    }
+
+    #[test]
     fn rounding_uses_half_away_from_zero() {
         assert_eq!(round3(1.5025), 1.503);
     }

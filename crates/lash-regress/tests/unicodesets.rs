@@ -169,6 +169,19 @@ fn unicode_sets_breaking_change_from_u_to_v_28() {
     test_parse_fails_flags(r#"[_^^]"#, "v");
 }
 
+/// Intersection retains both singleton and multi-codepoint string alternatives.
+#[test]
+fn unicode_sets_mixed_string_self_intersection_preserves_exact_alternatives() {
+    test_with_configs(|tc| {
+        test_unicode_sets_matches(
+            tc,
+            r"^[\q{0|2|4|9\uFE0F\u20E3}&&\q{0|2|4|9\uFE0F\u20E3}]$",
+            &["0", "2", "4", "9\u{FE0F}\u{20E3}"],
+            &["7", "9", "9\u{FE0F}", "\u{FE0F}\u{20E3}", "\u{20E3}"],
+        );
+    });
+}
+
 fn test_unicode_sets_matches(tc: TestConfig, expression: &str, matches: &[&str], fails: &[&str]) {
     let compiled = tc.compilef(expression, "v");
     for m in matches {

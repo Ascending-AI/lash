@@ -190,6 +190,37 @@ class SharedActionTests(unittest.TestCase):
                 self.assertEqual(1, malformed.returncode)
                 self.assertIn("CACHE_ENDPOINT", malformed.stderr)
 
+    def test_all_credential_lines_are_masked_before_outputs(self) -> None:
+        verify = step(shared_action(), "Verify shared pool configuration")["run"]
+        credentials = {
+            "CACHE_CA": "sentinel-ca-first\nsentinel-ca-second\nsentinel-ca-last",
+            "CACHE_CERT": "sentinel-cert-first\nsentinel-cert-second\nsentinel-cert-last",
+            "CACHE_KEY": "sentinel-key-first\nsentinel-key-second\nsentinel-key-last",
+        }
+        with tempfile.TemporaryDirectory(dir=ROOT / ".buck2") as directory:
+            output = Path(directory) / "output"
+            # A FIFO records outputs in the same stream as masks, preserving order.
+            os.mkfifo(output)
+            completed = subprocess.run(
+                ["bash", "-c", 'cat "$GITHUB_OUTPUT" & reader=$!\n' + verify + '\nwait "$reader"'],
+                cwd=ROOT,
+                env=os.environ | credentials | {
+                    "CACHE_ENDPOINT": "grpcs://sentinel.example:8443",
+                    "CACHE_INSTANCE": "sentinel-instance",
+                    "KILN_EXECUTOR_RUNTIME": "sentinel-runtime",
+                    "GITHUB_OUTPUT": str(output),
+                }, capture_output=True, text=True,
+            )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        lines = completed.stdout.splitlines()
+        first_output = lines.index("address=sentinel.example:8443")
+        for value in credentials.values():
+            for line in value.splitlines():
+                with self.subTest(credential=line):
+                    mask = "::add-mask::" + line
+                    self.assertEqual(lines.count(mask), 1)
+                    self.assertLess(lines.index(mask), first_output)
+
     def configure_client(self, environment: dict[str, str]) -> tuple[str, set[str]]:
         configure = step(shared_action(), "Configure authenticated Buck2 client")["run"]
         with tempfile.TemporaryDirectory() as directory:

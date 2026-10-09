@@ -103,9 +103,15 @@ def certify_case(artifacts: Path, junit: Path, outputs: dict[str, Path], source:
         errors.append(f"expected one CaseReceipt under case/, found {len(receipts)}")
     else:
         try:
-            evidence = json.loads(receipts[0].read_text())["case"]["evidence"]
+            receipt = json.loads(receipts[0].read_text())
+            evidence = receipt["case"]["evidence"]
             if not isinstance(evidence, dict):
                 raise ValueError("receipt evidence is not an object")
+            scenario = base_provenance["scenario"].rsplit("::", 1)[-1]
+            if evidence.get("scenario") != scenario:
+                errors.append(f"CaseReceipt scenario {evidence.get('scenario')} does not match {scenario}")
+            if receipt.get("verdict") != {"verdict": "passed"}:
+                errors.append("CaseReceipt verdict is not passed")
         except (OSError, ValueError, KeyError, TypeError) as error:
             errors.append(f"unreadable CaseReceipt: {error}")
     commits = evidence.get("commits") or []

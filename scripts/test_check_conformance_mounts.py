@@ -30,6 +30,14 @@ class MountGateTests(unittest.TestCase):
     def missing(self):
         return set(unmounted(self.root)[0])
 
+    def test_unreachable_helper_with_same_name_cannot_mount_a_law(self):
+        self.write("crates/backend/src/lib.rs", "fn helper() { law(); }")
+        self.write("crates/backend/tests/conformance.rs", """
+            fn helper() {}
+            #[test] fn mounted() { helper(); }
+        """)
+        self.assertEqual(self.missing(), {"law"})
+
     def test_a_declared_macro_is_not_a_mount(self):
         self.write("crates/lash-conformance/src/macros.rs", """
             macro_rules! laws { () => { #[tokio::test] async fn mounted() { law().await; } }; }

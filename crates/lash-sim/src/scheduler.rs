@@ -582,6 +582,38 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// Equal-tick candidates admit both orders, with exact replay for each seed.
+    #[test]
+    fn equal_tick_seed_cohort_reaches_both_delivery_orders_and_replays() {
+        let events = [
+            BoundaryEvent::new("a", "session-a", BoundaryKind::Provider, 7, "p", json!({})),
+            BoundaryEvent::new("b", "session-b", BoundaryKind::Provider, 7, "p", json!({})),
+        ];
+        let order = |seed| {
+            let mut scheduler = BoundaryScheduler::with_events(seed, events.clone());
+            std::iter::from_fn(|| scheduler.deliver_next(Value::Null))
+                .map(|event| event.boundary_id)
+                .collect::<Vec<_>>()
+        };
+        let mut orders = BTreeSet::new();
+        for seed in 0..64 {
+            let delivered = order(seed);
+            assert_eq!(
+                delivered,
+                order(seed),
+                "seed {seed} must replay event order"
+            );
+            orders.insert(delivered);
+        }
+        assert_eq!(
+            orders,
+            BTreeSet::from([
+                vec!["a".to_string(), "b".to_string()],
+                vec!["b".to_string(), "a".to_string()],
+            ])
+        );
+    }
+
     #[test]
     fn scheduler_records_delivery_decisions_as_trace_evidence() {
         let events = [

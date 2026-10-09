@@ -106,16 +106,16 @@ def inventory(root):
                 parameter = re.search(r"pub (?:async )?fn \$(\w+)", code[start:end])
                 if parameter:
                     generated[name] = parameter.group(1)
-            bodies[name].update(IDENT.findall(code[start:end]))
+            bodies[(path, name)].update(IDENT.findall(code[start:end]))
             line_start = code.rfind("\n", 0, match.start()) + 1
             declaration = code[line_start:match.end()].strip()
             if path.is_relative_to(root / "crates/lash-conformance/src/conformance"):
                 if re.match(r"pub (?:async )?fn ", declaration):
-                    laws[name] = f"{path.relative_to(root)}:{code.count(chr(10), 0, match.start()) + 1}"
+                    laws[name] = ((path, name), f"{path.relative_to(root)}:{code.count(chr(10), 0, match.start()) + 1}")
             prefix = code[max(code.rfind("}", 0, match.start()),
                               code.rfind(";", 0, match.start())) + 1:match.start()]
             if name == "main" or re.search(r"#\[(?:tokio::)?test\b", prefix):
-                roots.add(name)
+                roots.add((path, name))
     test_macros = {name for name, body in macros.items()
                    if re.search(r"#\[(?:tokio::)?test\b", body)}
     while True:
@@ -143,7 +143,7 @@ def inventory(root):
             name = invocation.group(1)
             if name not in test_macros:
                 continue
-            roots.add(name)
+            roots.add((path, name))
             opening = invocation.end() - 1
             delimiter = code[opening]
             closing = {"(": ")", "{": "}", "[": "]"}[delimiter]
@@ -151,7 +151,7 @@ def inventory(root):
             for index in range(opening + 1, len(code)):
                 depth += (code[index] == delimiter) - (code[index] == closing)
                 if depth == 0:
-                    roots.update(IDENT.findall(code[opening:index]))
+                    roots.update((path, identifier) for identifier in IDENT.findall(code[opening:index]))
                     break
     for macro, parameter in generated.items():
         for path, code in sources.items():
@@ -173,21 +173,30 @@ def inventory(root):
                 if declaration is None:
                     raise ValueError(f"unsupported public law generator {macro}")
                 for name in re.findall(r"\(\s*(\w+)\s*,", arguments):
-                    laws[name] = str(path.relative_to(root))
-                    bodies[name].update(bodies[macro])
+                    laws[name] = ((path, name), str(path.relative_to(root)))
+                    bodies[(path, name)].update(IDENT.findall(macros[macro]))
     return laws, bodies, roots
 
 
 def unmounted(root):
     laws, bodies, pending = inventory(root)
+    by_name = defaultdict(list)
+    for key in bodies:
+        by_name[key[1]].append(key)
     reached = set()
     while pending:
-        name = pending.pop()
-        if name in reached:
-            continue
-        reached.add(name)
-        pending.update(bodies.get(name, set()) - reached)
-    return {name: location for name, location in laws.items() if name not in reached}, len(laws)
+        path, name = pending.pop()
+        # A local helper shadows equally named helpers in other source files.
+        # Keep bodies separate: merging them would turn an unreachable caller
+        # in a library into a mount through an unrelated executable's helper.
+        local = (path, name)
+        candidates = [local] if local in bodies else by_name[name]
+        for key in candidates:
+            if key in reached:
+                continue
+            reached.add(key)
+            pending.update((key[0], identifier) for identifier in bodies[key])
+    return {name: location for name, (key, location) in laws.items() if key not in reached}, len(laws)
 
 
 def main():

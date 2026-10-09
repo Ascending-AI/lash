@@ -350,3 +350,66 @@ async fn settled(world: &World, nodes: &SimNodes) -> Vec<String> {
     }
     violations
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_durable::{ActorKey, CommitLabel};
+    use lash_durable_test::Point;
+
+    /// F1 refuses an old owner's committed actor write until a fresh claim.
+    #[test]
+    fn fencing_detects_zombie_commit_and_allows_fresh_claim() {
+        let cut = Cut {
+            node: "old-owner".into(),
+            kind: WriteKind::Actor,
+            point: Point {
+                label: CommitLabel::TURN_COMMIT,
+                nth: 1,
+            },
+            fault: Fault::Zombie,
+        };
+        let held = Write {
+            node: cut.node.clone(),
+            kind: cut.kind,
+            point: cut.point,
+            node_nth: 1,
+            actor: Some(ActorKey::session("fencing-law").expect("actor")),
+            at_ms: 10,
+            cut: Some(Fault::Zombie),
+            stored: Stored::NotEntered,
+            starts: Vec::new(),
+        };
+        let committed = Write {
+            point: Point {
+                label: CommitLabel::TURN_COMMIT,
+                nth: 2,
+            },
+            node_nth: 2,
+            at_ms: 20,
+            cut: None,
+            stored: Stored::Committed { effective: true },
+            ..held.clone()
+        };
+        let violations = fencing(Some(&cut), &[held.clone(), committed.clone()]);
+        assert_eq!(violations.len(), 1);
+        assert!(violations[0].starts_with("F1:"));
+        let claim = Write {
+            kind: WriteKind::Lease,
+            point: Point {
+                label: CommitLabel::CLAIM,
+                nth: 1,
+            },
+            actor: None,
+            node_nth: 1,
+            at_ms: 15,
+            cut: None,
+            stored: Stored::Committed { effective: true },
+            ..held.clone()
+        };
+        assert_eq!(
+            fencing(Some(&cut), &[held, claim, committed]),
+            Vec::<String>::new()
+        );
+    }
+}

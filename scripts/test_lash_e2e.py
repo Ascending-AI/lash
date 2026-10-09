@@ -290,7 +290,7 @@ class ReceiptLaws(unittest.TestCase):
         for name, path in outputs.items():
             path.write_text(f"built {name}")
         evidence = {
-            "case": "S30",
+            "scenario": test_name,
             "artifacts": [{
                 "role": "external-consumer", "path": str(outputs["workbench"]),
                 "sha256": e2e.digest(outputs["workbench"]),
@@ -308,11 +308,11 @@ class ReceiptLaws(unittest.TestCase):
         (case_dir / "case").mkdir(parents=True)
         (case_dir / "case" / "receipt.json").write_text(json.dumps({
             "counts": {"selected": 1, "executed": 1, "passed": 1, "failed": 0, "not_run": 0},
-            "case": {"evidence": evidence, "verdict": "Passed"},
+            "case": {"evidence": evidence}, "verdict": {"verdict": "passed"},
         }))
         junit_source = self.root / "kiln-junit.xml"
         junit_source.write_text(f'<testsuite><testcase name="{test_name}" /></testsuite>')
-        base = {"scenario": test_name, "label": SYNTHETIC_LABEL,
+        base = {"scenario": "workbench::" + test_name, "label": SYNTHETIC_LABEL,
                 "source_sha": SOURCE, "gate": "law", "port_base": 61000, "generation": "1",
                 "playwright": "1.62.0", "workbench": {"path": "w", "sha256": "0" * 64}}
         provenance = gate.certify_case(case_dir, junit_source, outputs, SOURCE, key, "live", base)
@@ -340,6 +340,21 @@ class ReceiptLaws(unittest.TestCase):
                    "groups": e2e.store_leg_groups(expected["cases"], [row]),
                    "audits": {}, "gates": {}}
         self.assertEqual(e2e.reconcile(expected, receipt, case_dir, manifest)["status"], "passed")
+
+        # Passing JUnit cannot certify a different case or a failed CaseReceipt.
+        for index, (scenario, verdict, error) in enumerate((
+            ("s31_wrong_case", {"verdict": "passed"}, "CaseReceipt scenario s31_wrong_case does not match s30_external_consumer_accept_follow_cancel"),
+            (test_name, {"verdict": "failed", "reason": "sentinel failure"}, "CaseReceipt verdict is not passed"),
+        )):
+            invalid = self.root / f"case-invalid-{index}"
+            (invalid / "case").mkdir(parents=True)
+            invalid_receipt = json.loads((case_dir / "case" / "receipt.json").read_text())
+            invalid_receipt["case"]["evidence"]["scenario"] = scenario
+            invalid_receipt["verdict"] = verdict
+            (invalid / "case" / "receipt.json").write_text(json.dumps(invalid_receipt))
+            with self.subTest(scenario=scenario, verdict=verdict):
+                provenance = gate.certify_case(invalid, junit_source, outputs, SOURCE, key, "live", dict(base))
+                self.assertEqual(provenance["evidence_error"], error)
 
         # The upgrade-node pair case also certifies the operator binaries.
         upgrade = self.root / "case-upgrade"

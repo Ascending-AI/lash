@@ -517,7 +517,11 @@ impl StateMachinePlanner {
                 }
                 1 if remaining >= 2 && self.can_plan_queue_pair(session) => {
                     let active_turn = self.first_provider_turn_ref(session);
-                    let mode = if self.next_usize() & 1 == 0 {
+                    // The branch draw is odd (% 10 == 1). This LCG flips
+                    // parity on every draw, so its next low bit is always zero.
+                    // Use a high bit to avoid the low-bit correlation with
+                    // both branch and session selection.
+                    let mode = if (next_seed(&mut self.rng) >> 32) & 1 == 0 {
                         QueuedIngressMode::ActiveTurn
                     } else {
                         QueuedIngressMode::NextTurn
@@ -1161,6 +1165,66 @@ fn hex_digest(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Seeds vary the transition schedule independently of generated identities and text.
+    #[test]
+    fn seed_cohort_varies_structural_transition_schedules_and_replays() {
+        let mut schedules = std::collections::BTreeSet::new();
+        for seed in 0..64 {
+            let workload = generate_workload(seed, "fast", 256).expect("workload");
+            assert_eq!(
+                workload,
+                generate_workload(seed, "fast", 256).expect("replay")
+            );
+            let schedule = workload
+                .boundaries
+                .iter()
+                .map(|event| (event.actor_alias.clone(), event.kind))
+                .collect::<Vec<_>>();
+            schedules.insert(schedule);
+        }
+        assert!(
+            schedules.len() > 1,
+            "seeds must vary transitions, not just IDs or payloads"
+        );
+    }
+
+    /// Required ingress pairs cannot witness diversity of the extra random draws.
+    #[test]
+    fn extra_queued_ingress_cohort_reaches_both_modes() {
+        let mut modes = std::collections::BTreeSet::new();
+        for seed in 0..64 {
+            let required = generate_workload(seed, "fast", 0).expect("required workload");
+            let required_ids = required
+                .boundaries
+                .iter()
+                .filter(|event| event.kind == BoundaryKind::QueuedIngress)
+                .map(|event| event.boundary_id.as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            let workload = generate_workload(seed, "fast", 256).expect("workload");
+            for event in workload.boundaries.iter().filter(|event| {
+                event.kind == BoundaryKind::QueuedIngress
+                    && !required_ids.contains(event.boundary_id.as_str())
+            }) {
+                assert!(
+                    workload.boundaries.iter().any(|turn| {
+                        turn.kind == BoundaryKind::Provider
+                            && turn.actor_alias == event.actor_alias
+                            && turn.at < event.at
+                    }),
+                    "an extra queued input must have an eligible turn"
+                );
+                modes.insert(event.queued_ingress_mode().expect("ingress mode"));
+            }
+        }
+        assert_eq!(
+            modes,
+            std::collections::BTreeSet::from([
+                QueuedIngressMode::ActiveTurn,
+                QueuedIngressMode::NextTurn,
+            ])
+        );
+    }
 
     /// The widened payload domain reaches every class it exists for across a
     /// small seed batch, and the drawn usage keeps reasoning inside output.
