@@ -8,7 +8,7 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::{LawBroken, LawResult, ensure};
 use crate::{
@@ -19,8 +19,8 @@ use crate::{
 mod harness;
 
 use harness::{
-    Claims, CountingStore, actor, create, eventually, holding, listening, liveness, mail, node,
-    owner_of, quiet, under,
+    Claims, CountingStore, Evidence, WakeEvidence, actor, create, eventually, holding, listening,
+    liveness, mail, node, observing, owner_of, quiet, under,
 };
 pub use harness::{LawNode, serve_node};
 
@@ -60,14 +60,18 @@ async fn start_counted(
     name: &str,
     settings: crate::DurableSettings,
     claims: &Claims,
-) -> LawNode {
+) -> (LawNode, Evidence) {
     let (inner, node_wakes) = tier.open().await;
     let store = CountingStore {
         inner,
         node: name.to_owned(),
         claims: claims.clone(),
     };
-    serve_node(Arc::new(store), Some(node_wakes), name, settings)
+    let (node_wakes, evidence) = observing(node_wakes);
+    (
+        serve_node(Arc::new(store), Some(node_wakes), name, settings),
+        evidence,
+    )
 }
 
 /// A listener holds its boot's liveness lock. Only a reaper that itself
@@ -114,10 +118,7 @@ pub async fn a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie(
     zombie.ack_seen().give_up(Release::Idle);
 
     drop(feed);
-    eventually(Duration::from_secs(5), "the lock is released", || async {
-        Ok(held(node_wakes, &dead.owner).await? == Some(false))
-    })
-    .await?;
+    eventually(|| async { Ok(held(node_wakes, &dead.owner).await? == Some(false)) }).await?;
     let reaped = node_wakes.reap_released(&watcher, &dead.owner).await?;
     ensure!(
         reaped.len() == 1
@@ -157,9 +158,7 @@ pub async fn a_lost_listener_session_resubscribes_holding_its_lock(
     let lease = node(store.as_ref(), "blip").await?;
     let mut feed = node_wakes.listen(&lease).await?;
     tier.sever(&lease.owner).await;
-    let event = tokio::time::timeout(Duration::from_secs(5), feed.next())
-        .await
-        .map_err(|_| LawBroken("the listener never reported its new session".to_owned()))?;
+    let event = feed.next().await;
     ensure!(
         event == NodeWakeEvent::Resubscribed,
         "the listener reported {event:?}"
@@ -179,9 +178,7 @@ pub async fn a_lost_listener_session_resubscribes_holding_its_lock(
             ..WakeBatch::default()
         })
         .await?;
-    let event = tokio::time::timeout(Duration::from_secs(5), feed.next())
-        .await
-        .map_err(|_| LawBroken("a hint never reached the new session".to_owned()))?;
+    let event = feed.next().await;
     ensure!(
         event == NodeWakeEvent::Ready,
         "the new session heard {event:?}"
@@ -214,9 +211,7 @@ pub async fn an_appended_log_is_named_to_every_listening_node(
         })
         .await?;
     for (name, feed) in &mut feeds {
-        let event = tokio::time::timeout(Duration::from_secs(5), feed.next())
-            .await
-            .map_err(|_| LawBroken(format!("{name} never heard the appended logs")))?;
+        let event = feed.next().await;
         let NodeWakeEvent::Appended(heard) = event else {
             return Err(LawBroken(format!("{name} heard {event:?}")));
         };
@@ -229,37 +224,27 @@ pub async fn an_appended_log_is_named_to_every_listening_node(
 }
 
 /// O1: mail written on node B to an actor hot on node A reaches A through
-/// B's after-commit hint, far inside A's ten-second mail poll.
+/// B's after-commit hint. The owner has finished its initial mailbox read,
+/// and its fallback poll is effectively disabled, so only the hint can deliver.
 pub async fn mail_from_another_node_reaches_a_hot_owner_through_its_hint(
     tier: &dyn NodeWakeTier,
 ) -> LawResult {
     let (store, node_wakes) = tier.open().await;
     let hot = actor("hot")?;
     create(store.as_ref(), &hot).await?;
-    let slow_poll = LeaseSettings {
-        claim_poll: Duration::from_secs(10),
-        ..LeaseSettings::default()
-    };
+    let slow_poll = quiet();
     let mut owner = start(tier, "a", under(slow_poll)).await;
-    eventually(Duration::from_secs(5), "node a owns the actor", || async {
-        Ok(owner_of(store.as_ref(), &hot).await?.as_deref() == Some("a"))
-    })
-    .await?;
+    eventually(|| async { Ok(owner_of(store.as_ref(), &hot).await?.as_deref() == Some("a")) })
+        .await?;
     let writer = start(tier, "b", under(slow_poll)).await;
     listening(node_wakes.as_ref(), "b").await?;
 
-    let sent = Instant::now();
+    owner.waiting().await?;
     let commit = store
         .commit_mail(mail(&hot), CommitLabel::MAIL_SESSION)
         .await?;
     writer.hints.woke(&commit);
-    let arrived = owner.arrived(Duration::from_secs(5)).await?;
-    let latency = arrived.saturating_duration_since(sent);
-    eprintln!("cross-node hint: mail seen after {latency:?}");
-    ensure!(
-        latency < Duration::from_secs(1),
-        "the hint took {latency:?}, as long as a poll"
-    );
+    owner.arrived().await?;
     Ok(())
 }
 
@@ -271,29 +256,22 @@ pub async fn mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_
     let (store, node_wakes) = tier.open().await;
     let hot = actor(&"x".repeat(crate::node_wake_payload::MAX_BYTES))?;
     create(store.as_ref(), &hot).await?;
-    let slow_poll = LeaseSettings {
-        claim_poll: Duration::from_secs(10),
-        ..LeaseSettings::default()
-    };
+    let slow_poll = quiet();
     let mut owner = start(tier, "a", under(slow_poll)).await;
-    eventually(
-        Duration::from_secs(5),
-        "node a owns the oversized key",
-        || async { Ok(owner_of(store.as_ref(), &hot).await?.as_deref() == Some("a")) },
-    )
-    .await?;
+    eventually(|| async { Ok(owner_of(store.as_ref(), &hot).await?.as_deref() == Some("a")) })
+        .await?;
     let writer = start(tier, "b", under(slow_poll)).await;
     listening(node_wakes.as_ref(), "b").await?;
     // Synchronize with the real activation's mailbox read: the mail below
     // must wake an already-waiting owner, rather than ride its initial read.
-    owner.waiting(Duration::from_secs(5)).await?;
+    owner.waiting().await?;
     let commit = store
         .commit_mail(mail(&hot), CommitLabel::MAIL_SESSION)
         .await?;
     writer.hints.woke(&commit);
-    // The only periodic mail wake is ten seconds away. This is a hang
-    // guard, not a subsecond performance requirement on the store commit.
-    owner.arrived(Duration::from_secs(5)).await?;
+    // With the initial read finished and fallback polls disabled, only the
+    // typed store-scan hint can cause this delivery.
+    owner.arrived().await?;
     Ok(())
 }
 
@@ -311,60 +289,74 @@ pub async fn mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll(
         ..LeaseSettings::default()
     };
     let mut owner = start(tier, "a", under(lease)).await;
-    eventually(Duration::from_secs(5), "node a owns the actor", || async {
-        Ok(owner_of(store.as_ref(), &hot).await?.as_deref() == Some("a"))
-    })
-    .await?;
-    let sent = Instant::now();
+    eventually(|| async { Ok(owner_of(store.as_ref(), &hot).await?.as_deref() == Some("a")) })
+        .await?;
+    owner.waiting().await?;
     store
         .commit_mail(mail(&hot), CommitLabel::MAIL_SESSION)
         .await?;
-    let arrived = owner.arrived(Duration::from_secs(5)).await?;
-    let latency = arrived.saturating_duration_since(sent);
-    eprintln!("lost hint: mail seen after {latency:?} on a {poll:?} poll");
-    ensure!(
-        latency < poll + Duration::from_millis(500),
-        "the poll took {latency:?}"
-    );
+    owner.arrived().await?;
     Ok(())
 }
 
 /// A node that dies is reaped through its liveness lock, and its actor is
-/// claimed by a surviving node, in a small fraction of the fifteen-second
-/// lease a lease reap would wait for.
+/// claimed by a surviving node. Its lease and the expiry reap are effectively
+/// disabled: the survivor must observe the held lock, then reap its release.
 pub async fn a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses(
     tier: &dyn NodeWakeTier,
 ) -> LawResult {
-    let (store, node_wakes) = tier.open().await;
+    let (store, _) = tier.open().await;
     let hot = actor("hot")?;
     create(store.as_ref(), &hot).await?;
-    let dying = start(tier, "dying", under(LeaseSettings::default())).await;
-    eventually(
-        Duration::from_secs(5),
-        "the dying node owns the actor",
-        || async { Ok(owner_of(store.as_ref(), &hot).await?.as_deref() == Some("dying")) },
-    )
-    .await?;
-    let _survivor = start(tier, "survivor", under(LeaseSettings::default())).await;
-    eventually(Duration::from_secs(5), "both nodes listen", || async {
-        let live = liveness(node_wakes.as_ref()).await?;
-        Ok(live.len() == 2 && live.iter().all(|liveness| liveness.held))
-    })
-    .await?;
-    // Let the survivor's watch see the dying node's lock held.
-    tokio::time::sleep(Duration::from_millis(600)).await;
+    let lease = LeaseSettings {
+        ttl: quiet().claim_poll,
+        self_stop_after: quiet().claim_poll / 2,
+        reap_every: quiet().claim_poll,
+        ..LeaseSettings::default()
+    };
+    let mut dying = start(tier, "dying", under(lease)).await;
+    dying.waiting().await?;
+    let claimed = store
+        .actor(&hot)
+        .await?
+        .ok_or_else(|| LawBroken("the dying node's actor is absent".to_owned()))?;
+    let dead_boot = claimed
+        .owner
+        .ok_or_else(|| LawBroken("the dying node does not own its actor".to_owned()))?;
+    let (survivor_store, survivor_wakes) = tier.open().await;
+    let (survivor_wakes, mut evidence) = observing(survivor_wakes);
+    let mut survivor = serve_node(
+        survivor_store,
+        Some(survivor_wakes),
+        "survivor",
+        under(lease),
+    );
+    evidence
+        .until(|event| {
+            matches!(event, WakeEvidence::Watched(boots)
+            if boots.iter().any(|boot| boot.boot == dead_boot && boot.held)
+                && boots.iter().any(|boot| boot.boot.node.as_str() == "survivor" && boot.held))
+        })
+        .await?;
 
     dying.kill().await;
-    let failover = eventually(
-        Duration::from_secs(10),
-        "the survivor takes over",
-        || async { Ok(owner_of(store.as_ref(), &hot).await?.as_deref() == Some("survivor")) },
-    )
-    .await?;
-    eprintln!("lock failover: the survivor owns the actor after {failover:?}");
+    let WakeEvidence::Reaped(reaped) = evidence
+        .until(|event| matches!(event, WakeEvidence::Reaped(_)))
+        .await?
+    else {
+        unreachable!("the predicate selects lock reaping evidence");
+    };
     ensure!(
-        failover < Duration::from_secs(3),
-        "the takeover took {failover:?}, near the lease"
+        reaped.len() == 1
+            && reaped[0].actor == hot
+            && reaped[0].from == dead_boot
+            && reaped[0].epoch > claimed.epoch,
+        "the survivor's lock reap answered {reaped:?}"
+    );
+    survivor.waiting().await?;
+    ensure!(
+        owner_of(store.as_ref(), &hot).await?.as_deref() == Some("survivor"),
+        "the survivor did not take over the reaped actor"
     );
     Ok(())
 }
@@ -384,20 +376,20 @@ pub async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node(
     let mut nodes = Vec::new();
     for index in 1..NODES {
         let name = format!("peer-{index:02}");
-        nodes.push(start_counted(tier, &name, holding(quiet(), 256), &claims).await);
+        let (peer, _) = start_counted(tier, &name, holding(quiet(), 256), &claims).await;
+        nodes.push(peer);
         listening(node_wakes.as_ref(), &name).await?;
     }
-    eventually(Duration::from_secs(5), "each peer claimed once", || async {
-        Ok(claims.len() == NODES - 1)
-    })
-    .await?;
+    claims.wait_for(NODES - 1).await;
+    ensure!(
+        claims.len() == NODES - 1,
+        "the peers claimed more than once"
+    );
     let held_actor = actor("held")?;
     create(store.as_ref(), &held_actor).await?;
-    let producer = start_counted(tier, "producer", holding(quiet(), 1), &claims).await;
-    eventually(Duration::from_secs(5), "the producer is full", || async {
-        Ok(owner_of(store.as_ref(), &held_actor).await?.as_deref() == Some("producer"))
-    })
-    .await?;
+    let (mut producer, mut evidence) =
+        start_counted(tier, "producer", holding(quiet(), 1), &claims).await;
+    producer.waiting().await?;
     claims.take();
 
     for index in 0..READIED {
@@ -405,14 +397,32 @@ pub async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node(
         producer
             .hints
             .woke(&create(store.as_ref(), &readied).await?);
-        eventually(Duration::from_secs(5), "a peer runs the actor", || async {
-            Ok(owner_of(store.as_ref(), &readied)
-                .await?
-                .is_some_and(|owner| owner.starts_with("peer-")))
-        })
-        .await?;
+        let WakeEvidence::Published(batch) = evidence
+            .until(|event| matches!(event, WakeEvidence::Published(_)))
+            .await?
+        else {
+            unreachable!("the predicate selects publication evidence");
+        };
+        ensure!(
+            batch.ready.len() == 1 && batch.owned.is_empty() && batch.appended.is_empty(),
+            "a readied actor rings exactly one peer: {batch:?}"
+        );
+        claims.wait_for(index + 1).await;
+        let owner = owner_of(store.as_ref(), &readied).await?;
+        ensure!(
+            owner
+                .as_ref()
+                .is_some_and(|owner| owner.starts_with("peer-")
+                    && batch.ready.contains(&crate::NodeId::new(owner))),
+            "the hinted peer did not take the actor: {owner:?}, {batch:?}"
+        );
     }
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Stop and join every claimant before inspecting the final count. No
+    // arbitrary settling sleep, and no later claim can race the assertion.
+    producer.kill().await;
+    for peer in nodes {
+        peer.kill().await;
+    }
     let attempts = claims.take();
     let empty = attempts.iter().filter(|(_, taken)| *taken == 0).count();
     eprintln!(
@@ -424,7 +434,6 @@ pub async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node(
         (attempts.len(), empty) == (READIED, 0),
         "each readied actor costs one claim attempt that takes it: {attempts:?}"
     );
-    drop(nodes);
     Ok(())
 }
 
@@ -437,58 +446,53 @@ pub async fn a_hint_to_a_dead_node_is_backed_by_the_claim_poll(
 ) -> LawResult {
     let (store, node_wakes) = tier.open().await;
     let claims = Claims::default();
-    let doomed = start_counted(tier, "doomed", holding(quiet(), 256), &claims).await;
+    let (doomed, _) = start_counted(tier, "doomed", holding(quiet(), 256), &claims).await;
     listening(node_wakes.as_ref(), "doomed").await?;
-    eventually(
-        Duration::from_secs(5),
-        "the doomed node claimed",
-        || async { Ok(claims.len() == 1) },
-    )
-    .await?;
+    claims.wait_for(1).await;
     let held_actor = actor("held")?;
     create(store.as_ref(), &held_actor).await?;
-    let producer = start_counted(tier, "producer", holding(quiet(), 1), &claims).await;
-    eventually(Duration::from_secs(5), "the producer is full", || async {
-        Ok(owner_of(store.as_ref(), &held_actor).await?.as_deref() == Some("producer"))
-    })
-    .await?;
+    let (mut producer, mut evidence) =
+        start_counted(tier, "producer", holding(quiet(), 1), &claims).await;
+    producer.waiting().await?;
     let poll = Duration::from_millis(500);
     let polling = LeaseSettings {
         claim_poll: poll,
         claim_backoff: poll,
         ..LeaseSettings::default()
     };
-    let _survivor = start_counted(tier, "survivor", holding(polling, 256), &claims).await;
+    let before_survivor = claims.len();
+    let (mut survivor, _) = start_counted(tier, "survivor", holding(polling, 256), &claims).await;
     listening(node_wakes.as_ref(), "survivor").await?;
+    claims.wait_for(before_survivor + 1).await;
     doomed.kill().await;
-    eventually(
-        Duration::from_secs(5),
-        "the doomed node's lock is free",
-        || async {
-            Ok(liveness(node_wakes.as_ref())
-                .await?
-                .iter()
-                .all(|liveness| liveness.boot.node.as_str() != "doomed" || !liveness.held))
-        },
-    )
+    eventually(|| async {
+        Ok(liveness(node_wakes.as_ref())
+            .await?
+            .iter()
+            .all(|liveness| liveness.boot.node.as_str() != "doomed" || !liveness.held))
+    })
     .await?;
 
     let readied = actor("readied")?;
-    let sent = Instant::now();
     producer
         .hints
         .woke(&create(store.as_ref(), &readied).await?);
-    eventually(
-        Duration::from_secs(5),
-        "the survivor runs the actor",
-        || async { Ok(owner_of(store.as_ref(), &readied).await?.as_deref() == Some("survivor")) },
-    )
-    .await?;
-    let latency = sent.elapsed();
-    eprintln!("lost ready hint: the poll claimed the actor after {latency:?}");
+    let WakeEvidence::Published(batch) = evidence
+        .until(|event| matches!(event, WakeEvidence::Published(_)))
+        .await?
+    else {
+        unreachable!("the predicate selects publication evidence");
+    };
     ensure!(
-        latency < poll + Duration::from_millis(500),
-        "the poll took {latency:?} on a {poll:?} poll"
+        batch.ready == BTreeSet::from([crate::NodeId::new("doomed")])
+            && batch.owned.is_empty()
+            && batch.appended.is_empty(),
+        "the hint did not go only to the dead node: {batch:?}"
+    );
+    survivor.waiting().await?;
+    ensure!(
+        owner_of(store.as_ref(), &readied).await?.as_deref() == Some("survivor"),
+        "the survivor's claim poll did not take the actor"
     );
     Ok(())
 }

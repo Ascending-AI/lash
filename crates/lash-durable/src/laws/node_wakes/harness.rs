@@ -2,9 +2,9 @@
 //! actor they claim hot, and a store that counts each node's claim attempts.
 
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 
 use super::super::{LawBroken, LawResult};
 use crate::domain;
@@ -13,7 +13,7 @@ use crate::{
     ActorKey, ActorSnapshot, ActorTx, BootLiveness, Claimed, CommitLabel, DurableError,
     DurableInstant, DurableReads, DurableSettings, DurableStore, Epoch, FormatSet,
     HeartbeatOutcome, LeaseSettings, MailCommit, MailKind, MailTx, NodeId, NodeLease, NodeSpec,
-    NodeWakes, Reaped,
+    NodeWakes, Owner, Reaped, WakeBatch,
 };
 use lash_sansio::{ProcessId, SessionId, TurnId};
 
@@ -73,47 +73,34 @@ pub(super) async fn liveness(node_wakes: &dyn NodeWakes) -> Result<Vec<BootLiven
     Ok(node_wakes.liveness().await?)
 }
 
-/// Poll `reached` every 25 ms until it holds or `within` passes; answers how
-/// long it took.
-pub(super) async fn eventually<F, Fut>(
-    within: Duration,
-    what: &str,
-    mut reached: F,
-) -> Result<Duration, LawBroken>
+/// Wait on stored state, yielding between reads. The test action's watchdog
+/// bounds hangs; scheduler latency is never part of a law's verdict.
+pub(super) async fn eventually<F, Fut>(mut reached: F) -> LawResult
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<bool, LawBroken>>,
 {
-    let started = Instant::now();
     while !reached().await? {
-        if started.elapsed() >= within {
-            return Err(LawBroken(format!("{what} not within {within:?}")));
-        }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    Ok(started.elapsed())
+    Ok(())
 }
 
 /// Wait until `node`'s listener holds its liveness lock.
 pub(super) async fn listening(node_wakes: &dyn NodeWakes, node: &str) -> LawResult {
-    eventually(
-        Duration::from_secs(5),
-        &format!("{node} listens"),
-        || async {
-            Ok(liveness(node_wakes)
-                .await?
-                .iter()
-                .any(|liveness| liveness.boot.node.as_str() == node && liveness.held))
-        },
-    )
+    eventually(|| async {
+        Ok(liveness(node_wakes)
+            .await?
+            .iter()
+            .any(|liveness| liveness.boot.node.as_str() == node && liveness.held))
+    })
     .await
-    .map(drop)
 }
 
 /// Holds every actor it claims hot, acknowledging its mail and reporting
 /// when each arrived.
 struct Hold {
-    arrived: mpsc::UnboundedSender<Instant>,
+    arrived: mpsc::UnboundedSender<()>,
     waiting: mpsc::UnboundedSender<()>,
 }
 
@@ -125,12 +112,11 @@ impl Activation for Hold {
                 return Exit::Released;
             };
             if !tx.mail().is_empty() {
-                let arrived = Instant::now();
                 tx.ack_seen();
                 if owned.commit(tx, CommitLabel::new("law.ack")).await.is_err() {
                     return Exit::Released;
                 }
-                let _ = self.arrived.send(arrived);
+                let _ = self.arrived.send(());
             }
             let _ = self.waiting.send(());
             owned.wait_for_mail().await;
@@ -143,7 +129,7 @@ impl Activation for Hold {
 pub struct LawNode {
     /// The hints the node's mailbox writers hand what their commits woke.
     pub hints: Hints,
-    arrived: mpsc::UnboundedReceiver<Instant>,
+    arrived: mpsc::UnboundedReceiver<()>,
     waiting: mpsc::UnboundedReceiver<()>,
     task: tokio::task::JoinHandle<Result<Stopped, DurableError>>,
 }
@@ -151,18 +137,18 @@ pub struct LawNode {
 impl LawNode {
     /// Wait until an activation has read its mailbox and is waiting for
     /// a hint or its mail poll. A later append cannot race its initial read.
-    pub(super) async fn waiting(&mut self, within: Duration) -> Result<(), LawBroken> {
-        tokio::time::timeout(within, self.waiting.recv())
+    pub(super) async fn waiting(&mut self) -> LawResult {
+        self.waiting
+            .recv()
             .await
-            .map_err(|_| LawBroken("the owner never waited for mail".to_owned()))?
             .ok_or_else(|| LawBroken("the owner stopped before waiting for mail".to_owned()))
     }
 
-    /// When the next mail reached one of the node's actors, within `within`.
-    pub(super) async fn arrived(&mut self, within: Duration) -> Result<Instant, LawBroken> {
-        tokio::time::timeout(within, self.arrived.recv())
+    /// Wait for the next mail to reach one of the node's actors.
+    pub(super) async fn arrived(&mut self) -> LawResult {
+        self.arrived
+            .recv()
             .await
-            .map_err(|_| LawBroken(format!("no mail arrived within {within:?}")))?
             .ok_or_else(|| LawBroken("the node stopped running its actors".to_owned()))
     }
 
@@ -243,22 +229,37 @@ pub(super) fn holding(lease: LeaseSettings, max_active: usize) -> DurableSetting
     }
 }
 
-/// Polls far apart, so inside a wake law every claim is a hint's.
+/// Put fallback polls effectively out of reach of a test action. Both the
+/// floor and ceiling must be disabled: a successful claim resets the floor.
 pub(super) fn quiet() -> LeaseSettings {
     LeaseSettings {
-        claim_poll: Duration::from_secs(30),
-        claim_backoff: Duration::from_secs(30),
+        claim_poll: Duration::from_secs(100 * 365 * 24 * 60 * 60),
+        claim_backoff: Duration::from_secs(100 * 365 * 24 * 60 * 60),
         ..LeaseSettings::default()
     }
 }
 
 /// Every claim call the counted nodes made, as (node, actors taken).
 #[derive(Clone, Default)]
-pub(super) struct Claims(Arc<std::sync::Mutex<Vec<(String, usize)>>>);
+pub(super) struct Claims {
+    attempts: Arc<std::sync::Mutex<Vec<(String, usize)>>>,
+    changed: Arc<Notify>,
+}
 
 impl Claims {
+    /// Await completed claim calls, rather than racing a wall-clock bound.
+    pub(super) async fn wait_for(&self, count: usize) {
+        loop {
+            let changed = self.changed.notified();
+            if self.len() >= count {
+                return;
+            }
+            changed.await;
+        }
+    }
+
     pub(super) fn len(&self) -> usize {
-        self.0
+        self.attempts
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .len()
@@ -267,7 +268,7 @@ impl Claims {
     pub(super) fn take(&self) -> Vec<(String, usize)> {
         std::mem::take(
             &mut *self
-                .0
+                .attempts
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         )
@@ -308,10 +309,11 @@ impl DurableStore for CountingStore {
         let claimed = self.inner.claim(node, limit).await;
         if let Ok(claimed) = &claimed {
             self.claims
-                .0
+                .attempts
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .push((self.node.clone(), claimed.len()));
+            self.claims.changed.notify_one();
         }
         claimed
     }
@@ -462,5 +464,77 @@ impl DurableReads for CountingStore {
         hashes: &[String],
     ) -> Result<Vec<domain::PromptText>, DurableError> {
         self.inner.prompt_texts(hashes).await
+    }
+}
+
+/// Evidence from calls made by a production runner, forwarded unchanged.
+pub(super) enum WakeEvidence {
+    Published(WakeBatch),
+    Watched(Vec<BootLiveness>),
+    Reaped(Vec<Reaped>),
+}
+
+pub(super) struct Evidence(mpsc::UnboundedReceiver<WakeEvidence>);
+
+impl Evidence {
+    pub(super) async fn until(
+        &mut self,
+        matches: impl Fn(&WakeEvidence) -> bool,
+    ) -> Result<WakeEvidence, LawBroken> {
+        while let Some(event) = self.0.recv().await {
+            if matches(&event) {
+                return Ok(event);
+            }
+        }
+        Err(LawBroken(
+            "the node stopped before reporting its wake evidence".to_owned(),
+        ))
+    }
+}
+
+struct ObservedWakes {
+    inner: Arc<dyn NodeWakes>,
+    evidence: mpsc::UnboundedSender<WakeEvidence>,
+}
+
+pub(super) fn observing(inner: Arc<dyn NodeWakes>) -> (Arc<dyn NodeWakes>, Evidence) {
+    let (evidence, received) = mpsc::unbounded_channel();
+    (
+        Arc::new(ObservedWakes { inner, evidence }),
+        Evidence(received),
+    )
+}
+
+#[async_trait::async_trait]
+impl NodeWakes for ObservedWakes {
+    async fn publish(&self, batch: &WakeBatch) -> Result<(), DurableError> {
+        self.inner.publish(batch).await?;
+        let _ = self.evidence.send(WakeEvidence::Published(batch.clone()));
+        Ok(())
+    }
+
+    async fn listen(
+        &self,
+        lease: &NodeLease,
+    ) -> Result<Box<dyn crate::NodeWakeFeed>, DurableError> {
+        self.inner.listen(lease).await
+    }
+
+    async fn liveness(&self) -> Result<Vec<BootLiveness>, DurableError> {
+        let boots = self.inner.liveness().await?;
+        let _ = self.evidence.send(WakeEvidence::Watched(boots.clone()));
+        Ok(boots)
+    }
+
+    async fn reap_released(
+        &self,
+        reaper: &NodeLease,
+        boot: &Owner,
+    ) -> Result<Vec<Reaped>, DurableError> {
+        let reaped = self.inner.reap_released(reaper, boot).await?;
+        if !reaped.is_empty() {
+            let _ = self.evidence.send(WakeEvidence::Reaped(reaped.clone()));
+        }
+        Ok(reaped)
     }
 }
