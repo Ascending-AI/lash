@@ -535,3 +535,18 @@ fn assert_finished(end: End, expected: Datum) {
         other => panic!("expected {expected:?}, got {other:?}"),
     }
 }
+
+/// ECMA Array.prototype.unshift: with no arguments, only ToLength and the
+/// final length write occur; a huge array-like object is never traversed.
+#[test]
+fn unshift_without_arguments_does_not_traverse_the_receiver() {
+    assert_finished(
+        execute(
+            "const xs = {length: Infinity}; const length = Array.prototype.unshift.call(xs); finish([length, xs.length]);",
+        ),
+        Datum::List(vec![
+            Datum::Float(lash_kernel_doc::Float::new(9007199254740991.0)),
+            Datum::Float(lash_kernel_doc::Float::new(9007199254740991.0)),
+        ]),
+    );
+}

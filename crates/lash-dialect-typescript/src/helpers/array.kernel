@@ -923,6 +923,7 @@ body {
       do invoke ts.array.remove(this, tail)
     }
   } else {
+    if num.lt(removed_count, inserted_count) {
     let index = num.sub(length, removed_count)
     while num.lt(start, index) {
       set index = num.sub(index, 1)
@@ -933,6 +934,7 @@ body {
         let value = invoke ts.get(this, from)
         do invoke ts.array.set(this, to, value)
       } else { do invoke ts.array.remove(this, to) }
+    }
     }
   }
   let index = 0.0
