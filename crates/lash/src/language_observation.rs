@@ -214,7 +214,7 @@ impl LanguageObservationPublisher {
     fn enqueue_language(
         &self,
         record: &TraceRecord,
-        language: &str,
+        language: Option<&str>,
         execution: &lash_trace::TraceLanguageExecution,
     ) {
         if self.closed.load(Ordering::Acquire) {
@@ -229,7 +229,7 @@ impl LanguageObservationPublisher {
             Subject::Session(id) => self.charge(&(id, language, execution)),
         });
         let observation = || LanguageExecutionObservation {
-            language: language.into(),
+            language: language.map(str::to_owned),
             execution: execution.clone(),
             observed_at_ms: timestamp.unwrap_or(0),
         };
@@ -278,7 +278,7 @@ impl TraceSink for LanguageObservationPublisher {
     fn append(&self, record: &TraceRecord) -> Result<(), TraceSinkError> {
         match &record.event {
             TraceEvent::LanguageExecution { language, event } => {
-                self.enqueue_language(record, language, event);
+                self.enqueue_language(record, language.as_deref(), event);
             }
             TraceEvent::StepBodyStarted { step } => self.enqueue_step_body_started(record, step),
             _ => {}

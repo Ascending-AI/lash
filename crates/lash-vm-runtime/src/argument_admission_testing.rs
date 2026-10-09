@@ -21,13 +21,11 @@ fn host_claim() -> lash_core::ReferrerClaim {
     .expect("unguarded host pin")
 }
 async fn compile_fixture(
-    source: &str,
     program: lash_vm::Program,
     environment: &LashVmHostEnvironment,
 ) -> lash_vm_client::service::CompiledModule {
     match lash_vm_client::service::Service::default()
-        .request_accounted(lash_vm_client::service::Request::CompileAst {
-            source: source.to_owned(),
+        .request_accounted(lash_vm_client::service::Request::LinkAst {
             program,
             environment: environment.clone(),
         })
@@ -44,7 +42,6 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
     let store = LashVmArtifacts::new(store);
     let environment = LashVmHostEnvironment::default();
     let handler = compile_fixture(
-        "nested handler",
         process_module(
             "handler",
             vec![
@@ -65,7 +62,6 @@ pub async fn nested_process_arguments_reject_forged_aliases_and_try_later_union_
         lash_vm::TypeExpr::Bool,
     );
     let receiver = compile_fixture(
-        "nested union receiver",
         process_module(
             "install",
             vec![b::param(

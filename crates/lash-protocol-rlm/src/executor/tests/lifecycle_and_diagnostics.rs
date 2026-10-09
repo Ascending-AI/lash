@@ -160,12 +160,13 @@ impl ExecutionHost for NoopHost {
 
 pub(super) async fn worker_compile_program(
     program: &lash_vm::Program,
+    globals: &[&str],
 ) -> Result<lash_vm_client::service::CompiledModule, String> {
     match lash_vm_client::service::Service::default()
-        .request_accounted(lash_vm_client::service::Request::CompileAst {
-            source: String::new(),
+        .request_accounted(lash_vm_client::service::Request::LinkAst {
             program: program.clone(),
-            environment: Default::default(),
+            environment: lash_vm::LashVmHostEnvironment::default()
+                .with_globals(globals.iter().copied()),
         })
         .await
         .map_err(|e| e.to_string())?

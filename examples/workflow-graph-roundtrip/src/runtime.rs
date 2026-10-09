@@ -94,8 +94,7 @@ pub(crate) fn surviving_ids(
         match entry {
             WorkflowCorrespondenceEntry::Retained { handle, to, .. }
             | WorkflowCorrespondenceEntry::Moved { handle, to, .. }
-            | WorkflowCorrespondenceEntry::Inserted { handle, to, .. }
-            | WorkflowCorrespondenceEntry::Merged { handle, to, .. } => {
+            | WorkflowCorrespondenceEntry::Inserted { handle, to, .. } => {
                 ids.insert(*handle, to.clone());
             }
             WorkflowCorrespondenceEntry::Split { into, .. } => {

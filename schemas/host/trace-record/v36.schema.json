@@ -1572,7 +1572,7 @@
       ]
     },
     "TelemetryContent": {
-      "description": "Whether built-in telemetry carries content.\n\nContent is what a session says, as opposed to what it did: prompts and\nmodel responses, rendered instructions and tool contracts, tool arguments\nand results, executed code and its output, raw provider payloads, and\ndiagnostic or provider text. One host choice governs all of it on every\nbuilt-in telemetry path: the records every [`TraceSink`](crate::TraceSink)\nreceives (JSONL, stderr, a tee, a host's own sink) and the adapter's\nprojection of them.\n\nThe policy is consent, not detail: [`TraceLevel`](crate::TraceLevel) still\nchooses which records exist, and byte bounds still cut what is captured.\nIt governs telemetry only. Durable requests and results, session history,\nproduct observations and the app's own responses keep their contracts.\n\nOpaque [`TraceEvent::Custom`] payloads are the emitting host's or plugin's\nown structured evidence and pass through unread; a producer that would put\ncontent in one consults the policy first.",
+      "description": "Whether built-in telemetry carries content.\n\nContent is what a session says, as opposed to what it did: prompts and\nmodel responses, rendered instructions and tool contracts, tool arguments\nand results, executed code and its output, raw provider payloads, and\ndiagnostic or provider text. One host choice governs all of it on every\nbuilt-in telemetry path: the records every [`TraceSink`](crate::TraceSink)\nreceives (JSONL, stderr, a tee, a host's own sink) and the adapter's\nprojection of them.\n\nThe policy is consent, not detail: [`TraceLevel`](crate::TraceLevel) still\nchooses which records exist, and byte bounds still cut what is captured.\nIt governs telemetry only. Durable requests and results, session history,\nproduct observations and the app's own responses keep their contracts.\n\nOpaque [`TraceEvent::Custom`] payloads are plugin-authored (or host-authored)\noutput. Lash does not inspect or classify them. A plugin must honour the\npolicy for content it includes in custom payloads; its factory reads the\ncurrent deployment policy through\n`lash::plugins::PluginSessionContext::telemetry_content()`. This operational\nprivacy setting follows the receiving host on reopen, rather than a\nsession's recorded execution config.\n\nA host has the final say over custom payloads at its exporter: install a\nwrapping [`TraceSink`](crate::TraceSink) through\n`LashCoreBuilder::trace_sink` that drops custom records or clones and\nredacts their payloads before forwarding them to the export sink. The\nwrapper should also forward [`TraceSink::flush`](crate::TraceSink::flush).",
       "oneOf": [
         {
           "const": "omitted",
@@ -5134,7 +5134,11 @@
           "$ref": "#/$defs/TraceLanguageExecution"
         },
         "language": {
-          "type": "string"
+          "description": "The source dialect, when the execution records one. Graph artifacts\nare dialect-free and leave it absent.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "type": {
           "const": "language_execution",
@@ -5143,7 +5147,6 @@
       },
       "required": [
         "type",
-        "language",
         "event"
       ],
       "type": "object"

@@ -587,17 +587,6 @@ fn correspondence_is_total(
                     reached(piece, to, &mut to_now)?;
                 }
             }
-            Entry::Merged {
-                handles,
-                from,
-                handle,
-                to,
-            } => {
-                for (source, from) in handles.iter().zip(from) {
-                    left(source, from, &mut from_base)?;
-                }
-                reached(handle, to, &mut to_now)?;
-            }
             other => {
                 return Err(TestCaseError::fail(format!(
                     "an outcome this law does not know: {other:?}"

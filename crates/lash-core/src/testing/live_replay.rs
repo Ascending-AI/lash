@@ -39,7 +39,7 @@ pub fn process_language_observation(
     label: &str,
 ) -> crate::LanguageExecutionObservation {
     crate::LanguageExecutionObservation {
-        language: "fixture".to_string(),
+        language: Some("fixture".to_string()),
         execution: lash_trace::TraceLanguageExecution {
             event_key: event_key.to_string(),
             identity: lash_trace::TraceLanguageExecutionIdentity {

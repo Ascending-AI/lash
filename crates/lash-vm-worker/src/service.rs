@@ -58,7 +58,7 @@ pub(crate) fn perform(
                             ),
                         );
                         let draft = lash_core_execution::ProcessDefinitionDraft::new(
-                            "lashvm",
+                            lash_vm::LASH_VM_ENGINE_KIND,
                             identity.to_process_value(),
                             [lash_core_execution::ArtifactName {
                                 store: lash_core_execution::ArtifactStoreId::VmModule,
@@ -89,27 +89,9 @@ pub(crate) fn perform(
             refused => refused,
         },
         Request::LinkAst {
-            source,
             program,
             environment,
-        } => linked_module(&source, program, &environment, false)?,
-        Request::CompileAst { program, .. } => {
-            match lash_vm::ModuleArtifact::from_program(program) {
-                Ok(artifact) => {
-                    let introspection = artifact.introspect().map_err(inconsistent_artifact)?;
-                    Response::Module(compiled_output(lash_vm::ModuleCompileOutput {
-                        module_ref: artifact.module_ref().clone(),
-                        host_requirements_ref: artifact.host_requirements_ref().clone(),
-                        artifact,
-                        introspection,
-                    })?)
-                }
-                Err(error) => Response::Refused {
-                    message: error.to_string(),
-                    policy: false,
-                },
-            }
-        }
+        } => linked_module("", program, &environment, false)?,
         #[cfg(feature = "testing")]
         Request::ContinuationProbe {
             bytes,

@@ -411,7 +411,7 @@ impl LashVmExecutionTrace {
             (
                 context,
                 TraceEvent::LanguageExecution {
-                    language: self.language.to_string(),
+                    language: Some(self.language.to_string()),
                     event: event.clone(),
                 },
             )

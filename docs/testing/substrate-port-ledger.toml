@@ -2290,9 +2290,9 @@ status = "deleted"
 note = "activate opened a capability Run through the double's handler: the Restate server double and its handlers went with 5ad9641f9e (FIG-5190)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred_triggers.rs"
+path = "crates/lash-vm-runtime/src/deferred_triggers.rs"
 test = "*"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell"]
 class = "delete"
 lane = "L9e"
@@ -2308,9 +2308,9 @@ status = "deleted"
 note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
+path = "crates/lash-vm-runtime/src/lib_tests.rs"
 test = "*"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell", "process"]
 class = "mechanical"
 lane = "L9e"
@@ -2345,9 +2345,9 @@ status = "ported"
 note = "FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
+path = "crates/lash-vm-runtime/src/lib_tests.rs"
 test = "process_shutdown_preserves_typed_failures"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell", "process"]
 class = "delete"
 lane = "L9e"
@@ -2359,9 +2359,9 @@ status = "deleted"
 note = "its fixture, the journal-era process shutdown over the effect host, was deleted with its subject by FIG-5198"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
+path = "crates/lash-vm-runtime/src/lib_tests.rs"
 test = "process_event_host_failure_stops_execution"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell", "process"]
 class = "delete"
 lane = "L9e"
@@ -2373,23 +2373,23 @@ status = "deleted"
 note = "its fixture, a process event host failing a journal append, was deleted with its subject by FIG-5198"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
+path = "crates/lash-vm-runtime/src/lib_tests.rs"
 test = "real_process_sleep_for_emits_wait_and_completion"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell", "process"]
 class = "mechanical"
 lane = "L9e"
 laws = [
   "real_process_sleep_for_emits_wait_and_completion",
 ]
-disposition = "covered-by:crates/lash-durable-test/tests/core_node_processes.rs::lashlang_process_runs_to_its_terminal"
+disposition = "covered-by:crates/lash-durable-test/tests/core_node_processes.rs::lash_vm_process_runs_to_its_terminal"
 status = "deleted"
-note = "a lashlang process sleeping twice runs to its terminal on the core's node; the trace half (a NodeWaiting event for the sleep) is subject-deleted: FIG-5198 (96558d9d7b) deleted lashlang process execution traces with the segment run path"
+note = "a Lash VM process sleeping twice runs to its terminal on the core's node; the trace half (a NodeWaiting event for the sleep) is subject-deleted: FIG-5198 (96558d9d7b) deleted Lash VM process execution traces with the segment run path"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
+path = "crates/lash-vm-runtime/src/lib_tests.rs"
 test = "real_process_signal_wait_names_the_durable_key_and_resolves"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell", "process"]
 class = "delete"
 lane = "L9e"
@@ -2398,12 +2398,12 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5309 re-wrote the law on the core's node: a lashlang process waiting on its signal parks idle, and a host's signal through the core's process API resumes its VM with the payload. The journaled signal-wait key and its trace event went with FIG-5198 (96558d9d7b): a signal is the process's mail FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
+note = "FIG-5309 re-wrote the law on the core's node: a Lash VM process waiting on its signal parks idle, and a host's signal through the core's process API resumes its VM with the payload. The journaled signal-wait key and its trace event went with FIG-5198 (96558d9d7b): a signal is the process's mail FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
+path = "crates/lash-vm-runtime/src/lib_tests.rs"
 test = "real_process_tool_batch_wait_uses_the_dispatch_batch_id"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell", "process"]
 class = "mechanical"
 lane = "L9e"
@@ -2412,40 +2412,40 @@ laws = [
 ]
 disposition = "covered-by:crates/lash-durable-test/tests/process_tool_calls.rs::process_tool_call_limit_admits_the_limit_and_refuses_the_group_past_it"
 status = "deleted"
-note = "a process's Promise.all group of catalog tools runs whole on the core's node; the trace half (the dispatch batch id on a NodeWaiting event) is subject-deleted with lashlang process execution traces (FIG-5198, 96558d9d7b)"
+note = "a process's Promise.all group of catalog tools runs whole on the core's node; the trace half (the dispatch batch id on a NodeWaiting event) is subject-deleted with Lash VM process execution traces (FIG-5198, 96558d9d7b)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
+path = "crates/lash-vm-runtime/src/lib_tests.rs"
 test = "process_admission_four_shape_table_preserves_codes_and_prepare_omission"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell", "process"]
 class = "mechanical"
 lane = "L9e"
 laws = [
   "process_admission_four_shape_table_preserves_codes_and_prepare_omission",
 ]
-disposition = "replaced-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_start_its_artifact_or_host_does_not_admit_ends_with_its_typed_refusal"
+disposition = "replaced-by:crates/lash-vm-runtime/src/engine/advance_tests.rs::a_start_its_artifact_or_host_does_not_admit_ends_with_its_typed_refusal"
 status = "deleted"
 note = "FIG-5309 re-wrote the law at vm_run, the run-time admission recheck since FIG-5198: the four refusals end the process with their codes before the VM runs, and the start preparation refuses the two immutable mismatches and omits the live host"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests.rs"
+path = "crates/lash-vm-runtime/src/lib_tests.rs"
 test = "process_rebuild_failure_is_terminal_but_artifact_io_failure_retries"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell", "process"]
 class = "mechanical"
 lane = "L9e"
 laws = [
   "process_rebuild_failure_is_terminal_but_artifact_io_failure_retries",
 ]
-disposition = "replaced-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::an_unreadable_artifact_ends_the_process_but_a_store_outage_faults_the_step"
+disposition = "replaced-by:crates/lash-vm-runtime/src/engine/advance_tests.rs::an_unreadable_artifact_ends_the_process_but_a_store_outage_faults_the_step"
 status = "deleted"
 note = "FIG-5309 re-wrote the law at vm_run: a missing artifact settles the process failed, a corrupt one abandons it as a refused resume, and a store outage faults the step, which asked again reads the artifact and reaches admission before the VM runs"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/worker_execution.rs"
+path = "crates/lash-vm-runtime/src/worker_execution.rs"
 test = "*"
-area = "lashlang"
+area = "Lash VM"
 needs = ["cell"]
 class = "semantic"
 lane = "L9e"
@@ -3039,7 +3039,7 @@ lane = "L9e"
 laws = [
   "a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_serves",
 ]
-disposition = "covered-by:crates/lashlang/src/runtime/tests/projection_provider_laws.rs::a_heap_of_projections_restores_fresh_and_reads_through_its_provider"
+disposition = "covered-by:crates/lash-vm/src/runtime/tests/projection_provider_laws.rs::a_heap_of_projections_restores_fresh_and_reads_through_its_provider"
 status = "deleted"
 note = "L7p deleted the unavailable-after-restore placeholder: a restored projection reads through its provider"
 
@@ -3113,7 +3113,7 @@ laws = [
   "trigger_disable_is_revision_checked_and_keeps_registry_entry",
   "print_observation_preserves_typed_value_and_records_cut_metadata",
   "console_log_of_a_large_record_stops_at_the_char_cap",
-  "executor_reports_a_disabled_lashlang_ability_at_link_time",
+  "executor_reports_a_disabled_lash_vm_ability_at_link_time",
   "subcap_prints_stay_fully_inline_including_empty_and_null_values",
 ]
 disposition = "subject-deleted"
@@ -3258,7 +3258,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5309 re-wrote the law at the trigger command handler a process body's trigger operation runs through (execute_trigger_operation): in a host-originated process context, a list and the delete of a live session subscription are refused naming bare host authority, and the store is unchanged. FIG-5313 routed a lashlang process body's trigger operation to it as a host step of the process, acting as the process's recorded originator FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
+note = "FIG-5309 re-wrote the law at the trigger command handler a process body's trigger operation runs through (execute_trigger_operation): in a host-originated process context, a list and the delete of a live session subscription are refused naming bare host authority, and the store is unchanged. FIG-5313 routed a Lash VM process body's trigger operation to it as a host step of the process, acting as the process's recorded originator FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -3272,7 +3272,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the lashlang engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the Lash VM engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -3286,7 +3286,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the lashlang engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
+note = "FIG-5309 re-wrote the law through a host's send() on the core's served node: an RLM cell starts a process whose body lists triggers. It exposed a bug: the worker refused a process body's trigger operation as a tool its catalog does not hold. FIG-5313 runs it as a host step the Lash VM engine declares, and the law runs on every tier FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/executor/tests/triggers.rs"
@@ -3435,7 +3435,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5310: a_host_started_process_runs_under_the_behaviour_its_creation_recorded runs on every tier in crates/lash-durable-test/tests/recorded_behaviour_laws.rs; missing and corrupt settings are vm_run laws in crates/lash-lashlang-runtime/src/engine/advance_tests.rs (unreadable_recorded_settings_end_the_process_typed); D-SLEEPALWAYS deletes the recorded sleep ability and its law; durable sleep is covered by core_node_processes::lashlang_process_runs_to_its_terminal; process_settings_have_one_recorded_engine_shape is in crates/lash-protocol-rlm/src/plugin/factory.rs and pins the captured plugin resources, which vm_run reads from the record alone (FIG-5198). a_child_session_runs_under_its_parents_recorded_behaviour is subject-deleted: 35b70ca82b (FIG-5296) made a non-fork create record only what its request states. process_law_on_double, the always_replay legs and the live Restate leg went with the engine (5ad9641f9e, FIG-5190)"
+note = "FIG-5310: a_host_started_process_runs_under_the_behaviour_its_creation_recorded runs on every tier in crates/lash-durable-test/tests/recorded_behaviour_laws.rs; missing and corrupt settings are vm_run laws in crates/lash-vm-runtime/src/engine/advance_tests.rs (unreadable_recorded_settings_end_the_process_typed); D-SLEEPALWAYS deletes the recorded sleep ability and its law; durable sleep is covered by core_node_processes::lash_vm_process_runs_to_its_terminal; process_settings_have_one_recorded_engine_shape is in crates/lash-protocol-rlm/src/plugin/factory.rs and pins the captured plugin resources, which vm_run reads from the record alone (FIG-5198). a_child_session_runs_under_its_parents_recorded_behaviour is subject-deleted: 35b70ca82b (FIG-5296) made a non-fork create record only what its request states. process_law_on_double, the always_replay legs and the live Restate leg went with the engine (5ad9641f9e, FIG-5190)"
 
 [[row]]
 path = "crates/lash-protocol-rlm/src/plugin/runtime_state.rs"
@@ -3608,7 +3608,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5216 re-wrote the Lashlang process producer through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: crates/lash-durable-test/tests/process_tool_calls.rs (a group at the limit runs and one past it is refused whole; a consumed group is held no more; a held race counts once) and crates/lash-durable-test/tests/process_tool_call_crash_laws.rs (the holding law across a worker kill)"
+note = "FIG-5216 re-wrote the Lash VM process producer through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: crates/lash-durable-test/tests/process_tool_calls.rs (a group at the limit runs and one past it is refused whole; a consumed group is held no more; a held race counts once) and crates/lash-durable-test/tests/process_tool_call_crash_laws.rs (the holding law across a worker kill)"
 
 [[row]]
 path = "crates/lash-protocol-standard/src/prompt_tests.rs"
@@ -4464,7 +4464,7 @@ lane = "L9e"
 laws = [
   "a_spent_worker_cpu_budget_is_never_the_process_terminal",
 ]
-disposition = "covered-by:crates/lash-lashlang-runtime/src/process/opaque_state_tests.rs::only_a_refusal_or_a_run_limit_ends_the_process"
+disposition = "covered-by:crates/lash-vm-runtime/src/process/opaque_state_tests.rs::only_a_refusal_or_a_run_limit_ends_the_process"
 status = "deleted"
 owed = "a spent worker cpu budget is never the process terminal"
 note = "a spent CPU budget is WorkerLimitExceeded{Deadline} at checkout (lash-vm-worker pool_laws), and the law pins that it is retryable and redriven, never a process terminal code; the segment replay onto another host went with FIG-5198"
@@ -6796,14 +6796,14 @@ class = "replace"
 lane = "L9e"
 laws = [
   "sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_reopen",
-  "sqlite_process_recovery_preserves_lashlang_admission_failure_codes",
+  "sqlite_process_recovery_preserves_lash_vm_admission_failure_codes",
   "typescript_artifact_runs_through_process_engine_to_terminal",
   "sqlite_trigger_started_process_recovered_after_worker_registry_reopen",
 ]
 disposition = "replaced-by:crates/lash-durable-test/tests/core_node_processes/process_endstates.rs"
 status = "deleted"
-owed = "a process resumed on another node after its worker and registry reopen keeps its snapshot plugin options, lashlang admission codes and trigger binding, and a TypeScript artifact runs to its terminal"
-note = "FIG-5311: sqlite_process_recovery_preserves_lashlang_admission_failure_codes is crates/lash-durable-test/tests/core_node_processes/process_endstates.rs::a_lashlang_process_whose_input_disagrees_with_its_artifact_ends_with_its_typed_refusal (every tier): a host-requirements or process-ref mismatch ends the process at its first vm_run with process_host_requirements_mismatch or process_ref_mismatch; the host-environment codes come from the same validate_lashlang_process_admission. Covered elsewhere: sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_reopen by crates/lash-durable-test/tests/process_tool_call_crash_laws.rs::tool_call_limit_counts_what_a_process_holds_across_a_worker_kill (a lashlang process recovered on the other node calls its tools under its recorded environment); typescript_artifact_runs_through_process_engine_to_terminal by crates/lash-durable-test/tests/process_tool_calls.rs (a cell creates a TypeScript-dialect process and runs it to its terminal); sqlite_trigger_started_process_recovered_after_worker_registry_reopen by crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_sqlite_memory. Subject-deleted with Restate (5ad9641f9e, FIG-5190): the file's Restate invocation-identity, segment-continuation and ingress-relay laws FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
+owed = "a process resumed on another node after its worker and registry reopen keeps its snapshot plugin options, Lash VM admission codes and trigger binding, and a TypeScript artifact runs to its terminal"
+note = "FIG-5311: sqlite_process_recovery_preserves_lash_vm_admission_failure_codes is crates/lash-durable-test/tests/core_node_processes/process_endstates.rs::a_lash_vm_process_whose_input_disagrees_with_its_artifact_ends_with_its_typed_refusal (every tier): a host-requirements or process-ref mismatch ends the process at its first vm_run with process_host_requirements_mismatch or process_ref_mismatch; the host-environment codes come from the same validate_lash_vm_process_admission. Covered elsewhere: sqlite_process_recovery_rebuilds_snapshot_plugin_options_after_worker_reopen by crates/lash-durable-test/tests/process_tool_call_crash_laws.rs::tool_call_limit_counts_what_a_process_holds_across_a_worker_kill (a Lash VM process recovered on the other node calls its tools under its recorded environment); typescript_artifact_runs_through_process_engine_to_terminal by crates/lash-durable-test/tests/process_tool_calls.rs (a cell creates a TypeScript-dialect process and runs it to its terminal); sqlite_trigger_started_process_recovered_after_worker_registry_reopen by crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_sqlite_memory. Subject-deleted with Restate (5ad9641f9e, FIG-5190): the file's Restate invocation-identity, segment-continuation and ingress-relay laws FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired."
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_recovery.rs"
@@ -6932,7 +6932,7 @@ class = "delete"
 lane = "L10a"
 laws = [
   "restate_controller_replays_parent_shaped_start_await_suspend_flow",
-  "restate_controller_schedules_lashlang_process_with_serializable_input",
+  "restate_controller_schedules_lash_vm_process_with_serializable_input",
   "restate_controller_awaits_and_signals_through_process_effects",
   "restate_signal_uses_declared_wait_ordinal_when_event_count_diverges",
   "restate_cancel_redrive_after_completion_replays_journaled_admission",
@@ -7173,13 +7173,13 @@ status = "deleted"
 
 [[row]]
 path = "crates/lash-restate/src/tests/process_workflow.rs"
-test = "lashlang_process_retains_child_possession_across_restate_segments"
+test = "lash_vm_process_retains_child_possession_across_restate_segments"
 area = "processes"
 needs = ["process"]
 class = "delete"
 lane = "L10a"
 laws = [
-  "lashlang_process_retains_child_possession_across_restate_segments",
+  "lash_vm_process_retains_child_possession_across_restate_segments",
 ]
 disposition = "covered-by:row:crates/lash-sim/tests/possession_conservation.rs::realized_processes_are_possessed_by_exactly_one_opener_after_every_step"
 status = "deleted"
@@ -8069,7 +8069,7 @@ laws = [
   "law_a_a_crash_between_verdict_and_marker_retries_without_refusal",
   "law_c_a_journal_lost_after_the_marker_is_substrate_lost_with_no_effect",
   "law_d_a_journal_lost_after_effects_is_substrate_lost_with_no_redispatch",
-  "an_admitted_lashlang_process_runs_its_body_and_is_running",
+  "an_admitted_lash_vm_process_runs_its_body_and_is_running",
   "a_completed_segment_is_superseded_not_refused",
   "root_segment_admits_only_rows_that_never_started",
   "a_successor_reference_store_fault_is_retried_by_restate",
@@ -8945,7 +8945,7 @@ laws = [
   "schema_mismatch_stops_after_one_child_execution_and_reaches_parent_failure",
   "submitted_child_failure_reason_reaches_parent_record_and_terminal_event",
   "rlm_spawn_is_visible_through_parent_session_process_observer",
-  "rlm_spawn_links_subagent_process_from_lashlang_graph",
+  "rlm_spawn_links_subagent_process_from_lash_vm_graph",
   "rlm_spawn_defaults_single_capability_when_omitted",
   "spawn_agent_examples_render_as_parseable_typescript",
 ]
@@ -9724,7 +9724,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5311: two laws no durable law proved are written: a_process_outlives_its_deleted_session_and_resumes_on_a_host_signal in crates/lash-durable-test/tests/core_node_processes/process_endstates.rs (every tier), and a_signal_is_admitted_only_under_a_declared_name_with_a_payload_its_schema_accepts in crates/lash-core-execution/src/runtime/process/validation_tests.rs, a unit law of the pure admit_process_signal_append. Covered elsewhere, not re-written: host_owned_processes_run_without_application_session by core_node_processes.rs::lashlang_process_runs_to_its_terminal; session_trigger_process_visibility_conformance by core_node_processes.rs::trigger_started_process_runs_on_the_core_node and the process registry's observer conformance (crates/lash-conformance/src/conformance/process_registry/observer_transfer.rs); repeated_waits_on_one_signal_consume_in_order by crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order; process_starts_and_awaits_child_process by advance_tests.rs::an_await_stands_until_its_process_ends and crates/lash-durable-test/tests/cell_restore_laws.rs::processes_await_in_a_cell_parks_and_resumes_on_sqlite_memory; process_children_inherit_session_chain_provenance by crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs::a_process_lineage_carries_its_recorded_ancestry and crates/lash-durable-test/tests/declared_start.rs::declared_start_child_records_only_its_creators_facts; sqlite_facade_prune_removes_tombstoned_process_delivery by crates/lash-conformance/src/conformance/process_trigger_retention.rs::trigger_occurrence_tombstones_survive_every_reclaim and ::trigger_tombstone_forget_has_an_exclusive_write_time_cutoff; rlm_trigger_register_is_a_leaf_tool_and_fires_in_a_later_turn and rlm_process_body_registers_a_trigger_through_the_leaf_tool by crates/lash/src/tests/tool_intent_ingress.rs::host_register_trigger_realizes_and_fires_on_sqlite_memory and crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_sqlite_memory. Subject-deleted: process_prune_waits_for_process_scoped_turn_cancel_closure, with the turn-cancel closure obligation (11780f9839, FIG-5191) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired. FIG-5419: the signal delivery and schema subjects are deleted; detached-process survival after session deletion is retained by core_node_processes/process_endstates.rs::a_detached_process_outlives_its_deleted_session_and_accepts_host_cancellation. Trigger successors above are historical and subject-deleted; generic observer, child-await and lineage successors remain."
+note = "FIG-5311: two laws no durable law proved are written: a_process_outlives_its_deleted_session_and_resumes_on_a_host_signal in crates/lash-durable-test/tests/core_node_processes/process_endstates.rs (every tier), and a_signal_is_admitted_only_under_a_declared_name_with_a_payload_its_schema_accepts in crates/lash-core-execution/src/runtime/process/validation_tests.rs, a unit law of the pure admit_process_signal_append. Covered elsewhere, not re-written: host_owned_processes_run_without_application_session by core_node_processes.rs::lash_vm_process_runs_to_its_terminal; session_trigger_process_visibility_conformance by core_node_processes.rs::trigger_started_process_runs_on_the_core_node and the process registry's observer conformance (crates/lash-conformance/src/conformance/process_registry/observer_transfer.rs); repeated_waits_on_one_signal_consume_in_order by crates/lash-vm-runtime/src/engine/advance_tests.rs::a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order; process_starts_and_awaits_child_process by advance_tests.rs::an_await_stands_until_its_process_ends and crates/lash-durable-test/tests/cell_restore_laws.rs::processes_await_in_a_cell_parks_and_resumes_on_sqlite_memory; process_children_inherit_session_chain_provenance by crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs::a_process_lineage_carries_its_recorded_ancestry and crates/lash-durable-test/tests/declared_start.rs::declared_start_child_records_only_its_creators_facts; sqlite_facade_prune_removes_tombstoned_process_delivery by crates/lash-conformance/src/conformance/process_trigger_retention.rs::trigger_occurrence_tombstones_survive_every_reclaim and ::trigger_tombstone_forget_has_an_exclusive_write_time_cutoff; rlm_trigger_register_is_a_leaf_tool_and_fires_in_a_later_turn and rlm_process_body_registers_a_trigger_through_the_leaf_tool by crates/lash/src/tests/tool_intent_ingress.rs::host_register_trigger_realizes_and_fires_on_sqlite_memory and crates/lash-durable-test/tests/trigger_start_proof.rs::an_occurrence_starts_each_delivery_once_at_every_cut_on_sqlite_memory. Subject-deleted: process_prune_waits_for_process_scoped_turn_cancel_closure, with the turn-cancel closure obligation (11780f9839, FIG-5191) FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery. Generic lifecycle, crash, lease, call identity and cancellation laws remain; only the feature-specific fixture arms are retired. FIG-5419: the signal delivery and schema subjects are deleted; detached-process survival after session deletion is retained by core_node_processes/process_endstates.rs::a_detached_process_outlives_its_deleted_session_and_accepts_host_cancellation. Trigger successors above are historical and subject-deleted; generic observer, child-await and lineage successors remain."
 
 [[row]]
 path = "crates/lash/src/tests/recorded_execution_controls.rs"
@@ -10471,7 +10471,7 @@ lane = "L9e"
 laws = [
   "pending_host_tool_completion_parks_turn_and_resolves_through_core_ingress",
   "interleaved_standard_parts_keep_order_through_store_history_and_anthropic_request",
-  "rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_raw",
+  "rlm_streamed_lash_vm_cell_uses_captured_body_when_final_text_is_raw",
   "rlm_abort_drain_ignores_a_late_attempt_reset",
   "rlm_abort_drain_preserves_late_reasoning_replay_and_usage",
   "rlm_abort_drain_deadline_proceeds_with_default_usage",
@@ -10480,7 +10480,7 @@ laws = [
   "rlm_recovered_tool_failure_remains_in_turn_accounting",
   "rlm_code_block_aggregate_lists_every_collected_tool_call",
   "rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes",
-  "rlm_pending_host_tool_completion_resumes_lashlang_await",
+  "rlm_pending_host_tool_completion_resumes_lash_vm_await",
   "rlm_process_pending_host_tool_completion_resumes_process_await",
   "continue_as_observation_emits_frame_switch_then_commit",
   "lane_less_post_commit_from_plain_turn_does_not_affect_next_turn",
@@ -10559,7 +10559,7 @@ laws = [
 ]
 disposition = "port"
 status = "ported"
-note = "FIG-5312 ported the file onto the core's own node (SQLite memory; PostgreSQL legs #[ignore] for the PostgreSQL gate); stored_module_refusals_preserve_causes_and_terminal_semantics starts a real lashlang process on the node, and the double's server-stats check went with the double. #[ignore] FIG-5354 (a frame switch carries no seed modules): continue_as_carries_only_seeded_definition, carried_definition_id_retains_the_closure_across_frame_switch; #[ignore] FIG-5327: a_pressure_seed_carries_its_module_into_the_new_frame"
+note = "FIG-5312 ported the file onto the core's own node (SQLite memory; PostgreSQL legs #[ignore] for the PostgreSQL gate); stored_module_refusals_preserve_causes_and_terminal_semantics starts a real Lash VM process on the node, and the double's server-stats check went with the double. #[ignore] FIG-5354 (a frame switch carries no seed modules): continue_as_carries_only_seeded_definition, carried_definition_id_retains_the_closure_across_frame_switch; #[ignore] FIG-5327: a_pressure_seed_carries_its_module_into_the_new_frame"
 
 [[row]]
 path = "crates/lash/tests/artifact_referrers_evidence/fixture.rs"
@@ -11660,7 +11660,7 @@ status = "deleted"
 note = "L10a removes every dependency on the deleted crates (L10a step 2)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/Cargo.toml"
+path = "crates/lash-vm-runtime/Cargo.toml"
 test = "*"
 area = "manifest"
 needs = []
@@ -12565,9 +12565,9 @@ status = "deleted"
 note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests/recorded_engine_settings.rs"
+path = "crates/lash-vm-runtime/src/lib_tests/recorded_engine_settings.rs"
 test = "*"
-area = "lash-lashlang-runtime"
+area = "lash-Lash VM-runtime"
 needs = ["round"]
 class = "delete"
 lane = "L9c"
@@ -12580,9 +12580,9 @@ status = "deleted"
 note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests/second_front_end.rs"
+path = "crates/lash-vm-runtime/src/lib_tests/second_front_end.rs"
 test = "a_second_front_end_lifted_process_is_observed_and_redrives_identically"
-area = "lash-lashlang-runtime"
+area = "lash-Lash VM-runtime"
 needs = ["process"]
 class = "delete"
 lane = "L9d"
@@ -12594,9 +12594,9 @@ status = "deleted"
 note = "FIG-5190 deleted the test: it ran on the Restate double or a live engine."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/process/worker_recovery_tests.rs"
+path = "crates/lash-vm-runtime/src/process/worker_recovery_tests.rs"
 test = "*"
-area = "lash-lashlang-runtime"
+area = "lash-Lash VM-runtime"
 needs = ["process"]
 class = "delete"
 lane = "L9d"
@@ -12609,9 +12609,9 @@ status = "deleted"
 note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/replay_run_tests.rs"
+path = "crates/lash-vm-runtime/src/replay_run_tests.rs"
 test = "*"
-area = "lash-lashlang-runtime"
+area = "lash-Lash VM-runtime"
 needs = ["turn"]
 class = "delete"
 lane = "L9c"
@@ -12639,9 +12639,9 @@ status = "deleted"
 note = "FIG-5190 deleted the file: every test in it ran on the Restate double or a live engine."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/session_surface_tests.rs"
+path = "crates/lash-vm-runtime/src/session_surface_tests.rs"
 test = "*"
-area = "lash-lashlang-runtime"
+area = "lash-Lash VM-runtime"
 needs = ["process", "round"]
 class = "delete"
 lane = "L9d"
@@ -16491,7 +16491,7 @@ laws = [
 disposition = "covered-by:crates/lash-conformance/src/conformance/process_registry.rs::work_wait_seam_covers_unknown_pruned_and_backend_owned_processes"
 status = "deleted"
 owed = "native process await sink and prune end to end"
-note = "a host's signal resumes a parked lashlang process with its payload as the wait's value, through the core's process API on every tier; a pruned process's await and history answer the typed retained-history miss in crates/lash-durable-test/tests/process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
+note = "a host's signal resumes a parked Lash VM process with its payload as the wait's value, through the core's process API on every tier; a pruned process's await and history answer the typed retained-history miss in crates/lash-durable-test/tests/process_actor_laws.rs::an_awaiter_reads_the_outcome_of_a_process_pruned_after_it_ended FIG-5419: retained generic property; historical references to process signal, wake, emit or trigger fixtures do not carry those retired subjects forward. FIG-5419: retire the deleted feature successor; this disposition names the surviving generic property or ends the deleted subject."
 
 [[row]]
 path = "crates/lash/src/tests/response_phase_replay/catalog_fork.rs"
@@ -16517,12 +16517,12 @@ needs = ["cell", "process"]
 class = "replace"
 lane = "L9d"
 laws = [
-  "stack_budget_rlm_lashlang_process_turn",
+  "stack_budget_rlm_lash_vm_process_turn",
 ]
 disposition = "covered-by:crates/lash-sim/tests/stack_policy.rs"
 status = "deleted"
-owed = "stack budget rlm lashlang process turn"
-note = "lash-sim's stack-policy probes run every fixed agent product contract, the lashlang process contracts among them, on a thread of the product's 2 MiB stack"
+owed = "stack budget rlm Lash VM process turn"
+note = "lash-sim's stack-policy probes run every fixed agent product contract, the Lash VM process contracts among them, on a thread of the product's 2 MiB stack"
 
 [[row]]
 path = "crates/lash/src/tests/tool_intent_ingress.rs"
@@ -16938,7 +16938,7 @@ laws = [
   "agent_frame_switch_clears_execution_state_across_cold_reopen",
   "engine_driven_chained_continue_as_survives_nested_commit_handoff",
   "durable_agent_frame_follow_through_uses_distinct_turn_scopes_and_commits",
-  "lashlang_execution_graph_store_observes_lashlang_process_from_facade",
+  "lash_vm_execution_graph_store_observes_lash_vm_process_from_facade",
   "rlm_failed_code_emits_failed_code_completion_without_fake_tools",
   "process_list_matches_the_definition_the_cell_started",
   "the_deferred_resolver_resolves_for_the_run_and_its_recorded_capabilities",
@@ -17076,9 +17076,9 @@ needs = ["turn"]
 class = "delete"
 lane = "L9h"
 laws = [
-  "approval_approve_resumes_parked_lashlang_instruction_with_success",
+  "approval_approve_resumes_parked_lash_vm_instruction_with_success",
   "a_decided_but_unresolved_approval_repairs_on_retry",
-  "approval_denial_preserves_typed_failure_fields_through_lashlang_bridge",
+  "approval_denial_preserves_typed_failure_fields_through_lash_vm_bridge",
   "approval_restart_reopens_the_ledger_and_durable_effect_host",
   "async_completion_success_crosses_session_reopen_and_redrive",
   "async_completion_failure_crosses_session_reopen_and_redrive",
@@ -18101,9 +18101,9 @@ status = "ported"
 note = "FIG-5190 deleted the tests of this file that needed an engine (their own rows); the tests left run without one."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests/second_front_end.rs"
+path = "crates/lash-vm-runtime/src/lib_tests/second_front_end.rs"
 test = "*"
-area = "lash-lashlang-runtime"
+area = "lash-Lash VM-runtime"
 needs = ["turn"]
 class = "mechanical"
 lane = "L9d"
@@ -18912,7 +18912,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "its double implemented RuntimeEffectController (deleted in I0) to serve a journaled binding set on redrive; there is no replay (ADR 0132), and the binding judgement itself stays pinned by lash-lashlang-runtime cell_bindings_tests; only the laws listed were deleted, the file's other tests stay"
+note = "its double implemented RuntimeEffectController (deleted in I0) to serve a journaled binding set on redrive; there is no replay (ADR 0132), and the binding judgement itself stays pinned by lash-Lash VM-runtime cell_bindings_tests; only the laws listed were deleted, the file's other tests stay"
 
 [[row]]
 path = "crates/lash-core-execution/tests/store_backed/kernel/tool_dispatch/tests/intent_laws.rs"
@@ -18995,9 +18995,9 @@ status = "deleted"
 note = "the law counted journaled AdmitShift steps through a strict-replay RecordingEffectController layer; nothing is journaled or redriven under ADR 0132, and the shift is L3s's session mail drain (S3)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "not_available_surfaces_clean_link_error_and_is_recorded"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19010,9 +19010,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "resolves_unknown_paths_in_one_record_filtered_batch"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19025,9 +19025,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "excludes_recorded_paths_from_a_non_empty_batch"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19040,9 +19040,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "recorded_unavailable_masks_a_new_ambient_binding"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19055,9 +19055,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "recorded_grant_replaces_a_changed_ambient_binding"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19070,9 +19070,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "recorded_grant_still_obeys_unrelated_ambient_module_collisions"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19085,9 +19085,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "fault_after_resolver_return_allows_side_effect_free_rediscovery"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19100,9 +19100,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "fault_after_durable_record_replays_without_resolving"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19115,9 +19115,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "journal_replay_masks_changed_ambient_before_live_lookup"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19130,9 +19130,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "journal_replay_masks_changed_surface_before_catalog_merge"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19145,9 +19145,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "journal_replay_preserves_unrelated_surface_catalog_collision"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19160,9 +19160,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "fault_before_registration_retries_captured_route_without_resolving"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19175,9 +19175,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "revoked_route_refuses_without_replacing_the_journaled_grant"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19190,9 +19190,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "independent_link_can_accept_a_new_ambient_binding"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19205,9 +19205,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "deferred_record_refuses_a_different_admitted_link_address"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19220,9 +19220,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer, an EffectLayer over the recording host (both deleted); deferred resolutions become VM snapshot state (L7, S7)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred/tests/journal_replay.rs"
+path = "crates/lash-vm-runtime/src/deferred/tests/journal_replay.rs"
 test = "*"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19235,9 +19235,9 @@ owed = "a cell's deferred tool resolutions are held in its snapshot and restored
 note = "ran through FaultJournalLayer (deleted with the EffectLayer seam)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred/tests/runtime_built_in.rs"
+path = "crates/lash-vm-runtime/src/deferred/tests/runtime_built_in.rs"
 test = "*"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "replace"
 lane = "I0"
@@ -19382,9 +19382,9 @@ status = "deleted"
 note = "ADR 0132 has no replay path and no recorded step: nothing re-runs against a recorded history, so the gate's subject is gone with RuntimeEffectController and EffectHost. Replay freedom is NR-1..4 (planned:NR-1)"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/deferred.rs"
+path = "crates/lash-vm-runtime/src/deferred.rs"
 test = "*"
-area = "lashlang-deferred"
+area = "Lash VM-deferred"
 needs = ["cell"]
 class = "mechanical"
 lane = "I0"
@@ -19445,9 +19445,9 @@ needs = ["turn", "process", "cell"]
 class = "replace"
 lane = "L9f"
 laws = [
-  "scalar_lashlang_pending_provider_invocation_crosses_native_recorded_attempt_boundary",
-  "batched_lashlang_provider_invocations_cross_native_recorded_attempt_boundary",
-  "scalar_lashlang_process_segment_tool_call_crosses_native_recorded_attempt_boundary",
+  "scalar_lash_vm_pending_provider_invocation_crosses_native_recorded_attempt_boundary",
+  "batched_lash_vm_provider_invocations_cross_native_recorded_attempt_boundary",
+  "scalar_lash_vm_process_segment_tool_call_crosses_native_recorded_attempt_boundary",
   "a_race_turn_on_restate_succeeds",
 ]
 disposition = "covered-by:crates/lash-durable-test/tests/cell_restore_laws.rs::a_race_loser_in_a_cell_is_admitted_and_settles_on_sqlite_memory"
@@ -20088,7 +20088,7 @@ owed = "a promoted generated regression trace, recorded on the durable engine, r
 note = "FIG-5308: the promoted fixture was a recorded generated-run trace of the deleted engine, removed in 5a64db23e0. On durable a send queued behind a running run stays unadmitted, and after the cancel it is withdrawn with no provider call."
 
 [[row]]
-path = "crates/lashlang/src/runtime/tests/projection_cases.rs"
+path = "crates/lash-vm/src/runtime/tests/projection_cases.rs"
 test = "*"
 area = "projections"
 needs = []
@@ -20097,12 +20097,12 @@ lane = "L7p"
 laws = [
   "canonical_snapshot_restore_makes_projected_value_unavailable",
 ]
-disposition = "covered-by:crates/lashlang/src/runtime/tests/projection_provider_laws.rs::a_heap_of_projections_restores_fresh_and_reads_through_its_provider"
+disposition = "covered-by:crates/lash-vm/src/runtime/tests/projection_provider_laws.rs::a_heap_of_projections_restores_fresh_and_reads_through_its_provider"
 status = "deleted"
 note = "L7p (FIG-5197) deleted the unavailable-after-restore placeholder; only this law of the file is listed, the rest stay"
 
 [[row]]
-path = "crates/lashlang/src/runtime/state/tests.rs"
+path = "crates/lash-vm/src/runtime/state/tests.rs"
 test = "*"
 area = "projections"
 needs = []
@@ -20116,7 +20116,7 @@ status = "deleted"
 note = "L7p (FIG-5197) deleted placeholder refresh: a restored projection is plain data; only this law of the file is listed, the rest stay"
 
 [[row]]
-path = "crates/lashlang/src/runtime/state/durable_tests.rs"
+path = "crates/lash-vm/src/runtime/state/durable_tests.rs"
 test = "*"
 area = "projections"
 needs = []
@@ -20130,7 +20130,7 @@ status = "deleted"
 note = "L7p (FIG-5197) deleted projection_ref, the only projection part that could exceed the depth bound; only this law of the file is listed, the rest stay"
 
 [[row]]
-path = "crates/lashlang/src/runtime/vm/continuation/tests.rs"
+path = "crates/lash-vm/src/runtime/vm/continuation/tests.rs"
 test = "*"
 area = "projections"
 needs = []
@@ -20156,7 +20156,7 @@ laws = [
   "string_coercion_of_an_unrefreshed_placeholder_refuses",
   "concatenating_an_unrefreshed_placeholder_refuses",
 ]
-disposition = "covered-by:crates/lashlang/src/runtime/tests/projection_provider_laws.rs::a_projection_without_a_provider_is_refused_with_no_provider"
+disposition = "covered-by:crates/lash-vm/src/runtime/tests/projection_provider_laws.rs::a_projection_without_a_provider_is_refused_with_no_provider"
 status = "deleted"
 note = "L7p (FIG-5197): a projection no provider answers is refused with NoProvider; only these laws of the file are listed, the rest stay"
 
@@ -21595,7 +21595,7 @@ status = "deleted"
 note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the continuation store is gone"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests/pre_cutover_refusal.rs"
+path = "crates/lash-vm-runtime/src/lib_tests/pre_cutover_refusal.rs"
 test = "*"
 area = "processes"
 needs = ["process"]
@@ -21609,7 +21609,7 @@ status = "deleted"
 note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; vm_run keeps the RetiredGeneration refusal"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests/pre_cutover_refusal.rs"
+path = "crates/lash-vm-runtime/src/lib_tests/pre_cutover_refusal.rs"
 test = "another_builds_parked_segment_is_refused_at_the_identity_fence_before_any_effect"
 area = "processes"
 needs = ["process"]
@@ -21618,12 +21618,12 @@ lane = "L7b"
 laws = [
   "another_builds_parked_segment_is_refused_at_the_identity_fence_before_any_effect",
 ]
-disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_snapshot_of_another_program_identity_is_refused_before_it_resumes"
+disposition = "covered-by:crates/lash-vm-runtime/src/engine/advance_tests.rs::a_snapshot_of_another_program_identity_is_refused_before_it_resumes"
 status = "deleted"
 note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/lib_tests/pre_cutover_refusal.rs"
+path = "crates/lash-vm-runtime/src/lib_tests/pre_cutover_refusal.rs"
 test = "another_generations_parked_segment_is_refused_at_the_version_fence_before_any_effect"
 area = "processes"
 needs = ["process"]
@@ -21632,12 +21632,12 @@ lane = "L7b"
 laws = [
   "another_generations_parked_segment_is_refused_at_the_version_fence_before_any_effect",
 ]
-disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_state_of_another_format_is_refused"
+disposition = "covered-by:crates/lash-vm-runtime/src/engine/advance_tests.rs::a_state_of_another_format_is_refused"
 status = "deleted"
 note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/process/segment_trace_tests.rs"
+path = "crates/lash-vm-runtime/src/process/segment_trace_tests.rs"
 test = "*"
 area = "processes"
 needs = ["process"]
@@ -21661,7 +21661,7 @@ status = "deleted"
 note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; segment state, its goldens and process execution traces are gone"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/process/segment_trace_tests.rs"
+path = "crates/lash-vm-runtime/src/process/segment_trace_tests.rs"
 test = "resume_rejects_changed_bytecode_program_hash_with_typed_failure"
 area = "processes"
 needs = ["process"]
@@ -21670,12 +21670,12 @@ lane = "L7b"
 laws = [
   "resume_rejects_changed_bytecode_program_hash_with_typed_failure",
 ]
-disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_snapshot_of_another_program_identity_is_refused_before_it_resumes"
+disposition = "covered-by:crates/lash-vm-runtime/src/engine/advance_tests.rs::a_snapshot_of_another_program_identity_is_refused_before_it_resumes"
 status = "deleted"
 note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/process/segment_trace_tests.rs"
+path = "crates/lash-vm-runtime/src/process/segment_trace_tests.rs"
 test = "another_generations_segment_is_refused_at_both_fences"
 area = "processes"
 needs = ["process"]
@@ -21684,12 +21684,12 @@ lane = "L7b"
 laws = [
   "another_generations_segment_is_refused_at_both_fences",
 ]
-disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_state_of_another_format_is_refused"
+disposition = "covered-by:crates/lash-vm-runtime/src/engine/advance_tests.rs::a_state_of_another_format_is_refused"
 status = "deleted"
 note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/process/segment_trace_tests.rs"
+path = "crates/lash-vm-runtime/src/process/segment_trace_tests.rs"
 test = "durable_exhaustion_has_a_typed_process_failure_surface"
 area = "processes"
 needs = ["process"]
@@ -21698,12 +21698,12 @@ lane = "L7b"
 laws = [
   "durable_exhaustion_has_a_typed_process_failure_surface",
 ]
-disposition = "covered-by:crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_vm_run_past_its_limit_ends_the_process"
+disposition = "covered-by:crates/lash-vm-runtime/src/engine/advance_tests.rs::a_vm_run_past_its_limit_ends_the_process"
 status = "deleted"
 note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions"
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/process/signal_wait_tests.rs"
+path = "crates/lash-vm-runtime/src/process/signal_wait_tests.rs"
 test = "*"
 area = "processes"
 needs = ["process", "wait"]
@@ -21716,10 +21716,10 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the journaled signal wait is gone; signal order is crates/lash-lashlang-runtime/src/engine/advance_tests.rs::a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
+note = "L7b (FIG-5198) replaced segment handover with snapshots committed with their operation admissions; the journaled signal wait is gone; signal order is crates/lash-vm-runtime/src/engine/advance_tests.rs::a_signal_is_kept_until_its_wait_and_answers_it_in_arrival_order FIG-5419: host-events cutover removes process signal, wake, emit and trigger machinery."
 
 [[row]]
-path = "crates/lash-lashlang-runtime/src/argument_admission_testing.rs"
+path = "crates/lash-vm-runtime/src/argument_admission_testing.rs"
 test = "*"
 area = "processes"
 needs = ["process"]
@@ -24906,7 +24906,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "L7b (FIG-5198) deleted it with the lashlang process run path (argument_admission_testing)"
+note = "L7b (FIG-5198) deleted it with the Lash VM process run path (argument_admission_testing)"
 
 [[row]]
 path = "crates/lash-postgres-store/tests/conformance.rs"
@@ -24920,7 +24920,7 @@ laws = [
 ]
 disposition = "subject-deleted"
 status = "deleted"
-note = "L7b (FIG-5198) deleted it with the lashlang process run path (argument_admission_testing)"
+note = "L7b (FIG-5198) deleted it with the Lash VM process run path (argument_admission_testing)"
 
 [[row]]
 path = "crates/lash-postgres-store/tests/conformance.rs"
@@ -25565,7 +25565,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/tool_batches.rs"
 status = "deleted"
 owed = "every member of a tool group starts before any finishes, and a reverse dependency between members does not serialize them, through send()"
-note = "FIG-5210 (L9t) re-wrote both through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18, over parallel native calls, one batch, batches beside native calls, Promise.all and Promise.allSettled, at widths 2, 8 and 64, with the differential. Routes: a listed leaf and a deferring round member on the standard protocol; a listed leaf and a resolver-granted leaf in a cell, whose call pins no completion wait (FIG-5174). The Lashlang process-aggregate producer is FIG-5216's (row crates/lash-protocol-rlm/tests/tool_batch_parallelism.rs::tool_call_limit_process_tests). The PostgreSQL leg is red at width 64 on the pool-exhaustion deadlock FIG-5237 owns"
+note = "FIG-5210 (L9t) re-wrote both through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18, over parallel native calls, one batch, batches beside native calls, Promise.all and Promise.allSettled, at widths 2, 8 and 64, with the differential. Routes: a listed leaf and a deferring round member on the standard protocol; a listed leaf and a resolver-granted leaf in a cell, whose call pins no completion wait (FIG-5174). The Lash VM process-aggregate producer is FIG-5216's (row crates/lash-protocol-rlm/tests/tool_batch_parallelism.rs::tool_call_limit_process_tests). The PostgreSQL leg is red at width 64 on the pool-exhaustion deadlock FIG-5237 owns"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/tool_batch_parallelism.rs"
@@ -25626,7 +25626,7 @@ laws = [
 disposition = "replaced-by:crates/lash-durable-test/tests/process_tool_call_crash_laws.rs::tool_call_limit_counts_what_a_process_holds_across_a_worker_kill"
 status = "deleted"
 owed = "the tool-call limit admits the limit and refuses past it, staged and across a crash or a worker kill, through send()"
-note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: an RLM cell's Lashlang process races max_tool_calls calls and asks one more, cut by a FaultStore matrix at every write under its labels, under fail-before, ack-hidden, zombie, abort and commit-then-abort, recovered on the other node (process.advance, step.outcome, process.terminal). The process is detached: a cell's processes.start is admitted Once until FIG-5174, so a kill inside it ends the turn"
+note = "FIG-5216 re-wrote it through a host's send() on the core's served node, on SQLite memory, SQLite file and PostgreSQL 18: an RLM cell's Lash VM process races max_tool_calls calls and asks one more, cut by a FaultStore matrix at every write under its labels, under fail-before, ack-hidden, zombie, abort and commit-then-abort, recovered on the other node (process.advance, step.outcome, process.terminal). The process is detached: a cell's processes.start is admitted Once until FIG-5174, so a kill inside it ends the turn"
 
 [[row]]
 path = "crates/lash-conformance/src/conformance/tool_batch_parallelism/budget.rs"

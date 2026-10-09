@@ -342,11 +342,13 @@ async fn rlm_uses_runtime_scope_without_suppressing_product_replay() {
             .into_runtime()
             .with_trace_standing(standing)
     };
-    let artifact =
-        worker_compile_program(&lash_typescript::parse("finish(42);").expect("fixture program"))
-            .await
-            .expect("fixture artifact")
-            .artifact;
+    let artifact = worker_compile_program(
+        &lash_typescript::parse("finish(42);").expect("fixture program"),
+        &[],
+    )
+    .await
+    .expect("fixture artifact")
+    .artifact;
     let live = context(runtime.unreplayed(Some(scope.clone())));
     let trace = foreground_lash_vm_execution_trace(&live, &artifact, "typescript")
         .expect("the runtime observes the language");

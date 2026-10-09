@@ -207,7 +207,7 @@ fn fixture_record(event: TraceEvent, ms: i64) -> TraceRecord {
 fn record_at(event: TraceLanguageExecution, ms: i64) -> TraceRecord {
     fixture_record(
         TraceEvent::LanguageExecution {
-            language: "lashvm".to_string(),
+            language: Some("lashvm".to_string()),
             event,
         },
         ms,
@@ -633,7 +633,7 @@ fn a_committed_terminal_settles_without_a_finish_and_is_never_reopened() {
     let observe = |accumulator: &mut WorkflowExecutionOverlayAccumulator, ms, event| {
         accumulator
             .observe(&crate::LanguageExecutionObservation {
-                language: "fixture".into(),
+                language: Some("fixture".into()),
                 execution: in_process(event, &process),
                 observed_at_ms: ms,
             })
@@ -1126,7 +1126,7 @@ fn a_fold_refuses_an_empty_unbounded_or_mixed_input_without_mutation() {
     assert_eq!(accumulator.snapshot(), before);
     assert_eq!(
         accumulator.observe(&crate::LanguageExecutionObservation {
-            language: "fixture".into(),
+            language: Some("fixture".into()),
             execution: node_completed("done", 1),
             observed_at_ms: u64::MAX,
         }),

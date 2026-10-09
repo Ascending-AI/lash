@@ -82,7 +82,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
 
     fn language_execution(payload: TraceLanguageExecutionPayload) -> TraceEvent {
         TraceEvent::LanguageExecution {
-            language: "lashvm".to_string(),
+            language: Some("lashvm".to_string()),
             event: TraceLanguageExecution {
                 event_key: "event-key".to_string(),
                 identity: TraceLanguageExecutionIdentity {

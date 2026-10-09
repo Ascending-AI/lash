@@ -848,6 +848,78 @@ async fn a_snapshot_of_another_program_identity_is_refused_before_it_resumes() {
     );
 }
 
+/// FIG-5648: an artifact stores dialect-free IR, so its process events
+/// cannot claim a source dialect the document does not record.
+#[tokio::test]
+async fn a_dialect_free_process_never_claims_a_source_language() {
+    #[derive(Default)]
+    struct Events(std::sync::Mutex<Vec<lash_trace::TraceRecord>>);
+    impl lash_trace::TraceSink for Events {
+        fn append(
+            &self,
+            record: &lash_trace::TraceRecord,
+        ) -> Result<(), lash_trace::TraceSinkError> {
+            self.0.lock().expect("events lock").push(record.clone());
+            Ok(())
+        }
+    }
+    let events = Arc::new(Events::default());
+    let mut fixture = vm_fixture().await;
+    fixture.engine = fixture.engine.with_trace_runtime(
+        lash_core::trace::TraceRuntime::default().with_trace_sink(events.clone()),
+    );
+    let (program_hash, vm, _) = parked_sleep(fixture.run(fixture.first()).await);
+    let (program_hash, vm, _) = parked_sleep(
+        fixture
+            .run(VmRunInput {
+                payload: fixture.payload.clone(),
+                program_hash: Some(program_hash),
+                vm: Some(vm),
+                inject: Some(Injection::Woke { operation: 0 }),
+            })
+            .await,
+    );
+    assert!(matches!(
+        fixture
+            .run(VmRunInput {
+                payload: fixture.payload.clone(),
+                program_hash: Some(program_hash),
+                vm: Some(vm),
+                inject: Some(Injection::Woke { operation: 1 }),
+            })
+            .await,
+        VmRunOutput::Ended { .. }
+    ));
+    let records = events.0.lock().expect("events lock");
+    let language_events = records
+        .iter()
+        .filter_map(|record| {
+            if let lash_trace::TraceEvent::LanguageExecution { event, .. } = &record.event {
+                let wire = serde_json::to_value(&record.event).expect("event serializes");
+                assert!(
+                    wire["language"].is_null(),
+                    "dialect-free document claimed a language: {wire}"
+                );
+                Some(&event.payload)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert!(language_events.iter().any(|payload| matches!(
+        payload,
+        lash_trace::TraceLanguageExecutionPayload::ExecutionStarted { .. }
+    )));
+    assert!(language_events.iter().any(|payload| matches!(
+        payload,
+        lash_trace::TraceLanguageExecutionPayload::NodeWaiting { .. }
+    )));
+    assert!(language_events.iter().any(|payload| matches!(
+        payload,
+        lash_trace::TraceLanguageExecutionPayload::ExecutionFinished { .. }
+    )));
+}
+
 // ---- vm_run's admission and artifact refusals ----
 
 /// Run one `vm_run` step of `engine` on `input`, under the recorded

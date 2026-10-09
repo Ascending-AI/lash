@@ -56,13 +56,6 @@ pub enum WorkflowCorrespondenceEntry {
         from: WorkflowNodeId,
         into: Vec<(WorkflowDraftHandle, WorkflowNodeId)>,
     },
-    /// Normalization folded several nodes into one.
-    Merged {
-        handles: Vec<WorkflowDraftHandle>,
-        from: Vec<WorkflowNodeId>,
-        handle: WorkflowDraftHandle,
-        to: WorkflowNodeId,
-    },
     /// The node's provenance was lost: nothing says which node of the new
     /// document it is, and none is guessed.
     Unmatched {
@@ -145,25 +138,6 @@ impl WorkflowCorrespondence {
                         Entry::Split { handle, from, into }
                     });
                 }
-                Entry::Merged {
-                    handles,
-                    from,
-                    handle,
-                    to,
-                } => match admitted.get(&to) {
-                    Some(to) => entries.push(Entry::Merged {
-                        handles,
-                        from,
-                        handle,
-                        to: to.clone(),
-                    }),
-                    None => entries.extend(
-                        handles
-                            .into_iter()
-                            .zip(from)
-                            .map(|(handle, from)| Entry::Unmatched { handle, from }),
-                    ),
-                },
                 unchanged @ (Entry::Deleted { .. } | Entry::Unmatched { .. }) => {
                     entries.push(unchanged);
                 }
@@ -183,7 +157,6 @@ pub(super) struct Journal {
     pub(super) minted: BTreeMap<WorkflowDraftHandle, WorkflowNodeSource>,
     pub(super) deleted: BTreeSet<WorkflowDraftHandle>,
     pub(super) split: BTreeMap<WorkflowDraftHandle, Vec<WorkflowDraftHandle>>,
-    pub(super) merged: BTreeMap<WorkflowDraftHandle, Vec<WorkflowDraftHandle>>,
     pub(super) moved: BTreeSet<WorkflowDraftHandle>,
     pub(super) unmatched: BTreeSet<WorkflowDraftHandle>,
     /// Nodes an edit moved to a body of another process or of `main`.
@@ -198,7 +171,6 @@ impl Journal {
         }
         self.deleted.extend(later.deleted);
         self.split.extend(later.split);
-        self.merged.extend(later.merged);
         self.moved.extend(later.moved);
         self.unmatched.extend(later.unmatched);
         self.reframed.extend(later.reframed);
@@ -212,29 +184,7 @@ impl Journal {
     ) -> Vec<WorkflowCorrespondenceEntry> {
         let mut entries = Vec::new();
         let mut accounted = BTreeSet::new();
-        for (target, sources) in &self.merged {
-            let Some(to) = now.get(target) else {
-                continue;
-            };
-            let from = sources
-                .iter()
-                .filter_map(|source| base.get(source).cloned())
-                .collect::<Vec<_>>();
-            if from.len() == sources.len() {
-                accounted.extend(sources.iter().copied());
-                accounted.insert(*target);
-                entries.push(WorkflowCorrespondenceEntry::Merged {
-                    handles: sources.clone(),
-                    from,
-                    handle: *target,
-                    to: to.clone(),
-                });
-            }
-        }
         for (handle, from) in base {
-            if accounted.contains(handle) {
-                continue;
-            }
             let (handle, from) = (*handle, from.clone());
             entries.push(if let Some(to) = now.get(&handle) {
                 let to = to.clone();

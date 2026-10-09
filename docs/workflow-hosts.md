@@ -160,7 +160,7 @@ before and after, each with its outcome.
 | `Moved { from, to }` | An edit moved it. |
 | `Inserted { to, source }` | New: authored by an edit, cloned from a node, or derived from one by normalization. |
 | `Deleted { from }` | Removed. |
-| `Split { from, into }` / `Merged { from, to }` | Normalization spelled one statement as several, or several as one. |
+| `Split { from, into }` | Normalization spelled one statement as several. |
 | `Unmatched { from }` | Its provenance was lost. Nothing says which new node it is, and none is guessed. |
 
 Key anything you keep per node (canvas position, comments, selection) by

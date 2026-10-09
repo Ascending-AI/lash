@@ -218,7 +218,7 @@ impl ProcessTrace {
             (
                 context.clone(),
                 TraceEvent::LanguageExecution {
-                    language: "typescript".to_owned(),
+                    language: None,
                     event: event.clone(),
                 },
             )

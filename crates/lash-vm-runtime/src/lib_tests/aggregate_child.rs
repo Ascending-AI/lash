@@ -110,7 +110,7 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
             .expect("graph")
             .fold(std::slice::from_ref(&product_record(
                 lash_trace::TraceEvent::LanguageExecution {
-                    language: "lashvm".to_string(),
+                    language: Some("lashvm".to_string()),
                     event,
                 },
             )))
@@ -240,7 +240,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
                 .expect("graph")
                 .fold(std::slice::from_ref(&product_record(
                     lash_trace::TraceEvent::LanguageExecution {
-                        language: "lashvm".to_string(),
+                        language: Some("lashvm".to_string()),
                         event: TraceLanguageExecution {
                             event_key: "public-cancel".to_string(),
                             identity: identity.clone(),
@@ -412,7 +412,7 @@ async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
     let record = |payload: TraceLanguageExecutionPayload| {
         clock.advance(1);
         let mut record = product_record(lash_trace::TraceEvent::LanguageExecution {
-            language: "lashvm".to_string(),
+            language: Some("lashvm".to_string()),
             event: TraceLanguageExecution {
                 event_key: "loop-branch".to_string(),
                 identity: identity.clone(),

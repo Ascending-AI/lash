@@ -104,7 +104,7 @@ impl<'scope> ProcessOpScope<'scope> {
             (
                 context,
                 lash_trace::TraceEvent::LanguageExecution {
-                    language: call.language.clone(),
+                    language: Some(call.language.clone()),
                     event,
                 },
             )

@@ -64,10 +64,13 @@ pub(super) fn projected_history_is_available_without_clobbering_executor_globals
             .expect("patch diary");
 
         let projected = projected_history(vec![FlowValue::String("hello".into())]);
-        let compiled = worker_compile_program(&finish_record(&[
-            ("history_len", b::builtin("len", vec![b::var("history")])),
-            ("diary_len", b::builtin("len", vec![b::var("diary")])),
-        ]))
+        let compiled = worker_compile_program(
+            &finish_record(&[
+                ("history_len", b::builtin("len", vec![b::var("history")])),
+                ("diary_len", b::builtin("len", vec![b::var("diary")])),
+            ]),
+            &["history", "diary"],
+        )
         .await
         .expect("compile");
         let outcome = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
@@ -132,7 +135,7 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = worker_compile_program(&seed_nested_one())
+        let setup = worker_compile_program(&seed_nested_one(), &[])
             .await
             .expect("compile setup");
         execute_with_projected(&setup, state.vm.state_mut(), &projected)
@@ -151,9 +154,10 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
             .await
             .expect("patch heap-backed state");
 
-        let finish = worker_compile_program(&b::program(vec![b::finish(b::var("diary"))]))
-            .await
-            .expect("compile finish");
+        let finish =
+            worker_compile_program(&b::program(vec![b::finish(b::var("diary"))]), &["diary"])
+                .await
+                .expect("compile finish");
         assert_eq!(
             execute_with_projected(&finish, state.vm.state_mut(), &projected)
                 .await
@@ -189,7 +193,7 @@ pub(super) fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_mar
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = worker_compile_program(&seed_nested_one())
+        let setup = worker_compile_program(&seed_nested_one(), &[])
             .await
             .expect("compile setup");
         execute_with_projected(&setup, state.vm.state_mut(), &projected)
@@ -243,10 +247,10 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
     block_on(async {
         let projected = ProjectedBindings::new();
         let mut state = RlmExecutionState::new();
-        let setup = worker_compile_program(&b::program(vec![b::assign(
-            "seed",
-            b::list(vec![b::num(1.0)]),
-        )]))
+        let setup = worker_compile_program(
+            &b::program(vec![b::assign("seed", b::list(vec![b::num(1.0)]))]),
+            &[],
+        )
         .await
         .expect("compile setup");
         execute_with_projected(&setup, state.vm.state_mut(), &projected)
@@ -285,19 +289,22 @@ pub(super) fn heap_backed_projection_and_prune_survive_execution_and_restore() {
     block_on(async {
         // history = [{ role: "user" }]
         // kept = [{ nested: [2] }]
-        let setup = worker_compile_program(&b::program(vec![
-            b::assign(
-                "history",
-                b::list(vec![b::record(vec![("role", b::string("user"))])]),
-            ),
-            b::assign(
-                "kept",
-                b::list(vec![b::record(vec![(
-                    "nested",
-                    b::list(vec![b::num(2.0)]),
-                )])]),
-            ),
-        ]))
+        let setup = worker_compile_program(
+            &b::program(vec![
+                b::assign(
+                    "history",
+                    b::list(vec![b::record(vec![("role", b::string("user"))])]),
+                ),
+                b::assign(
+                    "kept",
+                    b::list(vec![b::record(vec![(
+                        "nested",
+                        b::list(vec![b::num(2.0)]),
+                    )])]),
+                ),
+            ]),
+            &[],
+        )
         .await
         .expect("compile setup");
         let mut state = lash_vm::State::new();
@@ -336,10 +343,10 @@ pub(super) fn heap_backed_projection_and_prune_survive_execution_and_restore() {
         );
         crate::projection::prune_reserved_projected_bindings(&mut state);
 
-        let finish = worker_compile_program(&finish_record(&[
-            ("doc", b::var("doc")),
-            ("kept", b::var("kept")),
-        ]))
+        let finish = worker_compile_program(
+            &finish_record(&[("doc", b::var("doc")), ("kept", b::var("kept"))]),
+            &["doc", "kept"],
+        )
         .await
         .expect("compile post-patch read");
         let expected =
@@ -395,10 +402,13 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
             ProjectedValue::scalar("current_query", FlowValue::String("host".into())),
         );
 
-        let compiled = worker_compile_program(&finish_record(&[
-            ("chars", b::builtin("len", vec![b::var("current_query")])),
-            ("value", b::var("current_query")),
-        ]))
+        let compiled = worker_compile_program(
+            &finish_record(&[
+                ("chars", b::builtin("len", vec![b::var("current_query")])),
+                ("value", b::var("current_query")),
+            ]),
+            &["current_query"],
+        )
         .await
         .expect("compile read");
         let outcome = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
@@ -411,10 +421,10 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
         assert_eq!(record["value"], FlowValue::String("host".into()));
         assert!(state.vm.state().globals().get("current_query").is_none());
 
-        let compiled = worker_compile_program(&b::program(vec![b::assign(
-            "current_query",
-            b::string("local"),
-        )]))
+        let compiled = worker_compile_program(
+            &b::program(vec![b::assign("current_query", b::string("local"))]),
+            &[],
+        )
         .await
         .expect("compile write");
         let env = ExecutionEnvironment::new(&NoopHost)

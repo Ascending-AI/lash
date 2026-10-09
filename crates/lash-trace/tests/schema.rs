@@ -442,7 +442,7 @@ fn event_samples() -> Vec<TraceEvent> {
             payload: json!({ "code": "print 1" }),
         },
         TraceEvent::LanguageExecution {
-            language: "lashvm".to_string(),
+            language: Some("lashvm".to_string()),
             event: TraceLanguageExecution {
                 event_key: "process:p1:finished".to_string(),
                 identity: lash_vm_identity(),
@@ -670,7 +670,7 @@ fn language_execution_records() -> Vec<TraceRecord> {
             fixture_record(
                 TraceContext::default().for_session("s1"),
                 TraceEvent::LanguageExecution {
-                    language: "lashvm".to_string(),
+                    language: (index % 2 == 0).then(|| "typescript".to_string()),
                     event: TraceLanguageExecution {
                         event_key: format!("process:p1:{index}"),
                         identity: lash_vm_identity(),
@@ -872,7 +872,7 @@ fn content_bearing_events() -> Vec<TraceEvent> {
         }])
     };
     let language = |payload| TraceEvent::LanguageExecution {
-        language: "lashvm".to_string(),
+        language: Some("lashvm".to_string()),
         event: TraceLanguageExecution {
             event_key: "process:p1:event".to_string(),
             identity: lash_vm_identity(),

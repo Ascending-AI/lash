@@ -29,11 +29,6 @@ pub enum Request {
         graph: Box<lash_vm::WorkflowGraph>,
         environment: LashVmHostEnvironment,
     },
-    CompileAst {
-        source: String,
-        program: lash_vm::Program,
-        environment: LashVmHostEnvironment,
-    },
     ContinuationInfo {
         bytes: Vec<u8>,
     },
@@ -53,7 +48,6 @@ pub enum Request {
         environment: LashVmHostEnvironment,
     },
     LinkAst {
-        source: String,
         program: lash_vm::Program,
         environment: LashVmHostEnvironment,
     },
@@ -549,9 +543,7 @@ pub mod runtime_ops {
             let source = match &request {
                 Request::References { source }
                 | Request::CreateDefinition { source, .. }
-                | Request::CompileModule { source, .. }
-                | Request::CompileAst { source, .. }
-                | Request::LinkAst { source, .. } => Some(source),
+                | Request::CompileModule { source, .. } => Some(source),
                 _ => None,
             };
             if let Some(source) = source
@@ -577,9 +569,7 @@ pub mod runtime_ops {
             self.record_worker(
                 match &request {
                     Request::References { .. } => WorkerPath::References,
-                    Request::CompileModule { .. }
-                    | Request::CompileAst { .. }
-                    | Request::LinkAst { .. } => WorkerPath::Compile,
+                    Request::CompileModule { .. } | Request::LinkAst { .. } => WorkerPath::Compile,
                     Request::CreateDefinition { .. } => WorkerPath::CreateDefinition,
                     Request::AdmitDocument { .. } => WorkerPath::Admit,
                     Request::InspectArtifact { .. } | Request::VerifyArtifact { .. } => {

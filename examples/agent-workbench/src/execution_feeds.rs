@@ -632,7 +632,7 @@ mod tests {
         payload: TraceLanguageExecutionPayload,
     ) -> LanguageExecutionObservation {
         LanguageExecutionObservation {
-            language: "typescript".to_string(),
+            language: Some("typescript".to_string()),
             execution: TraceLanguageExecution {
                 event_key: key.to_string(),
                 identity: TraceLanguageExecutionIdentity {

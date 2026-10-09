@@ -29,7 +29,7 @@ fn record(subject: TraceRuntimeSubject, occurrence: u64) -> TraceRecord {
     fixture_record(
         lash_trace::TraceContext::default(),
         TraceEvent::LanguageExecution {
-            language: "fixture-language".into(),
+            language: Some("fixture-language".into()),
             event: TraceLanguageExecution {
                 event_key: format!("{subject:?}:{occurrence}"),
                 identity: TraceLanguageExecutionIdentity {
@@ -397,7 +397,8 @@ async fn language_ingress_overflow_resnapshots_every_session_and_continues() {
                 panic!("typed language observation");
             };
             assert_eq!(
-                observation.language, "fixture-language",
+                observation.language.as_deref(),
+                Some("fixture-language"),
                 "routing is independent of dialect name"
             );
             assert_eq!(observation.execution.identity.subject, subject);

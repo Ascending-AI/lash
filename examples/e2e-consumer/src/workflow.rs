@@ -273,7 +273,6 @@ fn correspondence_json(correspondence: &WorkflowCorrespondence, draft: &Workflow
                 "from": from,
                 "into": into.iter().map(|(_, id)| id).collect::<Vec<_>>(),
             }),
-            Entry::Merged { from, to, .. } => json!({"outcome": "merged", "from": from, "to": to}),
             Entry::Unmatched { from, .. } => json!({"outcome": "unmatched", "from": from}),
             other => json!({"outcome": format!("{other:?}")}),
         })

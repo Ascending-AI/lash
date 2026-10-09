@@ -254,7 +254,9 @@ pub enum TraceEvent {
         payload: Value,
     },
     LanguageExecution {
-        language: String,
+        /// The source dialect, when the execution records one. Graph artifacts
+        /// are dialect-free and leave it absent.
+        language: Option<String>,
         event: TraceLanguageExecution,
     },
     /// The admitted body of a process step started.

@@ -474,7 +474,6 @@ pub async fn compile_with_deferred_resolution(
         resolve_and_fold_deferred(&program, host_environment, resolver, record, ctx).await?;
     match workers
         .request_accounted(lash_vm_client::service::Request::LinkAst {
-            source: String::new(),
             program,
             environment: host_environment,
         })

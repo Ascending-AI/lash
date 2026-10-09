@@ -15,7 +15,8 @@ use crate::{
 /// part of it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LanguageExecutionObservation {
-    pub language: String,
+    /// The source dialect, absent for a dialect-free graph execution.
+    pub language: Option<String>,
     pub execution: crate::TraceLanguageExecution,
     pub observed_at_ms: u64,
 }
