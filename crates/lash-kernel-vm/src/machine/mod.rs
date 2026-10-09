@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use lash_kernel_doc::{
-    Datum, ErrorDatum, ErrorValue, Identity, JoinMode, Name, ObjectId, TaskId, TaskIdentity, Value,
+    Datum, ErrorValue, Identity, JoinMode, Name, ObjectId, TaskId, TaskIdentity, Value,
 };
 
 use crate::compile::{BlockId, CodeId, Executable, LibId, StmtId};
@@ -489,7 +489,9 @@ impl KernelMachine {
         if task == TaskId::MAIN {
             self.end = Some(match result {
                 Ok(value) => self.conclude(None, Ending::Returned(value)),
-                Err(value) => End::Error(RunError::Uncaught(self.uncaught(&value))),
+                Err(value) => End::Error(RunError::Uncaught(
+                    copy_out(&self.heap, &value).unwrap_or_else(Raised::into_datum),
+                )),
             });
             return Ok(());
         }
@@ -531,22 +533,6 @@ impl KernelMachine {
         Ok(())
     }
 
-    /// An uncaught value as the error a run ends in.
-    fn uncaught(&self, value: &Value) -> ErrorDatum {
-        match value {
-            Value::Error(error) => ErrorDatum {
-                kind: error.kind.clone(),
-                message: error.message.clone(),
-                data: copy_out(&self.heap, &error.data).unwrap_or(Datum::Null),
-            },
-            other => ErrorDatum {
-                kind: "thrown".to_string(),
-                message: "a value that is not an error was raised and not caught".to_string(),
-                data: copy_out(&self.heap, other).unwrap_or(Datum::Null),
-            },
-        }
-    }
-
     /// Examines the other tasks at the run's end and gives the end
     /// (`K-TASK-018`). `ender` is the task that ran `finish` or `fail`.
     fn conclude(&mut self, ender: Option<TaskId>, ending: Ending) -> End {
@@ -573,11 +559,7 @@ impl KernelMachine {
         match ending {
             Ending::Returned(value) => match copy_out(&self.heap, &value) {
                 Ok(result) => End::Finished(self.finished(result)),
-                Err(raised) => End::Error(RunError::Uncaught(ErrorDatum {
-                    kind: raised.kind.to_string(),
-                    message: raised.message,
-                    data: Datum::Null,
-                })),
+                Err(raised) => End::Error(RunError::Uncaught(raised.into_datum())),
             },
             Ending::Finished(result) => End::Finished(self.finished(result)),
             Ending::Failed(reason) => End::Failed(reason),

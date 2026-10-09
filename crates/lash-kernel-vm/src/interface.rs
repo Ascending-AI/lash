@@ -230,9 +230,9 @@ pub struct Finished {
 /// A run that ended in an error (`K-TASK-018`, `K-BND-001`).
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
 pub enum RunError {
-    /// An error no `catch` took ended `main`.
-    #[error("uncaught {}: {}", .0.kind, .0.message)]
-    Uncaught(ErrorDatum),
+    /// A value no `catch` took ended `main`, copied out unchanged.
+    #[error("uncaught {0:?}")]
+    Uncaught(Datum),
     /// The run reached its end with tasks that were unfinished, or that
     /// ended in an error no `join` observed.
     #[error("the run ended with {} unfinished task(s) and {} unobserved task error(s)", .unfinished.len(), .unobserved.len())]

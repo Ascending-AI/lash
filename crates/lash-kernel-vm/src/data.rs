@@ -19,6 +19,16 @@ pub(crate) struct Raised {
     pub(crate) message: String,
 }
 
+impl Raised {
+    pub(crate) fn into_datum(self) -> Datum {
+        Datum::Error(Box::new(ErrorDatum {
+            kind: self.kind.to_string(),
+            message: self.message,
+            data: Datum::Null,
+        }))
+    }
+}
+
 pub(crate) fn raised(kind: &'static str, message: impl Into<String>) -> Raised {
     Raised {
         kind,

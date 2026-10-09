@@ -16,6 +16,172 @@ fn tuple<const N: usize>(items: [Datum; N]) -> Datum {
     Datum::Tuple(items.to_vec())
 }
 
+/// `K-FORM-010`: a text index reads an existing record field.
+#[test]
+fn a_record_text_index_reads_the_field() {
+    assert_eq!(value(r#"let r = {a: 7} return r["a"]"#), int(7));
+}
+
+/// `K-FORM-010`: a missing record field reads as absent.
+#[test]
+fn a_missing_record_text_index_reads_absent() {
+    assert_eq!(value(r#"let r = {} return r["missing"]"#), Datum::Absent);
+}
+
+/// `K-FORM-006`, `K-VAL-011`: replacing a field keeps its position.
+#[test]
+fn a_record_text_index_replaces_without_reordering() {
+    assert_eq!(
+        value(r#"let r = {a: 1, b: 2} set r["a"] = 3 return r"#),
+        record([("a", int(3)), ("b", int(2))]),
+    );
+}
+
+/// `K-FORM-006`, `K-VAL-011`: a newly indexed field goes last.
+#[test]
+fn a_record_text_index_adds_the_field_last() {
+    assert_eq!(
+        value(r#"let r = {a: 1} set r["b"] = 2 return r"#),
+        record([("a", int(1)), ("b", int(2))]),
+    );
+}
+
+/// `K-FORM-007`: a text index removes the named record field.
+#[test]
+fn a_record_text_index_removes_the_field() {
+    assert_eq!(
+        value(r#"let r = {a: 1, b: 2} remove r["a"] return r"#),
+        record([("b", int(2))]),
+    );
+}
+
+/// `K-FORM-007`: removing a missing indexed field changes nothing.
+#[test]
+fn removing_a_missing_record_text_index_changes_nothing() {
+    assert_eq!(
+        value(r#"let r = {a: 1} remove r["missing"] return r"#),
+        record([("a", int(1))]),
+    );
+}
+
+fn rejects_non_text_record_indexes(operation: impl Fn(&str) -> String) {
+    for index in [
+        "null",
+        "absent",
+        "true",
+        "1",
+        "1.0",
+        r#"b"00""#,
+        "clock",
+        "()",
+        "[]",
+        "map{}",
+        "set{}",
+        "{}",
+        "fn() {}",
+        "error_value",
+        "task",
+        "&worker",
+        "handle",
+        "ident.ref(r)",
+    ] {
+        let operation = operation(index);
+        let mut embedder = Embedder::with(
+            &format!(
+                r#"
+entry go(handle: Handle("table")) -> Any
+fn worker() {{}}
+fn go(handle) {{
+    let r = {{a: 1}}
+    let task = spawn call worker()
+    do join task
+    let error_value = null
+    try {{ if 1 {{}} }} catch e {{ set error_value = e }}
+    let caught = null
+    try {{ {operation} }} catch e {{ set caught = e.kind }}
+    return (caught, r)
+}}
+main {{}}"#
+            ),
+            Setup {
+                start: Start {
+                    target: Target::Entry(Name::new("go")),
+                    args: vec![Datum::Handle(Handle {
+                        kind: "table".into(),
+                        id: "one".into(),
+                    })],
+                    bindings: Bindings::default(),
+                },
+                ..Setup::default()
+            },
+        );
+        assert_eq!(
+            result(embedder.run_to_end(&[])),
+            tuple([text("type_error"), record([("a", int(1))])]),
+            "{operation}"
+        );
+    }
+}
+
+/// `K-FORM-010`: every non-text record index raises type_error.
+#[test]
+fn record_index_reads_reject_non_text() {
+    rejects_non_text_record_indexes(|index| format!("let ignored = r[{index}]"));
+}
+
+/// `K-FORM-006`, `K-EVAL-007`: an invalid index leaves the record unchanged.
+#[test]
+fn record_index_assignments_reject_non_text() {
+    rejects_non_text_record_indexes(|index| format!("set r[{index}] = 9"));
+}
+
+/// `K-FORM-007`, `K-EVAL-007`: an invalid index leaves the record unchanged.
+#[test]
+fn record_index_removals_reject_non_text() {
+    rejects_non_text_record_indexes(|index| format!("remove r[{index}]"));
+}
+
+/// `K-ERR-003`: an uncaught integer is the thrown value itself.
+#[test]
+fn an_uncaught_throw_carries_the_integer_unchanged() {
+    let (end, _) = run("main { throw 7 }");
+    let End::Error(crate::RunError::Uncaught(raised)) = end else {
+        panic!("main must end in the uncaught value");
+    };
+    assert_eq!(raised, int(7));
+}
+
+/// `K-ERR-003`: collection contents and ordinary errors stay unchanged.
+#[test]
+fn an_uncaught_throw_preserves_collections_and_errors() {
+    let expected = tuple([
+        record([("a", list([int(1)]))]),
+        Datum::Map(vec![(text("key"), int(2))]),
+        Datum::Set(vec![int(3)]),
+    ]);
+    assert_eq!(
+        run(r#"main { throw ({a: [1]}, map{"key": 2}, set{3}) }"#).0,
+        End::Error(crate::RunError::Uncaught(expected)),
+    );
+    let error = Datum::Error(Box::new(lash_kernel_doc::ErrorDatum {
+        kind: "boom".into(),
+        message: "bang".into(),
+        data: text("bang"),
+    }));
+    assert_eq!(
+        run(r#"main { do perform boom("bang") as Any }"#).0,
+        End::Error(crate::RunError::Uncaught(error)),
+    );
+}
+
+/// `K-EFF-002`: an uncaught value that cannot leave the run reports the
+/// typed copy failure, rather than losing its data silently.
+#[test]
+fn an_uncaught_throw_reports_values_that_cannot_be_copied_out() {
+    assert_eq!(uncaught("throw fn() {}"), "not_data");
+    assert_eq!(uncaught("let r = {} set r.self = r throw r"), "cycle");
+}
+
 /// Each case: the rule it pins, `main`'s body, and what the run returns.
 #[test]
 fn forms_do_what_their_rules_say() {
@@ -365,7 +531,7 @@ fn operations_raise_typed_errors_outside_their_operand_kinds() {
 fn a_declared_function_is_closed() {
     let (end, _) =
         run("fn peek() { return secret } main { let secret = 1 let r = call peek() return r }");
-    let End::Error(crate::RunError::Uncaught(error)) = end else {
+    let End::Error(crate::RunError::Uncaught(Datum::Error(error))) = end else {
         panic!("the function read main's variable");
     };
     assert_eq!(error.kind, "unbound_variable");

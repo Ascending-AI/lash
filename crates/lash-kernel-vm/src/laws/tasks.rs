@@ -738,7 +738,7 @@ main { let h = spawn call ends() do join h }"#);
     let End::Error(RunError::Uncaught(error)) = raised.run_to_end(&[]) else {
         panic!("main raised");
     };
-    assert_eq!((error.kind.as_str(), error.data), ("thrown", text("plain")));
+    assert_eq!(error, text("plain"));
 }
 
 /// `K-TASK-020`, `K-EFF-008`: a task is identified by its spawner, the

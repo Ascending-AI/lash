@@ -306,7 +306,7 @@ pub enum RecordedEnd {
         reason: Datum,
     },
     Uncaught {
-        error: ErrorDatum,
+        error: Datum,
     },
     TasksOutstanding {
         unfinished: Vec<TaskIdentity>,
@@ -447,6 +447,21 @@ mod tests {
     use lash_kernel_doc::{Site, Unit};
 
     use super::*;
+
+    /// `K-ERR-003`, ADR 0132 §8: restoring a recorded end returns the
+    /// original thrown value, including a value that is not an error.
+    #[test]
+    fn a_recorded_uncaught_end_keeps_the_thrown_value() {
+        let end = End::Error(RunError::Uncaught(Datum::Int(7.into())));
+        let recorded = RecordedEnd::of(&end).expect("an uncaught end is recorded");
+        let stored = serde_json::to_value(&recorded).expect("the end encodes");
+        assert_eq!(
+            stored,
+            serde_json::json!({"uncaught": {"error": {"int": "7"}}})
+        );
+        let restored: RecordedEnd = serde_json::from_value(stored).expect("the end decodes");
+        assert_eq!(restored.into_end(), end);
+    }
 
     fn identity(occurrence: u64) -> EffectIdentity {
         EffectIdentity {

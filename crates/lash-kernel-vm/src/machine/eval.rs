@@ -205,6 +205,18 @@ impl KernelMachine {
                 match &target {
                     Value::Tuple(items) => element(items),
                     Value::List(list) => element(self.heap.list(*list).map_or(&[], Vec::as_slice)),
+                    Value::Record(record) => {
+                        let Value::Text(field) = &index else {
+                            return raise("type_error", "a record index must be text");
+                        };
+                        Ok(self
+                            .heap
+                            .record(*record)
+                            .and_then(|fields| {
+                                fields.iter().find(|(name, _)| name == field.as_ref())
+                            })
+                            .map_or(Value::Absent, |(_, value)| value.clone()))
+                    }
                     Value::Map(map) => {
                         let key = key(&index)?;
                         match self.heap.table(*map).and_then(|table| table.get(&key)) {
@@ -222,7 +234,7 @@ impl KernelMachine {
                     }
                     _ => raise(
                         "type_error",
-                        "only a list, a tuple, a map or a set is read by index",
+                        "only a list, a tuple, a record, a map or a set is read by index",
                     ),
                 }
             }

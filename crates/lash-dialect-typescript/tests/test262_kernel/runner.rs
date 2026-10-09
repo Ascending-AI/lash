@@ -180,24 +180,29 @@ fn library() -> &'static NamedLibrary {
 /// The JavaScript error class an uncaught value belongs to: the kernel's
 /// own kinds by the name JavaScript gives them, any other kind as written,
 /// and a thrown object by its `name`.
-fn thrown_name(error: &ErrorDatum) -> String {
-    if let Datum::Record(fields) = &error.data
+fn thrown_name(value: &Datum) -> Option<String> {
+    let (record, kind) = match value {
+        Datum::Record(_) => (Some(value), None),
+        Datum::Error(error) => (Some(&error.data), Some(error.kind.as_str())),
+        _ => (None, None),
+    };
+    if let Some(Datum::Record(fields)) = record
         && let Some((_, Datum::Text(name))) = fields.iter().find(|(field, _)| field == "name")
     {
-        return name.clone();
+        return Some(name.clone());
     }
-    match error.kind.as_str() {
+    kind.map(|kind| match kind {
         "type_error" | "key_missing" | "invalid_key" | "not_data" | "cycle" => "TypeError".into(),
         "index_out_of_range" | "number_range" => "RangeError".into(),
         "unbound_variable" => "ReferenceError".into(),
         other => other.to_string(),
-    }
+    })
 }
 
 fn judge(end: End, meta: &Metadata) -> Observed {
     match (end, &meta.negative) {
         (End::Error(RunError::Uncaught(error)), Some(negative))
-            if thrown_name(&error) == negative.error_type.as_str() =>
+            if thrown_name(&error).as_deref() == Some(negative.error_type.as_str()) =>
         {
             Observed::Pass
         }

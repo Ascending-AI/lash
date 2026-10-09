@@ -431,7 +431,7 @@ pub(crate) fn value(body: &str) -> Datum {
 /// The kind of the error `main`'s body ends in, uncaught.
 pub(crate) fn uncaught(body: &str) -> String {
     match run(&format!("main {{ {body} }}")).0 {
-        End::Error(RunError::Uncaught(error)) => error.kind,
+        End::Error(RunError::Uncaught(Datum::Error(error))) => error.kind,
         other => panic!("the run did not end in an uncaught error: {other:?}"),
     }
 }

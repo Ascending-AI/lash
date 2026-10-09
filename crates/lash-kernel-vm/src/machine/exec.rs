@@ -779,13 +779,7 @@ impl KernelMachine {
                 let Value::Record(record) = self.eval(task, host, exe, target)? else {
                     return raise("type_error", "only a record has fields to assign");
                 };
-                self.reserve(value_bytes(&value).saturating_add(field.len() as u64))?;
-                if let Some(Obj::Record(fields)) = self.heap.get_mut(record) {
-                    match fields.iter_mut().find(|(name, _)| name == field) {
-                        Some(held) => held.1 = value,
-                        None => fields.push((field.clone(), value)),
-                    }
-                }
+                self.write_record_field(record, field, value)?;
             }
             Member::Index(target, index) => {
                 let target = self.eval(task, host, exe, target)?;
@@ -808,6 +802,12 @@ impl KernelMachine {
                                 None => items.push(value),
                             }
                         }
+                    }
+                    Value::Record(record) => {
+                        let Value::Text(field) = index else {
+                            return raise("type_error", "a record index must be text");
+                        };
+                        self.write_record_field(record, &field, value)?;
                     }
                     Value::Map(map) => {
                         let key = super::eval::key(&index)?;
@@ -836,10 +836,27 @@ impl KernelMachine {
                     _ => {
                         return raise(
                             "type_error",
-                            "only a list, a map or a set is assigned by index",
+                            "only a list, a record, a map or a set is assigned by index",
                         );
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    /// Field and text-index assignment share a record's insertion order.
+    fn write_record_field(
+        &mut self,
+        record: lash_kernel_doc::ObjectId,
+        field: &str,
+        value: Value,
+    ) -> Eval<()> {
+        self.reserve(value_bytes(&value).saturating_add(field.len() as u64))?;
+        if let Some(Obj::Record(fields)) = self.heap.get_mut(record) {
+            match fields.iter_mut().find(|(name, _)| name == field) {
+                Some(held) => held.1 = value,
+                None => fields.push((field.to_string(), value)),
             }
         }
         Ok(())
@@ -880,6 +897,14 @@ impl KernelMachine {
                             items.remove(position);
                         }
                     }
+                    Value::Record(record) => {
+                        let Value::Text(field) = index else {
+                            return raise("type_error", "a record index must be text");
+                        };
+                        if let Some(Obj::Record(fields)) = self.heap.get_mut(record) {
+                            fields.retain(|(name, _)| name != field.as_ref());
+                        }
+                    }
                     Value::Map(table) | Value::Set(table) => {
                         let key: Key = super::eval::key(&index)?;
                         if let Some(Obj::Map(table) | Obj::Set(table)) = self.heap.get_mut(table) {
@@ -889,7 +914,7 @@ impl KernelMachine {
                     _ => {
                         return raise(
                             "type_error",
-                            "only a list, a map or a set has an index to remove",
+                            "only a list, a record, a map or a set has an index to remove",
                         );
                     }
                 }
