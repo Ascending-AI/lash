@@ -227,8 +227,16 @@ impl LashCore {
 
     /// The hub that ticks when a commit grew a process's log, on this
     /// core's node or, through its node wakes, on another.
+    #[cfg(test)]
     pub(crate) fn process_changes(&self) -> &lash_core::runtime::ProcessChangeHub {
         self.substrate_slot.setup.process.watched().hub()
+    }
+
+    /// The hub that ticks once this core's sinks, its observation
+    /// dispatcher among them, were handed what a commit appended to a
+    /// process's log, and when another node appended to it.
+    pub(crate) fn process_emissions(&self) -> &lash_core::runtime::ProcessChangeHub {
+        self.substrate_slot.setup.process.watched().emitted_hub()
     }
 
     /// The worker the core's node runs its processes on.

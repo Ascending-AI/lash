@@ -25,10 +25,16 @@ pub use event_sink::ProcessEventSink;
 /// ([`WatchedRegistry::announce_through`]), an append here also ticks the
 /// change hubs of the other nodes, and theirs tick this one's.
 ///
+/// It ticks two hubs. The change hub ticks as soon as an append is durable.
+/// The emitted hub ticks once this node's sinks were handed the append, and
+/// at another node's append, which this node's sinks are never handed: a
+/// waiter on it finds whatever a sink does with a commit already under way.
+///
 /// Sinks share the same watched handle used by the process port.
 struct WatchedProcessRegistry {
     inner: Arc<dyn ProcessRegistry>,
     hub: ProcessChangeHub,
+    emitted: ProcessChangeHub,
     sinks: Arc<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
     publication: Arc<Publication>,
 }
@@ -55,8 +61,11 @@ struct Publication {
     hints: std::sync::OnceLock<lash_durable::runner::Hints>,
 }
 
-/// Ticks a change hub for the process logs another node appended to.
-struct HubFollowers(ProcessChangeHub);
+/// Ticks both hubs for the process logs another node appended to.
+struct HubFollowers {
+    changes: ProcessChangeHub,
+    emitted: ProcessChangeHub,
+}
 
 impl lash_durable::runner::LogFollowers for HubFollowers {
     fn appended(&self, actors: &[lash_durable::ActorKey]) {
@@ -64,13 +73,15 @@ impl lash_durable::runner::LogFollowers for HubFollowers {
             if actor.kind() == lash_durable::ActorKind::Process
                 && let Ok(process) = ProcessId::parse(actor.id())
             {
-                self.0.notify(&process);
+                self.changes.notify(&process);
+                self.emitted.notify(&process);
             }
         }
     }
 
     fn resubscribed(&self) {
-        self.0.notify_all();
+        self.changes.notify_all();
+        self.emitted.notify_all();
     }
 }
 
@@ -83,6 +94,7 @@ pub struct WatchedRegistry {
     registry: Arc<dyn ProcessRegistry>,
     watched: Arc<WatchedProcessRegistry>,
     hub: ProcessChangeHub,
+    emitted: ProcessChangeHub,
     sinks: Arc<Mutex<Vec<Arc<dyn ProcessEventSink>>>>,
 }
 
@@ -105,10 +117,12 @@ impl Drop for ProcessEventSinkRegistration {
 impl WatchedRegistry {
     fn new(inner: Arc<dyn ProcessRegistry>) -> Self {
         let hub = ProcessChangeHub::new();
+        let emitted = ProcessChangeHub::new();
         let sinks = Arc::new(Mutex::new(Vec::new()));
         let watched = Arc::new(WatchedProcessRegistry {
             inner: Arc::clone(&inner),
             hub: hub.clone(),
+            emitted: emitted.clone(),
             sinks: Arc::clone(&sinks),
             publication: Arc::default(),
         });
@@ -117,6 +131,7 @@ impl WatchedRegistry {
             registry,
             watched,
             hub,
+            emitted,
             sinks,
         }
     }
@@ -129,6 +144,15 @@ impl WatchedRegistry {
     /// The change hub paired with this watched registry.
     pub fn hub(&self) -> &ProcessChangeHub {
         &self.hub
+    }
+
+    /// The hub that ticks for a process once this node's sinks were handed
+    /// what a commit appended to its log, and when another node appended to
+    /// it. A commit made here ticks it after every sink's
+    /// [`emit`](ProcessEventSink::emit) returned, so a waiter that asks a
+    /// sink about the commit finds it already handed over.
+    pub fn emitted_hub(&self) -> &ProcessChangeHub {
+        &self.emitted
     }
 
     /// How many event sinks are attached: what the registration-detach law in
@@ -158,10 +182,13 @@ impl WatchedRegistry {
         let event_path = self.watched.event_path(process_id);
         let _guard = event_path.lock().await;
         self.watched.appended(process_id);
-        self.watched
+        let emitted = self
+            .watched
             .emit_event_pages_since(process_id, Some(published), published)
             .await
-            .unwrap_or(published)
+            .unwrap_or(published);
+        self.watched.emitted.notify(process_id);
+        emitted
     }
 
     /// The last sequence of `process_id` emitted on this node: what its
@@ -193,7 +220,10 @@ impl WatchedRegistry {
     /// first hints named stay: a registry serves one backend.
     pub fn announce_through(&self, hints: lash_durable::runner::Hints) {
         if self.watched.publication.hints.set(hints.clone()).is_ok() {
-            hints.follow(Arc::new(HubFollowers(self.hub.clone())));
+            hints.follow(Arc::new(HubFollowers {
+                changes: self.hub.clone(),
+                emitted: self.emitted.clone(),
+            }));
         }
     }
 
@@ -244,6 +274,7 @@ delegate_process_registrar!(
         watched
             .emit_event_pages_since(process_id, sink_cursor, 0)
             .await;
+        watched.emitted.notify(process_id);
         Ok(record)
     }
 );
@@ -264,6 +295,7 @@ delegate_process_event_log!(
         watched
             .emit_event_pages_since(process_id, sink_cursor, 0)
             .await;
+        watched.emitted.notify(process_id);
         Ok(result)
     }
 );
@@ -282,6 +314,7 @@ delegate_process_lifecycle!(
         watched
             .emit_event_pages_since(process_id, sink_cursor, 0)
             .await;
+        watched.emitted.notify(process_id);
         Ok(result)
     }
 );
@@ -299,6 +332,7 @@ impl super::registry::ProcessClockRebind for WatchedProcessRegistry {
             Arc::new(Self {
                 inner,
                 hub: self.hub.clone(),
+                emitted: self.emitted.clone(),
                 sinks: Arc::clone(&self.sinks),
                 publication: Arc::clone(&self.publication),
             }) as Arc<dyn ProcessRegistry>

@@ -52,10 +52,15 @@ turn and session effects reach session replay. The language name does not
 decide admission. Provisional observations move the live position without
 proving a durable revision advance.
 
-Language ingress admits at most 256 events and 4 MiB of charged serialized
-payload per class, including its publication in flight. Process and session
-classes drain independently outside VM execution. Process observations and
-after-commit facts share a FIFO: a terminal follows every accepted preceding
+Language ingress admits at most 4 MiB of charged serialized payload per class
+and a bounded count of events, including its publications in flight: 256 for
+the session class, and for the process class two rounds of what its replay
+store writes at once (`ProcessReplayStore::publish_limits`: concurrency times
+batch size, so 4,096 events for the PostgreSQL store's defaults). Process and
+session classes drain independently outside VM execution. The process class's
+worker takes everything pending and publishes it one batch per process, the
+processes side by side. A process's observations and after-commit facts share
+a FIFO: a terminal follows every accepted preceding
 observation. Recovery publishes through the same FIFO and awaits its
 completion before checking the committed bridge; execution only enqueues and
 never awaits that completion. Overflow clears that class's pending queue and coalesces one

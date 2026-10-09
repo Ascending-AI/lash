@@ -15,6 +15,7 @@
 use crate::ProcessId;
 use std::collections::VecDeque;
 use std::fmt;
+use std::num::NonZeroUsize;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -604,6 +605,52 @@ impl Stream for ProcessReplaySubscription {
     }
 }
 
+/// How a store takes publications in bulk: what a publisher that drains a
+/// queue sizes its batches and its queue by.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessReplayPublishLimits {
+    /// Publications of different processes the store writes at once; more
+    /// only wait inside it.
+    pub concurrency: NonZeroUsize,
+    /// The most events one publication should carry: a larger one overruns
+    /// the process's window, or a write the store gathers.
+    pub batch_events: NonZeroUsize,
+    /// The most bytes one publication should carry, by the publisher's own
+    /// estimate of its drafts: a margin under the bound past which the
+    /// store refuses a publication.
+    pub batch_bytes: NonZeroUsize,
+}
+
+impl ProcessReplayPublishLimits {
+    /// One publication at a time, of at most 256 events and 1 MiB: what a
+    /// store that states nothing is taken to hold.
+    pub const fn serial() -> Self {
+        Self {
+            concurrency: NonZeroUsize::MIN,
+            batch_events: NonZeroUsize::MIN.saturating_add(255),
+            batch_bytes: NonZeroUsize::MIN.saturating_add(1024 * 1024 - 1),
+        }
+    }
+
+    /// `concurrency`, `batch_events` and `batch_bytes`, each raised to one.
+    pub fn new(concurrency: usize, batch_events: usize, batch_bytes: usize) -> Self {
+        let at_least_one = |value| NonZeroUsize::new(value).unwrap_or(NonZeroUsize::MIN);
+        Self {
+            concurrency: at_least_one(concurrency),
+            batch_events: at_least_one(batch_events),
+            batch_bytes: at_least_one(batch_bytes),
+        }
+    }
+
+    /// The events one round of publications carries: every concurrent
+    /// publication at its most.
+    pub const fn round_events(self) -> usize {
+        self.concurrency
+            .get()
+            .saturating_mul(self.batch_events.get())
+    }
+}
+
 /// Bounded, best-effort live replay of process observation: the tail of
 /// every process feed.
 ///
@@ -662,6 +709,13 @@ pub trait ProcessReplayStore: Send + Sync {
         process_id: &ProcessId,
         events: Vec<ProcessReplayEventDraft>,
     ) -> Result<Vec<Arc<ProcessObservationEvent>>, ProcessReplayStoreError>;
+
+    /// How this store takes publications in bulk. The core's observation
+    /// dispatcher publishes each process's pending drafts in batches of at
+    /// most this size, this many processes at once.
+    fn publish_limits(&self) -> ProcessReplayPublishLimits {
+        ProcessReplayPublishLimits::serial()
+    }
 
     /// The process's retained events after `cursor`, or the gap that
     /// prevents continuing from it. This is the subscription's replayed

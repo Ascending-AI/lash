@@ -18,20 +18,24 @@
 //!
 //! An open feed converges on the durable process whoever committed to it
 //! and whatever became of the commit's publication. It holds a subscription
-//! of the registry's change hub, which ticks at a commit on this node and,
-//! through node wakes, on another; at a tick, and on the host's reconcile
-//! cadence when a tick was lost, it compares the durable sequence with the
-//! one its consumer holds. The window between a commit and its publication
-//! is closed by the session feed's rule: while this node is still
-//! publishing a fact behind the sequence it read, the feed waits for that
-//! publication and takes the fact from the replay. Only with none in flight
-//! (another node's commit, or a lost publication) does it publish the
-//! retained facts between to the replay store itself, which drops those it
-//! already holds, and deliver them from the store like any other. It
-//! bridges only a small distance that way: a consumer further behind than
-//! the bridge bound, facts that were released, and a fact whose publication
-//! was dropped or refused are each a gap, and the feed goes on from the
-//! durable process. Only a failed read ends a feed with an error.
+//! of the registry's emitted hub, which ticks once this node's observation
+//! dispatcher was handed a commit made here and, through node wakes, at a
+//! commit on another node; at a tick it compares the durable sequence with
+//! the one its consumer holds. The window between a commit and its
+//! publication is closed by the session feed's rule: while this node is
+//! still publishing a fact behind the sequence it read, the feed waits for
+//! that publication and takes the fact from the replay. A tick follows the
+//! dispatcher's admission of the commit, so a commit made here is always
+//! found in flight or already published. Only with none in flight (another
+//! node's commit, or a lost publication) does the feed publish the retained
+//! facts between to the replay store itself, which drops those it already
+//! holds, and deliver them from the store like any other. It bridges only a
+//! small distance that way: a consumer further behind than the bridge
+//! bound, facts that were released, and a fact whose publication was
+//! dropped or refused are each a gap, and the feed goes on from the durable
+//! process. Only a failed read ends a feed with an error. An idle feed
+//! reads nothing: a node that may have missed a wake ticks every followed
+//! process when its listener resubscribes.
 //!
 //! Delivery is at least once. A stream drops an event identity
 //! ([`ProcessObservationEventId`]) it already delivered within a bounded
@@ -47,7 +51,7 @@ use std::task::{Context, Poll};
 
 use futures_util::future::BoxFuture;
 use futures_util::{FutureExt as _, Stream, StreamExt as _};
-use lash_core::runtime::{PollPacing, ProcessChangeHub, ProcessChangeSubscription};
+use lash_core::runtime::{ProcessChangeHub, ProcessChangeSubscription};
 use lash_core::{
     PluginError, ProcessEffectCoverage, ProcessEffectEvidence, ProcessEffectGapReason,
     ProcessEffectReport, ProcessEventHistoryRetention, ProcessEventPageEvents,
@@ -172,11 +176,10 @@ pub(crate) async fn fold_effects(
 pub(crate) struct FeedReconcile {
     /// The core's ordered publication barrier, shared with its language sink.
     pub(crate) publisher: Arc<crate::language_observation::LanguageObservationPublisher>,
-    /// Ticks when a commit grew a process's log, on this node or another.
+    /// Ticks once this node's sinks were handed a commit that grew a
+    /// process's log, and when another node grew it: the watched registry's
+    /// emitted hub.
     pub(crate) changes: ProcessChangeHub,
-    /// How long a feed waits without a tick before it compares anyway: from
-    /// the initial delay after a tick, backing off to the maximum.
-    pub(crate) pacing: PollPacing,
 }
 
 /// What a process feed reads: the durable process and the replay store.
@@ -482,8 +485,7 @@ impl ProcessObservationStream {
         let limit = source.work_limits.process_dedup_ids;
         // Watched before the feed's first read of the durable process, so a
         // commit after that read ticks.
-        let changes = source.reconcile.changes.subscribe(&source.process_id);
-        let pause = source.reconcile.pacing.initial();
+        let changes = Some(source.reconcile.changes.subscribe(&source.process_id));
         Self {
             cursor: cursor.clone(),
             state: Some(Box::new(FeedState {
@@ -493,7 +495,6 @@ impl ProcessObservationStream {
                 held: None,
                 live: None,
                 changes,
-                pause,
             })),
             step: None,
             applied: AppliedEventIds {
@@ -573,10 +574,9 @@ struct FeedState {
     /// gap established it.
     held: Option<ProcessSequence>,
     live: Option<ProcessReplaySubscription>,
-    /// Ticks when a commit grew the process's log.
-    changes: ProcessChangeSubscription,
-    /// How long the feed waits without a tick before its next reconcile.
-    pause: std::time::Duration,
+    /// Ticks when a commit grew the process's log; `None` once the
+    /// registry's hub is gone, when only the replay is left to follow.
+    changes: Option<ProcessChangeSubscription>,
 }
 
 impl FeedState {
@@ -602,22 +602,22 @@ impl FeedState {
                     Err(error) => return Some(Err(error)),
                 }
             };
-            // Whatever the replay already holds goes first; a tick or the
-            // cadence only makes the feed look at the durable process.
-            let pacing = self.source.reconcile.pacing;
+            // Whatever the replay already holds goes first; a tick only
+            // makes the feed look at the durable process.
+            let changes = &mut self.changes;
             let next = tokio::select! {
                 biased;
                 next = live.next() => Some(next),
-                changed = self.changes.changed() => {
-                    if changed.is_err() {
-                        // The registry's hub is gone: only the cadence is left.
-                        tokio::time::sleep(self.pause).await;
+                changed = async {
+                    match changes {
+                        Some(changes) => changes.changed().await,
+                        None => std::future::pending().await,
                     }
-                    self.pause = pacing.initial();
-                    None
-                }
-                () = tokio::time::sleep(self.pause) => {
-                    self.pause = self.pause.saturating_mul(2).min(pacing.maximum());
+                } => {
+                    if changed.is_err() {
+                        self.changes = None;
+                        continue;
+                    }
                     None
                 }
             };

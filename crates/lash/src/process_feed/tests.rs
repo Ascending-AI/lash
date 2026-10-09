@@ -26,14 +26,12 @@ fn tick(process_id: &ProcessId, n: u64) -> lash_core::ProcessEventAppendRequest 
     lash_core::ProcessEventAppendRequest::wait_entered(process_id, &wait)
 }
 
-/// A reconcile cadence no law waits out.
-const NO_CADENCE: std::time::Duration = std::time::Duration::from_secs(3600);
-
 struct Fixture {
     /// What wakes this fixture's feeds to look at the durable process:
     /// nothing, unless a law says otherwise.
     reconcile: FeedReconcile,
-    /// The hub the fixture's registry ticks at each commit.
+    /// The hub the fixture's registry ticks once a commit was handed to its
+    /// sinks: what a core's feeds watch.
     commits: ProcessChangeHub,
     registry: Arc<dyn ProcessRegistry>,
     replay: Arc<InMemoryProcessReplayStore>,
@@ -59,7 +57,7 @@ impl Fixture {
                 .process_registry(),
         );
         let registry = Arc::clone(watched.registry());
-        let commits = watched.hub().clone();
+        let commits = watched.emitted_hub().clone();
         let process_id = registry
             .register_process(
                 lash_core::ProcessRegistration::new(
@@ -102,7 +100,6 @@ impl Fixture {
             reconcile: FeedReconcile {
                 publisher,
                 changes: ProcessChangeHub::new(),
-                pacing: PollPacing::new(NO_CADENCE, NO_CADENCE).expect("pacing"),
             },
             commits,
             registry,

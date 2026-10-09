@@ -66,8 +66,7 @@ impl Processes {
                 self.core.env.core.observation_work_limits,
                 crate::process_feed::FeedReconcile {
                     publisher: Arc::clone(&self.core.language_observation_publisher),
-                    changes: self.core.process_changes().clone(),
-                    pacing: self.core.observer_pacing.process_reconcile,
+                    changes: self.core.process_emissions().clone(),
                 },
             ),
         }

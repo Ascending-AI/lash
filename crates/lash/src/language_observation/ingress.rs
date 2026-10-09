@@ -1,16 +1,28 @@
-//! Count and byte admission, including the single publication in flight.
+//! Count and byte admission, including the publications in flight.
 //! A queue that cannot take a draft loses every draft it holds, and retires
 //! the whole class's provisional continuity: it can no longer name what it
 //! lost.
 
 use std::collections::VecDeque;
 
+/// The session class's count bound: its worker publishes one draft per
+/// store call.
 pub(super) const MAX_EVENTS: usize = 256;
 pub(super) const MAX_BYTES: usize = 4 * 1024 * 1024;
 
+/// The process class's count bound, from how its store takes publications:
+/// the round its worker is publishing and the round that gathers behind it.
+/// A worker that drains everything pending into one round sustains whatever
+/// rate fills one round per store round trip, so a queue of two rounds
+/// overflows only when the VM outruns the store itself.
+pub(super) fn process_events(limits: lash_core::ProcessReplayPublishLimits) -> usize {
+    limits.round_events().saturating_mul(2)
+}
+
 pub(super) enum Work<T> {
     Invalidate,
-    Publish { draft: T, charge: usize },
+    /// Everything pending, in admission order, each with its charge.
+    Publish(Vec<(T, usize)>),
 }
 
 pub(super) struct Ingress<T> {
@@ -72,9 +84,7 @@ impl<T> Ingress<T> {
         if std::mem::take(&mut self.dirty) {
             return Some(Work::Invalidate);
         }
-        self.pending
-            .pop_front()
-            .map(|(draft, charge)| Work::Publish { draft, charge })
+        (!self.pending.is_empty()).then(|| Work::Publish(self.pending.drain(..).collect()))
     }
 
     pub(super) fn has_work(&self) -> bool {
@@ -87,8 +97,15 @@ impl<T> Ingress<T> {
         self.admitted
     }
 
-    pub(super) fn finish(&mut self, charge: usize) {
-        self.admitted -= 1;
+    /// Drafts no worker has taken yet.
+    #[cfg(test)]
+    pub(super) fn pending(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Release what `events` drafts charged once their publication returned.
+    pub(super) fn finish(&mut self, events: usize, charge: usize) {
+        self.admitted -= events;
         self.bytes -= charge;
     }
 }

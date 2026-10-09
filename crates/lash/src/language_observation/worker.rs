@@ -1,15 +1,19 @@
-//! One FIFO drainer per class. All execution-side work is synchronous
-//! admission; retries and store invalidation stay on these workers.
+//! One drainer per class. All execution-side work is synchronous admission;
+//! retries and store invalidation stay on these workers. A worker takes
+//! everything pending at once; the process worker publishes it through its
+//! store's batch API, one process's drafts in order.
 //!
 //! A loss the process worker can name is that process's alone: a draft the
 //! ingress could not admit for its size, or one the store refused,
 //! invalidates its own process. Only a loss it cannot attribute (a queue
 //! that overflowed, a process it could not invalidate) invalidates them all.
 
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use futures_util::StreamExt as _;
 use lash_core::{
     LiveReplayEventDraft, LiveReplayStore, ProcessReplayEventDraft, ProcessReplayStore,
     ProcessSequence, SessionRevision,
@@ -117,6 +121,11 @@ impl<T: Draft> Channel<T> {
         self.queue.lock_recover().admitted()
     }
 
+    #[cfg(test)]
+    pub(super) fn pending(&self) -> usize {
+        self.queue.lock_recover().pending()
+    }
+
     fn failed(&self) {
         let lost = self.queue.lock_recover().invalidate();
         lost.into_iter().for_each(Draft::lost);
@@ -127,8 +136,8 @@ impl<T: Draft> Channel<T> {
         drop(self.queue.lock_recover().invalidate());
     }
 
-    fn finish(&self, charge: usize) {
-        self.queue.lock_recover().finish(charge);
+    fn finish(&self, events: usize, charge: usize) {
+        self.queue.lock_recover().finish(events, charge);
     }
 }
 
@@ -136,13 +145,24 @@ pub(super) async fn process(
     channel: Arc<Channel<ProcessPublication>>,
     store: Arc<dyn ProcessReplayStore>,
 ) {
+    let limits = store.publish_limits();
     loop {
         let result = match channel.next().await {
             Work::Invalidate => store.invalidate_all().await.map(|_| ()),
-            Work::Publish { draft, charge } => {
-                let result = publish(store.as_ref(), draft).await;
-                channel.finish(charge);
-                result
+            Work::Publish(pending) => {
+                // Order matters only within one process: each process's
+                // drafts stay in admission order, and the processes publish
+                // side by side, as many at once as the store writes.
+                futures_util::stream::iter(by_process(pending))
+                    .map(|(id, drafts)| {
+                        publish_process(&channel, store.as_ref(), limits, id, drafts)
+                    })
+                    .buffer_unordered(limits.concurrency.get())
+                    .fold(
+                        Ok(()),
+                        |round, published| async move { round.and(published) },
+                    )
+                    .await
             }
         };
         if let Err(error) = result {
@@ -153,39 +173,107 @@ pub(super) async fn process(
     }
 }
 
-/// Publish one draft. A draft the store refuses, or one that stands for a
-/// fact too large to admit, costs its own process's continuity and the
-/// worker carries on; the error is a process it could not invalidate.
-async fn publish(
+type Charged = (ProcessPublication, usize);
+
+/// One round's drafts grouped by process, each group in admission order.
+fn by_process(pending: Vec<Charged>) -> Vec<(ProcessId, Vec<Charged>)> {
+    let mut groups = Vec::<(ProcessId, Vec<Charged>)>::new();
+    let mut index = HashMap::<ProcessId, usize>::new();
+    for charged in pending {
+        let group = *index.entry(charged.0.id.clone()).or_insert_with(|| {
+            groups.push((charged.0.id.clone(), Vec::new()));
+            groups.len() - 1
+        });
+        groups[group].1.push(charged);
+    }
+    groups
+}
+
+/// Publish one process's drafts in order, in batches the store takes whole.
+/// A batch the store refuses, or a publication that stands for a fact too
+/// large to admit, costs the process's continuity in its place in the FIFO
+/// and the worker carries on behind it; the error is a process it could not
+/// invalidate, which ends the round for the process.
+async fn publish_process(
+    channel: &Channel<ProcessPublication>,
     store: &dyn ProcessReplayStore,
-    publication: ProcessPublication,
+    limits: lash_core::ProcessReplayPublishLimits,
+    id: ProcessId,
+    drafts: Vec<Charged>,
 ) -> Result<(), lash_core::ProcessReplayStoreError> {
-    let ProcessPublication {
-        id,
-        draft,
-        completion,
-        // Held until the store answered, and until a refusal invalidated
-        // the process: a feed that waited then reads the outcome.
-        mark: _mark,
-    } = publication;
-    if let Some(draft) = draft {
-        match store.publish(&id, vec![draft]).await {
-            Ok(_) => {
-                if let Some(completion) = completion {
-                    let _ = completion.send(CommittedPublication::Published);
-                }
-                return Ok(());
+    let mut drafts = drafts.into_iter().peekable();
+    let mut round = Ok(());
+    while drafts.peek().is_some() {
+        let mut batch = Vec::new();
+        // What outlives each draft's store call: an acknowledgement, answered
+        // once the store answered and a refusal invalidated the process,
+        // and a publication mark, held until then so a feed that waited on
+        // it reads the outcome.
+        let mut waiting = Vec::new();
+        let (mut events, mut bytes) = (0_usize, 0_usize);
+        // A publication without a draft ends the batch before it: the
+        // process is invalidated in that fact's place.
+        let mut unadmitted = false;
+        while let Some((next, charge)) = drafts.peek() {
+            if !batch.is_empty()
+                && (batch.len() >= limits.batch_events.get()
+                    || bytes.saturating_add(*charge) > limits.batch_bytes.get())
+            {
+                break;
             }
-            Err(error) => {
-                tracing::warn!(%error, process_id = %id, "process replay refused a publication");
+            if next.draft.is_none() && !batch.is_empty() {
+                break;
+            }
+            let Some((publication, charge)) = drafts.next() else {
+                break;
+            };
+            // Exhaustive: a field added to a publication is placed before
+            // or after the store call here.
+            let ProcessPublication {
+                id: _,
+                draft,
+                completion,
+                mark,
+            } = publication;
+            events += 1;
+            bytes += charge;
+            waiting.push((completion, mark));
+            match draft {
+                Some(draft) => batch.push(draft),
+                None => {
+                    unadmitted = true;
+                    break;
+                }
             }
         }
+        let published = match &round {
+            Err(_) => false,
+            Ok(()) if unadmitted => false,
+            Ok(()) => match store.publish(&id, batch).await {
+                Ok(_) => true,
+                Err(error) => {
+                    tracing::warn!(%error, process_id = %id, "process replay refused a publication");
+                    false
+                }
+            },
+        };
+        if !published && round.is_ok() {
+            round = store.invalidate_process(&id).await;
+        }
+        channel.finish(events, bytes);
+        let answer = if published {
+            CommittedPublication::Published
+        } else {
+            CommittedPublication::ContinuityLost
+        };
+        for (completion, mark) in waiting {
+            if let Some(completion) = completion {
+                let _ = completion.send(answer);
+            }
+            drop(mark);
+        }
     }
-    let invalidated = store.invalidate_process(&id).await;
-    if let Some(completion) = completion {
-        let _ = completion.send(CommittedPublication::ContinuityLost);
-    }
-    invalidated
+    round
 }
 
 pub(super) async fn session(
@@ -195,17 +283,20 @@ pub(super) async fn session(
     loop {
         let result = match channel.next().await {
             Work::Invalidate => store.invalidate_all().await,
-            Work::Publish {
-                draft: (id, draft),
-                charge,
-            } => {
-                // A provisional observation never proves a durable advance.
-                let result = store
-                    .publish(&id, SessionRevision::new(0), vec![draft])
-                    .await
-                    .map(|_| ());
-                channel.finish(charge);
-                result
+            Work::Publish(pending) => {
+                let mut round = Ok(());
+                for ((id, draft), charge) in pending {
+                    if round.is_ok() {
+                        // A provisional observation never proves a durable
+                        // advance.
+                        round = store
+                            .publish(&id, SessionRevision::new(0), vec![draft])
+                            .await
+                            .map(|_| ());
+                    }
+                    channel.finish(1, charge);
+                }
+                round
             }
         };
         if let Err(error) = result {

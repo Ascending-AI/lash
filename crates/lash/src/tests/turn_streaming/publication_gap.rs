@@ -507,21 +507,12 @@ async fn process_feed_across_two_publication_windows() -> Result<(Vec<Shown>, us
         gate: Gate::default(),
         facts: std::sync::atomic::AtomicUsize::new(0),
     });
-    // The feed looks at the durable process when a commit ticks it, never
-    // on a cadence: nothing but the schedule decides what it reads.
-    let never = lash_core::runtime::PollPacing::new(
-        std::time::Duration::from_secs(3600),
-        std::time::Duration::from_secs(3600),
-    )
-    .expect("pacing");
+    // The feed looks at the durable process only when a commit ticks it:
+    // nothing but the schedule decides what it reads.
     let core = standard_core_builder_over(lash_conformance::backend_over(
         sqlite_memory_store_set().await,
     ))
     .process_replay_store(replay.clone())
-    .observer_pacing(crate::ObserverPacing {
-        process_reconcile: never,
-        ..crate::ObserverPacing::standard()
-    })
     .build(crate::testing::runtime_lease_owner())?;
     let registry = core.process_registry.clone();
     let process_id = registry

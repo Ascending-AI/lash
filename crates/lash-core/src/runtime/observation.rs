@@ -19,9 +19,9 @@ pub use process_replay::{
     ProcessObservationCursorError, ProcessObservationEvent, ProcessObservationEventPayload,
     ProcessObservationGapCause, ProcessObservationIdentity, ProcessReadView,
     ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason, ProcessReplayOutcome,
-    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
-    ProcessReplaySubscription, ProcessSequence, RetainedProcessView, StepBodyStartedObservation,
-    commits_bridge,
+    ProcessReplayPublishLimits, ProcessReplayStore, ProcessReplayStoreError,
+    ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence, RetainedProcessView,
+    StepBodyStartedObservation, commits_bridge,
 };
 pub(in crate::runtime) use replay::observation_revision;
 pub use replay::{

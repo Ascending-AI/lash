@@ -406,7 +406,8 @@ async fn write_once(shared: &Shared, batch: &[PublishRequest]) -> Result<Written
         let requests = batch
             .iter()
             .enumerate()
-            .filter(|(_, request)| request.process_id.as_str() == process);
+            .filter(|(_, request)| request.process_id.as_str() == process)
+            .collect::<Vec<_>>();
         if denied.contains(process) {
             for (index, _) in requests {
                 plans[index] = Planned::Refused(capacity_error());
@@ -417,7 +418,7 @@ async fn write_once(shared: &Shared, batch: &[PublishRequest]) -> Result<Written
             return Err(Attempt::Retry(Retry::Race));
         };
         let window = windows.entry(process.clone()).or_default();
-        for (index, request) in requests {
+        for (index, request) in requests.iter().copied() {
             let mut claimed = HashMap::<&str, &ProcessObservationEventPayload>::new();
             let mut accepted = Vec::new();
             let mut conflict = None;
@@ -450,14 +451,19 @@ async fn write_once(shared: &Shared, batch: &[PublishRequest]) -> Result<Written
             if let Some(error) = refusal {
                 // Neither a fact that contradicts the window nor a batch
                 // larger than it can be published: the process's
-                // continuity ends here.
+                // continuity ends here, and with it the tick for the
+                // process. The requests staged before this one lose their
+                // rows and those after it are not staged, so every one of
+                // them is refused alike.
                 head.invalidate();
                 window.clear();
                 rows.discard(process);
                 largest.remove(process.as_str());
                 doorbell.processes.insert(process.clone());
-                plans[index] = Planned::Refused(error);
-                continue;
+                for (index, _) in &requests {
+                    plans[*index] = Planned::Refused(error.clone());
+                }
+                break;
             }
             let start = head.tail + 1;
             for (slot, offset) in accepted.iter().enumerate() {

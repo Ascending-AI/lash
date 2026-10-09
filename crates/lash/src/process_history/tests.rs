@@ -122,7 +122,6 @@ impl Fixture {
                 )),
             ),
         );
-        let hour = std::time::Duration::from_secs(3600);
         crate::process_feed::ProcessFeedSource::new(
             self.process_id.clone(),
             Arc::clone(&self.registry),
@@ -134,7 +133,6 @@ impl Fixture {
             crate::process_feed::FeedReconcile {
                 publisher,
                 changes: lash_core::runtime::ProcessChangeHub::new(),
-                pacing: lash_core::runtime::PollPacing::new(hour, hour).expect("pacing"),
             },
         )
         .snapshot()

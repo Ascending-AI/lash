@@ -467,11 +467,6 @@ impl Dispatch {
                 crate::process_feed::FeedReconcile {
                     publisher: Arc::clone(&self.publisher),
                     changes: lash_core::runtime::ProcessChangeHub::new(),
-                    pacing: lash_core::runtime::PollPacing::new(
-                        Duration::from_secs(3600),
-                        Duration::from_secs(3600),
-                    )
-                    .expect("pacing"),
                 },
             ),
         }
@@ -640,8 +635,12 @@ async fn a_feed_whose_reconcile_publication_overflowed_gaps_and_keeps_delivering
     dispatch.commit_started(&followed).await;
 
     // The worker takes the noisy process's observation first and stalls in
-    // the store; the feed's reconciled fact waits behind it.
+    // the store; the feed's reconciled fact waits behind that round.
     dispatch.admit_language(&noisy, "stalled");
+    dispatch.publisher.start();
+    while dispatch.publisher.process.pending() > 0 {
+        tokio::task::yield_now().await;
+    }
     let mut feed = observed.subscribe_and_recover(snapshot.cursor);
     while dispatch.publisher.process.admitted() < 2 {
         assert!(

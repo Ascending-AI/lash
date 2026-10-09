@@ -268,9 +268,9 @@ pub use observation::{
     ProcessObservationCursorError, ProcessObservationEvent, ProcessObservationEventPayload,
     ProcessObservationGapCause, ProcessObservationIdentity, ProcessReadView,
     ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason, ProcessReplayOutcome,
-    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
-    ProcessReplaySubscription, ProcessSequence, RetainedProcessView, StepBodyStartedObservation,
-    commits_bridge,
+    ProcessReplayPublishLimits, ProcessReplayStore, ProcessReplayStoreError,
+    ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence, RetainedProcessView,
+    StepBodyStartedObservation, commits_bridge,
 };
 pub use observation_publisher::{ObservationSource, work_with_observations};
 pub use process::ProcessChangeSubscription;

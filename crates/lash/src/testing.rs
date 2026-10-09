@@ -307,3 +307,53 @@ impl<T: serde::de::DeserializeOwned> AdminFixtureOutcome
         }
     }
 }
+
+/// A core's language-observation dispatcher over a process replay store of
+/// the test's own: the bounded ingress and the worker a
+/// [`LashCore`](crate::LashCore) installs as its observation sink, for a law
+/// that measures what the dispatcher does to a store under load.
+pub struct LanguageObservationDispatcher {
+    publisher: std::sync::Arc<crate::language_observation::LanguageObservationPublisher>,
+}
+
+impl LanguageObservationDispatcher {
+    /// The dispatcher a core builds over `process_store`. Call it inside the
+    /// runtime its worker runs on.
+    pub fn over(process_store: std::sync::Arc<dyn lash_core::ProcessReplayStore>) -> Self {
+        Self {
+            publisher: std::sync::Arc::new(
+                crate::language_observation::LanguageObservationPublisher::new(
+                    process_store,
+                    std::sync::Arc::new(lash_core::facade_support::InMemoryLiveReplayStore::new(
+                        lash_core::facade_support::InMemoryLiveReplayStoreConfig::standard(),
+                    )),
+                ),
+            ),
+        }
+    }
+
+    /// Admit one language observation the way the VM's trace does: a
+    /// synchronous call that never waits on the store.
+    pub fn observe(&self, observation: lash_core::LanguageExecutionObservation) {
+        let record = lash_trace::TraceRecord {
+            schema_version: lash_trace::TRACE_SCHEMA_VERSION,
+            id: observation.execution.event_key.clone(),
+            content: lash_trace::TelemetryContent::Captured,
+            timestamp: (std::time::UNIX_EPOCH
+                + std::time::Duration::from_millis(observation.observed_at_ms))
+            .into(),
+            context: lash_trace::TraceContext::default(),
+            event: lash_trace::TraceEvent::LanguageExecution {
+                language: observation.language,
+                event: observation.execution,
+            },
+        };
+        // The dispatcher's sink never refuses a record.
+        let _ = lash_trace::TraceSink::append(self.publisher.as_ref(), &record);
+    }
+
+    /// Stop the dispatcher; an undrained observation is explicit loss.
+    pub async fn shutdown(&self) {
+        self.publisher.shutdown().await;
+    }
+}

@@ -476,7 +476,6 @@ mod pacing_laws {
             follow_buffer: std::num::NonZeroUsize::MIN.saturating_add(2),
             send_channel: std::num::NonZeroUsize::MIN.saturating_add(1),
             snapshot_read_attempts: std::num::NonZeroUsize::MIN.saturating_add(3),
-            process_reconcile: schedule,
         };
         let core = builder(backend)
             .serve_test_llm_profile(

@@ -1207,9 +1207,9 @@ pub mod process {
         ProcessObservationCursor, ProcessObservationCursorError, ProcessObservationEvent,
         ProcessObservationEventPayload, ProcessObservationGapCause, ProcessObservationIdentity,
         ProcessReadView, ProcessReplayEventDraft, ProcessReplayGap, ProcessReplayGapReason,
-        ProcessReplayOutcome, ProcessReplayStore, ProcessReplayStoreError,
-        ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
-        RetainedProcessView, StepBodyStartedObservation,
+        ProcessReplayOutcome, ProcessReplayPublishLimits, ProcessReplayStore,
+        ProcessReplayStoreError, ProcessReplaySubscribeOutcome, ProcessReplaySubscription,
+        ProcessSequence, RetainedProcessView, StepBodyStartedObservation,
     };
     #[cfg(feature = "rlm")]
     pub use lash_vm_runtime::{LASH_VM_ENGINE_KIND, LashVmProcessInput};

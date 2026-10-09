@@ -396,12 +396,10 @@ whose publication was dropped or refused, are the same gap. The feed stays
 open after it; only a failed read of the durable process ends a feed with an
 error.
 
-A tick can be lost, and a store may deliver no wake at all.
-`ObserverPacing::process_reconcile` is how long an open feed waits without a
-tick before it compares anyway: from its initial delay after a tick, backing
-off to its maximum (25 ms to 1 s in the standard preset). It bounds how stale
-an idle follower can be. No host timer, event-page loop or resubscribe is
-needed; a host only reads the feed.
+An idle feed reads nothing: it does not poll the durable process. A node
+whose wake listener lost its connection ticks every followed process when it
+resubscribes, so a wake missed in between is made up then. No host timer,
+event-page loop or resubscribe is needed; a host only reads the feed.
 
 What crosses cores this way is the committed facts. Provisional node events
 cross only through a shared replay store, as the next section says.

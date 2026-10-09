@@ -135,6 +135,17 @@ async fn publish(
         .expect("a fresh observation publishes")
 }
 
+/// The cursor everything the store retains for `process` comes after.
+async fn earliest(
+    store: &Arc<dyn ProcessReplayStore>,
+    process: &ProcessId,
+) -> ProcessObservationCursor {
+    store
+        .earliest_cursor(process, ProcessSequence::new(1))
+        .await
+        .expect("an earliest cursor")
+}
+
 async fn replay(
     store: &Arc<dyn ProcessReplayStore>,
     cursor: &ProcessObservationCursor,
@@ -575,5 +586,116 @@ async fn a_followed_process_idle_past_max_age_keeps_its_window() {
         next(&mut on_b).await.cursor,
         second.cursor,
         "the follower sees no gap"
+    );
+}
+
+/// FIG-5625: a VM hands its language observations to the dispatcher at VM
+/// speed, far faster than a store round trip. A burst of 1,000 for one
+/// process reaches the PostgreSQL store whole and in order: the process's
+/// subscriber sees every one of them and no invalidation, and the store keeps
+/// its incarnation. The store runs its production tick.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_burst_of_a_thousand_language_observations_is_published_without_invalidation() {
+    const BURST: usize = 1_000;
+    let database = IsolatedDatabase::create(&required_database_url()).await;
+    let store = connect(
+        database.url(),
+        with_data(&fresh_schema(), |data| {
+            data.publish_tick = ProcessReplayDataPolicy::default().publish_tick;
+        }),
+    );
+    let process = ProcessId::fixture("dispatcher-burst");
+    let before = earliest(&store, &process).await;
+    let mut subscription = subscribed(&store, &before).await;
+    let dispatcher = lash::testing::LanguageObservationDispatcher::over(Arc::clone(&store));
+
+    let started = std::time::Instant::now();
+    for index in 0..BURST {
+        let label = format!("burst-{index}");
+        dispatcher.observe(process_language_observation(&process, &label, &label));
+    }
+    let admitted = started.elapsed();
+    for index in 0..BURST {
+        let event = match next_item(&mut subscription).await {
+            Some(Ok(event)) => event,
+            other => panic!(
+                "observation {index} of {BURST} was lost to an invalidation: {:?}",
+                other.map(|item| item.map(|event| process_observation_label(&event)))
+            ),
+        };
+        assert_eq!(process_observation_label(&event), format!("burst-{index}"));
+    }
+    let published = started.elapsed();
+    println!(
+        "dispatcher burst: {BURST} observations admitted in {admitted:?}, published in \
+         {published:?} ({:.0}/s)",
+        BURST as f64 / published.as_secs_f64()
+    );
+    assert_eq!(
+        earliest(&store, &process)
+            .await
+            .parse()
+            .expect("cursor")
+            .replay_incarnation_id,
+        before.parse().expect("cursor").replay_incarnation_id,
+        "the store kept its incarnation"
+    );
+    dispatcher.shutdown().await;
+}
+
+/// FIG-5625: a conflicting redelivery ends its process's continuity for the
+/// whole tick. The publications of the process the tick had gathered before
+/// it lose their rows, and those behind it are not written, so every one of
+/// them is refused: none is answered with events the store does not hold.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_conflicting_redelivery_refuses_every_publication_of_its_process_in_the_tick() {
+    let database = IsolatedDatabase::create(&required_database_url()).await;
+    // A tick long enough to gather the three publications below.
+    let store = connect(
+        database.url(),
+        with_data(&fresh_schema(), |data| {
+            data.publish_tick = Duration::from_millis(500);
+        }),
+    );
+    let process = ProcessId::fixture("conflict-in-tick");
+    let other = ProcessId::fixture("conflict-bystander");
+    let before = earliest(&store, &process).await;
+    let draft = |owner: &ProcessId, key: &str, label: &str| {
+        vec![ProcessReplayEventDraft::language_execution(
+            ProcessSequence::new(1),
+            process_language_observation(owner, key, label),
+        )]
+    };
+    // Polled in order, so the tick gathers them in this order.
+    let (first, conflicting, behind, bystander) = tokio::join!(
+        store.publish(&process, draft(&process, "one", "first fact")),
+        store.publish(&process, draft(&process, "one", "another fact")),
+        store.publish(&process, draft(&process, "two", "behind the conflict")),
+        store.publish(&other, draft(&other, "one", "bystander")),
+    );
+    for (name, answer) in [
+        ("staged before the conflict", first),
+        ("the conflict", conflicting),
+        ("behind the conflict", behind),
+    ] {
+        assert!(
+            matches!(
+                answer,
+                Err(ProcessReplayStoreError::ConflictingRedelivery { .. })
+            ),
+            "{name}: {:?}",
+            answer.map(|events| cursors(&events))
+        );
+    }
+    assert_eq!(bystander.expect("another process publishes").len(), 1);
+    assert_eq!(
+        replay(&store, &before).await.map(|events| cursors(&events)),
+        Err(ProcessReplayGapReason::Unavailable)
+    );
+    // The process's next generation holds nothing of the refused tick.
+    let after = earliest(&store, &process).await;
+    assert_eq!(
+        replay(&store, &after).await.map(|events| cursors(&events)),
+        Ok(Vec::new())
     );
 }

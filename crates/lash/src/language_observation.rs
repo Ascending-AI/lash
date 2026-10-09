@@ -1,5 +1,7 @@
 //! Language facts enter bounded replay outside VM execution. Each class has
-//! its own count/byte budget and worker; process facts keep one FIFO barrier.
+//! its own count/byte budget and worker; a process's facts keep one FIFO
+//! barrier, and the process class's count budget follows from how its store
+//! takes batches.
 //! A process fact too large to admit loses its own process's continuity, in
 //! its place in that FIFO; a queue that overflows loses every process's.
 
@@ -44,14 +46,12 @@ impl LanguageObservationPublisher {
         process_store: Arc<dyn ProcessReplayStore>,
         session_store: Arc<dyn LiveReplayStore>,
     ) -> Self {
-        Self::with_limits(
-            process_store,
-            session_store,
-            ingress::MAX_EVENTS,
-            ingress::MAX_BYTES,
-        )
+        let events = ingress::process_events(process_store.publish_limits());
+        Self::with_limits(process_store, session_store, events, ingress::MAX_BYTES)
     }
 
+    /// A dispatcher whose process class admits `events` events and whose
+    /// classes each admit `bytes` bytes.
     fn with_limits(
         process_store: Arc<dyn ProcessReplayStore>,
         session_store: Arc<dyn LiveReplayStore>,
@@ -60,7 +60,7 @@ impl LanguageObservationPublisher {
     ) -> Self {
         Self {
             process: Arc::new(Channel::new(Ingress::new(events, bytes))),
-            session: Arc::new(Channel::new(Ingress::new(events, bytes))),
+            session: Arc::new(Channel::new(Ingress::new(ingress::MAX_EVENTS, bytes))),
             process_store,
             session_store,
             committing: Arc::default(),

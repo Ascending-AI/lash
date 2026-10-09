@@ -346,6 +346,22 @@ impl Drop for PostgresProcessReplayStore {
 
 #[async_trait::async_trait]
 impl ProcessReplayStore for PostgresProcessReplayStore {
+    /// As many publications at once as the publisher runs transactions;
+    /// each of at most what one tick gathers and a quarter of a process's
+    /// window, so one batch never displaces what a subscriber has yet to
+    /// read of the batch before it.
+    fn publish_limits(&self) -> lash_core::ProcessReplayPublishLimits {
+        let config = &self.shared.config;
+        lash_core::ProcessReplayPublishLimits::new(
+            config.publish_concurrency,
+            config
+                .max_batch_events
+                .min(config.max_events_per_process / 4)
+                .min(config.max_pending_events),
+            (config.max_bytes_per_process / 4).min(config.max_pending_bytes),
+        )
+    }
+
     async fn publish(
         &self,
         process_id: &ProcessId,

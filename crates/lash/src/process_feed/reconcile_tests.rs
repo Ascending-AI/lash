@@ -19,7 +19,7 @@ fn committed_sequence(item: ProcessObservationStreamItem) -> u64 {
 
 /// The last after-commit publication is dropped: the commit never reaches
 /// the replay store. An idle feed, already attached, still delivers the
-/// fact itself, woken by the commit's tick alone; its cadence is an hour.
+/// fact itself, woken by the commit's tick alone; it has no cadence.
 #[tokio::test]
 async fn an_idle_follower_recovers_a_commit_whose_publication_was_dropped() {
     let mut fixture = Fixture::new().await;
@@ -38,23 +38,6 @@ async fn an_idle_follower_recovers_a_commit_whose_publication_was_dropped() {
     assert_eq!(fixture.publish(&dropped).await, 0);
     let after = fixture.commit_published().await;
     assert_eq!(committed_sequence(next(&mut feed).await), after.sequence);
-}
-
-/// The wake is lost as well: nothing ticks the feed. It finds the commit on
-/// its reconcile cadence.
-#[tokio::test]
-async fn an_idle_follower_recovers_on_its_cadence_when_the_wake_is_lost_too() {
-    let mut fixture = Fixture::new().await;
-    fixture.reconcile.pacing =
-        PollPacing::new(Duration::from_millis(10), Duration::from_millis(10)).expect("pacing");
-    let observed = fixture.observe();
-    let snapshot = observed.snapshot().await.expect("snapshot");
-    let mut feed = observed.subscribe_and_recover(snapshot.cursor);
-
-    let first = fixture.commit().await;
-    let second = fixture.commit().await;
-    assert_eq!(committed_sequence(next(&mut feed).await), first.sequence);
-    assert_eq!(committed_sequence(next(&mut feed).await), second.sequence);
 }
 
 /// Facts the feed cannot read any more are a gap with the durable process,
@@ -136,7 +119,7 @@ async fn a_follower_behind_the_bridge_bound_gaps_and_republishes_nothing() {
 }
 
 /// One node of a SQLite database file: a core of its own over a store set
-/// of its own, whose feeds reconcile without a tick only every hour.
+/// of its own.
 async fn core_on(
     database: &std::path::Path,
     node: &str,
@@ -151,10 +134,6 @@ async fn core_on(
     );
     let core =
         crate::tests::standard_core_builder_over(lash_conformance::backend_over(stores.clone()))
-            .observer_pacing(crate::ObserverPacing {
-                process_reconcile: PollPacing::new(NO_CADENCE, NO_CADENCE).expect("pacing"),
-                ..crate::ObserverPacing::standard()
-            })
             .build(lash_core::LeaseOwnerIdentity::opaque(
                 node,
                 format!("{node}-boot"),
@@ -166,8 +145,8 @@ async fn core_on(
 /// Two cores serve one SQLite file as two nodes, each with a replay store of
 /// its own. Core A follows a process it executes nothing of; core B commits
 /// the process's terminal. A's feed delivers the terminal fact, with no host
-/// timer and no local trace: its own cadence is an hour, so it came by B's
-/// node wake.
+/// timer and no local trace: a feed has no cadence, so it came by B's node
+/// wake.
 #[tokio::test]
 async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
     let dir = tempfile::tempdir().expect("two-core tempdir");
@@ -234,4 +213,177 @@ async fn a_follower_on_one_core_observes_the_terminal_another_core_commits() {
         }
     }
     assert_eq!(sequence, terminal.last_event_sequence);
+}
+
+/// A replay store that counts the drafts handed to it and, while held,
+/// keeps every publication waiting: a store slower than a task wake.
+struct HeldReplay {
+    inner: InMemoryProcessReplayStore,
+    drafts: std::sync::atomic::AtomicUsize,
+    open: tokio::sync::watch::Sender<bool>,
+}
+
+#[async_trait::async_trait]
+impl ProcessReplayStore for HeldReplay {
+    async fn publish(
+        &self,
+        process_id: &ProcessId,
+        events: Vec<ProcessReplayEventDraft>,
+    ) -> std::result::Result<Vec<Arc<ProcessObservationEvent>>, ProcessReplayStoreError> {
+        self.drafts
+            .fetch_add(events.len(), std::sync::atomic::Ordering::SeqCst);
+        let _ = self.open.subscribe().wait_for(|open| *open).await;
+        self.inner.publish(process_id, events).await
+    }
+
+    async fn replay_after_cursor(
+        &self,
+        cursor: &ProcessObservationCursor,
+    ) -> std::result::Result<lash_core::ProcessReplayOutcome, ProcessReplayStoreError> {
+        self.inner.replay_after_cursor(cursor).await
+    }
+
+    async fn subscribe_after_cursor(
+        &self,
+        cursor: &ProcessObservationCursor,
+    ) -> std::result::Result<ProcessReplaySubscribeOutcome, ProcessReplayStoreError> {
+        self.inner.subscribe_after_cursor(cursor).await
+    }
+
+    async fn earliest_cursor(
+        &self,
+        process_id: &ProcessId,
+        sequence: ProcessSequence,
+    ) -> std::result::Result<ProcessObservationCursor, ProcessReplayStoreError> {
+        self.inner.earliest_cursor(process_id, sequence).await
+    }
+
+    async fn invalidate_process(
+        &self,
+        process_id: &ProcessId,
+    ) -> std::result::Result<(), ProcessReplayStoreError> {
+        self.inner.invalidate_process(process_id).await
+    }
+
+    async fn invalidate_all(&self) -> std::result::Result<(), ProcessReplayStoreError> {
+        self.inner.invalidate_all().await
+    }
+}
+
+/// FIG-5625: a commit made on a feed's own node is published to the replay
+/// store once, however many feeds are open and however slow the store. The
+/// feeds are ticked only once the dispatcher holds the commit, wait for its
+/// publication and take the fact from the live tail: none of them reads the
+/// durable log to publish it again.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_local_commit_is_published_once_however_many_feeds_are_open() {
+    const FEEDS: usize = 8;
+    let replay = Arc::new(HeldReplay {
+        inner: InMemoryProcessReplayStore::new(InMemoryProcessReplayStoreConfig::standard()),
+        drafts: std::sync::atomic::AtomicUsize::new(0),
+        open: tokio::sync::watch::channel(true).0,
+    });
+    let stores = crate::tests::sqlite_memory_store_set().await;
+    lash_core::testing::process_execution_env_fixture(stores.process_env_store().as_ref()).await;
+    let core = crate::tests::standard_core_builder_over(lash_conformance::backend_over(stores))
+        .process_replay_store(replay.clone())
+        .build(crate::testing::runtime_lease_owner())
+        .expect("standard core");
+    let registry = core.process_registry.clone();
+    let process_id = registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::testing::held_engine_input(serde_json::Value::Null),
+                lash_core::ProcessProvenance::host(),
+                lash_core::Lifetime::Detached,
+            )
+            .with_execution_env_ref(Some(lash_core::testing::process_execution_env_fixture_ref())),
+        )
+        .await
+        .expect("register the process")
+        .id;
+
+    let observed = core.processes().observe(&process_id);
+    let (items, mut delivered) = tokio::sync::mpsc::unbounded_channel();
+    for feed in 0..FEEDS {
+        let snapshot = observed.snapshot().await.expect("snapshot");
+        let mut stream = observed.subscribe_and_recover(snapshot.cursor);
+        let items = items.clone();
+        tokio::spawn(async move {
+            while let Some(item) = stream.next().await {
+                if items.send((feed, item.expect("the feed reads"))).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+    // Every feed is subscribed once it delivered this provisional event.
+    replay
+        .inner
+        .publish(
+            &process_id,
+            vec![ProcessReplayEventDraft::language_execution(
+                ProcessSequence::new(0),
+                lash_core::testing::process_language_observation(&process_id, "open", "open"),
+            )],
+        )
+        .await
+        .expect("publish a provisional event");
+    let mut next = async |what: &str| {
+        tokio::time::timeout(Duration::from_secs(30), delivered.recv())
+            .await
+            .unwrap_or_else(|_| panic!("every feed delivers {what}"))
+            .expect("the feeds are open")
+    };
+    for _ in 0..FEEDS {
+        let (_, ProcessObservationStreamItem::Event(_)) = next("the provisional event").await
+        else {
+            panic!("an attached feed never gaps here");
+        };
+    }
+
+    let held = observed
+        .snapshot()
+        .await
+        .expect("snapshot")
+        .read_view
+        .sequence()
+        .as_u64();
+    let before = replay.drafts.load(std::sync::atomic::Ordering::SeqCst);
+    replay.open.send_replace(false);
+    let terminal = registry
+        .complete_process(
+            &process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::workflow_key(&process_id),
+        )
+        .await
+        .expect("complete the process");
+    // Long enough for every ticked feed to act on a store that has not
+    // published the commit yet.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    replay.open.send_replace(true);
+
+    let mut finished = 0;
+    while finished < FEEDS {
+        let (feed, item) = next("the committed facts").await;
+        let ProcessObservationStreamItem::Event(event) = item else {
+            panic!("feed {feed} gapped on a commit of its own node");
+        };
+        if let ProcessObservationEventPayload::Committed { event: fact } = &event.payload
+            && fact.sequence == terminal.last_event_sequence
+        {
+            finished += 1;
+        }
+    }
+    // A republication would be queued behind the commit's own by now.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        replay.drafts.load(std::sync::atomic::Ordering::SeqCst) - before,
+        (terminal.last_event_sequence - held) as usize,
+        "each committed fact is handed to the replay store once"
+    );
+    core.shutdown().await.expect("stop the core");
 }

@@ -189,6 +189,17 @@ impl InMemoryProcessReplayStore {
 
 #[async_trait::async_trait]
 impl ProcessReplayStore for InMemoryProcessReplayStore {
+    /// One publication at a time, since every one takes the store's lock;
+    /// each of at most a quarter of a process's window, so one batch never
+    /// displaces what a subscriber has yet to read of the batch before it.
+    fn publish_limits(&self) -> super::ProcessReplayPublishLimits {
+        super::ProcessReplayPublishLimits::new(
+            1,
+            self.config.max_events_per_process / 4,
+            self.config.max_bytes_per_process / 4,
+        )
+    }
+
     async fn publish(
         &self,
         process_id: &ProcessId,
