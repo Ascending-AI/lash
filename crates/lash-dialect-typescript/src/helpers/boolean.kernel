@@ -1,4 +1,7 @@
 # JavaScript boolean behavior, expressed in kernel code.
+use error.new
+use kind
+use same
 use ts.boolean.convert
 use ts.boolean.toString
 use ts.boolean.valueOf
@@ -21,7 +24,8 @@ kernel 1
 errors "type_error", "RangeError"
 charge sum(8, deep(result))
 body {
-  return this
+  if same(kind(this), "bool") { return this }
+  throw error.new("type_error", "Boolean receiver required", null)
 }
 
 function ts.boolean.toString(this: Any, args: List(Any)) -> Any

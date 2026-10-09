@@ -680,3 +680,14 @@ fn array_search_returns_positive_zero_and_empty_shift_skips_index_zero() {
         ]),
     );
 }
+
+/// Boolean.valueOf requires a Boolean receiver.
+#[test]
+fn borrowed_boolean_value_of_rejects_other_kinds() {
+    assert_finished(
+        execute(
+            "let typeError = false; try { Boolean.prototype.valueOf.call({}); } catch (e) { typeError = e.name === 'TypeError'; } finish(typeError);",
+        ),
+        Datum::Bool(true),
+    );
+}
