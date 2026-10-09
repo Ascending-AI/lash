@@ -258,13 +258,29 @@ impl ProcessDefinitionRef {
 pub struct ProcessDefinitionResolution {
     /// The authoritative signature, read from the engine's stored artifact.
     pub signature: ProcessSignature,
+    /// The other definitions the same artifact defines: what a process of
+    /// this definition can start by value with nobody publishing them. Every
+    /// referrer that holds the definition holds these with it (ADR 0113
+    /// §3.6). Empty for an engine whose artifacts define one process each.
+    pub siblings: Vec<super::definition::ProcessDefinitionDraft>,
 }
 
 impl ProcessDefinitionResolution {
     pub fn new(signature: impl Into<ProcessSignature>) -> Self {
         Self {
             signature: signature.into(),
+            siblings: Vec::new(),
         }
+    }
+
+    /// Name the definitions the artifact defines beside this one.
+    #[must_use]
+    pub fn with_siblings(
+        mut self,
+        siblings: impl IntoIterator<Item = super::definition::ProcessDefinitionDraft>,
+    ) -> Self {
+        self.siblings = siblings.into_iter().collect();
+        self
     }
 }
 

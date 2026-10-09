@@ -58,6 +58,28 @@ impl InspectedArtifact {
             process_name: name.to_owned(),
         })
     }
+    /// The definition descriptor of every process the module exports, by
+    /// export name: what a holder of the module can start (ADR 0113 §3.6).
+    pub fn definition_drafts(
+        &self,
+    ) -> Result<
+        Vec<(&str, lash_core_execution::ProcessDefinitionDraft)>,
+        lash_core_execution::ProcessDefinitionDraftError,
+    > {
+        self.exports
+            .processes
+            .iter()
+            .map(|(name, process_ref)| {
+                let identity = lash_vm::ProcessDefinitionIdentity {
+                    module_ref: self.module_ref.clone(),
+                    host_requirements_ref: self.host_requirements_ref.clone(),
+                    process_ref: process_ref.clone(),
+                    process_name: name.clone(),
+                };
+                Ok((name.as_str(), identity.draft()?))
+            })
+            .collect()
+    }
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }

@@ -108,10 +108,22 @@ async fn run(
         .publish_process_env(pin, &environment())
         .await
         .expect("publish the process environment");
+    let process_id = start(core, &env_ref, definition, key, ("name", "operator")).await;
+    let value = finished(core, &process_id).await;
+    (process_id, value)
+}
+
+/// Starts `definition` with one string argument under the host key `key`.
+async fn start(
+    core: &LashCore,
+    env_ref: &lash_core::ProcessExecutionEnvRef,
+    definition: &lash_core::ProcessDefinition,
+    key: &str,
+    (name, value): (&str, &str),
+) -> lash_core::ProcessId {
     let mut args = serde_json::Map::new();
-    args.insert("name".to_owned(), serde_json::json!("operator"));
-    let process_id = core
-        .processes()
+    args.insert(name.to_owned(), serde_json::json!(value));
+    core.processes()
         .start(
             lash_core::ProcessStartRequest::new(
                 lash_core::ProcessStartTarget::Definition {
@@ -123,15 +135,19 @@ async fn run(
                 lash_core::LifetimeDecision::Detached,
             )
             .with_host_start_key(key)
-            .with_env_ref(env_ref),
+            .with_env_ref(env_ref.clone()),
             core.effect_host(),
         )
         .await
         .expect("the process starts")
-        .process_id;
+        .process_id
+}
+
+/// What the process finished with.
+async fn finished(core: &LashCore, process_id: &lash_core::ProcessId) -> serde_json::Value {
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        core.processes().await_output(&process_id),
+        core.processes().await_output(process_id),
     )
     .await
     .expect("the process settles")
@@ -140,7 +156,7 @@ async fn run(
         panic!("the process settles with an output: {output:?}");
     };
     assert!(output.is_success(), "the process finishes: {output:?}");
-    (process_id, output.value_for_projection())
+    output.value_for_projection()
 }
 
 /// Inspect, edit inside a `try` region, publish and run, on typed IR alone.
@@ -400,6 +416,108 @@ async fn typescript_imports_into_the_same_publication_and_exports_as_a_source_vi
             .nodes()
             .all(|node| view.spans.contains_key(&node.id)),
         "every node has a span: {view:?}"
+    );
+    core.shutdown().await.expect("the core shuts down");
+}
+
+/// A workflow that defines a process inline and starts it by value.
+const SUPERVISOR: &str = r#"const supervise = async (stage: string) => {
+  const audit = async (stage: string) => {
+    return `audited ${stage}`;
+  };
+  const started = await processes.start({ definition: audit, args: { stage } });
+  return await started;
+};
+"#;
+
+/// FIG-5621: one publication stores a definition for every process the
+/// admitted module exports, and a started process holds the definitions its
+/// module can start (ADR 0113 §3.6). The host publishes the workflow once,
+/// starts it and releases its pin; the run starts its inline process and
+/// finishes. Once the pin's edges are severed, the definition and its
+/// sibling are still startable through the first process's record alone.
+#[tokio::test]
+async fn a_published_workflow_starts_its_inline_process_after_the_host_pin_is_released() {
+    let backend = sqlite_memory_store_backend().await;
+    let factory = rlm_factory(&backend);
+    let core = explicit_ephemeral_facets(LashCore::rlm_builder(backend, factory))
+        .plugin(Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
+        ))
+        .build(crate::testing::runtime_lease_owner())
+        .expect("the core builds");
+    let artifacts = core.host_artifacts();
+    let pin = crate::process::HostArtifactPin::mint();
+    let imported = lash_typescript::workflow_graph::workflow_graph_from_source(SUPERVISOR)
+        .expect("the supervisor lowers");
+    let draft = WorkflowDraft::open(&imported).expect("the import opens");
+    // The workflow is the process the source's main body defines; its
+    // inline process is the one lifted out of it.
+    let entry = draft
+        .document()
+        .declarations
+        .iter()
+        .find_map(|declaration| match declaration {
+            lash_vm::WorkflowDeclaration::Process(process)
+                if matches!(
+                    &process.origin,
+                    lash_vm::ProcessOrigin::Lifted { site, .. } if site.root == lash_vm::AstRoot::Main
+                ) =>
+            {
+                Some(process.id.clone())
+            }
+            _ => None,
+        })
+        .expect("the workflow's process");
+    let supervise = published(
+        artifacts
+            .publish_workflow(&pin, &draft, WorkflowEntry::Process(entry), &environment())
+            .await
+            .expect("the publication answers"),
+    )
+    .definition;
+    // Only the pin holds this one: it is gone once the pin's end is applied.
+    let witness = published(
+        publish(
+            &core,
+            &pin,
+            &WorkflowDraft::open(&guarded()).expect("the IR opens"),
+        )
+        .await,
+    )
+    .definition;
+    let env_ref = artifacts
+        .publish_process_env(&pin, &environment())
+        .await
+        .expect("publish the process environment");
+
+    let first = start(&core, &env_ref, &supervise, "supervise-1", ("stage", "one")).await;
+    artifacts.release(pin).await.expect("the pin releases");
+    assert_eq!(
+        finished(&core, &first).await,
+        serde_json::json!("audited one"),
+        "the run starts its inline process with the pin released"
+    );
+
+    tokio::time::timeout(std::time::Duration::from_secs(60), async {
+        while artifacts
+            .get_definition(&witness.id)
+            .await
+            .expect("the witness reads")
+            .is_some()
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the released pin's edges are severed");
+    let second = start(&core, &env_ref, &supervise, "supervise-2", ("stage", "two")).await;
+    assert_eq!(
+        finished(&core, &second).await,
+        serde_json::json!("audited two"),
+        "the first process's record holds the workflow and its inline process"
     );
     core.shutdown().await.expect("the core shuts down");
 }

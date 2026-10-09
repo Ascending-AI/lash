@@ -394,8 +394,16 @@ versions; lash has no named definition registry or definition CAS
 `crates/lash-core-execution/src/runtime/process/definition_store.rs:4-25`).
 
 Every reader holds the descriptor and complete manifest under the same
-referrer. The engine checks the manifest and derives the signature before
-publication or acquisition. Engine-owned entries are prepared first under
+referrer, and with them the descriptor's siblings: the other definitions
+its engine says the same artifact defines (for Lash VM, every process the
+module exports, a lifted inline process among them). A process starts a
+sibling by value, so publication and acquisition publish each sibling's
+descriptor under the same referrer before the descriptor's own edge commits,
+and a start's cleanup carries them onto its record. Siblings are not in the
+manifest, which is in the id's preimage: they name each other. A host
+therefore publishes a workflow once, and a started process starts its
+siblings after the host's pin is released (FIG-5621). The engine checks the
+manifest and derives the signature before publication or acquisition. Engine-owned entries are prepared first under
 the claim, with a guard where it has one; the descriptor and SQL-owned
 entries commit together. A usable result is exposed only after this closure
 is held. Partial preparations stay under their referrer's end rule

@@ -81,11 +81,10 @@ pub(super) async fn publish_cell_module(
         module_ref: artifact.module_ref().to_string(),
         bytes: String::from_utf8(artifact.bytes().to_vec()).map_err(|error| error.to_string())?,
     };
-    for name in artifact.exports().processes.keys() {
-        let identity = artifact
-            .definition_identity(name)
-            .ok_or_else(|| format!("module has no process `{name}`"))?;
-        let draft = identity.draft().map_err(|error| error.to_string())?;
+    for (_, draft) in artifact
+        .definition_drafts()
+        .map_err(|error| error.to_string())?
+    {
         let definition = ctx
             .publish_compiled_definition(
                 format!("literal-definition:{}", draft.id()),

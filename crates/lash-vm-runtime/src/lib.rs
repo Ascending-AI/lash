@@ -1026,9 +1026,19 @@ impl lash_core::ProcessEngine for LashVmProcessEngine {
         let process_type = artifact
             .process_type(&identity)
             .map_err(|error| unresolvable(error.to_string()))?;
-        Ok(lash_core::ProcessDefinitionResolution::new(
-            lash_core::ProcessSignature::known(lash_vm_type_expr_schema(&process_type)),
-        ))
+        // Every process the module exports: a process of this definition
+        // starts the others by value, a lifted process among them.
+        let siblings = artifact
+            .definition_drafts()
+            .map_err(|error| unresolvable(error.to_string()))?
+            .into_iter()
+            .map(|(_, draft)| draft);
+        Ok(
+            lash_core::ProcessDefinitionResolution::new(lash_core::ProcessSignature::known(
+                lash_vm_type_expr_schema(&process_type),
+            ))
+            .with_siblings(siblings),
+        )
     }
 
     /// A lash_vm start names one artifact: its module, in the store set's

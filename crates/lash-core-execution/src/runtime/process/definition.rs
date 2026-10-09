@@ -61,8 +61,8 @@ use serde::{Deserialize, Serialize};
 use crate::{ArtifactName, ArtifactStoreId};
 
 use super::definition_ref::{
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionValue, ProcessEngineKind,
-    ProcessSignature,
+    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+    ProcessDefinitionValue, ProcessEngineKind, ProcessSignature,
 };
 use super::engine::ProcessEngineRegistry;
 
@@ -380,9 +380,39 @@ impl ProcessEngineRegistry {
         &self,
         draft: &ProcessDefinitionDraft,
     ) -> Result<ProcessDefinition, ProcessDefinitionRefusal> {
-        self.check_definition_manifest(draft)?;
-        let resolution = self.resolve(&draft.unclaimed_reference()).await?;
+        let resolution = self.resolve_definition(draft).await?;
         Ok(ProcessDefinition::new(draft.id(), resolution.signature))
+    }
+
+    /// What `draft`'s owning engine says of it: its signature and the
+    /// sibling definitions its artifact defines, each a descriptor of the
+    /// same engine with a checked manifest and none of them `draft` itself.
+    ///
+    /// # Errors
+    ///
+    /// The engine's [`ProcessDefinitionRefusal`], for `draft` or for a
+    /// sibling it names.
+    pub async fn resolve_definition(
+        &self,
+        draft: &ProcessDefinitionDraft,
+    ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal> {
+        self.check_definition_manifest(draft)?;
+        let mut resolution = self.resolve(&draft.unclaimed_reference()).await?;
+        let id = draft.id();
+        resolution.siblings.retain(|sibling| sibling.id() != id);
+        for sibling in &resolution.siblings {
+            if sibling.engine_kind != draft.engine_kind {
+                return Err(ProcessDefinitionRefusal::UnresolvableDefinition {
+                    engine_kind: draft.engine_kind.clone(),
+                    message: format!(
+                        "definition `{id}` names a sibling of engine `{}`",
+                        sibling.engine_kind.as_str()
+                    ),
+                });
+            }
+            self.check_definition_manifest(sibling)?;
+        }
+        Ok(resolution)
     }
 
     /// Refuses a draft whose manifest is not exactly the set of artifacts its

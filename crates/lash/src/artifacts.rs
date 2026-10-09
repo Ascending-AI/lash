@@ -102,7 +102,9 @@ impl HostArtifacts {
 
     /// Publish `draft` and hold it under `pin`: its descriptor and every
     /// artifact of its manifest, which the host published under the same pin
-    /// first. Answers the definition with the signature its engine derives.
+    /// first, and the sibling definitions its engine names (the other
+    /// processes of its module). Answers the definition with the signature
+    /// its engine derives.
     /// Equal content publishes to the same id and changes nothing; a released
     /// pin, a draft its engine refuses and conflicting bytes under an
     /// existing id are refused.
@@ -117,8 +119,9 @@ impl HostArtifacts {
             .await?)
     }
 
-    /// Hold the definition `id` names under `pin`: its descriptor and its
-    /// whole manifest, checked by its engine first. This is how a host keeps
+    /// Hold the definition `id` names under `pin`: its descriptor, its
+    /// whole manifest and its sibling definitions, checked by its engine
+    /// first. This is how a host keeps
     /// a definition available between starts; the id alone holds nothing. A
     /// definition nothing holds any more is `DefinitionMissing`, and a
     /// released pin is refused.
@@ -157,7 +160,9 @@ impl HostArtifacts {
 
     /// Admit the document `draft` exports as a definition and hold it under
     /// `pin`: the module the linker derives from it and the descriptor of
-    /// the process `entry` selects.
+    /// every process that module exports. The answer names the one `entry`
+    /// selects; the others are what a process of it starts by value, an
+    /// inline process among them, so one publication is all a run needs.
     ///
     /// Lash reconstructs the document's IR in its VM workers and links it
     /// against `environment`, the environment a process of the definition
@@ -211,8 +216,9 @@ impl HostArtifacts {
                 return Ok(WorkflowPublish::Refused(refusal));
             }
         };
-        // The module is held under the pin from here; the descriptor joins
-        // it, checked by the engine against the stored module.
+        // The module is held under the pin from here; the entry's
+        // descriptor joins it, checked by the engine against the stored
+        // module, with the descriptor of every other process it exports.
         let definition = self
             .definition_ports
             .publish_definition(&self.engines, &claim, &admitted.draft)

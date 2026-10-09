@@ -198,7 +198,8 @@ Lash reconstructs the document's IR in its VM workers and links it against
 including the tool catalogue its plugins resolve. It then publishes the
 module and the definition of the selected entry (`WorkflowEntry::Sole`, or
 `WorkflowEntry::Process(id)` when the document exports several) under your
-pin.
+pin. Every other process the document defines, an inline process among
+them, is published with it, so one publication is all a run needs.
 
 - **Nothing the document says about itself is trusted.** Ids, types,
   signatures, lifted processes and host requirements are derived again.

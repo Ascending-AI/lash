@@ -485,7 +485,7 @@ impl ArtifactCleanupRelay {
 
     /// Every artifact the retained record names: its environment, its
     /// engine's start artifacts and, for a start by id, its definition's
-    /// descriptor and manifest.
+    /// descriptor and manifest and those of its sibling definitions.
     async fn retained_names(
         &self,
         retained: &RetainedStart,
@@ -511,6 +511,24 @@ impl ArtifactCleanupRelay {
                         undecodable(format!("stored definition `{definition_id}`: {error}"))
                     })?;
                 names.extend(draft.artifacts().iter().cloned());
+                // Whoever holds a descriptor holds its siblings (§3.6), so
+                // the record takes them from `Start(key)` with it: the
+                // process can start them once every other holder is gone.
+                let resolution = self
+                    .ports
+                    .engines
+                    .resolve_definition(&draft)
+                    .await
+                    .map_err(|refusal| {
+                        retryable("definition siblings")(PluginError::from(refusal))
+                    })?;
+                for sibling in &resolution.siblings {
+                    names.push(ArtifactName {
+                        store: ArtifactStoreId::ProcessDefinition,
+                        artifact_ref: sibling.id().as_str().to_owned(),
+                    });
+                    names.extend(sibling.artifacts().iter().cloned());
+                }
             }
         }
         if let Some(env_ref) = &retained.env_ref {
