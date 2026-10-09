@@ -66,7 +66,7 @@ Evidence: `crates/lash-vm/src/artifact.rs`,
 
 A subscription names one minted process id. Publication positions are
 contiguous only within a publisher epoch. The process cursor is
-`lashpc3:<epoch>:<process-reference>:<position>:<sequence>`.
+`lashpo1:<incarnation>:<sequence>:<position>:<process-id>`.
 The reference is the minted process id; position is the live publication
 position and sequence is the durable event high-water mark.
 
@@ -83,8 +83,8 @@ bounded and uses Full payloads with typed retention outcomes. Live completeness
 and durable completeness are separate. Missing observations stay unknown.
 Durable publication follows the commit through the process sink.
 
-Evidence: `crates/lash-sansio/src/process_cursor.rs:1`, `:55`,
-`crates/lash/src/process_observation.rs:1`, `:48`, `:591`, `:725`, and
+Evidence: `crates/lash-core/src/runtime/observation/process_replay.rs`,
+`crates/lash/src/process_feed.rs`, and
 `crates/lash-core-execution/src/runtime/process/observation.rs`.
 
 ### R3: logical identity is not publication position
@@ -138,7 +138,7 @@ identity is the minted id, with no additional process-incarnation component.
 
 Evidence: `crates/lash-trace/src/workflow_overlay/model.rs`,
 `crates/lash-vm-runtime/src/host_identity.rs:1`, and
-`crates/lash-sansio/src/process_cursor.rs:55`.
+`crates/lash-core/src/runtime/observation/process_replay.rs`.
 
 ### R6: expose the admitted artifact's identity
 

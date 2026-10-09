@@ -135,16 +135,6 @@ async fn publish(
         .expect("a fresh observation publishes")
 }
 
-async fn current(
-    store: &Arc<dyn ProcessReplayStore>,
-    process: &ProcessId,
-) -> ProcessObservationCursor {
-    store
-        .current_cursor(process, ProcessSequence::new(1))
-        .await
-        .expect("a current cursor")
-}
-
 async fn replay(
     store: &Arc<dyn ProcessReplayStore>,
     cursor: &ProcessObservationCursor,
@@ -229,8 +219,7 @@ async fn execute(url: &str, statement: &str) {
 
 /// Writers on two replicas racing on one process share one gap-free
 /// position order, a subscriber on B sees A's events live in that order
-/// without contacting A, and B's cursor for a stale snapshot sits before
-/// what A published at a newer sequence.
+/// without contacting A.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn writers_on_two_replicas_share_one_gap_free_order_that_both_observe() {
     let Replicas {
@@ -241,7 +230,7 @@ async fn writers_on_two_replicas_share_one_gap_free_order_that_both_observe() {
     } = replicas(|_| {}).await;
     let process = ProcessId::fixture("replicated");
     let start = b
-        .current_cursor(&process, ProcessSequence::new(0))
+        .earliest_cursor(&process, ProcessSequence::new(0))
         .await
         .expect("a start cursor on B");
     let mut on_b = subscribed(&b, &start).await;
@@ -289,22 +278,6 @@ async fn writers_on_two_replicas_share_one_gap_free_order_that_both_observe() {
         live.iter()
             .any(|event| process_observation_label(event).starts_with('a')),
         "B's subscriber sees events A published"
-    );
-    assert_eq!(
-        current(&b, &process)
-            .await
-            .parse()
-            .expect("parse")
-            .live_position,
-        first + 2 * BATCHES as u64 - 1,
-        "B's current cursor is the shared tail"
-    );
-    assert_eq!(
-        b.current_cursor(&process, ProcessSequence::new(0))
-            .await
-            .expect("a stale cursor on B"),
-        start,
-        "a snapshot older than every event replays them all"
     );
 }
 
@@ -398,8 +371,9 @@ async fn a_missing_sentinel_rotates_the_incarnation_for_every_replica() {
         "B's subscription into the lost history closes, got {ended:?}"
     );
     assert_eq!(
-        current(&b, &process)
+        b.earliest_cursor(&process, ProcessSequence::new(1))
             .await
+            .expect("B's earliest cursor")
             .parse()
             .expect("parse")
             .replay_incarnation_id,
@@ -478,7 +452,7 @@ async fn the_idlest_window_is_evicted_to_keep_the_aggregate_bounds() {
         "a subscription to an evicted process closes, got {ended:?}"
     );
     let start = b
-        .current_cursor(&three, ProcessSequence::new(0))
+        .earliest_cursor(&three, ProcessSequence::new(0))
         .await
         .expect("a start cursor");
     assert_eq!(
@@ -551,10 +525,10 @@ async fn the_idlest_window_is_evicted_to_keep_the_aggregate_bounds() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_followed_process_idle_past_max_age_keeps_its_window() {
     let Replicas {
-        database: _database,
+        database,
+        schema,
         a,
         b,
-        ..
     } = replicas(|policy| {
         policy.data.max_age = Duration::from_millis(500);
         policy.data.cleanup_interval = Duration::from_millis(100);
@@ -566,18 +540,30 @@ async fn a_followed_process_idle_past_max_age_keeps_its_window() {
     let alone = publish(&a, &unfollowed, "event-0", "alone").await;
     let mut on_b = subscribed(&b, &first.cursor).await;
 
-    // The unfollowed head going is the evidence that both processes sat
-    // idle past `max_age` under running cleanup passes.
+    // Read the head directly to observe cleanup without subscribing and
+    // making the supposedly unfollowed process active on every probe.
+    let pool = sqlx::PgPool::connect(database.url()).await.expect("pool");
+    let has_head = format!(
+        "SELECT EXISTS (SELECT 1 FROM \"{schema}\".process_replay_head WHERE process_id = $1)"
+    );
     tokio::time::timeout(Duration::from_secs(30), async {
-        while !matches!(
-            replay(&a, &alone.cursor).await,
-            Err(ProcessReplayGapReason::Unavailable)
-        ) {
+        while sqlx::query_scalar::<_, bool>(&has_head)
+            .bind(unfollowed.as_str())
+            .fetch_one(&pool)
+            .await
+            .expect("read the unfollowed head")
+        {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
     .await
     .expect("the unfollowed process is forgotten");
+    pool.close().await;
+    assert_eq!(
+        replay(&a, &alone.cursor).await.err(),
+        Some(ProcessReplayGapReason::Unavailable),
+        "the forgotten process's cursor gaps"
+    );
 
     assert_eq!(
         replay(&a, &first.cursor).await.map(|events| events.len()),

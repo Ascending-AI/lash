@@ -15,8 +15,8 @@ use tokio_util::sync::ReusableBoxFuture;
 use super::{
     ParsedProcessObservationCursor, ProcessObservationCursor, ProcessObservationEvent,
     ProcessObservationIdentity, ProcessReplayEventDraft, ProcessReplayGapReason, ProcessReplayItem,
-    ProcessReplayOutcome, ProcessReplayStore, ProcessReplayStoreError,
-    ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
+    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
+    ProcessReplaySubscription, ProcessSequence,
 };
 use crate::ProcessId;
 
@@ -243,7 +243,6 @@ impl ProcessReplayStore for InMemoryProcessReplayStore {
                 let bytes = event_bytes(&event, self.config.max_bytes_per_process)?;
                 Ok(Stored {
                     position,
-                    sequence,
                     identity,
                     bytes,
                     appended_at: now,
@@ -282,24 +281,6 @@ impl ProcessReplayStore for InMemoryProcessReplayStore {
         Ok(events)
     }
 
-    async fn replay_after_cursor(
-        &self,
-        cursor: &ProcessObservationCursor,
-    ) -> Result<ProcessReplayOutcome, ProcessReplayStoreError> {
-        let parsed = cursor.parse()?;
-        let (windows, _) = self.upkeep(&parsed.process_id);
-        if let Some(reason) = self.gap(&windows, &parsed) {
-            return Ok(ProcessReplayOutcome::Gap(reason));
-        }
-        Ok(ProcessReplayOutcome::Replayed(
-            windows
-                .windows
-                .get(&parsed.process_id)
-                .map(|window| window.after(parsed.live_position))
-                .unwrap_or_default(),
-        ))
-    }
-
     async fn subscribe_after_cursor(
         &self,
         cursor: &ProcessObservationCursor,
@@ -330,20 +311,6 @@ impl ProcessReplayStore for InMemoryProcessReplayStore {
             )))
     }
 
-    async fn current_cursor(
-        &self,
-        process_id: &ProcessId,
-        sequence: ProcessSequence,
-    ) -> Result<ProcessObservationCursor, ProcessReplayStoreError> {
-        self.cursor_at(process_id, sequence, |window| {
-            window
-                .events
-                .iter()
-                .find(|stored| stored.sequence > sequence)
-                .map_or(window.tail_position, |stored| stored.position - 1)
-        })
-    }
-
     async fn earliest_cursor(
         &self,
         process_id: &ProcessId,
@@ -371,11 +338,6 @@ impl ProcessReplayStore for InMemoryProcessReplayStore {
         windows.windows.clear();
         windows.idle.clear();
         windows.retained_bytes = 0;
-        Ok(())
-    }
-
-    async fn trim_process(&self, process_id: &ProcessId) -> Result<(), ProcessReplayStoreError> {
-        drop(self.upkeep(process_id));
         Ok(())
     }
 }
@@ -573,7 +535,6 @@ struct Window {
 #[derive(Debug)]
 struct Stored {
     position: u64,
-    sequence: ProcessSequence,
     identity: ProcessObservationIdentity,
     bytes: usize,
     appended_at: Instant,

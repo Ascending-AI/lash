@@ -74,10 +74,31 @@ impl ReplayLawKind for ProcessReplayLaws {
         subject: &ProcessId,
         revision: u64,
     ) -> ProcessObservationCursor {
-        store
-            .current_cursor(subject, ProcessSequence::new(revision))
+        // Only the law fixtures need a sequence-relative cursor. Product
+        // snapshots attach before the whole retained window instead.
+        let sequence = ProcessSequence::new(revision);
+        let start = store
+            .earliest_cursor(subject, sequence)
             .await
-            .expect("the process's current cursor")
+            .expect("the process's earliest cursor");
+        let ProcessReplayOutcome::Replayed(events) = store
+            .replay_after_cursor(&start)
+            .await
+            .expect("read the fixture window")
+        else {
+            panic!("a fresh fixture cursor must continue");
+        };
+        let parsed = start.parse().expect("the store's cursor parses");
+        let position = events
+            .iter()
+            .find(|event| event.sequence() > sequence)
+            .map(|event| event.live_position() - 1)
+            .unwrap_or_else(|| {
+                events
+                    .last()
+                    .map_or(parsed.live_position, |event| event.live_position())
+            });
+        ProcessObservationCursor::new(parsed.replay_incarnation_id, subject, sequence, position)
     }
 
     async fn replay(
@@ -118,7 +139,16 @@ impl ReplayLawKind for ProcessReplayLaws {
         reason = "conformance-law fixture: a store that cannot trim fails the law"
     )]
     async fn trim(store: &Self::Store, subject: &ProcessId) {
-        store.trim_process(subject).await.expect("trim a process");
+        // Retention is observed by reads; no explicit trim belongs on
+        // the production store port.
+        let start = store
+            .earliest_cursor(subject, ProcessSequence::new(0))
+            .await
+            .expect("a cursor after retention");
+        store
+            .replay_after_cursor(&start)
+            .await
+            .expect("read after retention");
     }
 
     fn describe(event: &Self::Event) -> ReplayLawEvent<ProcessObservationCursor> {
@@ -262,7 +292,7 @@ async fn labels_after(
 async fn a_redelivery_is_published_once(store: Arc<dyn ProcessReplayStore>) {
     let process = ProcessId::fixture("redelivery");
     let start = store
-        .current_cursor(&process, ProcessSequence::new(0))
+        .earliest_cursor(&process, ProcessSequence::new(0))
         .await
         .expect("a start cursor");
     let node = || process_language_observation(&process, "node:a:0:started", "node a");
@@ -399,7 +429,7 @@ async fn a_conflicting_redelivery_is_a_gap(store: Arc<dyn ProcessReplayStore>) {
     ] {
         let process = ProcessId::fixture(name);
         let start = store
-            .current_cursor(&process, ProcessSequence::new(0))
+            .earliest_cursor(&process, ProcessSequence::new(0))
             .await
             .expect("a start cursor");
         store
@@ -432,7 +462,7 @@ async fn a_conflicting_redelivery_is_a_gap(store: Arc<dyn ProcessReplayStore>) {
             "{name}: a cursor across a conflict is a gap"
         );
         let fresh = store
-            .current_cursor(&process, ProcessSequence::new(0))
+            .earliest_cursor(&process, ProcessSequence::new(0))
             .await
             .expect("a cursor after the conflict");
         assert!(

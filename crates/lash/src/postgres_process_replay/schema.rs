@@ -261,22 +261,15 @@ impl Statements {
                  ORDER BY e.position",
                 first_live = first_live(3),
             ),
-            // The head and, within the window's age, its first event and
-            // its first event stamped past `$2`.
+            // The head and its first event within the window's age.
             positions: format!(
                 "SELECT i.incarnation_id, COALESCE(s.watermark, 0) AS watermark, \
                         (s.incarnation_id = i.incarnation_id) IS TRUE AS valid, \
-                        h.tail_position, {first_live} AS first_live, \
-                        (SELECT l.position FROM {log} l \
-                          WHERE l.process_id = h.process_id \
-                            AND l.position >= h.first_retained \
-                            AND l.published_at >= {age} AND l.sequence > $2 \
-                          ORDER BY l.position LIMIT 1) AS first_newer \
+                        h.tail_position, {first_live} AS first_live \
                  FROM {inc} i \
                  LEFT JOIN {sen} s ON true \
                  LEFT JOIN {head} h ON h.process_id = $1",
-                first_live = first_live(3),
-                age = age(3),
+                first_live = first_live(2),
             ),
             expired_heads: format!(
                 "SELECT h.process_id FROM {head} h JOIN {log} l \
@@ -688,28 +681,14 @@ pub(super) async fn invalidate(
     Err(store_error("invalidate", "the process head kept racing"))
 }
 
-/// Where a cursor for a process stands.
-pub(super) enum CursorAt {
-    /// After everything the window holds stamped at or before a sequence.
-    Current(ProcessSequence),
-    /// Before everything the window still holds.
-    Earliest,
-}
-
 /// A cursor of `process_id` at `sequence`, from one snapshot of its head.
 pub(super) async fn cursor(
     shared: &super::Shared,
     process_id: &ProcessId,
     sequence: ProcessSequence,
-    at: CursorAt,
 ) -> Result<ProcessObservationCursor, ProcessReplayStoreError> {
-    let stamped = match at {
-        CursorAt::Current(sequence) => sequence.as_u64(),
-        CursorAt::Earliest => 0,
-    };
     let row = sqlx::query(&shared.sql.positions)
         .bind(process_id.as_str())
-        .bind(column(stamped))
         .bind(micros(shared.config.max_age))
         .fetch_optional(&shared.pool)
         .await
@@ -729,9 +708,6 @@ pub(super) async fn cursor(
         row.get::<Option<i64>, _>(name)
             .map(|first| position(first).saturating_sub(1))
     };
-    let live_position = match at {
-        CursorAt::Current(_) => before("first_newer").unwrap_or(tail),
-        CursorAt::Earliest => before("first_live").unwrap_or(tail),
-    };
+    let live_position = before("first_live").unwrap_or(tail);
     Ok(incarnation.cursor(process_id, sequence, live_position))
 }

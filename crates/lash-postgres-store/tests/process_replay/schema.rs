@@ -15,7 +15,7 @@ use lash_postgres_store::testing::{IsolatedDatabase, required_database_url};
 use sqlx::postgres::PgConnectOptions;
 use sqlx::{ConnectOptions as _, Connection as _, PgConnection, PgPool};
 
-use super::{config, current, cursors, endpoints, fresh_schema, publish, replay, with_data};
+use super::{config, cursors, endpoints, fresh_schema, publish, replay, with_data};
 
 fn verify_only(schema: &str) -> PostgresHostConfig {
     with_data(schema, |data| {
@@ -176,7 +176,10 @@ async fn a_host_provisioned_schema_serves_verify_only_under_a_role_without_ddl_p
             .expect("a host-provisioned schema connects verify-only"),
     );
     let process = lash_core::ProcessId::fixture("provisioned");
-    let before = current(&store, &process).await;
+    let before = store
+        .earliest_cursor(&process, lash_core::ProcessSequence::new(1))
+        .await
+        .expect("a start cursor");
     let first = publish(&store, &process, "k", "first").await;
     assert_eq!(
         cursors(&replay(&store, &before).await.expect("replay")),

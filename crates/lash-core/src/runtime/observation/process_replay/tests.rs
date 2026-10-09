@@ -126,7 +126,7 @@ async fn the_per_process_byte_bound_drops_the_oldest_events() {
     });
     let process = ProcessId::fixture("byte-bound");
     let start = store
-        .current_cursor(&process, ProcessSequence::new(0))
+        .earliest_cursor(&process, ProcessSequence::new(0))
         .await
         .expect("cursor");
     let mut published = Vec::new();
@@ -209,7 +209,7 @@ async fn the_aggregate_bound_evicts_the_idlest_other_process() {
         .await
         .expect("publish");
     let busy_start = store
-        .current_cursor(&busy, ProcessSequence::new(0))
+        .earliest_cursor(&busy, ProcessSequence::new(0))
         .await
         .expect("cursor");
     for index in 0..3 {

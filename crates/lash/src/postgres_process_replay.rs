@@ -43,8 +43,8 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use lash_core::{
     ProcessId, ProcessObservationCursor, ProcessObservationEvent, ProcessReplayEventDraft,
-    ProcessReplayOutcome, ProcessReplayStore, ProcessReplayStoreError,
-    ProcessReplaySubscribeOutcome, ProcessReplaySubscription, ProcessSequence,
+    ProcessReplayStore, ProcessReplayStoreError, ProcessReplaySubscribeOutcome,
+    ProcessReplaySubscription, ProcessSequence,
 };
 use lash_postgres_store::host::{
     ConnectionRole, PostgresHostConfig, ProcessReplayDataPolicy, ReconnectPolicy, ReplaySchemaMode,
@@ -69,7 +69,7 @@ mod subscription;
 pub use schema_shape::{PostgresProcessReplaySchemaFinding, PostgresProcessReplaySchemaReport};
 
 use codec::Doorbell;
-use schema::{CursorAt, Statements};
+use schema::Statements;
 use subscription::Read;
 
 /// Why a [`PostgresProcessReplayStore`] could not start.
@@ -384,17 +384,6 @@ impl ProcessReplayStore for PostgresProcessReplayStore {
         answer.await.map_err(|_| ProcessReplayStoreError::Closed)?
     }
 
-    async fn replay_after_cursor(
-        &self,
-        cursor: &ProcessObservationCursor,
-    ) -> Result<ProcessReplayOutcome, ProcessReplayStoreError> {
-        let parsed = cursor.parse()?;
-        Ok(match subscription::read(&self.shared, &parsed).await? {
-            Read::Gap(reason) => ProcessReplayOutcome::Gap(reason),
-            Read::Events(events) => ProcessReplayOutcome::Replayed(events),
-        })
-    }
-
     async fn subscribe_after_cursor(
         &self,
         cursor: &ProcessObservationCursor,
@@ -423,26 +412,12 @@ impl ProcessReplayStore for PostgresProcessReplayStore {
         ))
     }
 
-    async fn current_cursor(
-        &self,
-        process_id: &ProcessId,
-        sequence: ProcessSequence,
-    ) -> Result<ProcessObservationCursor, ProcessReplayStoreError> {
-        schema::cursor(
-            &self.shared,
-            process_id,
-            sequence,
-            CursorAt::Current(sequence),
-        )
-        .await
-    }
-
     async fn earliest_cursor(
         &self,
         process_id: &ProcessId,
         sequence: ProcessSequence,
     ) -> Result<ProcessObservationCursor, ProcessReplayStoreError> {
-        schema::cursor(&self.shared, process_id, sequence, CursorAt::Earliest).await
+        schema::cursor(&self.shared, process_id, sequence).await
     }
 
     async fn invalidate_process(
@@ -460,9 +435,5 @@ impl ProcessReplayStore for PostgresProcessReplayStore {
         schema::rotate(&self.shared.pool, &self.shared.sql, true).await?;
         self.shared.ring(&Doorbell::all());
         Ok(())
-    }
-
-    async fn trim_process(&self, process_id: &ProcessId) -> Result<(), ProcessReplayStoreError> {
-        cleanup::trim(&self.shared, process_id).await
     }
 }

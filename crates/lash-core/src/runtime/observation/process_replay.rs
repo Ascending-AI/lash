@@ -642,9 +642,6 @@ impl Stream for ProcessReplaySubscription {
 /// - **Lag means resubscribe**, and **invalidation reaches every
 ///   subscriber**: every existing cursor answers `Unavailable` and every
 ///   live subscription to the process closes.
-/// - **Current cursors stay behind newer sequences.** A cursor at sequence
-///   `N` sits before every event stamped past `N` that the store holds or
-///   will hold. Stamps need not grow with position.
 /// - **A redelivery is published once, and a conflicting one is never
 ///   applied.** A draft whose [`ProcessObservationIdentity`] the process's
 ///   window already holds with the same fact is dropped. One that holds it
@@ -667,11 +664,19 @@ pub trait ProcessReplayStore: Send + Sync {
     ) -> Result<Vec<Arc<ProcessObservationEvent>>, ProcessReplayStoreError>;
 
     /// The process's retained events after `cursor`, or the gap that
-    /// prevents continuing from it.
+    /// prevents continuing from it. This is the subscription's replayed
+    /// prefix at its linearization point; it never polls the live tail.
     async fn replay_after_cursor(
         &self,
         cursor: &ProcessObservationCursor,
-    ) -> Result<ProcessReplayOutcome, ProcessReplayStoreError>;
+    ) -> Result<ProcessReplayOutcome, ProcessReplayStoreError> {
+        Ok(match self.subscribe_after_cursor(cursor).await? {
+            ProcessReplaySubscribeOutcome::Subscribed(subscription) => {
+                ProcessReplayOutcome::Replayed(subscription.replay.into_iter().collect())
+            }
+            ProcessReplaySubscribeOutcome::Gap(reason) => ProcessReplayOutcome::Gap(reason),
+        })
+    }
 
     /// Subscribe after `cursor`, replaying retained events before live
     /// events, or answer the gap that prevents continuing from it.
@@ -679,15 +684,6 @@ pub trait ProcessReplayStore: Send + Sync {
         &self,
         cursor: &ProcessObservationCursor,
     ) -> Result<ProcessReplaySubscribeOutcome, ProcessReplayStoreError>;
-
-    /// The cursor after everything the store holds for the process that is
-    /// stamped at or before `sequence`: a snapshot at `sequence` that raced
-    /// a newer commit still replays that commit.
-    async fn current_cursor(
-        &self,
-        process_id: &ProcessId,
-        sequence: ProcessSequence,
-    ) -> Result<ProcessObservationCursor, ProcessReplayStoreError>;
 
     /// The cursor every event the store still retains for the process comes
     /// after. A snapshot attaches here, so an observer that arrives late or
@@ -712,9 +708,6 @@ pub trait ProcessReplayStore: Send + Sync {
     /// calls this when it can no longer name the processes it lost
     /// observations of. A store may rotate its incarnation to do it.
     async fn invalidate_all(&self) -> Result<(), ProcessReplayStoreError>;
-
-    /// Apply retention to the process's window.
-    async fn trim_process(&self, process_id: &ProcessId) -> Result<(), ProcessReplayStoreError>;
 }
 
 #[cfg(test)]

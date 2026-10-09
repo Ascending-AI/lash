@@ -382,7 +382,7 @@ narrow supported history or mutable reads at finalize
 | Artifact and attachment referrers | Preserve canonical identities. Unknown kind is `Incompatible(UnknownVocabulary)`; malformed known identity is corruption (`crates/lash-core-store/src/artifact_referrer.rs`, `crates/lash-core-store/src/store/attachment_referrers.rs`). |
 | Obligation vocabulary | Unknown state or kind is typed incompatibility. Delivery stalls undecodable work and keeps its row for inspection (`crates/lash-core-store/src/store/obligation.rs`). |
 | Trace JSONL | Count and skip unknown event kinds. Malformed known events and unsupported schema versions refuse (`crates/lash-trace/src/jsonl_records.rs`). |
-| Process cursors | Cursor minting uses the fleet-selected writer version; parsing rejects versions outside its readable range (`crates/lash-sansio/src/process_cursor.rs`, `crates/lash/src/process_observation.rs`). |
+| Process observation cursors | The replay store mints `lashpo1` cursors; parsing validates that prefix and the process, sequence and position fields. Continuity is scoped by replay incarnation (`crates/lash-core/src/runtime/observation/process_replay.rs`, `crates/lash/src/process_feed.rs`). |
 | Operator JSON | `lashctl` owns command DTOs and the `{schema_version, command, result, error}` envelope (`crates/lashctl/src/main.rs`). |
 
 Format stamps are write metadata outside request-identity preimages.
@@ -434,7 +434,7 @@ the current numbers. Compatibility descriptors and refusal machinery are
 part of the binary; numeric schema, protocol, cursor and VM constants retain
 their current default values
 (`crates/lash-sqlite-store/src/schema.rs`,
-`crates/lash-sansio/src/process_cursor.rs`).
+`crates/lash-core/src/runtime/observation/process_replay.rs`).
 Synthetic-only changes do not advance those default versions.
 
 ### 8. Upgrade operations

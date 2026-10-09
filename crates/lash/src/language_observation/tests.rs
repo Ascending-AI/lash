@@ -596,24 +596,11 @@ impl ProcessReplayStore for GatedReplay {
         let _open = self.gate.acquire().await.expect("the gate stays");
         self.inner.publish(process_id, events).await
     }
-    async fn replay_after_cursor(
-        &self,
-        cursor: &lash_core::ProcessObservationCursor,
-    ) -> Result<lash_core::ProcessReplayOutcome, lash_core::ProcessReplayStoreError> {
-        self.inner.replay_after_cursor(cursor).await
-    }
     async fn subscribe_after_cursor(
         &self,
         cursor: &lash_core::ProcessObservationCursor,
     ) -> Result<lash_core::ProcessReplaySubscribeOutcome, lash_core::ProcessReplayStoreError> {
         self.inner.subscribe_after_cursor(cursor).await
-    }
-    async fn current_cursor(
-        &self,
-        process_id: &ProcessId,
-        sequence: ProcessSequence,
-    ) -> Result<lash_core::ProcessObservationCursor, lash_core::ProcessReplayStoreError> {
-        self.inner.current_cursor(process_id, sequence).await
     }
     async fn earliest_cursor(
         &self,
@@ -630,12 +617,6 @@ impl ProcessReplayStore for GatedReplay {
     }
     async fn invalidate_all(&self) -> Result<(), lash_core::ProcessReplayStoreError> {
         self.inner.invalidate_all().await
-    }
-    async fn trim_process(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<(), lash_core::ProcessReplayStoreError> {
-        self.inner.trim_process(process_id).await
     }
 }
 

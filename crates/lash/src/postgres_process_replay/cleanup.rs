@@ -1,6 +1,6 @@
 //! Retention between publications: a periodic, jittered pass per replica
 //! that deletes expired events, forgets idle processes and hands unused
-//! byte reservations back, plus the per-process trim.
+//! byte reservations back.
 //!
 //! Reads already cut the window by database time, so cleanup only reclaims
 //! space, identities and budget; any replica's pass serves every replica.
@@ -13,7 +13,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use lash_core::{ProcessId, ProcessReplayStoreError};
+use lash_core::ProcessReplayStoreError;
 use sqlx::Row as _;
 
 use super::Shared;
@@ -208,12 +208,4 @@ async fn reclaim(shared: &Shared, reclaim: Reclaim) -> Result<usize, ProcessRepl
     tx.commit().await.map_err(db_error("commit"))?;
     shared.ring(&doorbell);
     Ok(changed)
-}
-
-/// `trim_process`: apply age retention to one process now.
-pub(super) async fn trim(
-    shared: &Shared,
-    process_id: &ProcessId,
-) -> Result<(), ProcessReplayStoreError> {
-    expire(shared, &[process_id.to_string()]).await
 }
