@@ -1,7 +1,12 @@
 {
   "frame_residency_curve": {
     "current_frame_nodes": 64,
-    "earlier_history_nodes": [0, 1000, 8000, 32000],
+    "earlier_history_nodes": [
+      0,
+      1000,
+      8000,
+      32000
+    ],
     "max_resident_heap_growth_percent": 1.0,
     "max_resident_heap_growth_bytes": 65536,
     "max_commit_median_ratio": 1.2
@@ -2161,12 +2166,20 @@
               "budget_ms": 37.158,
               "required": true
             },
+            "context_transform": {
+              "budget_ms": 108.842,
+              "required": true
+            },
             "effect_loop": {
               "budget_ms": 168.341,
               "required": true
             },
             "plugin_hook.after_turn.standard_compaction": {
               "budget_ms": 0.747,
+              "required": true
+            },
+            "plugin_hook.context_pressure.standard_compaction": {
+              "budget_ms": 108.842,
               "required": true
             },
             "post_commit_delivery": {
@@ -3707,8 +3720,117 @@
       }
     },
     "profile": {
-      "default": {
-        "instructions_per_iter_max": 83199
+      "baseline": {
+        "instructions_per_iter_max": 126,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "language_host_environment": {
+        "instructions_per_iter_max": 438,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "async_await": {
+        "instructions_per_iter_max": 44,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "direct_unwrap": {
+        "instructions_per_iter_max": 23,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "general_fanout": {
+        "instructions_per_iter_max": 42,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "loop_control": {
+        "instructions_per_iter_max": 1912,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "indexed_assignment": {
+        "instructions_per_iter_max": 236,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "projected_values": {
+        "instructions_per_iter_max": 51,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "large_data": {
+        "instructions_per_iter_max": 16347,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "cache_pressure": {
+        "instructions_per_iter_max": 147,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "projected_operations": {
+        "instructions_per_iter_max": 52,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "type_system_stress": {
+        "instructions_per_iter_max": 2219,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "wrapped_error_paths": {
+        "instructions_per_iter_max": 35,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "tool_control_host_environment": {
+        "instructions_per_iter_max": 74,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "snapshot_projected_state": {
+        "instructions_per_iter_max": 34,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "continue_as_seed_host_environment": {
+        "instructions_per_iter_max": 37,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "syntax_text_host_environment": {
+        "instructions_per_iter_max": 45,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "integer_range_host_environment": {
+        "instructions_per_iter_max": 138,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "fanout_expression_host_environment": {
+        "instructions_per_iter_max": 60,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "image_host_environment": {
+        "instructions_per_iter_max": 29,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "heap_list_iteration": {
+        "instructions_per_iter_max": 28023,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "heap_nested_loop": {
+        "instructions_per_iter_max": 15556,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "heap_allocation_churn": {
+        "instructions_per_iter_max": 8043,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "heap_deep_chain_mutation": {
+        "instructions_per_iter_max": 3031,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "heap_comprehension_build": {
+        "instructions_per_iter_max": 16493,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "heap_variable_concat": {
+        "instructions_per_iter_max": 5720,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "heap_shallow_chain_mutation": {
+        "instructions_per_iter_max": 926,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
+      },
+      "heap_deep_chain_mutation_24": {
+        "instructions_per_iter_max": 962,
+        "invariant": "FIXED-SCENARIO-OPCODE-WORK: no more VM opcodes than one execution of this fixed benchmark scenario from its seeded state; full counter total, zero padding."
       }
     },
     "perf_ratios": {

@@ -60,7 +60,7 @@ class LoadRecordTests(unittest.TestCase):
 
     def test_load_at_the_core_count_during_the_fast_case_is_unqualified(self):
         status, result, _ = self.run_child(32.0, "fast")
-        self.assertEqual(0, status, "an unqualified run keeps the command's status")
+        self.assertEqual(3, status, "an unqualified run cannot certify")
         self.assertFalse(result["verdict"]["qualified"])
         self.assertIn("reached 32.00", result["verdict"]["reason"])
 
@@ -115,7 +115,7 @@ class LoadRecordTests(unittest.TestCase):
                     "--", sys.executable, "-c", CHILD, "runs", "fast"])
             finally:
                 sys.stdout = stdout
-            self.assertEqual(0, status)
+            self.assertEqual(3, status)
             written = json.loads(out.read_text())
             self.assertFalse(written["verdict"]["qualified"])
             self.assertEqual(32, written["verdict"]["cores"])

@@ -97,8 +97,11 @@ fn main() {
     }
     println!("iterations: {iterations}");
     println!("program_expressions: {program_expressions}");
+    let instruction_stats = profile.instruction_stats();
+    let vm_instructions_total: u64 = instruction_stats.iter().map(|stat| stat.count).sum();
+    println!("vm_instructions_total: {vm_instructions_total}");
     println!("instruction_hotspots:");
-    for stat in profile.instruction_stats().iter().take(12) {
+    for stat in instruction_stats.iter().take(12) {
         println!(
             "{:<16} count={:<10} total_ms={:<10.3} avg_ns={}",
             stat.name,

@@ -57,7 +57,7 @@ pub fn verify() -> Result<()> {
 /// Warm effect exchanges only, for a paired before/after comparison in one
 /// run (FIG-4433). The timings are a population on a shared host; the frame
 /// and byte counts per exchange are exact.
-pub fn exchanges(path: &Path, warm: usize) -> Result<()> {
+pub fn exchanges(path: &Path, warm: usize, enforce_budgets: bool) -> Result<()> {
     ensure!(warm > 0, "empty exchange population");
     let pool = WorkerPool::new(config()?)?;
     let mut codec = baseline::CodecSocket::new()?;
@@ -116,7 +116,7 @@ pub fn exchanges(path: &Path, warm: usize) -> Result<()> {
         budgets.push(row);
         samples.finish(path)?;
     }
-    finish_budgets(path, &samples, &budgets)
+    finish_budgets(path, &samples, &budgets, enforce_budgets)
 }
 
 fn leaves(case: &workload::Case) -> usize {
@@ -127,26 +127,53 @@ fn leaves(case: &workload::Case) -> usize {
     }
 }
 
-fn finish_budgets(path: &Path, samples: &Samples, exchanges: &[serde_json::Value]) -> Result<()> {
-    let zero = samples.summaries.iter().find(|s| s.metric == "warm/zero-effects/paired-overhead").map(|s| serde_json::json!({"p50_ns":s.p50,"p99_ns":s.p99,"over_budget":s.p50>1_000_000 || s.p99>5_000_000,"report_only":true}));
+fn finish_budgets(
+    path: &Path,
+    samples: &Samples,
+    exchanges: &[serde_json::Value],
+    enforce_budgets: bool,
+) -> Result<()> {
+    let zero = samples.summaries.iter().find(|s| s.metric == "warm/zero-effects/paired-overhead").map(|s| serde_json::json!({"p50_ns":s.p50,"p99_ns":s.p99,"over_budget":s.p50>1_000_000 || s.p99>5_000_000,"threshold_p50_ns":1_000_000,"threshold_p99_ns":5_000_000}));
     let report = serde_json::json!({
+        "certification_mode":if enforce_budgets { "certifying" } else { "report_only" },
         "zero_effect_overhead":zero,"effect_exchanges":exchanges,
         "instrumentation":"const_generic_zero_cost_hook",
         "exchange_boundary":"worker_request_serialization_start_to_next_request_received",
         "exchange_clock":"CLOCK_MONOTONIC",
         "baseline_process_id":std::process::id(),
         "baseline_transport":"same_process_socket_pair",
+        "budget_statistic":"nearest_rank_p50_and_p99",
+        "exchange_budget_unit":"nanoseconds_per_leaf",
+        "zero_effect_budget_unit":"nanoseconds_per_case",
+        "threshold_kind":"configured_upper_bound",
         "phase_attribution":"worker_and_parent_phases_measured; ipc_read_wait_is_exclusive_wall_remainder; overlap_reported",
     });
     std::fs::write(
         path.join("budgets.json"),
         serde_json::to_vec_pretty(&report)?,
     )?;
-    metrics::write_exchange_report(path, samples, exchanges)?;
+    metrics::write_exchange_report(path, samples, exchanges, enforce_budgets)?;
+    if enforce_budgets {
+        ensure!(
+            zero.is_some() || !exchanges.is_empty(),
+            "no selected worker budgets"
+        );
+        ensure!(
+            zero.iter()
+                .chain(exchanges)
+                .all(|row| row["over_budget"].as_bool() == Some(false)
+                    && row
+                        .get("reconciliation_failures")
+                        .is_none_or(|value| value.as_u64() == Some(0))),
+            "worker matrix budget failed; see budgets.json"
+        );
+    } else {
+        println!("Report-only mode: does not certify any worker budget.");
+    }
     Ok(())
 }
 
-pub fn measure(path: &Path, warm: usize, cold: usize) -> Result<()> {
+pub fn measure(path: &Path, warm: usize, cold: usize, enforce_budgets: bool) -> Result<()> {
     ensure!(
         warm >= 10_000 && cold >= 200,
         "measurement needs 10,000 warm observations and 200 cold starts"
@@ -285,7 +312,7 @@ pub fn measure(path: &Path, warm: usize, cold: usize) -> Result<()> {
     }
     measure_concurrency(&mut samples, warm)?;
     samples.finish(path)?;
-    finish_budgets(path, &samples, &budgets)?;
+    finish_budgets(path, &samples, &budgets, enforce_budgets)?;
     Ok(())
 }
 
@@ -370,4 +397,36 @@ fn queue_once(pool: &WorkerPool, case: &workload::Case) -> Result<worker::Observ
             .join()
             .map_err(|_| anyhow::anyhow!("queue measurement thread panicked"))?
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn certification_rejects_any_selected_worker_budget() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut samples = super::Samples::new(directory.path()).unwrap();
+        let rows = [
+            super::metrics::record_exchanges(&mut samples, "fast", &[1], 1, &[], &[]).unwrap(),
+            super::metrics::record_exchanges(&mut samples, "slow", &[600_000], 1, &[], &[])
+                .unwrap(),
+        ];
+        let result = super::finish_budgets(directory.path(), &samples, &rows, true);
+        assert!(
+            result.is_err(),
+            "a failing worker budget must refuse certification"
+        );
+        let receipt: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(directory.path().join("budgets.json")).unwrap())
+                .unwrap();
+        assert_eq!(receipt["certification_mode"], "certifying");
+        assert!(super::finish_budgets(directory.path(), &samples, &rows, false).is_ok());
+        assert!(super::finish_budgets(directory.path(), &samples, &rows[..1], true).is_ok());
+        let mut unreconciled = rows[..1].to_vec();
+        unreconciled[0]["reconciliation_failures"] = serde_json::json!(1);
+        assert!(super::finish_budgets(directory.path(), &samples, &unreconciled, true).is_err());
+        samples
+            .record("warm/zero-effects/paired-overhead", &[6_000_000], "ns")
+            .unwrap();
+        assert!(super::finish_budgets(directory.path(), &samples, &[], true).is_err());
+    }
 }

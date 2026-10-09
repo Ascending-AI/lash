@@ -58,7 +58,7 @@ def parse_args() -> argparse.Namespace:
         "--profile-scenario",
         action="append",
         default=[],
-        help="Profile scenario; defaults to aggregate all. Known names are loaded from the benchmark binary.",
+        help="Profile scenario; defaults to each scenario separately. Known names are loaded from the benchmark binary.",
     )
     parser.add_argument("--skip-perf", action="store_true")
     parser.add_argument("--skip-profile", action="store_true")
@@ -72,10 +72,16 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_BUDGET_FILE,
         help="JSON budget file for --enforce-budgets.",
     )
-    parser.add_argument(
+    certification = parser.add_mutually_exclusive_group()
+    certification.add_argument(
         "--enforce-budgets",
         action="store_true",
-        help="Exit non-zero when a Lash VM perf guard budget is exceeded.",
+        default=True,
+        help="Certify every selected budget; exit non-zero on failure (default).",
+    )
+    certification.add_argument(
+        "--report-only", dest="enforce_budgets", action="store_false",
+        help="Explore measurements without certification; failed budgets do not affect exit status.",
     )
     parser.add_argument(
         "--stack-budget-bytes",
@@ -88,7 +94,10 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     add_build_report_arg(parser)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.enforce_budgets and args.skip_perf and args.skip_profile:
+        parser.error("certification needs at least one selected perf or profile population")
+    return args
 
 
 def repo_root() -> Path:
@@ -196,15 +205,7 @@ def resolve_requested(values: list[str], known: list[str], default: list[str]) -
 
 
 def resolve_profile_scenarios(values: list[str], known: list[str]) -> list[str]:
-    requested = values or ["all"]
-    resolved: list[str] = []
-    for value in requested:
-        if value != "all" and value not in known:
-            expected = ", ".join([*known, "all"])
-            raise SystemExit(f"error: unknown profile scenario `{value}`; expected one of: {expected}")
-        if value not in resolved:
-            resolved.append(value)
-    return resolved
+    return resolve_requested(values, known, known)
 
 
 def run_command(root: Path, cmd: list[str]) -> str:
@@ -349,7 +350,7 @@ def budget_result(
 
 
 def evaluate_ratio_budgets(
-    perf_results: list[dict[str, Any]], budgets: dict[str, Any]
+    perf_results: list[dict[str, Any]], budgets: dict[str, Any], selection: dict[str, Any]
 ) -> list[dict[str, Any]]:
     """Guard how a measurement scales, not just how big it is.
 
@@ -366,6 +367,10 @@ def evaluate_ratio_budgets(
         if not isinstance(spec, dict):
             continue
         mode = spec.get("mode", "compiled_execute")
+        if mode not in selection["modes"] or not {
+            spec.get("numerator"), spec.get("denominator")
+        }.issubset(selection["scenarios"]):
+            continue
         metric = spec.get("metric", "ns_per_iter")
         budget = spec.get("max")
         values: dict[str, float] = {}
@@ -410,7 +415,8 @@ def evaluate_lash_vm_budgets(report: dict[str, Any], budgets: dict[str, Any]) ->
     results: list[dict[str, Any]] = []
     perf_results = report.get("perf_results", [])
     profile_results = report.get("profile_results", [])
-    if not perf_results:
+    parameters = report.get("parameters", {})
+    if not perf_results and not parameters.get("skip_perf", False):
         results.append(
             budget_result(
                 section="perf",
@@ -422,7 +428,7 @@ def evaluate_lash_vm_budgets(report: dict[str, Any], budgets: dict[str, Any]) ->
                 reason="missing perf results",
             )
         )
-    if not profile_results:
+    if not profile_results and not parameters.get("skip_profile", False):
         results.append(
             budget_result(
                 section="profile",
@@ -465,7 +471,12 @@ def evaluate_lash_vm_budgets(report: dict[str, Any], budgets: dict[str, Any]) ->
                 )
             )
 
-    results.extend(evaluate_ratio_budgets(perf_results, budgets))
+    if not parameters.get("skip_perf", False):
+        selection = {
+            "modes": parameters.get("modes", [row.get("mode_arg") for row in perf_results]),
+            "scenarios": parameters.get("scenarios", [row.get("scenario_arg") for row in perf_results]),
+        }
+        results.extend(evaluate_ratio_budgets(perf_results, budgets, selection))
 
     for row in profile_results:
         scenario = str(row.get("scenario_arg", "unknown"))
@@ -483,12 +494,9 @@ def evaluate_lash_vm_budgets(report: dict[str, Any], budgets: dict[str, Any]) ->
                 )
             )
             continue
-        instruction_count = sum(
-            hotspot.get("count", 0)
-            for hotspot in row.get("instruction_hotspots", [])
-            if isinstance(hotspot.get("count", 0), int | float)
-        )
-        instructions_per_iter = float(instruction_count) / float(iterations)
+        instruction_count = row.get("vm_instructions_total")
+        complete = isinstance(instruction_count, int) and instruction_count > 0
+        instructions_per_iter = instruction_count / iterations if complete else None
         results.append(
             budget_result(
                 section="profile",
@@ -496,6 +504,7 @@ def evaluate_lash_vm_budgets(report: dict[str, Any], budgets: dict[str, Any]) ->
                 mode=None,
                 metric="instructions_per_iter",
                 actual=instructions_per_iter,
+                reason=None if complete else "missing or invalid vm_instructions_total",
                 budget=budget_value(
                     budgets,
                     "profile",
@@ -578,6 +587,13 @@ def main() -> int:
     report = {
         "created_at": datetime.now(timezone.utc).isoformat(),
         "kind": "lash-vm-perf",
+        "certification_mode": "certifying" if args.enforce_budgets else "report_only",
+        "opcode_work": {
+            "quantity": "executed VM opcodes", "unit": "VM opcodes",
+            "process": "profile example subprocess",
+            "window": "all executions of the selected scenarios",
+            "statistic": "full total; instructions_per_iter divides by reported iterations",
+        },
         "git": git_info(root),
         "build_mode": "debug" if args.debug else "release",
         "stack_profile": stack_profile,
@@ -598,6 +614,8 @@ def main() -> int:
     report["budget_results"] = evaluate_lash_vm_budgets(report, budgets)
     out_path.write_text(json.dumps(report, indent=2))
     print(json.dumps({"out": str(out_path), "perf_results": len(perf_results), "profile_results": len(profile_results)}, indent=2))
+    if not args.enforce_budgets:
+        print("Report-only mode: does not certify any budget.")
     if args.enforce_budgets:
         failures = [item for item in report["budget_results"] if not item.get("passed")]
         if failures:

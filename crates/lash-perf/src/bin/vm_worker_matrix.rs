@@ -9,6 +9,11 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("build this benchmark with kiln build --config=optimized");
     }
     let args: Vec<String> = std::env::args().collect();
+    let enforce_budgets = !args.iter().any(|arg| arg == "--report-only");
+    anyhow::ensure!(
+        enforce_budgets || !args.iter().any(|arg| arg == "--enforce-budgets"),
+        "--report-only and --enforce-budgets are mutually exclusive"
+    );
     if args.iter().any(|arg| arg == "--verify") {
         return matrix::verify();
     }
@@ -18,12 +23,12 @@ fn main() -> anyhow::Result<()> {
             .find(|p| p[0] == "--out")
             .map(|p| std::path::PathBuf::from(&p[1]))
             .ok_or_else(|| anyhow::anyhow!("--exchanges needs --out DIRECTORY"))?;
-        return matrix::exchanges(&directory, warm[1].parse()?);
+        return matrix::exchanges(&directory, warm[1].parse()?, enforce_budgets);
     }
     let directory = args
         .windows(2)
         .find(|p| p[0] == "--out")
         .map(|p| std::path::PathBuf::from(&p[1]))
         .ok_or_else(|| anyhow::anyhow!("pass --out DIRECTORY, --exchanges SAMPLES or --verify"))?;
-    matrix::measure(&directory, 10_000, 200)
+    matrix::measure(&directory, 10_000, 200, enforce_budgets)
 }

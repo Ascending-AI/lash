@@ -19,8 +19,8 @@ count, and also when the rule could not be checked: the fast case never ran
 to its end, or no sample fell inside its window. The reason is recorded and
 printed as one `latency load record: ...` line.
 
-The exit status is the command's own: an unqualified run is marked, not
-failed, because its correctness results still stand.
+A failed command retains its own exit status. A successful command on an
+unqualified host exits 3, so it cannot certify latency.
 """
 
 from __future__ import annotations
@@ -106,8 +106,8 @@ def qualify(samples: list[dict], windows: dict[str, dict], case: str, cores: int
 
 def record(command: list[str], *, interval: float, case: str, cores: int,
            loadavg: Path, pressure: Path, out) -> tuple[int, dict]:
-    """Run `command`, sampling load until it exits. Answers its exit status
-    and the record."""
+    """Run `command`, sampling load until it exits. Return certification
+    status and a record retaining the child status."""
 
     samples: list[dict] = []
     markers: list[dict] = []
@@ -136,15 +136,18 @@ def record(command: list[str], *, interval: float, case: str, cores: int,
     done.set()
     thread.join()
     windows = case_windows(markers)
-    return status, {
+    verdict = qualify(samples, windows, case, cores)
+    certification_status = status if status != 0 else (0 if verdict["qualified"] else 3)
+    return certification_status, {
         "schema_version": 1,
         "command": command,
         "exit_status": status,
+        "certification_exit_status": certification_status,
         "started_unix_s": started,
         "finished_unix_s": time.time(),
         "interval_seconds": interval,
         "cases": windows,
-        "verdict": qualify(samples, windows, case, cores),
+        "verdict": verdict,
         "samples": samples,
     }
 

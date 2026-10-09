@@ -232,7 +232,6 @@ pub fn record_exchanges(
         "negative_samples":judged.iter().filter(|v| **v<0).count(),
         "threshold_p50_ns":100_000,"threshold_p99_ns":500_000,
         "over_budget":summary.p50>100_000 || summary.p99>500_000,
-        "report_only":true,
         "reconciliation_tolerance_ns": RECONCILIATION_TOLERANCE_NS,
         "reconciliation_failures":phases.iter().zip(exchange).filter(|(p,e)| (p.sum()-p.overlap-**e).abs()>RECONCILIATION_TOLERANCE_NS).count(),
         "overlapping_samples":phases.iter().filter(|p| p.overlap>0).count(),
@@ -243,10 +242,19 @@ pub fn write_exchange_report(
     path: &Path,
     samples: &Samples,
     budgets: &[serde_json::Value],
+    enforce_budgets: bool,
 ) -> Result<()> {
     use std::fmt::Write as _;
     let mut report = String::from(
-        "# Worker exchange measurements\n\nLoaded-host diagnostic samples. Exchange spans start before worker request serialization and end after the next request arrives, using the shared machine CLOCK_MONOTONIC clock. All times are nearest-rank p50 / p99 in microseconds. Thresholds remain report-only at 100 / 500 us per leaf.\n\n| Population | Samples | Raw batch | Per leaf | Codec/socket baseline | Subtracted per leaf | Negative samples | Over budget |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n",
+        "# Worker exchange measurements\n\nLoaded-host diagnostic samples. Exchange spans start before worker request serialization and end after the next request arrives, using the shared machine CLOCK_MONOTONIC clock. All times are nearest-rank p50 / p99 in microseconds. Configured thresholds are 100 / 500 us per leaf.\n\n| Population | Samples | Raw batch | Per leaf | Codec/socket baseline | Subtracted per leaf | Negative samples | Over budget |\n| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n",
+    );
+    report.insert_str(
+        report.find("| Population").context("missing table")?,
+        if enforce_budgets {
+            "Certifying mode: every selected budget binds exit status.\n\n"
+        } else {
+            "Report-only mode: does not certify any budget.\n\n"
+        },
     );
     let pair = |population: &str, metric: &str| {
         samples

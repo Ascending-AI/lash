@@ -72,7 +72,7 @@ parent process during that window; worker busy/park metrics sum worker deltas.
 ## LashVm
 
 ```sh
-python3 scripts/profile_lash_vm.py --scenario baseline --mode one_shot \
+python3 scripts/profile_lash_vm.py --report-only --scenario baseline --mode one_shot \
   --iterations 1 --profile-scenario baseline --profile-iterations 1 \
   --build-report "$E/lash-vm-build.json" --out "$E/lash_vm.json"
 ```
@@ -85,6 +85,47 @@ increment); it emits no live-heap peak. Pre-window objects can be freed during
 execution, so reset counters cannot establish a new-window live peak without
 tracking allocation membership. Use DHAT for live-at-peak and live-at-end
 quantities rather than deriving them from these counters.
+
+The VM script certifies by default: any failed selected allocation, time,
+scaling or opcode budget exits 1. `--enforce-budgets` selects that mode explicitly;
+`just perf-guard`, release and manual perf workflows use it. `--report-only`
+exits successfully after measurement and labels both output and receipt as
+noncertifying. Skipped populations are not selected; a certifying invocation
+must select at least one. Scaling ratios bind only when their mode and both
+scenarios are selected, and missing measurements within that selection fail.
+
+The profile example emits `vm_instructions_total` before the top-12 display.
+This is the full count of executed VM opcodes in the profile subprocess's
+selected execution window, not native CPU instructions. `instructions_per_iter`
+divides that total by reported iterations. Standard sweeps profile each scenario
+separately. **FIXED-SCENARIO-OPCODE-WORK** pins the full opcode work of one fixed
+benchmark scenario from its seeded state, with zero padding. The 28 scenario
+ceilings in `scripts/perf_guard_budgets.json` came from one execution of each
+unchanged fixture; the baseline ceiling is 126. Hotspot timing/ranking never
+contributes to this count. A fixture or bytecode change requires a reasoned
+update to its named work invariant, not a shared default ceiling.
+
+The standard runtime phase inventory includes `context_transform` and
+`plugin_hook.context_pressure.standard_compaction`, required in the full geometry
+of five measured runs, one warmup and twelve turns. **NESTED-PREPARATION** gives
+each the existing configured `prepared_turn` upper bound of 108.842 ms: both
+phases occur inside `RuntimeTurnServices::prepare`'s prepared-turn span. These
+are advisory bounds inherited from the enclosing phase, not new measured timing
+baselines. Existing allocation ceilings stay enforced.
+
+## VM worker matrix
+
+The optimized `//crates/lash-perf:vm-worker-matrix__bin` certifies by default.
+It writes `budgets.json` and the exchange report before refusing any selected
+failed verdict: exchange nearest-rank p50 / p99 above configured 100 / 500 us
+per leaf, zero-effect paired overhead above configured 1 / 5 ms per case, or
+phase reconciliation errors above the configured 1 us tolerance. Exchange
+windows cover worker request serialization through the next request's arrival;
+zero-effect overhead is the paired worker-minus-reference case interval.
+`--exchanges N --out DIRECTORY` selects exchanges only; a full measurement also
+selects zero-effect overhead. `--report-only` labels output and receipts as
+noncertifying and retains samples for shared-host diagnosis. These runs do not
+establish quiet-host baselines.
 
 ## Send-to-completion latency
 
@@ -116,6 +157,12 @@ These diagnostic runs retain completed samples but exit 2 because the fast
 case did not run. This is functional proof, not a passing latency gate. The default
 `just latency-gate` still runs every case and requires 10,000 fast samples,
 overhead p50 below 50 ms and p99 below 250 ms on a qualified quiet host.
+A successful child with `qualified=false` makes the load wrapper exit 3; a
+failed child retains its own status. The load receipt records both
+`exit_status` (child) and `certification_exit_status` (wrapper). Qualification
+uses the maximum sampled 1-minute load average in the fast-case window against
+the configured core-count bound; PSI is diagnostic. `just latency-gate`
+propagates that status and cannot certify an unqualified run.
 
 ## Symbolized CPU sampling
 

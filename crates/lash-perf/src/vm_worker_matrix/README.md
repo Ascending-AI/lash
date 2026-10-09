@@ -98,7 +98,9 @@ client calls and worker startup select the false specialization, which compiles
 out all measurement clocks and telemetry emission. The matrix selects the
 measured worker at startup and the measured effect-answer method.
 
-All thresholds stay report-only. Nothing in CI or release gates on them.
+The matrix certifies selected budgets by default, failing if any exchange or
+zero-effect overhead threshold fails, or exchange phases fail reconciliation.
+`--report-only` retains diagnostic exploration and explicitly does not certify.
 No benchmark threshold may change to make observed results pass. Shared-host
 instrumented results are diagnostic; FIG-4172 owns quiet-host final numbers.
 Host presets stay explicit and inspectable; workload measurements do not
