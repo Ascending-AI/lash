@@ -5,19 +5,11 @@ impl WorkflowExecutionOverlay {
     /// Provisional execution outcomes cannot override this authority, and a
     /// provisional record that arrives later never reopens it.
     pub fn settle(&mut self, settlement: WorkflowOverlaySettlement) {
-        let settlement = settlement.refine(self.settlement);
-        *self = materialize_overlay(
-            ExecutionRef::of(self),
-            DocumentState::of(self),
-            self.history.clone(),
-            self.conflicts.clone(),
-            self.history_limit,
-            self.retention.clone(),
-            ExecutionProjection {
-                status: self.status,
-                settlement: Some(settlement),
-            },
-        );
+        let mut accumulator = WorkflowExecutionOverlayAccumulator::resume(self, self.history_limit);
+        accumulator.settle(settlement);
+        if let Some(settled) = accumulator.snapshot() {
+            *self = settled;
+        }
     }
 }
 
@@ -31,40 +23,26 @@ impl WorkflowOverlayTerminal {
     }
 }
 
-pub(super) fn settle_retained_sites<'a>(
-    sites: impl Iterator<Item = &'a mut WorkflowOverlaySite>,
-    settlement: WorkflowOverlaySettlement,
-) {
-    if settlement.terminal != WorkflowOverlayTerminal::Cancelled {
-        return;
-    }
-    let Some(end) = settlement.occurred_at else {
-        return;
+/// End the evicted occurrence a site still shows in flight when its process
+/// was cancelled at `end`.
+pub(super) fn settle_retained_site(site: &mut WorkflowOverlaySiteState, end: DateTime<Utc>) {
+    let (occurrence, start) = match site.occurrence {
+        WorkflowOverlayOccurrence::Running { occurrence, start } => (occurrence, Some(start)),
+        WorkflowOverlayOccurrence::Waiting {
+            occurrence, start, ..
+        } => (occurrence, start),
+        _ => return,
     };
-    for site in sites {
-        let (occurrence, start) = match site.occurrence {
-            WorkflowOverlayOccurrence::Running { occurrence, start } => (occurrence, Some(start)),
-            WorkflowOverlayOccurrence::Waiting {
-                occurrence, start, ..
-            } => (occurrence, start),
-            _ => continue,
-        };
-        site.occurrence = WorkflowOverlayOccurrence::Cancelled {
-            occurrence,
-            start,
-            end,
-        };
-        let terminal = WorkflowOverlayTerminalRecord {
-            occurrence,
-            status: WorkflowOverlayTerminalStatus::Cancelled,
-            end,
-        };
-        site.summary.terminal_count += 1;
-        if site.summary.first_terminal.is_none() {
-            site.summary.first_terminal = Some(terminal.clone());
-        }
-        site.summary.last_terminal = Some(terminal);
-    }
+    site.occurrence = WorkflowOverlayOccurrence::Cancelled {
+        occurrence,
+        start,
+        end,
+    };
+    site.summary.ended(WorkflowOverlayTerminalRecord {
+        occurrence,
+        status: WorkflowOverlayTerminalStatus::Cancelled,
+        end,
+    });
 }
 
 /// Both direct process execution and process-scoped effects are provisional
@@ -79,47 +57,27 @@ pub(super) fn is_process_subject(subject: &crate::TraceRuntimeSubject) -> bool {
     }
 }
 
-pub(super) fn observed_execution_status(
-    current: LanguageExecutionStatus,
-    subject: &crate::TraceRuntimeSubject,
-    fact: &WorkflowOverlayFact,
-) -> LanguageExecutionStatus {
-    if is_process_subject(subject) {
-        return current;
-    }
-    match fact {
-        WorkflowOverlayFact::Language {
-            payload: TraceLanguageExecutionPayload::ExecutionFinished { status, .. },
-            ..
-        } => canonical_execution_status(current, *status),
-        _ => current,
-    }
-}
-
 /// Retain the distinction between a missing site outcome and a proven one.
-pub(super) fn settle_incomplete_sites<'a>(
-    sites: impl Iterator<Item = &'a mut WorkflowOverlaySite>,
+pub(super) fn settle_incomplete_site(
+    site: &mut WorkflowOverlaySiteState,
     settlement: WorkflowOverlaySettlement,
 ) {
-    if settlement.terminal == WorkflowOverlayTerminal::Cancelled && settlement.occurred_at.is_some()
-    {
+    if settlement.cancelled_at().is_some() {
         return;
     }
-    for site in sites {
-        let (occurrence, start) = match site.occurrence {
-            WorkflowOverlayOccurrence::Running { occurrence, start } => (occurrence, Some(start)),
-            WorkflowOverlayOccurrence::Waiting {
-                occurrence, start, ..
-            } => (occurrence, start),
-            _ => continue,
-        };
-        site.occurrence = WorkflowOverlayOccurrence::Incomplete {
-            occurrence,
-            start,
-            settled_at: settlement.occurred_at,
-            terminal: settlement.terminal,
-        };
-    }
+    let (occurrence, start) = match site.occurrence {
+        WorkflowOverlayOccurrence::Running { occurrence, start } => (occurrence, Some(start)),
+        WorkflowOverlayOccurrence::Waiting {
+            occurrence, start, ..
+        } => (occurrence, start),
+        _ => return,
+    };
+    site.occurrence = WorkflowOverlayOccurrence::Incomplete {
+        occurrence,
+        start,
+        settled_at: settlement.occurred_at,
+        terminal: settlement.terminal,
+    };
 }
 
 impl WorkflowOverlaySettlement {
@@ -131,27 +89,12 @@ impl WorkflowOverlaySettlement {
         }
         self
     }
-}
 
-/// Which of two facts under one identity is canonical when both finish the
-/// execution with different statuses: `Some(true)` for `left`. `None` when
-/// they are not two such finishes.
-pub(super) fn canonical_execution_status_of(
-    left: &WorkflowOverlayFact,
-    right: &WorkflowOverlayFact,
-) -> Option<bool> {
-    let (
-        WorkflowOverlayFact::Language {
-            payload: TraceLanguageExecutionPayload::ExecutionFinished { status: left, .. },
-            ..
-        },
-        WorkflowOverlayFact::Language {
-            payload: TraceLanguageExecutionPayload::ExecutionFinished { status: right, .. },
-            ..
-        },
-    ) = (left, right)
-    else {
-        return None;
-    };
-    (left != right).then(|| canonical_execution_status(*left, *right) == *left)
+    /// When the process was cancelled, if this is a dated cancellation.
+    pub(super) fn cancelled_at(self) -> Option<DateTime<Utc>> {
+        match self.terminal {
+            WorkflowOverlayTerminal::Cancelled => self.occurred_at,
+            _ => None,
+        }
+    }
 }

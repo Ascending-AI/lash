@@ -569,13 +569,14 @@ fn check_followed(
     } = *run;
     let overlay = &observed["overlay"];
     ensure!(
-        overlay["coverage"] == json!({"document_loaded": true, "start_observed": false}),
-        "the overlay says it has the document and missed the start: {}",
+        overlay["coverage"] == json!({"start_observed": false}),
+        "the overlay says it missed the start: {}",
         overlay["coverage"]
     );
     ensure!(
-        overlay["document"] == *reference,
-        "the overlay is of the document the run names"
+        overlay["document"] == json!({"state": "loaded", "reference": reference}),
+        "the overlay was held to the document the run names: {}",
+        overlay["document"]
     );
     ensure!(
         overlay["status"] == "completed"
@@ -1200,7 +1201,7 @@ async fn s38(case: &mut Case) -> Result<()> {
         );
         ensure!(
             overlay.is_null()
-                || (overlay["coverage"]["document_loaded"] == true
+                || (overlay["document"]["state"] == "loaded"
                     && overlay["coverage"]["start_observed"] == false),
             "the {name} follower has not observed the start: {overlay}"
         );
@@ -1258,8 +1259,8 @@ async fn s38(case: &mut Case) -> Result<()> {
                 })
                 .await?;
             ensure!(
-                waiting["overlay"]["coverage"]
-                    == json!({"document_loaded": true, "start_observed": false})
+                waiting["overlay"]["document"]["state"] == "loaded"
+                    && waiting["overlay"]["coverage"] == json!({"start_observed": false})
                     && waiting["overlay"]["settlement"].is_null()
                     && waiting["terminal"].is_null(),
                 "mid-run, the {name} overlay is unsettled and incomplete: {}",

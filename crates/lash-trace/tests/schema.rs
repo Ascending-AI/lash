@@ -753,7 +753,7 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
     assert!(!overlay.sites.is_empty() && !overlay.history.is_empty());
     assert!(!overlay.retention.is_empty() && !overlay.children.is_empty());
     assert_eq!(overlay.mismatches.len(), 2);
-    assert!(overlay.sites[0].call.is_some());
+    assert!(overlay.sites[0].state.call.is_some());
     let mut value = serde_json::to_value(&overlay).expect("encode overlay");
     assert_schema_accepts(&validator, &value, "a folded overlay");
 
@@ -764,6 +764,8 @@ fn published_overlay_schema_accepts_a_folded_overlay_and_enforces_its_row() {
         ("site status", "/sites/0/status"),
         ("mismatch kind", "/mismatches/0/kind"),
         ("history fact", "/history/0/fact"),
+        ("history identity", "/history/0/identity/of"),
+        ("document binding", "/document/state"),
     ] {
         let mut changed = value.clone();
         *changed.pointer_mut(pointer).expect(field) = json!("future_variant");

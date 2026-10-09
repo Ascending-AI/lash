@@ -234,7 +234,7 @@ pub(super) fn agent_contract_graph_facts(
             };
             let title = label.title.as_str();
             let resource = described.kind == lash::tracing::ExecutionNodeKind::ResourceOperation;
-            match &site.occurrence {
+            match &site.state.occurrence {
                 lash::workflow::WorkflowOverlayOccurrence::Completed { .. } => {
                     if resource {
                         completed_labeled_resources.insert(title.to_string());
@@ -252,6 +252,7 @@ pub(super) fn agent_contract_graph_facts(
                 "{}->{}",
                 identity.entry_name,
                 child
+                    .child
                     .document
                     .as_ref()
                     .map(|document| document.module_ref.as_str())

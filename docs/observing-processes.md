@@ -299,7 +299,8 @@ only while the cell's execution is unsettled, unless a global of the frame
 names a process the cell declared: read a cell's document when its start
 arrives, and keep your own copy if you archive its observations. A document
 Lash no longer holds reads as `WorkflowDocumentRead::Unavailable`, and the
-overlay's `coverage.document_loaded` stays `false`. Events carry no labels,
+overlay's `document` stays `claimed` (the start named it) or `unknown`,
+never `loaded`. Events carry no labels,
 kinds or edges; look those up in the document by the event's site
 (`at.site`). A `BranchSelected` fact names the typed arm
 it took (`then` or `else`); which nodes the other arm holds is the document's
@@ -309,10 +310,16 @@ The overlay holds one state per observed execution site: its latest
 occurrence, the arm a branch site chose, the call an admitted step ran
 under, and a bounded history. It never lists a site that was not observed,
 and never grafts one the document lacks: a site outside the document is a
-typed `WorkflowOverlayMismatch`. `coverage` says what the overlay rests on.
-An observer that attached after the execution started still loads the right
-document from the snapshot's reference, and `coverage.start_observed` is
-`false` until the start is replayed.
+typed `WorkflowOverlayMismatch`. `document` and `coverage` say what the
+overlay rests on: whether it was held to the loaded document, and whether it
+retains the execution's start. An observer that attached after the execution
+started still loads the right document from the snapshot's reference, and
+`coverage.start_observed` is `false` until the start is replayed.
+
+An occurrence may wait and resume any number of times; each wait and each
+resume is its own observation, and the occurrence is parked while its latest
+wait is later than its latest resume. Two different observations of one
+transition are a typed conflict: the overlay keeps the earlier one.
 
 `StepBodyStarted` reports that the admitted body of a step is starting: the
 process, the exact site and occurrence, the admitted call and the attempt. A

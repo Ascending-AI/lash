@@ -5,8 +5,8 @@ use lash_sansio::WorkflowSiteRef;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    StepBodyStarted, TraceBranchSelection, TraceLanguageExecutionFailure,
-    TraceLanguageExecutionGeneration, TraceLanguageExecutionPayload,
+    StepBodyStarted, TraceBranchSelection, TraceLanguageChildExecution,
+    TraceLanguageExecutionFailure, TraceLanguageExecutionGeneration, TraceLanguageExecutionPayload,
     TraceLanguageExecutionStatus as LanguageExecutionStatus, TraceRuntimeScope,
     TraceRuntimeSubject, WorkflowDocumentRef, ensure_trace_schema_version,
 };
@@ -52,20 +52,38 @@ impl WorkflowOverlayDocument {
 /// How much of the execution the overlay can speak for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlayCoverage {
-    /// The reducer was given the document: every listed site is one of its
-    /// sites, and a site it lacks is a mismatch.
-    pub document_loaded: bool,
     /// The retained observations include the execution's start. Without it
     /// the observer attached late or lost continuity, and occurrences that
     /// ran before are not here.
     pub start_observed: bool,
 }
 
-impl WorkflowOverlayCoverage {
-    /// Whether the overlay covers the execution from its start against its
-    /// document. Per-site truncation is reported by the retention records.
-    pub const fn is_complete(self) -> bool {
-        self.document_loaded && self.start_observed
+/// What the overlay knows of the document its execution runs.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum WorkflowOverlayDocumentBinding {
+    /// No document was given and the execution's start was not observed.
+    Unknown,
+    /// The execution's start named this document; the reducer was not given
+    /// it, so the listed sites are whatever was observed.
+    Claimed { reference: WorkflowDocumentRef },
+    /// The reducer was given this document: every listed site is one of its
+    /// sites, and a site it lacks is a mismatch.
+    Loaded { reference: WorkflowDocumentRef },
+}
+
+impl WorkflowOverlayDocumentBinding {
+    /// The document the execution runs, when the overlay knows one.
+    pub fn reference(&self) -> Option<&WorkflowDocumentRef> {
+        match self {
+            Self::Unknown => None,
+            Self::Claimed { reference } | Self::Loaded { reference } => Some(reference),
+        }
+    }
+
+    /// Whether the overlay was held to the document's own sites.
+    pub const fn is_loaded(&self) -> bool {
+        matches!(self, Self::Loaded { .. })
     }
 }
 
@@ -82,38 +100,63 @@ pub enum WorkflowOverlayMismatch {
     SiteOutsideDocument { site: WorkflowSiteRef },
 }
 
-/// Canonical identity of one fold input within its execution.
+/// Canonical identity of one observation within its execution: two
+/// observations with one identity are of the same transition.
 ///
-/// Site transitions use `(site, occurrence)` plus the transition kind:
-/// occurrences count per site. The transition kind lets a start and its
-/// terminal fact merge monotonically while still making a second, different
-/// start or terminal a typed conflict. A step body start is one fact per
-/// attempt of its body.
-#[derive(
-    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
-)]
-pub struct WorkflowOverlayEventIdentity {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub site: Option<WorkflowSiteRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub occurrence: Option<u64>,
-    pub transition: WorkflowOverlayEventTransition,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub step_attempt: Option<u32>,
+/// An execution starts once and finishes once. An occurrence starts, ends,
+/// selects a branch and starts a child once each, and may wait and resume
+/// any number of times: each wait and each resume is its own observation,
+/// numbered in time. A step body start is one fact per attempt of its body.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "of", rename_all = "snake_case")]
+pub enum WorkflowOverlayEventIdentity {
+    Execution {
+        transition: WorkflowOverlayExecutionTransition,
+    },
+    Node {
+        at: lash_sansio::WorkflowOccurrence,
+        transition: WorkflowOverlayNodeTransition,
+    },
+    StepBody {
+        at: lash_sansio::WorkflowOccurrence,
+        attempt: u32,
+    },
+}
+
+impl WorkflowOverlayEventIdentity {
+    /// The occurrence the observation is about; `None` for a fact about the
+    /// whole execution.
+    pub const fn at(&self) -> Option<&lash_sansio::WorkflowOccurrence> {
+        match self {
+            Self::Execution { .. } => None,
+            Self::Node { at, .. } | Self::StepBody { at, .. } => Some(at),
+        }
+    }
 }
 
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum WorkflowOverlayEventTransition {
-    ExecutionStarted,
-    ExecutionFinished,
-    NodeStarted,
-    StepBodyStarted,
-    NodeWaiting,
-    NodeResumed,
-    NodeTerminal,
+pub enum WorkflowOverlayExecutionTransition {
+    Started,
+    Finished,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkflowOverlayNodeTransition {
+    Started,
+    /// The occurrence's `ordinal`-th retained wait, from 1, in time order.
+    Waiting {
+        ordinal: u32,
+    },
+    /// The occurrence's `ordinal`-th retained resume, from 1, in time order.
+    Resumed {
+        ordinal: u32,
+    },
+    /// The occurrence completed, failed or was cancelled.
+    Terminal,
     BranchSelected,
     ChildStarted,
 }
@@ -133,29 +176,12 @@ pub enum WorkflowOverlayFact {
 
 /// One canonical observation retained so a persisted overlay can be folded
 /// again.
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlayHistoryEvent {
     pub identity: WorkflowOverlayEventIdentity,
     pub timestamp: DateTime<Utc>,
     #[serde(flatten)]
     pub fact: WorkflowOverlayFact,
-}
-
-#[cfg(test)]
-thread_local! {
-    pub(super) static HISTORY_CLONES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-impl Clone for WorkflowOverlayHistoryEvent {
-    fn clone(&self) -> Self {
-        #[cfg(test)]
-        HISTORY_CLONES.with(|count| count.set(count.get() + 1));
-        Self {
-            identity: self.identity.clone(),
-            timestamp: self.timestamp,
-            fact: self.fact.clone(),
-        }
-    }
 }
 
 /// Why two records under one logical identity did not deduplicate.
@@ -165,7 +191,10 @@ pub enum WorkflowOverlayConflictKind {
     ConflictingDuplicate,
 }
 
-/// A bounded, typed record of divergent values under one logical identity.
+/// A bounded, typed record of divergent observations under one identity.
+/// The overlay keeps the earlier observation; of two at one instant it keeps
+/// the one whose variant digest is smaller. `variants` lists the smallest and
+/// the largest digest observed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlayConflict {
     pub identity: WorkflowOverlayEventIdentity,
@@ -182,17 +211,11 @@ pub struct WorkflowOverlayConflict {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct WorkflowExecutionOverlay {
     pub schema_version: u32,
-    /// The execution's key: its subject and, for an attempted execution, its
-    /// attempt. Two runs of one document never share it.
-    pub execution_key: String,
     pub scope: TraceRuntimeScope,
     pub subject: TraceRuntimeSubject,
     #[serde(flatten)]
     pub generation: Option<TraceLanguageExecutionGeneration>,
-    /// The document the execution runs: the loaded document's reference, or
-    /// the one the execution's start named when none was loaded.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub document: Option<WorkflowDocumentRef>,
+    pub document: WorkflowOverlayDocumentBinding,
     pub coverage: WorkflowOverlayCoverage,
     pub status: LanguageExecutionStatus,
     /// Authoritative process settlement, independent of provisional VM outcomes.
@@ -215,11 +238,10 @@ pub struct WorkflowExecutionOverlay {
 #[derive(Deserialize)]
 struct WorkflowExecutionOverlayWire {
     schema_version: u32,
-    execution_key: String,
     scope: TraceRuntimeScope,
     subject: TraceRuntimeSubject,
     attempt: Option<u32>,
-    document: Option<WorkflowDocumentRef>,
+    document: WorkflowOverlayDocumentBinding,
     coverage: WorkflowOverlayCoverage,
     status: LanguageExecutionStatus,
     settlement: Option<WorkflowOverlaySettlement>,
@@ -250,7 +272,6 @@ impl<'de> Deserialize<'de> for WorkflowExecutionOverlay {
             serde_json::from_value(value).map_err(serde::de::Error::custom)?;
         Ok(Self {
             schema_version: wire.schema_version,
-            execution_key: wire.execution_key,
             scope: wire.scope,
             subject: wire.subject,
             generation: wire.attempt.map(TraceLanguageExecutionGeneration::new),
@@ -270,16 +291,51 @@ impl<'de> Deserialize<'de> for WorkflowExecutionOverlay {
     }
 }
 
-/// Aggregate facts for occurrences evicted from one site's bounded history.
+impl WorkflowExecutionOverlay {
+    /// The execution's key: its subject and, for an attempted execution, its
+    /// attempt. Two runs of one document never share it.
+    pub fn execution_key(&self) -> String {
+        execution_key(&self.subject, self.generation)
+    }
+
+    /// Whether the overlay covers the execution from its start against its
+    /// document. Per-site truncation is reported by the retention records.
+    pub const fn is_complete(&self) -> bool {
+        self.document.is_loaded() && self.coverage.start_observed
+    }
+}
+
+pub(super) fn execution_key(
+    subject: &TraceRuntimeSubject,
+    generation: Option<TraceLanguageExecutionGeneration>,
+) -> String {
+    match generation {
+        Some(generation) => format!(
+            "{}:attempt:{attempt}",
+            subject.graph_key(),
+            attempt = generation.attempt(),
+        ),
+        None => subject.graph_key(),
+    }
+}
+
+/// What one site keeps of the occurrences evicted from its bounded history.
+///
+/// Occurrences at or below `truncation_watermark` are no longer in the
+/// overlay's history. The watermark occurrence keeps its observations, so
+/// one that arrives late still folds exactly. The occurrences below it are
+/// folded into `archived`; of those, a late observation can refine only the
+/// occurrence `archived` shows.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlaySiteRetention {
     pub site: WorkflowSiteRef,
     pub truncation_watermark: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub archived: Option<Box<WorkflowOverlaySite>>,
+    /// What the occurrences below the watermark folded to.
+    pub archived: WorkflowOverlaySiteState,
+    /// The child executions the occurrences below the watermark started.
+    pub archived_children: Vec<TraceLanguageChildExecution>,
+    /// The observations of the watermark occurrence.
     pub watermark_history: Vec<WorkflowOverlayHistoryEvent>,
-    pub state: WorkflowOverlaySite,
-    pub children: Vec<WorkflowOverlayChildLink>,
 }
 
 /// One occurrence's observed state at a site.
@@ -304,16 +360,12 @@ pub enum WorkflowOverlayOccurrence {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<DateTime<Utc>>,
         end: DateTime<Utc>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        duration_ms: Option<i64>,
     },
     Failed {
         occurrence: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         start: Option<DateTime<Utc>>,
         end: DateTime<Utc>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        duration_ms: Option<i64>,
         failure: TraceLanguageExecutionFailure,
     },
     Cancelled {
@@ -345,6 +397,37 @@ impl WorkflowOverlayOccurrence {
             | Self::Failed { .. }
             | Self::Cancelled { .. }
             | Self::Incomplete { .. } => true,
+        }
+    }
+
+    /// How long a completed or failed occurrence ran, when its start was
+    /// observed.
+    pub fn duration_ms(&self) -> Option<i64> {
+        match self {
+            Self::Completed {
+                start: Some(start),
+                end,
+                ..
+            }
+            | Self::Failed {
+                start: Some(start),
+                end,
+                ..
+            } => Some(end.signed_duration_since(start).num_milliseconds().max(0)),
+            _ => None,
+        }
+    }
+
+    /// When the occurrence was first observed to start.
+    pub const fn start(&self) -> Option<DateTime<Utc>> {
+        match self {
+            Self::Unobserved => None,
+            Self::Running { start, .. } => Some(*start),
+            Self::Waiting { start, .. }
+            | Self::Completed { start, .. }
+            | Self::Failed { start, .. }
+            | Self::Cancelled { start, .. }
+            | Self::Incomplete { start, .. } => *start,
         }
     }
 
@@ -403,6 +486,13 @@ pub struct WorkflowOverlayCall {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlaySite {
     pub site: WorkflowSiteRef,
+    #[serde(flatten)]
+    pub state: WorkflowOverlaySiteState,
+}
+
+/// What a site's occurrences fold to.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowOverlaySiteState {
     /// Which arm a branch site last took. Absent on every other site, and on
     /// a branch whose selection has not been observed. The arms themselves
     /// are the document's: a host reads which nodes an unselected arm holds
@@ -418,30 +508,19 @@ pub struct WorkflowOverlaySite {
     pub summary: WorkflowOverlaySiteReport,
 }
 
-impl WorkflowOverlaySite {
-    pub(super) fn unobserved(site: WorkflowSiteRef) -> Self {
-        Self {
-            site,
-            branch: None,
-            call: None,
-            occurrence: WorkflowOverlayOccurrence::Unobserved,
-            summary: WorkflowOverlaySiteReport::default(),
-        }
-    }
-}
-
-/// Link from an observed parent site to a child execution's overlay.
+/// Link from an observed parent site to a child execution's overlay. The
+/// parent execution is the overlay's own.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorkflowOverlayChildLink {
-    pub parent_execution_key: String,
     pub parent_site: WorkflowSiteRef,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub child_execution_key: Option<String>,
-    pub child_process_id: lash_sansio::ProcessId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub child_attempt: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub document: Option<WorkflowDocumentRef>,
+    pub child: TraceLanguageChildExecution,
+}
+
+impl WorkflowOverlayChildLink {
+    /// The child execution's key, when its attempt is known.
+    pub fn child_execution_key(&self) -> Option<String> {
+        self.child.graph_key()
+    }
 }
 
 /// The actual durable terminal category; abandonment is not a VM failure.

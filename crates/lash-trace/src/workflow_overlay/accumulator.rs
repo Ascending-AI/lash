@@ -1,51 +1,87 @@
-use std::collections::HashMap;
-
 use super::*;
 
-/// Mutable canonical history. Appends touch one site's bounded occurrence
-/// index; snapshot reads pay for sorting and projecting the retained
-/// observations.
+/// The overlay's one reducer: the canonical observations of an execution,
+/// held by site and occurrence. An append touches one occurrence of one
+/// site; a snapshot visits each site and each retained occurrence once.
 pub struct WorkflowExecutionOverlayAccumulator {
     history_limit: usize,
     execution: Option<ExecutionRef>,
     document: Option<WorkflowOverlayDocument>,
     document_state: DocumentState,
-    status: Option<LanguageExecutionStatus>,
     settlement: Option<WorkflowOverlaySettlement>,
-    execution_history: BTreeMap<WorkflowOverlayEventIdentity, HistoryEntry>,
-    sites: HashMap<WorkflowSiteRef, SiteHistory>,
+    execution_history: ExecutionHistory,
+    sites: BTreeMap<WorkflowSiteRef, SiteHistory>,
 }
 
+/// One site's occurrences above its watermark, in occurrence order, and
+/// what it keeps of those at or below it.
 #[derive(Default)]
 struct SiteHistory {
-    occurrences: BTreeMap<u64, BTreeMap<WorkflowOverlayEventIdentity, HistoryEntry>>,
-    retention: Option<WorkflowOverlaySiteRetention>,
+    occurrences: BTreeMap<u64, OccurrenceHistory>,
+    retention: Option<SiteRetention>,
 }
 
-struct HistoryEntry {
-    event: WorkflowOverlayHistoryEvent,
-    variants: BTreeSet<String>,
-}
-
-fn insert_event(
-    history: &mut BTreeMap<WorkflowOverlayEventIdentity, HistoryEntry>,
-    candidate: WorkflowOverlayHistoryEvent,
-) {
-    match history.entry(candidate.identity.clone()) {
-        std::collections::btree_map::Entry::Vacant(entry) => {
-            entry.insert(HistoryEntry {
-                event: candidate,
-                variants: BTreeSet::new(),
-            });
-        }
-        std::collections::btree_map::Entry::Occupied(mut entry) => {
-            let current = entry.get_mut();
-            if current.event != candidate {
-                insert_bounded_variant(&mut current.variants, history_digest(&current.event));
-                insert_bounded_variant(&mut current.variants, history_digest(&candidate));
-                current.event = canonical_history_event(current.event.clone(), candidate);
+impl SiteHistory {
+    fn observe(
+        &mut self,
+        occurrence: u64,
+        transition: Transition,
+        observation: Observation,
+        history_limit: usize,
+    ) {
+        match &mut self.retention {
+            Some(retention) if retention.holds(occurrence) => {
+                retention.observe_late(occurrence, transition, observation);
+            }
+            _ => {
+                self.occurrences
+                    .entry(occurrence)
+                    .or_default()
+                    .insert(transition, observation);
+                self.bound(history_limit);
             }
         }
+    }
+
+    /// Evict the earliest occurrences beyond `history_limit`.
+    fn bound(&mut self, history_limit: usize) {
+        while self.occurrences.len() > history_limit
+            && let Some((occurrence, history)) = self.occurrences.pop_first()
+        {
+            self.retention = Some(SiteRetention::evict(
+                self.retention.take(),
+                occurrence,
+                history,
+            ));
+        }
+    }
+
+    /// The site's state and the children it started. A committed
+    /// cancellation ends what was observed in flight; any other committed
+    /// end leaves it incomplete instead of inventing an outcome.
+    fn project(
+        &self,
+        settlement: Option<WorkflowOverlaySettlement>,
+    ) -> (WorkflowOverlaySiteState, SiteChildren) {
+        let (mut state, mut children) = match &self.retention {
+            Some(retention) => retention.state(),
+            None => Default::default(),
+        };
+        let cancelled_at = settlement.and_then(WorkflowOverlaySettlement::cancelled_at);
+        if let Some(end) = cancelled_at {
+            settle_retained_site(&mut state, end);
+        }
+        state.fold(
+            self.occurrences
+                .iter()
+                .map(|(occurrence, history)| (*occurrence, history)),
+            cancelled_at,
+            &mut children,
+        );
+        if let Some(settlement) = settlement {
+            settle_incomplete_site(&mut state, settlement);
+        }
+        (state, children)
     }
 }
 
@@ -64,11 +100,89 @@ impl WorkflowExecutionOverlayAccumulator {
             execution: None,
             document: None,
             document_state: DocumentState::default(),
-            status: None,
             settlement: None,
             execution_history: Default::default(),
             sites: Default::default(),
         }
+    }
+
+    /// Continue from `previous`: the accumulator that would snapshot to it.
+    /// The site index of its document is not part of an overlay; the caller
+    /// supplies it again with [`Self::set_document`].
+    pub(super) fn resume(previous: &WorkflowExecutionOverlay, history_limit: usize) -> Self {
+        let mut accumulator = Self::new(history_limit);
+        accumulator.document_state = DocumentState::of(previous);
+        accumulator.settlement = previous.settlement;
+        let sites = &mut accumulator.sites;
+        for retention in &previous.retention {
+            sites.entry(retention.site.clone()).or_default().retention =
+                Some(SiteRetention::restore(retention));
+        }
+        for event in &previous.history {
+            let observation = Observation {
+                timestamp: event.timestamp,
+                fact: event.fact.clone(),
+            };
+            match Placement::of(&observation) {
+                Placement::Execution(transition) => {
+                    accumulator
+                        .execution_history
+                        .insert(transition, observation);
+                }
+                Placement::Occurrence {
+                    site,
+                    occurrence,
+                    transition,
+                } => sites
+                    .entry(site)
+                    .or_default()
+                    .occurrences
+                    .entry(occurrence)
+                    .or_default()
+                    .insert(transition, observation),
+            }
+        }
+        for conflict in &previous.conflicts {
+            match &conflict.identity {
+                WorkflowOverlayEventIdentity::Execution { transition } => accumulator
+                    .execution_history
+                    .restore_conflict(*transition, &conflict.variants),
+                WorkflowOverlayEventIdentity::Node { at, .. }
+                | WorkflowOverlayEventIdentity::StepBody { at, .. } => {
+                    if let Some(history) = sites
+                        .get_mut(&at.site)
+                        .and_then(|site| site.occurrences.get_mut(&at.occurrence.get()))
+                    {
+                        history.restore_conflict(&conflict.identity, &conflict.variants);
+                    }
+                }
+            }
+        }
+        for site in sites.values_mut() {
+            site.bound(accumulator.history_limit);
+        }
+        // An overlay folded from steps alone has not been named: nothing it
+        // retains came from the execution itself.
+        let named = previous.generation.is_some()
+            || previous.scope != TraceRuntimeScope::none()
+            || previous
+                .history
+                .iter()
+                .chain(
+                    previous
+                        .retention
+                        .iter()
+                        .flat_map(|kept| &kept.watermark_history),
+                )
+                .any(|event| matches!(event.fact, WorkflowOverlayFact::Language { .. }));
+        accumulator.execution = Some(ExecutionRef {
+            subject: previous.subject.clone(),
+            name: named.then(|| ExecutionName {
+                scope: previous.scope.clone(),
+                generation: previous.generation,
+            }),
+        });
+        accumulator
     }
 
     /// Hold the overlay to `document`, the workflow document its execution
@@ -76,18 +190,12 @@ impl WorkflowExecutionOverlayAccumulator {
     /// the overlay as a mismatch, exactly as if the document had been here
     /// first.
     pub fn set_document(&mut self, document: WorkflowOverlayDocument) {
-        self.document_state.loaded = Some(document.reference().clone());
         let state = &mut self.document_state;
-        for entry in self.execution_history.values() {
-            state.admit(Some(&document), &entry.event.identity, &entry.event.fact);
+        state.loaded = Some(document.reference().clone());
+        if let Some(claimed) = self.execution_history.started_document() {
+            state.claim(&document, claimed);
         }
-        self.sites.retain(|site, _| {
-            let known = document.contains(site);
-            if !known {
-                state.report(WorkflowOverlayMismatch::SiteOutsideDocument { site: site.clone() });
-            }
-            known
-        });
+        self.sites.retain(|site, _| state.admits(&document, site));
         self.document = Some(document);
     }
 
@@ -96,32 +204,16 @@ impl WorkflowExecutionOverlayAccumulator {
         self.document.is_some()
     }
 
-    /// Fold a batch into one overlay without cloning its retained history.
-    /// A batch that spans executions is refused before changing the
-    /// accumulator.
+    /// Fold a batch of one execution's records. A batch that spans
+    /// executions is refused before changing the accumulator.
     pub fn fold(&mut self, records: &[TraceRecord]) -> Result<(), WorkflowOverlayFoldError> {
         let incoming = records.iter().filter_map(Incoming::of).collect::<Vec<_>>();
-        let Some((execution_key, subject)) = batch_execution(self.execution.as_ref(), &incoming)
-        else {
+        self.admit(incoming.iter().map(|item| &item.execution))?;
+        if self.execution.is_none() {
             return Err(WorkflowOverlayFoldError::NoExecutionObservations);
-        };
-        for item in &incoming {
-            if !item.belongs_to(&execution_key, &subject) {
-                let other = item.execution.key();
-                return Err(match &self.execution {
-                    Some(_) => WorkflowOverlayFoldError::PreviousExecutionMismatch {
-                        previous: execution_key,
-                        event: other,
-                    },
-                    None => WorkflowOverlayFoldError::MixedExecutions {
-                        first: execution_key,
-                        other,
-                    },
-                });
-            }
         }
         for item in incoming {
-            self.append(item);
+            self.append(item.observation);
         }
         Ok(())
     }
@@ -166,20 +258,37 @@ impl WorkflowExecutionOverlayAccumulator {
             .ok()
             .and_then(DateTime::from_timestamp_millis)
             .ok_or(WorkflowOverlayFoldError::InvalidObservationTimestamp { observed_at_ms })?;
-        let incoming = Incoming {
-            timestamp,
-            execution,
-            fact,
-        };
-        if let Some(previous) = &self.execution
-            && !incoming.belongs_to(&previous.key(), &previous.subject)
-        {
-            return Err(WorkflowOverlayFoldError::PreviousExecutionMismatch {
-                previous: previous.key(),
-                event: incoming.execution.key(),
-            });
+        self.admit([&execution])?;
+        self.append(Observation { timestamp, fact });
+        Ok(())
+    }
+
+    /// Take `observed` as observations of this accumulator's execution, or
+    /// refuse them all: the first one names the execution when nothing has.
+    fn admit<'a>(
+        &mut self,
+        observed: impl IntoIterator<Item = &'a ExecutionRef>,
+    ) -> Result<(), WorkflowOverlayFoldError> {
+        let mut execution = self.execution.clone();
+        for offered in observed {
+            match &mut execution {
+                None => execution = Some(offered.clone()),
+                Some(held) if held.admits(offered) => held.adopt(offered),
+                Some(held) => {
+                    return Err(match &self.execution {
+                        Some(previous) => WorkflowOverlayFoldError::PreviousExecutionMismatch {
+                            previous: previous.key(),
+                            event: offered.key(),
+                        },
+                        None => WorkflowOverlayFoldError::MixedExecutions {
+                            first: held.key(),
+                            other: offered.key(),
+                        },
+                    });
+                }
+            }
         }
-        self.append(incoming);
+        self.execution = execution;
         Ok(())
     }
 
@@ -193,112 +302,108 @@ impl WorkflowExecutionOverlayAccumulator {
     pub fn reset_live(&mut self) {
         self.execution_history.clear();
         self.sites.clear();
-        self.status = None;
         self.document_state.mismatches.clear();
         self.document_state.truncated = false;
     }
 
-    fn append(&mut self, incoming: Incoming) {
-        let Incoming {
-            timestamp,
-            execution,
-            fact,
-        } = incoming;
-        let execution = match self.execution.take() {
-            Some(previous) => previous.canonical(execution),
-            None => execution,
-        };
-        let status = self.status.unwrap_or(LanguageExecutionStatus::Running);
-        self.status = Some(observed_execution_status(status, &execution.subject, &fact));
-        let identity = event_identity(&fact);
-        if !self
-            .document_state
-            .admit(self.document.as_ref(), &identity, &fact)
-        {
-            self.execution = Some(execution);
-            return;
-        }
-        if let Some((site, occurrence)) = site_occurrence(&identity) {
-            let site = site.clone();
-            let history = self.sites.entry(site.clone()).or_default();
-            if let Some(retention) = &mut history.retention
-                && occurrence <= retention.truncation_watermark
-            {
-                merge_late_retained_event(retention, timestamp, &fact, &execution);
-            } else {
-                insert_event(
-                    history.occurrences.entry(occurrence).or_default(),
-                    WorkflowOverlayHistoryEvent {
-                        identity,
-                        timestamp,
-                        fact,
-                    },
-                );
-                if history.occurrences.len() > self.history_limit
-                    && let Some((occurrence, dropped)) = history.occurrences.pop_first()
+    fn append(&mut self, observation: Observation) {
+        match Placement::of(&observation) {
+            Placement::Execution(transition) => {
+                if let Some(document) = &self.document
+                    && let WorkflowOverlayFact::Language {
+                        document: claimed,
+                        payload: TraceLanguageExecutionPayload::ExecutionStarted,
+                    } = &observation.fact
                 {
-                    let dropped: Vec<_> = dropped.into_values().map(|entry| entry.event).collect();
-                    history.retention = Some(merge_site_retention(
-                        history.retention.take(),
-                        &site,
-                        occurrence,
-                        &dropped,
-                        &execution,
-                    ));
+                    self.document_state.claim(document, claimed);
                 }
+                self.execution_history.insert(transition, observation);
             }
-        } else {
-            insert_event(
-                &mut self.execution_history,
-                WorkflowOverlayHistoryEvent {
-                    identity,
-                    timestamp,
-                    fact,
-                },
-            );
+            Placement::Occurrence {
+                site,
+                occurrence,
+                transition,
+            } => {
+                if let Some(document) = &self.document
+                    && !self.document_state.admits(document, &site)
+                {
+                    return;
+                }
+                self.sites.entry(site).or_default().observe(
+                    occurrence,
+                    transition,
+                    observation,
+                    self.history_limit,
+                );
+            }
         }
-        self.execution = Some(execution);
     }
 
-    /// Materialize the pure fold's canonical overlay.
+    /// The overlay of what has been folded; `None` before any observation
+    /// named an execution.
     pub fn snapshot(&self) -> Option<WorkflowExecutionOverlay> {
+        use WorkflowOverlayExecutionTransition as Execution;
         let execution = self.execution.as_ref()?;
-        let entries = self.execution_history.values().chain(
-            self.sites
-                .values()
-                .flat_map(|site| site.occurrences.values().flat_map(BTreeMap::values)),
-        );
-        let mut history = Vec::new();
-        let mut conflicts = Vec::new();
-        for entry in entries {
-            history.push(entry.event.clone());
-            if !entry.variants.is_empty() {
-                conflicts.push(WorkflowOverlayConflict {
-                    identity: entry.event.identity.clone(),
-                    kind: WorkflowOverlayConflictKind::ConflictingDuplicate,
-                    variants: entry.variants.iter().cloned().collect(),
-                });
+        let (mut history, mut conflicts) = (Vec::new(), Vec::new());
+        self.execution_history
+            .publish_execution(&mut history, &mut conflicts);
+        let (mut sites, mut children, mut retention) = (Vec::new(), Vec::new(), Vec::new());
+        for (site, held) in &self.sites {
+            let (state, started) = held.project(self.settlement);
+            children.extend(started.iter().map(|child| WorkflowOverlayChildLink {
+                parent_site: site.clone(),
+                child: child.clone(),
+            }));
+            sites.push(WorkflowOverlaySite {
+                site: site.clone(),
+                state,
+            });
+            retention.extend(held.retention.as_ref().map(|kept| kept.publish(site)));
+            for observations in held.occurrences.values() {
+                observations.publish_retained(&mut history, &mut conflicts);
             }
         }
-        history.sort_by(|left, right| left.identity.cmp(&right.identity));
-        conflicts.sort_by(|left, right| left.identity.cmp(&right.identity));
-        let mut retention: Vec<_> = self
-            .sites
-            .values()
-            .filter_map(|site| site.retention.clone())
-            .collect();
-        retention.sort_by(|left, right| left.site.cmp(&right.site));
-        Some(materialize_overlay(
-            execution.clone(),
-            self.document_state.clone(),
-            history,
-            conflicts,
-            self.history_limit,
-            retention,
-            ExecutionProjection {
-                status: self.status.unwrap_or(LanguageExecutionStatus::Running),
-                settlement: self.settlement,
+        let started_document = self.execution_history.started_document();
+        let status = match self.settlement {
+            Some(settlement) => settlement.terminal.execution_status(),
+            // A process's own finish is provisional until its actor commits
+            // the terminal.
+            None if is_process_subject(&execution.subject) => LanguageExecutionStatus::Running,
+            None => self
+                .execution_history
+                .finished_status()
+                .unwrap_or(LanguageExecutionStatus::Running),
+        };
+        Some(WorkflowExecutionOverlay {
+            schema_version: TRACE_SCHEMA_VERSION,
+            scope: execution
+                .name
+                .as_ref()
+                .map_or_else(TraceRuntimeScope::none, |name| name.scope.clone()),
+            subject: execution.subject.clone(),
+            generation: execution.generation(),
+            document: match (&self.document_state.loaded, started_document) {
+                (Some(reference), _) => WorkflowOverlayDocumentBinding::Loaded {
+                    reference: reference.clone(),
+                },
+                (None, Some(reference)) => WorkflowOverlayDocumentBinding::Claimed {
+                    reference: reference.clone(),
+                },
+                (None, None) => WorkflowOverlayDocumentBinding::Unknown,
             },
-        ))
+            coverage: WorkflowOverlayCoverage {
+                start_observed: self.execution_history.get(&Execution::Started).is_some(),
+            },
+            status,
+            settlement: self.settlement,
+            sites,
+            children,
+            mismatches: self.document_state.mismatches.iter().cloned().collect(),
+            mismatches_truncated: self.document_state.truncated,
+            history_limit: self.history_limit,
+            retention,
+            conflicts,
+            history,
+        })
     }
 }

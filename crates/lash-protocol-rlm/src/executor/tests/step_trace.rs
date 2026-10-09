@@ -130,11 +130,11 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
                 } = &event.payload
             {
                 let graph = reduce(&records[..=index]);
-                assert_eq!(graph.execution_key, event.identity.graph_key());
+                assert_eq!(graph.execution_key(), event.identity.graph_key());
                 assert!(graph.sites.iter().any(|site| {
                     site.site.node_id == at.site.node_id
                         && matches!(
-                            site.occurrence,
+                            site.state.occurrence,
                             lash_vm_runtime::WorkflowOverlayOccurrence::Waiting { .. }
                         )
                 }));
@@ -143,17 +143,17 @@ fn real_foreground_sleep_reduces_waiting_then_completed() {
         }
         let (graph_key, node_id) = awaited_node.expect("sleep emitted a wait");
         let graph = reduce(&records);
-        assert_eq!(graph.execution_key, graph_key);
+        assert_eq!(graph.execution_key(), graph_key);
         assert!(graph.sites.iter().any(|site| {
             site.site.node_id == node_id
                 && matches!(
-                    site.occurrence,
+                    site.state.occurrence,
                     lash_vm_runtime::WorkflowOverlayOccurrence::Completed { .. }
                 )
         }));
         assert!(
             matches!(
-                graph.document.as_ref().map(|document| &document.entry),
+                graph.document.reference().map(|document| &document.entry),
                 Some(lash_trace::WorkflowDocumentEntry::Main)
             ),
             "a cell's start names the main body of its module: {:?}",
@@ -245,12 +245,12 @@ fn real_foreground_cancel_after_partial_completion_keeps_each_occurrence_honest(
             .sites
             .iter()
             .filter(|site| slept.contains(&site.site.node_id))
-            .map(|site| (site.site.node_id.clone(), site.occurrence.clone()))
+            .map(|site| (site.site.node_id.clone(), site.state.occurrence.clone()))
             .collect::<Vec<_>>();
         assert_eq!(sleeps.len(), 2, "{sleeps:#?}");
         assert!(
             graph.sites.iter().all(|site| !matches!(
-                site.occurrence,
+                site.state.occurrence,
                 Observation::Running { .. } | Observation::Waiting { .. }
             )),
             "nothing is left in flight: {:#?}",

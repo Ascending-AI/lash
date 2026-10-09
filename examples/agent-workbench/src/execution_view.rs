@@ -16,9 +16,9 @@ use lash::tracing::{
 };
 use lash::vm::ir::{WorkflowContainer, WorkflowEdgeKind, WorkflowNodeKind, WorkflowSubgraph};
 use lash::workflow::{
-    WorkflowExecutionDocument, WorkflowExecutionOverlay, WorkflowOverlayCoverage,
-    WorkflowOverlayMismatch, WorkflowOverlayOccurrence, WorkflowOverlaySettlement,
-    WorkflowOverlaySite, WorkflowOverlaySiteReport,
+    WorkflowExecutionDocument, WorkflowExecutionOverlay, WorkflowOverlayMismatch,
+    WorkflowOverlayOccurrence, WorkflowOverlaySettlement, WorkflowOverlaySite,
+    WorkflowOverlaySiteReport,
 };
 use serde::Serialize;
 
@@ -36,11 +36,20 @@ pub(crate) struct ExecutionGraph {
     pub(crate) entry_name: String,
     pub(crate) status: TraceLanguageExecutionStatus,
     pub(crate) settlement: Option<WorkflowOverlaySettlement>,
-    pub(crate) coverage: WorkflowOverlayCoverage,
+    pub(crate) coverage: ExecutionGraphCoverage,
     pub(crate) nodes: Vec<ExecutionGraphNode>,
     pub(crate) edges: Vec<ExecutionGraphEdge>,
     pub(crate) children: Vec<ExecutionGraphChildLink>,
     pub(crate) mismatches: Vec<WorkflowOverlayMismatch>,
+}
+
+/// How much of the execution the drawing can speak for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+pub(crate) struct ExecutionGraphCoverage {
+    /// The overlay was held to the document's own sites.
+    pub(crate) document_loaded: bool,
+    /// The overlay retains the execution's start.
+    pub(crate) start_observed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -73,6 +82,9 @@ pub(crate) struct ExecutionGraphNode {
     pub(crate) branch_selection: Option<TraceBranchSelection>,
     #[serde(flatten)]
     pub(crate) state: ExecutionGraphNodeState,
+    /// How long the shown occurrence ran, when both of its ends were seen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) duration_ms: Option<i64>,
     pub(crate) summary: WorkflowOverlaySiteReport,
 }
 
@@ -99,7 +111,7 @@ pub(crate) struct ExecutionGraphChildLink {
 /// The site whose state a node with several sites shows: one in flight, else
 /// the one that ended last, else any that was observed.
 fn shown<'a>(sites: &[&'a WorkflowOverlaySite]) -> Option<&'a WorkflowOverlaySite> {
-    let rank = |site: &&&WorkflowOverlaySite| match &site.occurrence {
+    let rank = |site: &&&WorkflowOverlaySite| match &site.state.occurrence {
         WorkflowOverlayOccurrence::Running { start, .. } => (3, Some(*start)),
         WorkflowOverlayOccurrence::Waiting { since, .. } => (3, Some(*since)),
         WorkflowOverlayOccurrence::Completed { end, .. }
@@ -124,13 +136,16 @@ fn node(
         kind,
         label,
         label_metadata,
-        branch_selection: sites.iter().find_map(|site| site.branch),
+        branch_selection: sites.iter().find_map(|site| site.state.branch),
+        duration_ms: shown.and_then(|site| site.state.occurrence.duration_ms()),
         state: ExecutionGraphNodeState::Observed(
             shown
-                .map(|site| site.occurrence.clone())
+                .map(|site| site.state.occurrence.clone())
                 .unwrap_or_default(),
         ),
-        summary: shown.map(|site| site.summary.clone()).unwrap_or_default(),
+        summary: shown
+            .map(|site| site.state.summary.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -175,7 +190,7 @@ impl Drawing<'_> {
                 self.nodes.push(drawn);
             }
             if let WorkflowNodeKind::Container(container) = &document_node.kind {
-                let taken = sites.iter().find_map(|site| site.branch);
+                let taken = sites.iter().find_map(|site| site.state.branch);
                 for (slot, child) in container.child_subgraphs() {
                     let other_arm_ran = match (container, taken) {
                         (WorkflowContainer::If { .. }, Some(TraceBranchSelection::Then)) => {
@@ -261,7 +276,7 @@ pub(crate) fn draw(
         }
     }
     ExecutionGraph {
-        graph_key: overlay.execution_key.clone(),
+        graph_key: overlay.execution_key(),
         scope: overlay.scope.clone(),
         subject: overlay.subject.clone(),
         attempt: overlay.generation.map(|generation| generation.attempt()),
@@ -281,30 +296,36 @@ pub(crate) fn draw(
         entry_name: identity.entry_name.clone(),
         status: overlay.status,
         settlement: overlay.settlement,
-        coverage: overlay.coverage,
+        coverage: ExecutionGraphCoverage {
+            document_loaded: overlay.document.is_loaded(),
+            start_observed: overlay.coverage.start_observed,
+        },
         nodes: drawing.nodes,
         edges: drawing.edges,
         children: overlay
             .children
             .iter()
             .map(|child| ExecutionGraphChildLink {
-                parent_graph_key: child.parent_execution_key.clone(),
+                parent_graph_key: overlay.execution_key(),
                 parent_node_id: child.parent_site.node_id.to_string(),
-                child_graph_key: child.child_execution_key.clone(),
-                child_process_id: child.child_process_id.clone(),
-                child_attempt: child.child_attempt,
+                child_graph_key: child.child_execution_key(),
+                child_process_id: child.child.process_id.clone(),
+                child_attempt: child.child.attempt,
                 child_module_ref: child
+                    .child
                     .document
                     .as_ref()
                     .map(|document| document.module_ref.to_string()),
-                child_entry_ref: child.document.as_ref().and_then(|document| {
-                    match &document.entry {
+                child_entry_ref: child
+                    .child
+                    .document
+                    .as_ref()
+                    .and_then(|document| match &document.entry {
                         lash::workflow::WorkflowDocumentEntry::Main => None,
                         lash::workflow::WorkflowDocumentEntry::Process { process_ref } => {
                             Some(process_ref.clone())
                         }
-                    }
-                }),
+                    }),
                 child_entry_name: None,
             })
             .collect(),

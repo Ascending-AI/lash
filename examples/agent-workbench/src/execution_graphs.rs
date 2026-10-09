@@ -578,10 +578,7 @@ mod tests {
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Running,
             settlement: None,
-            coverage: lash::workflow::WorkflowOverlayCoverage {
-                document_loaded: false,
-                start_observed: false,
-            },
+            coverage: Default::default(),
             nodes: Vec::new(),
             edges: Vec::new(),
             children,
@@ -644,10 +641,7 @@ mod tests {
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Running,
             settlement: None,
-            coverage: lash::workflow::WorkflowOverlayCoverage {
-                document_loaded: false,
-                start_observed: false,
-            },
+            coverage: Default::default(),
             nodes: Vec::new(),
             edges: Vec::new(),
             children: vec![ExecutionGraphChildLink {
@@ -686,10 +680,7 @@ mod tests {
             entry_name: "main".to_string(),
             status: TraceLanguageExecutionStatus::Completed,
             settlement: None,
-            coverage: lash::workflow::WorkflowOverlayCoverage {
-                document_loaded: false,
-                start_observed: false,
-            },
+            coverage: Default::default(),
             nodes: Vec::new(),
             edges: Vec::new(),
             children: Vec::new(),

@@ -2,7 +2,10 @@ use chrono::{TimeZone, Utc};
 use lash_sansio::{ExprSlot, ProcessId, SessionId, TurnId, WorkflowSitePath};
 
 use super::*;
-use crate::{TraceBranchSelection, TraceContext, TraceLanguageExecution, WorkflowDocumentEntry};
+use crate::{
+    StepBodyStarted, TraceBranchSelection, TraceContext, TraceLanguageExecution,
+    WorkflowDocumentEntry,
+};
 
 fn identity() -> LanguageIdentity {
     LanguageIdentity {
@@ -245,11 +248,12 @@ fn fold(
 fn state<'a>(
     overlay: &'a WorkflowExecutionOverlay,
     site: &WorkflowSiteRef,
-) -> &'a WorkflowOverlaySite {
+) -> &'a WorkflowOverlaySiteState {
     overlay
         .sites
         .iter()
         .find(|state| state.site == *site)
+        .map(|site| &site.state)
         .unwrap_or_else(|| panic!("no state for {site}"))
 }
 
@@ -271,7 +275,7 @@ fn test_permutations(records: &[TraceRecord]) -> Vec<Vec<TraceRecord>> {
 }
 
 /// Every order and every two-way partition of `records` folds to the same
-/// bytes, through the pure fold and through the accumulator.
+/// bytes, whether the accumulator is kept or resumed from each overlay.
 fn assert_fold_law(
     document: Option<&WorkflowOverlayDocument>,
     records: &[TraceRecord],
@@ -324,8 +328,15 @@ fn every_permutation_and_partition_folds_to_the_same_overlay() {
         DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT,
     );
     assert_eq!(with.sites, without.sites);
-    assert!(with.coverage.is_complete());
-    assert!(!without.coverage.is_complete());
+    assert!(with.is_complete());
+    assert!(!without.is_complete());
+    assert_eq!(
+        without.document,
+        WorkflowOverlayDocumentBinding::Claimed {
+            reference: reference()
+        },
+        "the start's claim stands in for a document that was not given"
+    );
 }
 
 /// FIG-5576: an observer that attaches after the execution started loads the
@@ -340,14 +351,13 @@ fn a_late_attach_without_the_start_marks_incomplete_coverage_over_the_loaded_doc
         record_at(node_completed("complete", 1), 1_250),
     ];
     let late = fold_workflow_overlay(None, Some(&document), &records, 8).expect("late attach");
-    assert_eq!(late.document.as_ref(), Some(document.reference()));
     assert_eq!(
-        late.coverage,
-        WorkflowOverlayCoverage {
-            document_loaded: true,
-            start_observed: false,
+        late.document,
+        WorkflowOverlayDocumentBinding::Loaded {
+            reference: reference()
         }
     );
+    assert!(!late.coverage.start_observed);
     assert!(late.mismatches.is_empty());
     assert_eq!(
         late.sites.len(),
@@ -362,19 +372,15 @@ fn a_late_attach_without_the_start_marks_incomplete_coverage_over_the_loaded_doc
         8,
     )
     .expect("replayed start");
-    assert!(seeded.coverage.is_complete());
+    assert!(seeded.is_complete());
     assert_eq!(seeded.sites, late.sites);
-    assert!(matches!(
-        state(&seeded, &site("branch")).occurrence,
-        WorkflowOverlayOccurrence::Completed {
-            duration_ms: Some(250),
-            ..
-        }
-    ));
+    assert_eq!(
+        state(&seeded, &site("branch")).occurrence.duration_ms(),
+        Some(250)
+    );
 
     let unloaded = fold(None, &records).expect("no document");
-    assert_eq!(unloaded.document, None);
-    assert!(!unloaded.coverage.document_loaded);
+    assert_eq!(unloaded.document, WorkflowOverlayDocumentBinding::Unknown);
 }
 
 /// FIG-5576: a site outside the claimed document is a typed mismatch and is
@@ -410,7 +416,7 @@ fn a_site_outside_the_document_is_a_typed_mismatch_and_never_a_site() {
         overlay
             .history
             .iter()
-            .all(|item| item.identity.site.as_ref() != Some(&stray))
+            .all(|item| item.identity.at().is_none_or(|at| at.site != stray))
     );
     assert!(overlay.coverage.start_observed, "the execution did start");
 
@@ -572,12 +578,9 @@ fn a_step_body_start_binds_its_occurrence_to_the_call_and_a_retry_keeps_both() {
     assert_eq!(bound.summary.started_count, 1);
     assert!(matches!(
         bound.occurrence,
-        WorkflowOverlayOccurrence::Completed {
-            occurrence: 1,
-            duration_ms: Some(2_000),
-            ..
-        }
+        WorkflowOverlayOccurrence::Completed { occurrence: 1, .. }
     ));
+    assert_eq!(bound.occurrence.duration_ms(), Some(2_000));
     assert!(overlay.conflicts.is_empty(), "two attempts are two facts");
 
     let only_started = fold(None, std::slice::from_ref(&first)).expect("body start alone");
@@ -601,7 +604,7 @@ fn a_step_body_start_binds_its_occurrence_to_the_call_and_a_retry_keeps_both() {
     )
     .expect("refused step");
     assert!(
-        refused.sites.iter().all(|state| state.call.is_none()),
+        refused.sites.iter().all(|site| site.state.call.is_none()),
         "a refused step has no admitted call"
     );
 
@@ -700,8 +703,8 @@ fn a_committed_terminal_settles_without_a_finish_and_is_never_reopened() {
     .expect("late record through the fold");
     assert_eq!(reopened, partitioned);
     assert_eq!(reopened.status, LanguageExecutionStatus::Cancelled);
-    assert!(reopened.sites.iter().all(|state| !matches!(
-        state.occurrence,
+    assert!(reopened.sites.iter().all(|site| !matches!(
+        site.state.occurrence,
         WorkflowOverlayOccurrence::Running { .. } | WorkflowOverlayOccurrence::Waiting { .. }
     )));
 
@@ -828,7 +831,7 @@ fn a_terminal_never_downgrades_and_the_next_occurrence_is_visible() {
     let first = record_at(failure(1, "worker-a", "first attempt"), 1_000);
     let folded = fold(None, std::slice::from_ref(&first)).expect("first attempt");
     assert_eq!(
-        folded.execution_key,
+        folded.execution_key(),
         format!("process:{}:attempt:1", ProcessId::fixture("worker-a"))
     );
     for other in [
@@ -871,12 +874,14 @@ fn per_site_history_is_bounded_with_a_canonical_watermark() {
         WorkflowOverlayOccurrence::Running { occurrence: 2, .. }
     ));
     for site in [&a, &z] {
-        assert!(overlay.history.iter().any(|item| {
-            item.identity.site.as_ref() == Some(site) && item.identity.occurrence == Some(2)
-        }));
-        assert!(overlay.history.iter().all(|item| {
-            item.identity.site.as_ref() != Some(site) || item.identity.occurrence != Some(1)
-        }));
+        let retained = overlay
+            .history
+            .iter()
+            .filter_map(|item| item.identity.at())
+            .filter(|at| at.site == *site)
+            .map(|at| at.occurrence.get())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(retained, BTreeSet::from([2]));
     }
     assert_eq!(
         overlay
@@ -885,6 +890,13 @@ fn per_site_history_is_bounded_with_a_canonical_watermark() {
             .map(|retention| (&retention.site, retention.truncation_watermark))
             .collect::<Vec<_>>(),
         vec![(&z, 1), (&a, 1)]
+    );
+    let evicted = &overlay.retention[1];
+    assert_eq!(evicted.archived, WorkflowOverlaySiteState::default());
+    assert_eq!(
+        evicted.watermark_history.len(),
+        2,
+        "the watermark occurrence keeps its observations"
     );
     assert!(
         overlay.coverage.start_observed,
@@ -909,32 +921,6 @@ fn the_default_limit_retains_the_latest_occurrence_and_summary() {
     assert_eq!(overlay.retention[0].truncation_watermark, 1);
 }
 
-/// One append clones only the occurrence it evicts, however many the site
-/// retains.
-#[test]
-fn appending_an_observation_clones_only_the_evicted_occurrence() {
-    for retained in [16, 256] {
-        let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
-        let mut append = |event, timestamp| {
-            accumulator
-                .fold(std::slice::from_ref(&record_at(event, timestamp)))
-                .expect("fold");
-        };
-        append(started_event("seed"), 0);
-        for occurrence in 1..=retained {
-            append(node_started("start", occurrence), occurrence as i64);
-            append(node_completed("end", occurrence), occurrence as i64 + 1);
-        }
-        model::HISTORY_CLONES.with(|count| count.set(0));
-        append(node_started("next", retained + 1), retained as i64 + 2);
-        let clones = model::HISTORY_CLONES.with(std::cell::Cell::get);
-        assert!(
-            clones <= 4,
-            "one append cloned {clones} history events with {retained} retained occurrences"
-        );
-    }
-}
-
 /// A wait is dated by its record, names what it awaits, and is resolved only
 /// for its own occurrence; a completion dominates it in every order.
 #[test]
@@ -946,18 +932,7 @@ fn a_wait_keeps_its_awaited_identity_and_resolves_only_its_own_occurrence() {
         name: "approval".into(),
         key: "key-2".into(),
     };
-    let resumed = |occurrence| {
-        language(
-            "resumed",
-            node_fact(
-                "branch",
-                occurrence,
-                TraceNodeFact::Resumed {
-                    resolution: crate::TraceNodeWaitResolution::Resumed,
-                },
-            ),
-        )
-    };
+    let resumed = |occurrence| node_resumed("resumed", occurrence);
     let waiting = [
         record_at(node_started("start", 1), 1_000),
         record_at(node_waiting("wait", 1, sleep.clone()), 2_000),
@@ -976,13 +951,10 @@ fn a_wait_keeps_its_awaited_identity_and_resolves_only_its_own_occurrence() {
     let mut completed = waiting.to_vec();
     completed.push(record_at(node_completed("done", 1), 3_000));
     let overlay = assert_fold_law(None, &completed, 8);
-    assert!(matches!(
-        state(&overlay, &site("branch")).occurrence,
-        WorkflowOverlayOccurrence::Completed {
-            duration_ms: Some(2_000),
-            ..
-        }
-    ));
+    assert_eq!(
+        state(&overlay, &site("branch")).occurrence.duration_ms(),
+        Some(2_000)
+    );
 
     let two = fold(
         None,
@@ -1079,16 +1051,15 @@ fn a_child_link_names_the_parent_site_and_the_child_execution() {
     .expect("child");
     assert_eq!(overlay.children.len(), 1);
     let link = &overlay.children[0];
-    assert_eq!(link.parent_execution_key, overlay.execution_key);
     assert_eq!(link.parent_site, site("then"));
     assert_eq!(
-        link.document.as_ref().map(|document| &document.entry),
+        link.child.document.as_ref().map(|document| &document.entry),
         Some(&WorkflowDocumentEntry::Process {
             process_ref: "0:1".to_owned()
         })
     );
     assert_eq!(
-        link.child_execution_key,
+        link.child_execution_key(),
         Some(format!("process:{child}:attempt:1"))
     );
     let parent = state(&overlay, &site("then"));
@@ -1165,5 +1136,187 @@ fn an_overlay_decodes_at_its_own_schema_version_and_round_trips() {
             .to_string()
             .contains("unsupported trace schema version"),
         "{error}"
+    );
+}
+
+fn node_resumed(event_key: &str, occurrence: u64) -> TraceLanguageExecution {
+    language(
+        event_key,
+        node_fact(
+            "branch",
+            occurrence,
+            TraceNodeFact::Resumed {
+                resolution: crate::TraceNodeWaitResolution::Resumed,
+            },
+        ),
+    )
+}
+
+/// FIG-5641: an occurrence that waits, resumes and waits again is parked on
+/// its second wait. Each wait and each resume is its own observation, in
+/// every arrival order, and none of them is a conflict.
+#[test]
+fn a_second_wait_of_one_occurrence_is_its_own_observation() {
+    let sleep = crate::TraceNodeAwaited::Sleep {
+        deadline_ms: Some(9_000),
+    };
+    let signal = crate::TraceNodeAwaited::Signal {
+        name: "approval".into(),
+        key: "key-2".into(),
+    };
+    let records = [
+        record_at(node_started("start", 1), 1_000),
+        record_at(node_waiting("wait-1", 1, sleep), 2_000),
+        record_at(node_resumed("resume-1", 1), 3_000),
+        record_at(node_waiting("wait-2", 1, signal.clone()), 4_000),
+    ];
+    let parked = assert_fold_law(None, &records, 8);
+    assert_eq!(
+        state(&parked, &site("branch")).occurrence,
+        WorkflowOverlayOccurrence::Waiting {
+            occurrence: 1,
+            start: Some(at(1_000)),
+            since: at(4_000),
+            awaited: signal,
+        }
+    );
+    assert!(parked.conflicts.is_empty(), "{:?}", parked.conflicts);
+    let transitions = parked
+        .history
+        .iter()
+        .map(|item| match &item.identity {
+            WorkflowOverlayEventIdentity::Node { transition, .. } => *transition,
+            other => panic!("not a node observation: {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        transitions,
+        [
+            WorkflowOverlayNodeTransition::Started,
+            WorkflowOverlayNodeTransition::Waiting { ordinal: 1 },
+            WorkflowOverlayNodeTransition::Waiting { ordinal: 2 },
+            WorkflowOverlayNodeTransition::Resumed { ordinal: 1 },
+        ]
+    );
+
+    let resumed = fold(
+        Some(&parked),
+        &[record_at(node_resumed("resume-2", 1), 5_000)],
+    )
+    .expect("second resume");
+    assert!(matches!(
+        state(&resumed, &site("branch")).occurrence,
+        WorkflowOverlayOccurrence::Running { occurrence: 1, .. }
+    ));
+}
+
+/// FIG-5641: two different observations of one transition are a conflict
+/// settled by rule, never by arrival: the earlier observation is kept.
+#[test]
+fn a_conflict_keeps_the_earlier_observation_in_every_order() {
+    let failed = record_at(node_failed("failed", 1, "boom"), 2_000);
+    let completed = record_at(node_completed("completed", 1), 3_000);
+    let overlay = assert_fold_law(None, &[failed, completed], 8);
+    assert!(matches!(
+        state(&overlay, &site("branch")).occurrence,
+        WorkflowOverlayOccurrence::Failed { end, .. } if end == at(2_000)
+    ));
+    assert_eq!(overlay.conflicts.len(), 1);
+    assert_eq!(
+        overlay.conflicts[0].identity,
+        WorkflowOverlayEventIdentity::Node {
+            at: occurrence_at(&site("branch"), 1),
+            transition: WorkflowOverlayNodeTransition::Terminal,
+        }
+    );
+}
+
+/// FIG-5641: a step names only its process, so it adopts the scope and the
+/// generation of the execution it belongs to and never erases them.
+#[test]
+fn a_step_adopts_the_scope_and_generation_of_its_execution() {
+    let process = ProcessId::fixture("worker");
+    let mut start = in_process(started_event("seed"), &process);
+    start.identity.scope = TraceRuntimeScope::for_session("session-1");
+    start.identity.generation = Some(crate::TraceLanguageExecutionGeneration::new(3));
+    let records = [
+        record_at(start, 900),
+        step_record(step_body(&process, 1, "call-1", 1), 1_000),
+    ];
+    let overlay = assert_fold_law(None, &records, 8);
+    assert_eq!(
+        overlay.generation,
+        Some(crate::TraceLanguageExecutionGeneration::new(3))
+    );
+    assert_eq!(overlay.scope, TraceRuntimeScope::for_session("session-1"));
+    assert_eq!(
+        overlay.execution_key(),
+        format!("process:{process}:attempt:3")
+    );
+
+    let mut retried = in_process(node_started("retried", 1), &process);
+    retried.identity.generation = Some(crate::TraceLanguageExecutionGeneration::new(4));
+    assert!(
+        matches!(
+            fold(Some(&overlay), &[record_at(retried, 2_000)]),
+            Err(WorkflowOverlayFoldError::PreviousExecutionMismatch { .. })
+        ),
+        "a named execution still refuses another attempt"
+    );
+}
+
+/// FIG-5641: a snapshot folds each retained occurrence and publishes each
+/// history event once, and an append touches one occurrence, however many
+/// sites and occurrences the overlay holds. The law counts the reducer's
+/// work (occurrences folded plus history events published), not time: a
+/// scan of every occurrence for every site would be 64 million units here.
+#[test]
+fn a_snapshot_costs_what_it_retains_and_an_append_one_occurrence() {
+    const SITES: u64 = 500;
+    let occurrences = DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT as u64;
+    let mut accumulator = WorkflowExecutionOverlayAccumulator::default();
+    let sites = (0..SITES)
+        .map(|index| site(&format!("site-{index:03}")))
+        .collect::<Vec<_>>();
+    for site in &sites {
+        for occurrence in 1..=occurrences {
+            accumulator
+                .fold(&[record_at(
+                    started_at("start", site, occurrence),
+                    occurrence as i64,
+                )])
+                .expect("fold");
+        }
+    }
+    occurrence::meter::take();
+    let overlay = accumulator.snapshot().expect("overlay");
+    let retained = SITES * occurrences;
+    assert_eq!(overlay.history.len() as u64, retained);
+    assert_eq!(
+        occurrence::meter::take(),
+        2 * retained,
+        "one fold and one published event for each retained occurrence"
+    );
+
+    accumulator
+        .fold(&[record_at(started_at("next", &sites[0], occurrences + 1), 0)])
+        .expect("append");
+    assert_eq!(
+        occurrence::meter::take(),
+        0,
+        "the first eviction archives nothing"
+    );
+    accumulator
+        .fold(&[record_at(started_at("next", &sites[0], occurrences + 2), 0)])
+        .expect("append");
+    assert_eq!(
+        occurrence::meter::take(),
+        1,
+        "an eviction folds the one occurrence that joins the archive"
+    );
+    let evicted = accumulator.snapshot().expect("overlay");
+    assert_eq!(
+        state(&evicted, &sites[0]).summary.retained_occurrences,
+        occurrences + 2
     );
 }

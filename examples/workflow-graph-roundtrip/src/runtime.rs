@@ -389,7 +389,7 @@ impl Overlay {
         };
         let mut nodes = BTreeMap::<&str, (u8, RunStatus, Option<String>, u64, u64)>::new();
         for site in &overlay.sites {
-            let (rank, status, error) = match &site.occurrence {
+            let (rank, status, error) = match &site.state.occurrence {
                 WorkflowOverlayOccurrence::Unobserved => continue,
                 WorkflowOverlayOccurrence::Running { .. } => (3, RunStatus::Started, None),
                 WorkflowOverlayOccurrence::Waiting { .. } => (3, RunStatus::Waiting, None),
@@ -411,8 +411,8 @@ impl Overlay {
             if rank > node.0 {
                 (node.0, node.1, node.2) = (rank, status, error);
             }
-            node.3 += site.summary.started_count;
-            node.4 += site.summary.terminal_count;
+            node.3 += site.state.summary.started_count;
+            node.4 += site.state.summary.terminal_count;
         }
         let mut events = Vec::new();
         for (node, (_, status, error, started, ended)) in nodes {

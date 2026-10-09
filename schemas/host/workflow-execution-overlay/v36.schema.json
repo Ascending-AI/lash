@@ -1016,51 +1016,23 @@
       "type": "object"
     },
     "WorkflowOverlayChildLink": {
-      "description": "Link from an observed parent site to a child execution's overlay.",
+      "description": "Link from an observed parent site to a child execution's overlay. The\nparent execution is the overlay's own.",
       "properties": {
-        "child_attempt": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "child_execution_key": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "child_process_id": {
-          "type": "string"
-        },
-        "document": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkflowDocumentRef"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "parent_execution_key": {
-          "type": "string"
+        "child": {
+          "$ref": "#/$defs/TraceLanguageChildExecution"
         },
         "parent_site": {
           "$ref": "#/$defs/WorkflowSiteRef"
         }
       },
       "required": [
-        "parent_execution_key",
         "parent_site",
-        "child_process_id"
+        "child"
       ],
       "type": "object"
     },
     "WorkflowOverlayConflict": {
-      "description": "A bounded, typed record of divergent values under one logical identity.",
+      "description": "A bounded, typed record of divergent observations under one identity.\nThe overlay keeps the earlier observation; of two at one instant it keeps\nthe one whose variant digest is smaller. `variants` lists the smallest and\nthe largest digest observed.",
       "properties": {
         "identity": {
           "$ref": "#/$defs/WorkflowOverlayEventIdentity"
@@ -1092,70 +1064,135 @@
     "WorkflowOverlayCoverage": {
       "description": "How much of the execution the overlay can speak for.",
       "properties": {
-        "document_loaded": {
-          "description": "The reducer was given the document: every listed site is one of its\nsites, and a site it lacks is a mismatch.",
-          "type": "boolean"
-        },
         "start_observed": {
           "description": "The retained observations include the execution's start. Without it\nthe observer attached late or lost continuity, and occurrences that\nran before are not here.",
           "type": "boolean"
         }
       },
       "required": [
-        "document_loaded",
         "start_observed"
       ],
       "type": "object"
     },
-    "WorkflowOverlayEventIdentity": {
-      "description": "Canonical identity of one fold input within its execution.\n\nSite transitions use `(site, occurrence)` plus the transition kind:\noccurrences count per site. The transition kind lets a start and its\nterminal fact merge monotonically while still making a second, different\nstart or terminal a typed conflict. A step body start is one fact per\nattempt of its body.",
-      "properties": {
-        "occurrence": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "site": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkflowSiteRef"
-            },
-            {
-              "type": "null"
+    "WorkflowOverlayDocumentBinding": {
+      "description": "What the overlay knows of the document its execution runs.",
+      "oneOf": [
+        {
+          "description": "No document was given and the execution's start was not observed.",
+          "properties": {
+            "state": {
+              "const": "unknown",
+              "type": "string"
             }
-          ]
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
         },
-        "step_attempt": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
+        {
+          "description": "The execution's start named this document; the reducer was not given\nit, so the listed sites are whatever was observed.",
+          "properties": {
+            "reference": {
+              "$ref": "#/$defs/WorkflowDocumentRef"
+            },
+            "state": {
+              "const": "claimed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reference"
+          ],
+          "type": "object"
         },
-        "transition": {
-          "$ref": "#/$defs/WorkflowOverlayEventTransition"
+        {
+          "description": "The reducer was given this document: every listed site is one of its\nsites, and a site it lacks is a mismatch.",
+          "properties": {
+            "reference": {
+              "$ref": "#/$defs/WorkflowDocumentRef"
+            },
+            "state": {
+              "const": "loaded",
+              "type": "string"
+            }
+          },
+          "required": [
+            "state",
+            "reference"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "transition"
-      ],
-      "type": "object"
+      ]
     },
-    "WorkflowOverlayEventTransition": {
+    "WorkflowOverlayEventIdentity": {
+      "description": "Canonical identity of one observation within its execution: two\nobservations with one identity are of the same transition.\n\nAn execution starts once and finishes once. An occurrence starts, ends,\nselects a branch and starts a child once each, and may wait and resume\nany number of times: each wait and each resume is its own observation,\nnumbered in time. A step body start is one fact per attempt of its body.",
+      "oneOf": [
+        {
+          "properties": {
+            "of": {
+              "const": "execution",
+              "type": "string"
+            },
+            "transition": {
+              "$ref": "#/$defs/WorkflowOverlayExecutionTransition"
+            }
+          },
+          "required": [
+            "of",
+            "transition"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/WorkflowOccurrence"
+            },
+            "of": {
+              "const": "node",
+              "type": "string"
+            },
+            "transition": {
+              "$ref": "#/$defs/WorkflowOverlayNodeTransition"
+            }
+          },
+          "required": [
+            "of",
+            "at",
+            "transition"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "at": {
+              "$ref": "#/$defs/WorkflowOccurrence"
+            },
+            "attempt": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "of": {
+              "const": "step_body",
+              "type": "string"
+            }
+          },
+          "required": [
+            "of",
+            "at",
+            "attempt"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "WorkflowOverlayExecutionTransition": {
       "enum": [
-        "execution_started",
-        "execution_finished",
-        "node_started",
-        "step_body_started",
-        "node_waiting",
-        "node_resumed",
-        "node_terminal",
-        "branch_selected",
-        "child_started"
+        "started",
+        "finished"
       ],
       "type": "string"
     },
@@ -1255,6 +1292,97 @@
         }
       ]
     },
+    "WorkflowOverlayNodeTransition": {
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "const": "started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The occurrence's `ordinal`-th retained wait, from 1, in time order.",
+          "properties": {
+            "kind": {
+              "const": "waiting",
+              "type": "string"
+            },
+            "ordinal": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "ordinal"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The occurrence's `ordinal`-th retained resume, from 1, in time order.",
+          "properties": {
+            "kind": {
+              "const": "resumed",
+              "type": "string"
+            },
+            "ordinal": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "ordinal"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The occurrence completed, failed or was cancelled.",
+          "properties": {
+            "kind": {
+              "const": "terminal",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "branch_selected",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "child_started",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "WorkflowOverlaySettlement": {
       "description": "Terminal evidence supplied by a committed process fact or durable snapshot.\nThis does not manufacture a language execution or site observation.",
       "properties": {
@@ -1349,13 +1477,6 @@
         },
         {
           "properties": {
-            "duration_ms": {
-              "format": "int64",
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
             "end": {
               "format": "date-time",
               "type": "string"
@@ -1386,13 +1507,6 @@
         },
         {
           "properties": {
-            "duration_ms": {
-              "format": "int64",
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
             "end": {
               "format": "date-time",
               "type": "string"
@@ -1575,29 +1689,21 @@
       "type": "object"
     },
     "WorkflowOverlaySiteRetention": {
-      "description": "Aggregate facts for occurrences evicted from one site's bounded history.",
+      "description": "What one site keeps of the occurrences evicted from its bounded history.\n\nOccurrences at or below `truncation_watermark` are no longer in the\noverlay's history. The watermark occurrence keeps its observations, so\none that arrives late still folds exactly. The occurrences below it are\nfolded into `archived`; of those, a late observation can refine only the\noccurrence `archived` shows.",
       "properties": {
         "archived": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkflowOverlaySite"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "$ref": "#/$defs/WorkflowOverlaySiteState",
+          "description": "What the occurrences below the watermark folded to."
         },
-        "children": {
+        "archived_children": {
+          "description": "The child executions the occurrences below the watermark started.",
           "items": {
-            "$ref": "#/$defs/WorkflowOverlayChildLink"
+            "$ref": "#/$defs/TraceLanguageChildExecution"
           },
           "type": "array"
         },
         "site": {
           "$ref": "#/$defs/WorkflowSiteRef"
-        },
-        "state": {
-          "$ref": "#/$defs/WorkflowOverlaySite"
         },
         "truncation_watermark": {
           "format": "uint64",
@@ -1605,6 +1711,7 @@
           "type": "integer"
         },
         "watermark_history": {
+          "description": "The observations of the watermark occurrence.",
           "items": {
             "$ref": "#/$defs/WorkflowOverlayHistoryEvent"
           },
@@ -1614,9 +1721,245 @@
       "required": [
         "site",
         "truncation_watermark",
-        "watermark_history",
-        "state",
-        "children"
+        "archived",
+        "archived_children",
+        "watermark_history"
+      ],
+      "type": "object"
+    },
+    "WorkflowOverlaySiteState": {
+      "description": "What a site's occurrences fold to.",
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "const": "unobserved",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "status": {
+              "const": "running",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "start"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "awaited": {
+              "$ref": "#/$defs/TraceNodeAwaited"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "since": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "waiting",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "since",
+            "awaited"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "completed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "failure": {
+              "$ref": "#/$defs/TraceLanguageExecutionFailure"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "failed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "end",
+            "failure"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "end": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "cancelled",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "end"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The process settled without complete terminal evidence for this\nobserved occurrence. The category is authoritative; success, failure\nand timing are not inferred from it.",
+          "properties": {
+            "occurrence": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "settled_at": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "start": {
+              "format": "date-time",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "status": {
+              "const": "incomplete",
+              "type": "string"
+            },
+            "terminal": {
+              "$ref": "#/$defs/WorkflowOverlayTerminal"
+            }
+          },
+          "required": [
+            "status",
+            "occurrence",
+            "terminal"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "branch": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TraceBranchSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which arm a branch site last took. Absent on every other site, and on\na branch whose selection has not been observed. The arms themselves\nare the document's: a host reads which nodes an unselected arm holds\nfrom the branch's typed children."
+        },
+        "call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkflowOverlayCall"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The admitted call of the site's latest bound occurrence."
+        },
+        "summary": {
+          "$ref": "#/$defs/WorkflowOverlaySiteReport"
+        }
+      },
+      "required": [
+        "summary"
       ],
       "type": "object"
     },
@@ -1739,19 +2082,7 @@
       "$ref": "#/$defs/WorkflowOverlayCoverage"
     },
     "document": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/WorkflowDocumentRef"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "The document the execution runs: the loaded document's reference, or\nthe one the execution's start named when none was loaded."
-    },
-    "execution_key": {
-      "description": "The execution's key: its subject and, for an attempted execution, its\nattempt. Two runs of one document never share it.",
-      "type": "string"
+      "$ref": "#/$defs/WorkflowOverlayDocumentBinding"
     },
     "history": {
       "items": {
@@ -1818,9 +2149,9 @@
   },
   "required": [
     "schema_version",
-    "execution_key",
     "scope",
     "subject",
+    "document",
     "coverage",
     "status",
     "sites",

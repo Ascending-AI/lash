@@ -191,23 +191,21 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
         "the step's body start keeps its place in the process's order"
     );
     let before = graph.snapshot().expect("observed graph");
-    assert!(
-        before
-            .sites
-            .iter()
-            .any(|site| matches!(site.occurrence, WorkflowOverlayOccurrence::Waiting { .. }))
-    );
+    assert!(before.sites.iter().any(|site| matches!(
+        site.state.occurrence,
+        WorkflowOverlayOccurrence::Waiting { .. }
+    )));
     let stepped = before
         .sites
         .iter()
         .find(|site| site.site == step.at.site)
         .expect("the step's site");
     assert!(matches!(
-        stepped.occurrence,
+        stepped.state.occurrence,
         WorkflowOverlayOccurrence::Running { occurrence: 1, .. }
     ));
     assert_eq!(
-        stepped.call.as_ref().map(|call| &call.call_id),
+        stepped.state.call.as_ref().map(|call| &call.call_id),
         Some(&step.call_id)
     );
     assert_eq!(
@@ -259,15 +257,15 @@ async fn a_process_cancelled_while_blocked_has_a_committed_cancelled_graph() {
             .iter()
             .find(|current| current.site == site.site)
             .expect("same site");
-        match site.occurrence {
+        match site.state.occurrence {
             WorkflowOverlayOccurrence::Running { occurrence, .. }
             | WorkflowOverlayOccurrence::Waiting { occurrence, .. } => {
                 assert!(
-                    matches!(settled.occurrence, WorkflowOverlayOccurrence::Cancelled { occurrence: ended, .. } if ended == occurrence)
+                    matches!(settled.state.occurrence, WorkflowOverlayOccurrence::Cancelled { occurrence: ended, .. } if ended == occurrence)
                 );
             }
             _ => assert_eq!(
-                settled.occurrence, site.occurrence,
+                settled.state.occurrence, site.state.occurrence,
                 "only in-flight occurrences settle"
             ),
         }

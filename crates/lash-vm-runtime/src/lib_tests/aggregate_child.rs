@@ -306,6 +306,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
             .iter()
             .find(|site| site.site.node_id == id)
             .expect("observed site")
+            .state
             .occurrence
     };
     assert!(matches!(
@@ -313,10 +314,10 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
         WorkflowOverlayOccurrence::Cancelled { .. }
     ));
     assert!(
-        graph
-            .sites
-            .iter()
-            .any(|site| matches!(site.occurrence, WorkflowOverlayOccurrence::Completed { .. })),
+        graph.sites.iter().any(|site| matches!(
+            site.state.occurrence,
+            WorkflowOverlayOccurrence::Completed { .. }
+        )),
         "the start before the await completed: {:#?}",
         graph.sites
     );
@@ -500,7 +501,7 @@ async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
         overlay
             .sites
             .iter()
-            .find_map(|site| site.branch)
+            .find_map(|site| site.state.branch)
             .expect("the branch site names its arm")
     };
 
@@ -508,7 +509,7 @@ async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
     assert_eq!(selected(&first), lash_trace::TraceBranchSelection::Then);
     assert!(
         matches!(
-            at(&first, &then_arm).map(|site| site.occurrence),
+            at(&first, &then_arm).map(|site| site.state.occurrence),
             Some(WorkflowOverlayOccurrence::Completed { occurrence: 1, .. })
         ),
         "{:#?}",
@@ -523,17 +524,17 @@ async fn a_real_loop_branch_names_the_typed_arm_it_takes_in_each_iteration() {
     let last = fold(&records);
     assert!(last.conflicts.is_empty(), "{:?}", last.conflicts);
     assert!(last.mismatches.is_empty(), "{:?}", last.mismatches);
-    assert!(last.coverage.is_complete());
+    assert!(last.is_complete());
     assert_eq!(selected(&last), lash_trace::TraceBranchSelection::Else);
     for arm in [&then_arm, &else_arm] {
         let site = at(&last, arm).expect("each arm ran once");
         assert!(
             matches!(
-                site.occurrence,
+                site.state.occurrence,
                 WorkflowOverlayOccurrence::Completed { occurrence: 1, .. }
             ),
             "{site:#?}"
         );
-        assert_eq!(site.summary.retained_occurrences, 1);
+        assert_eq!(site.state.summary.retained_occurrences, 1);
     }
 }

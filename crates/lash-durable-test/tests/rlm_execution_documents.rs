@@ -338,13 +338,13 @@ fn assert_document_is_the_compiled_inventory(
         lash::workflow::DEFAULT_WORKFLOW_OVERLAY_HISTORY_LIMIT,
     )
     .expect("the records fold");
-    assert_eq!(overlay.document.as_ref(), Some(document.reference()));
+    assert_eq!(overlay.document.reference(), Some(document.reference()));
     assert!(
         overlay.mismatches.is_empty(),
         "{context}: {:?}",
         overlay.mismatches
     );
-    assert!(overlay.coverage.is_complete(), "{context}");
+    assert!(overlay.is_complete(), "{context}");
     let observed = overlay
         .sites
         .iter()
@@ -435,7 +435,7 @@ fn assert_untaken(
         "the untaken `{marker}` arm was never observed: {observed:?}"
     );
     assert!(
-        overlay.sites.iter().any(|site| site.branch.is_some()),
+        overlay.sites.iter().any(|site| site.state.branch.is_some()),
         "the branch around it names the arm it took"
     );
 }
@@ -862,6 +862,7 @@ finish(result);
                 .expect("the step's site is observed");
             assert_eq!(
                 called
+                    .state
                     .call
                     .as_ref()
                     .map(|call| (&call.call_id, call.attempt)),
@@ -1068,13 +1069,13 @@ finish("started");
     let called = overlay
         .sites
         .iter()
-        .filter(|site| site.call.is_some())
+        .filter(|site| site.state.call.is_some())
         .collect::<Vec<_>>();
     let [site] = called.as_slice() else {
         panic!("only the admitted step's site shows a call: {called:#?}");
     };
     assert_eq!(site.site, first.at.site);
-    let call = site.call.as_ref().expect("the bound call");
+    let call = site.state.call.as_ref().expect("the bound call");
     assert_eq!(
         (call.occurrence, &call.call_id, call.attempt),
         (
@@ -1084,7 +1085,7 @@ finish("started");
         )
     );
     assert_eq!(
-        site.summary.retained_occurrences, 1,
+        site.state.summary.retained_occurrences, 1,
         "two attempts are one occurrence"
     );
     world.shutdown().await;

@@ -713,11 +713,11 @@ mod tests {
             );
             assert!(
                 matches!(
-                    graph.sites[0].occurrence,
+                    graph.sites[0].state.occurrence,
                     WorkflowOverlayOccurrence::Cancelled { .. }
                 ),
                 "settle_first={settle_first}: {:?}",
-                graph.sites[0].occurrence
+                graph.sites[0].state.occurrence
             );
         }
     }
