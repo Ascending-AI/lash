@@ -34,38 +34,10 @@ pub struct Finding {
 }
 
 /// The open findings.
-pub const OPEN: &[Finding] = &[
-    Finding {
-        id: "FIG-5184 M1",
-        owner: "L6 (FIG-5175)",
-        summary: "a failed step.outcome commit leaks its ordinal from the admitted execution's in-memory run cursor, so the next outcome is refused as a gap, the reload's as taken, and a Repeatable step re-runs twice",
-        case: Case::Process,
-        cell: Some("step.outcome#1 fail-before"),
-        cell_violations: &["NR-3: Repeatable body"],
-        epoch_violations: &[],
-    },
-    Finding {
-        id: "FIG-5184 M2",
-        owner: "L6b (FIG-5176)",
-        summary: "the session close's triggers step reads live Until descendants outside its transaction and mints a ProcessTerminal wait on one whose terminal may already have committed, so the wait is never resolved and the close never reaches its tombstone",
-        case: Case::Close,
-        cell: None,
-        cell_violations: &[
-            "not done after",
-            "deadline: done at",
-            "the close did not end at its tombstone",
-            "the closed session kept pending waits",
-            "the closed session's storage is not deleted",
-        ],
-        epoch_violations: &[
-            "not done 600 s after the plan",
-            "close is not done",
-            "close: the close did not end at its tombstone",
-            "close: the closed session kept pending waits",
-            "close: the closed session's storage is not deleted",
-        ],
-    },
-];
+/// FIG-5184 M1 (a leaked step ordinal) and M2 (a close's lost terminal
+/// wait) no longer show: FIG-5226 and FIG-5222 rewrote the code they lived
+/// in, and their matrices held unmasked at eight seeds (FIG-5193).
+pub const OPEN: &[Finding] = &[];
 
 fn explains(signature: &[&str], violations: &[String]) -> bool {
     !signature.is_empty()
@@ -104,14 +76,16 @@ mod tests {
     /// beside them fails the cell or epoch.
     #[test]
     fn a_finding_explains_only_its_own_violations() {
+        let signature = ["close is not done", "the closed session kept pending waits"];
         let own = vec![
             "close is not done".to_owned(),
             "close: the closed session kept pending waits".to_owned(),
         ];
-        assert!(explaining_epoch(&own).is_some());
+        assert!(explains(&signature, &own));
         let mut other = own.clone();
         other.push("turn is not done".to_owned());
-        assert!(explaining_epoch(&other).is_none());
-        assert!(explaining_epoch(&[]).is_none());
+        assert!(!explains(&signature, &other));
+        assert!(!explains(&signature, &[]));
+        assert!(!explains(&[], &own));
     }
 }
