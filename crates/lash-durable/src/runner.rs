@@ -901,6 +901,11 @@ impl Runner {
                             }
                         }
                     }
+                    NodeWakeEvent::PollStore => {
+                        self.hints.hint_all_running();
+                        next_claim = self.clock.now();
+                        claim_delay = settings.claim_backoff;
+                    }
                     NodeWakeEvent::Resubscribed => {
                         seen_held.clear();
                         self.hints.hint_all_running();

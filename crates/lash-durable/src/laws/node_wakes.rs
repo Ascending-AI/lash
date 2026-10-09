@@ -224,6 +224,40 @@ pub async fn mail_from_another_node_reaches_a_hot_owner_through_its_hint(
     Ok(())
 }
 
+/// FIG-5555: an individually oversized key requests a typed store scan,
+/// waking its hot owner before the durable polling fallback is due.
+pub async fn mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint(
+    tier: &dyn NodeWakeTier,
+) -> LawResult {
+    let (store, node_wakes) = tier.open().await;
+    let hot = actor(&"x".repeat(crate::node_wake_payload::MAX_BYTES))?;
+    create(store.as_ref(), &hot).await?;
+    let slow_poll = LeaseSettings {
+        claim_poll: Duration::from_secs(10),
+        ..LeaseSettings::default()
+    };
+    let mut owner = start(tier, "a", under(slow_poll)).await;
+    eventually(
+        Duration::from_secs(5),
+        "node a owns the oversized key",
+        || async { Ok(owner_of(store.as_ref(), &hot).await?.as_deref() == Some("a")) },
+    )
+    .await?;
+    let writer = start(tier, "b", under(slow_poll)).await;
+    listening(node_wakes.as_ref(), "b").await?;
+    // Synchronize with the real activation's mailbox read: the mail below
+    // must wake an already-waiting owner, rather than ride its initial read.
+    owner.waiting(Duration::from_secs(5)).await?;
+    let commit = store
+        .commit_mail(mail(&hot), CommitLabel::MAIL_SESSION)
+        .await?;
+    writer.hints.woke(&commit);
+    // The only periodic mail wake is ten seconds away. This is a hang
+    // guard, not a subsecond performance requirement on the store commit.
+    owner.arrived(Duration::from_secs(5)).await?;
+    Ok(())
+}
+
 /// O1: mail whose hint is lost (a writer with no node wakes, standing in for
 /// a dropped hint) still reaches a hot owner within its mail poll.
 pub async fn mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll(

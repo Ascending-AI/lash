@@ -311,6 +311,7 @@ PACKAGE_DEPS = {
             "lash_core_ids": "//crates/lash-core-ids:lash-core-ids",
             "lash_core_store": "//crates/lash-core-store:lash-core-store",
             "lash_sansio": "//crates/lash-sansio:lash-sansio",
+            "serde_json": "//third-party/rust:p0313",
             "thiserror": "//third-party/rust:p0364",
             "tokio": "//third-party/rust:p0371"
         }

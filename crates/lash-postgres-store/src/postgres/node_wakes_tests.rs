@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use lash_durable::laws::node_wakes::{NodeWakeTier, serve_node};
 use lash_durable::{
-    DurableSettings, DurableStore, FormatSet, HeartbeatOutcome, LeaseSettings, NodeSpec,
+    ActorKey, DurableSettings, DurableStore, FormatSet, HeartbeatOutcome, LeaseSettings, NodeSpec,
 };
 
 use super::*;
@@ -21,10 +21,6 @@ use crate::testing::IsolatedDatabase;
 
 fn formats() -> FormatSet {
     FormatSet::new("law-formats")
-}
-
-fn actor(name: &str) -> ActorKey {
-    ActorKey::session(name).expect("a law's actor key")
 }
 
 /// An isolated database and the storage every node of a law shares.
@@ -102,6 +98,8 @@ node_wake_laws!(
     a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie =>
         crate::testing::fixture_config(),
     a_lost_listener_session_resubscribes_holding_its_lock => crate::testing::fixture_config(),
+    mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint =>
+        crate::testing::fixture_config(),
     mail_from_another_node_reaches_a_hot_owner_through_its_hint =>
         crate::testing::fixture_config(),
     mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll =>
@@ -190,34 +188,102 @@ async fn a_saturated_shared_pool_cannot_starve_the_heartbeat() {
     node.kill().await;
 }
 
+/// FIG-5555: wake hints preserve delimiter-bearing identities and the
+/// largest plain key that fits the transport envelope, without oversized payloads.
 #[test]
-fn a_batch_rings_each_channel_with_bounded_payloads() {
-    let mut batch = WakeBatch {
-        ready: std::collections::BTreeSet::from([NodeId::new("b")]),
-        ..WakeBatch::default()
-    };
-    let crowd: std::collections::BTreeSet<ActorKey> = (0..1_000)
-        .map(|index| actor(&format!("crowded-{index:04}")))
-        .collect();
-    batch.owned.insert(NodeId::new("a"), crowd.clone());
-    let (channels, payloads) = notifications(&batch);
-    assert_eq!(
-        (channels[0].as_str(), payloads[0].as_str()),
-        ("lash_node_b", ""),
-        "a ready hint rings its one node with an empty payload"
-    );
-    assert!(channels[1..].iter().all(|channel| channel == "lash_node_a"));
-    assert!(
-        payloads
+fn wake_payloads_round_trip_delimiters_and_a_maximal_fitting_key() {
+    for actors in [
+        std::collections::BTreeSet::from([
+            ActorKey::process("b\ns/a").expect("newlines are valid"),
+            ActorKey::session("quotes\"\\\0雪").expect("escaped text is valid"),
+        ]),
+        std::collections::BTreeSet::from([ActorKey::session(
+            &"x".repeat(node_wake_payload::MAX_BYTES - 6),
+        )
+        .expect("actor ids have no length bound")]),
+        std::collections::BTreeSet::from([ActorKey::session(
+            &"\n".repeat((node_wake_payload::MAX_BYTES - 6) / 2),
+        )
+        .expect("escaping counts toward the bound")]),
+    ] {
+        let batch = WakeBatch {
+            owned: std::collections::BTreeMap::from([(NodeId::new("round-trip"), actors.clone())]),
+            ..WakeBatch::default()
+        };
+        let (_, payloads) = notifications(&batch);
+        assert!(
+            payloads
+                .iter()
+                .all(|payload| payload.len() <= node_wake_payload::MAX_BYTES)
+        );
+        let carried: std::collections::BTreeSet<ActorKey> = payloads
             .iter()
-            .all(|payload| payload.len() <= PAYLOAD_LIMIT)
-    );
-    let carried: std::collections::BTreeSet<ActorKey> = payloads[1..]
-        .iter()
-        .flat_map(|payload| payload.split('\n'))
-        .map(|key| ActorKey::parse(key).expect("a carried key"))
+            .flat_map(|payload| {
+                match node_wake_payload::decode(payload).expect("a valid wake payload") {
+                    NodeWakeEvent::Owned(actors) => actors,
+                    event => panic!("expected owned actors, got {event:?}"),
+                }
+            })
+            .collect();
+        assert_eq!(
+            carried, actors,
+            "wake hints preserve every complete actor identity"
+        );
+    }
+}
+
+/// FIG-5555: both transports split encoded batches at the byte bound and
+/// replace individually oversized keys with one typed store-scan hint.
+#[test]
+fn wake_payloads_split_encoded_batches_and_poll_for_oversized_keys() {
+    let actors: std::collections::BTreeSet<ActorKey> = (0..1_000)
+        .map(|index| {
+            ActorKey::session(&format!("crowded-{index:04}\n\0雪"))
+                .expect("a valid escaped actor key")
+        })
         .collect();
-    assert_eq!(carried, crowd, "every woken actor rides some payload");
-    let long = NodeId::new("a node name that cannot be a channel identifier as it stands");
-    assert!(node_channel(&long).len() <= 63);
+    let mut oversized = actors.clone();
+    oversized.extend([
+        ActorKey::session(&"x".repeat(node_wake_payload::MAX_BYTES)).expect("unbounded ids"),
+        ActorKey::process(&"\n".repeat(node_wake_payload::MAX_BYTES / 2)).expect("unbounded ids"),
+    ]);
+    let batch = WakeBatch {
+        ready: std::collections::BTreeSet::from([NodeId::new("ready")]),
+        owned: std::collections::BTreeMap::from([(
+            NodeId::new("a node name that cannot be a channel identifier as it stands"),
+            oversized,
+        )]),
+    };
+    let (channels, payloads) = notifications(&batch);
+    assert_eq!(channels[0], node_channel(&NodeId::new("ready")));
+    let owned_channel = node_channel(batch.owned.keys().next().expect("one owner node"));
+    assert!(owned_channel.len() <= 63);
+    assert!(
+        channels[1..]
+            .iter()
+            .all(|channel| channel == &owned_channel)
+    );
+    assert!(payloads.len() > 3, "the encoded crowd must split");
+    let mut carried = std::collections::BTreeSet::new();
+    let mut ready = 0;
+    let mut poll_store = 0;
+    for payload in payloads {
+        assert!(payload.len() <= node_wake_payload::MAX_BYTES);
+        assert!(
+            !payload.contains('\0'),
+            "NOTIFY payloads contain no raw NUL"
+        );
+        match node_wake_payload::decode(&payload).expect("a bounded wake envelope") {
+            NodeWakeEvent::Ready => ready += 1,
+            NodeWakeEvent::Owned(actors) => carried.extend(actors),
+            NodeWakeEvent::PollStore => poll_store += 1,
+            event => panic!("unexpected wake event: {event:?}"),
+        }
+    }
+    assert_eq!(ready, 1);
+    assert_eq!(poll_store, 1, "oversized keys coalesce into one store scan");
+    assert_eq!(
+        carried, actors,
+        "every fitting key rides a complete envelope"
+    );
 }

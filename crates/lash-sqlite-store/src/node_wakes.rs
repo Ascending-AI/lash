@@ -36,8 +36,8 @@ use std::sync::{Arc, Condvar, LazyLock, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use lash_durable::{
-    ActorKey, BootId, BootLiveness, DurableError, NodeLease, NodeWakeEvent, NodeWakeFeed,
-    NodeWakes, Owner, Reaped, StoreFailure, StoreFailureKind, WakeBatch,
+    BootId, BootLiveness, DurableError, NodeLease, NodeWakeEvent, NodeWakeFeed, NodeWakes, Owner,
+    Reaped, StoreFailure, StoreFailureKind, WakeBatch, node_wake_payload,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -57,8 +57,7 @@ CREATE TABLE IF NOT EXISTS node_wakes (
 );
 ";
 
-/// Append one hint for node `?1`: the newline-separated keys `?2` of its
-/// owned actors that took mail, or none for a ready hint.
+/// Append one hint for node `?1`: the shared wake envelope `?2`.
 const INSERT: &str =
     "INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (?1, ?2, ?3)";
 
@@ -123,33 +122,20 @@ pub(crate) fn lock_failure(error: &std::io::Error) -> DurableError {
     })
 }
 
-/// The `(node, actors)` rows that send `batch`.
+/// The `(node, envelope)` rows that send `batch`.
 fn rows(batch: &WakeBatch) -> Vec<(String, String)> {
-    let ready = batch
-        .ready
-        .iter()
-        .map(|node| (node.as_str().to_owned(), String::new()));
-    let owned = batch
-        .owned
-        .iter()
-        .filter(|(_, actors)| !actors.is_empty())
-        .map(|(node, actors)| {
-            let keys: Vec<&str> = actors.iter().map(ActorKey::as_str).collect();
-            (node.as_str().to_owned(), keys.join("\n"))
-        });
+    let ready = batch.ready.iter().map(|node| {
+        (
+            node.as_str().to_owned(),
+            node_wake_payload::READY.to_owned(),
+        )
+    });
+    let owned = batch.owned.iter().flat_map(|(node, actors)| {
+        node_wake_payload::owned(actors)
+            .into_iter()
+            .map(move |payload| (node.as_str().to_owned(), payload))
+    });
     ready.chain(owned).collect()
-}
-
-/// The wake event one row carries, if anything.
-fn node_wake_of(actors: &str) -> Option<NodeWakeEvent> {
-    if actors.is_empty() {
-        return Some(NodeWakeEvent::Ready);
-    }
-    let actors: Vec<ActorKey> = actors
-        .split('\n')
-        .filter_map(|key| ActorKey::parse(key).ok())
-        .collect();
-    (!actors.is_empty()).then_some(NodeWakeEvent::Owned(actors))
 }
 
 /// The node wakes of one SQLite database file.
@@ -289,7 +275,7 @@ impl Session {
         let mut events = Vec::with_capacity(rows.len());
         for (seq, actors) in rows {
             self.cursor = self.cursor.max(seq);
-            events.extend(node_wake_of(&actors));
+            events.extend(node_wake_payload::decode(&actors));
         }
         Some(events)
     }

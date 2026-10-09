@@ -54,6 +54,10 @@ pub enum NodeWakeEvent {
     Ready,
     /// These actors, owned by this node, took mail.
     Owned(Vec<ActorKey>),
+    /// A key exceeded the wake envelope's byte bound. Poll claimable
+    /// actors and every owned actor's mailbox; their durable rows carry
+    /// the identities the hint could not include.
+    PollStore,
     /// The listener lost its session and has a new one: every hint sent in
     /// between is lost and every liveness observation is stale. Rescan the
     /// claimable actors and every hot actor's mailbox, and see each boot's

@@ -114,6 +114,7 @@ pub(super) async fn listening(node_wakes: &dyn NodeWakes, node: &str) -> LawResu
 /// when each arrived.
 struct Hold {
     arrived: mpsc::UnboundedSender<Instant>,
+    waiting: mpsc::UnboundedSender<()>,
 }
 
 #[async_trait::async_trait]
@@ -131,6 +132,7 @@ impl Activation for Hold {
                 }
                 let _ = self.arrived.send(arrived);
             }
+            let _ = self.waiting.send(());
             owned.wait_for_mail().await;
         }
     }
@@ -142,10 +144,20 @@ pub struct LawNode {
     /// The hints the node's mailbox writers hand what their commits woke.
     pub hints: Hints,
     arrived: mpsc::UnboundedReceiver<Instant>,
+    waiting: mpsc::UnboundedReceiver<()>,
     task: tokio::task::JoinHandle<Result<Stopped, DurableError>>,
 }
 
 impl LawNode {
+    /// Wait until an activation has read its mailbox and is waiting for
+    /// a hint or its mail poll. A later append cannot race its initial read.
+    pub(super) async fn waiting(&mut self, within: Duration) -> Result<(), LawBroken> {
+        tokio::time::timeout(within, self.waiting.recv())
+            .await
+            .map_err(|_| LawBroken("the owner never waited for mail".to_owned()))?
+            .ok_or_else(|| LawBroken("the owner stopped before waiting for mail".to_owned()))
+    }
+
     /// When the next mail reached one of the node's actors, within `within`.
     pub(super) async fn arrived(&mut self, within: Duration) -> Result<Instant, LawBroken> {
         tokio::time::timeout(within, self.arrived.recv())
@@ -189,11 +201,15 @@ pub fn serve_node(
 ) -> LawNode {
     let config = settings.validate().expect("the law's settings validate");
     let (send, arrived) = mpsc::unbounded_channel();
+    let (idle, waiting) = mpsc::unbounded_channel();
     let mut runner = Runner::new(
         store,
         Arc::new(lash_core_ids::clock::SystemClock),
         RunnerConfig::new(NodeId::new(name), vec![formats()], &config),
-        Arc::new(Hold { arrived: send }),
+        Arc::new(Hold {
+            arrived: send,
+            waiting: idle,
+        }),
     );
     if let Some(node_wakes) = node_wakes {
         runner = runner.with_node_wakes(node_wakes);
@@ -203,6 +219,7 @@ pub fn serve_node(
     LawNode {
         hints,
         arrived,
+        waiting,
         task,
     }
 }

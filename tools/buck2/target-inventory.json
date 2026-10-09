@@ -43252,6 +43252,7 @@
         "lash-internal-core-ids",
         "lash-internal-core-store",
         "lash-internal-sansio",
+        "serde_json",
         "thiserror",
         "tokio"
       ],

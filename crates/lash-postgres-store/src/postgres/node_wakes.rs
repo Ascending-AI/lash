@@ -7,8 +7,8 @@
 //!   0.41 ms p50 at sixteen listeners, and an in-transaction notify takes
 //!   the notification queue's lock on every writer's commit. Each node has
 //!   one channel. A ready hint rings the one node picked to claim a readied
-//!   unowned actor, with an empty payload; mail for an owned actor rings its
-//!   owner's channel with the actor's key in the payload.
+//!   unowned actor; mail for an owned actor rings its owner's channel. Both
+//!   carry the shared, escaped, size-bounded wake envelope.
 //! - **Listener.** Each node has one listener on a connection of its own. It
 //!   subscribes to its node's channel, then takes its boot's liveness lock, a
 //!   session advisory lock, before [`NodeWakes::listen`] returns. When its
@@ -32,20 +32,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use lash_durable::{
-    ActorKey, BootLiveness, CommitCapacity, DurableError, NodeId, NodeLease, NodeWakeEvent,
-    NodeWakeFeed, NodeWakes, Owner, Reaped, WakeBatch,
+    BootLiveness, CommitCapacity, DurableError, NodeId, NodeLease, NodeWakeEvent, NodeWakeFeed,
+    NodeWakes, Owner, Reaped, WakeBatch, node_wake_payload,
 };
 use sqlx::PgPool;
-use sqlx::postgres::{PgListener, PgNotification, PgPoolOptions};
+use sqlx::postgres::{PgListener, PgPoolOptions};
 use tokio::sync::{OwnedSemaphorePermit, mpsc, oneshot};
 
 use crate::host::ReconnectPolicy;
 
 use super::{PostgresDurableStore, SQL, sqlx_failure};
-
-/// The most bytes one notification's payload carries; PostgreSQL refuses
-/// payloads of 8000 bytes or more.
-const PAYLOAD_LIMIT: usize = 7_900;
 
 /// A node's own channel: `lash_node_<id>`, or a digest of the id when the id
 /// does not fit a channel name.
@@ -72,40 +68,16 @@ fn notifications(batch: &WakeBatch) -> (Vec<String>, Vec<String>) {
     let mut payloads = Vec::new();
     for node in &batch.ready {
         channels.push(node_channel(node));
-        payloads.push(String::new());
+        payloads.push(node_wake_payload::READY.to_owned());
     }
     for (node, actors) in &batch.owned {
         let channel = node_channel(node);
-        let mut payload = String::new();
-        for actor in actors {
-            if !payload.is_empty() && payload.len() + 1 + actor.as_str().len() > PAYLOAD_LIMIT {
-                channels.push(channel.clone());
-                payloads.push(std::mem::take(&mut payload));
-            }
-            if !payload.is_empty() {
-                payload.push('\n');
-            }
-            payload.push_str(actor.as_str());
-        }
-        if !payload.is_empty() {
-            channels.push(channel);
+        for payload in node_wake_payload::owned(actors) {
+            channels.push(channel.clone());
             payloads.push(payload);
         }
     }
     (channels, payloads)
-}
-
-/// The wake event one notification carries, if anything.
-fn node_wake_of(notification: &PgNotification) -> Option<NodeWakeEvent> {
-    if notification.payload().is_empty() {
-        return Some(NodeWakeEvent::Ready);
-    }
-    let actors: Vec<ActorKey> = notification
-        .payload()
-        .split('\n')
-        .filter_map(|key| ActorKey::parse(key).ok())
-        .collect();
-    (!actors.is_empty()).then_some(NodeWakeEvent::Owned(actors))
 }
 
 /// The node wakes of one PostgreSQL catalog.
@@ -183,7 +155,7 @@ async fn forward(
             received = listener.try_recv() => received,
         };
         if let Ok(Some(notification)) = received {
-            if let Some(event) = node_wake_of(&notification)
+            if let Some(event) = node_wake_payload::decode(notification.payload())
                 && wakes.send(event).is_err()
             {
                 break 'serve;
