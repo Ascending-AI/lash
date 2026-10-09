@@ -41,7 +41,7 @@ time and the target is `dev-deferred`: two cases wait out a 15 s node lease.
 | Turn | [`src/turn.rs`](src/turn.rs) | real: the facade's session and send, the production turn driver, model pins, and a TypeScript cell on the RLM worker path with its durable snapshots; the model is scripted (`lash::testing::TestProvider`) |
 | `ext_write` | [`src/turn.rs`](src/turn.rs) | a `Once` host tool (`StaticToolProvider`) called from the cell through the production tool dispatch; its body is the runbook's |
 | Process | [`src/process.rs`](src/process.rs) | a host engine (`advance`) contributed by a plugin factory, with two engine steps (its own bodies, under lash's pinned `Repeatable` policy) and a pinned key with a deadline |
-| Reports | [`src/recorded.rs`](src/recorded.rs), [`src/events.rs`](src/events.rs) | decorators over the facade's `StoreSet`, durable store and signals that forward every call and print what the store answered; the partition's heartbeat hold is the one fault they inject |
+| Reports | [`src/recorded.rs`](src/recorded.rs), [`src/events.rs`](src/events.rs) | decorators over the facade's `StoreSet`, durable store and node wakes that forward every call and print what the store answered; the partition's heartbeat hold is the one fault they inject |
 | Server, nodes, faults | [`tests/support/`](tests/support/) | the test owns the server and the node processes (SIGKILL, stop on stdin, heartbeat hold); its operator core admits the turn and serves no node |
 | Witness ledger | [`witness.sql`](witness.sql) | the substrate runbook's ledger, unchanged |
 

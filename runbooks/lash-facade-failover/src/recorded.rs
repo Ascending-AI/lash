@@ -1,7 +1,7 @@
 //! The node's view of its own durable writes, and the partition fault.
 //!
 //! [`RecordedStores`] wraps the PostgreSQL store set so the backend's
-//! durable store and signals are [`RecordedStore`] and [`RecordedSignals`]:
+//! durable store and node wakes are [`RecordedStore`] and [`RecordedNodeWakes`]:
 //! each forwards every call unchanged and reports the answer of every lease
 //! call, claim, reap and owner commit ([`Event`]). The core's node, its
 //! activations and the fences are the production ones; the decorators only
@@ -22,7 +22,7 @@ use lash::durable::domain::{
 use lash::durable::{
     ActorCommit, ActorKey, ActorSnapshot, ActorTx, BootLiveness, Claimed, CommitLabel,
     DurableError, DurableInstant, DurableReads, DurableStore, Epoch, HeartbeatOutcome, MailCommit,
-    MailTx, NodeLease, NodeSpec, Owner, Reaped, SignalFeed, Signals, WakeBatch,
+    MailTx, NodeLease, NodeSpec, NodeWakeFeed, NodeWakes, Owner, Reaped, WakeBatch,
 };
 use lash::persistence::{
     ArtifactCleanupLedger, AttachmentReferrers, AttachmentStore, DeploymentStore,
@@ -342,21 +342,21 @@ impl DurableReads for RecordedStore {
     }
 }
 
-/// Signals that report the reaps their liveness locks found, and each
+/// Node wakes that report the reaps their liveness locks found, and each
 /// change in what their probe saw.
-pub struct RecordedSignals {
-    inner: Arc<dyn Signals>,
+pub struct RecordedNodeWakes {
+    inner: Arc<dyn NodeWakes>,
     store: Arc<RecordedStore>,
     seen: std::sync::Mutex<Option<(Vec<String>, Vec<String>)>>,
 }
 
 #[async_trait::async_trait]
-impl Signals for RecordedSignals {
+impl NodeWakes for RecordedNodeWakes {
     async fn publish(&self, batch: &WakeBatch) -> Result<(), DurableError> {
         self.inner.publish(batch).await
     }
 
-    async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn SignalFeed>, DurableError> {
+    async fn listen(&self, lease: &NodeLease) -> Result<Box<dyn NodeWakeFeed>, DurableError> {
         self.inner.listen(lease).await
     }
 
@@ -412,7 +412,7 @@ impl Signals for RecordedSignals {
     }
 }
 
-/// A store set whose durable store and signals report what they answered;
+/// A store set whose durable store and node wakes report what they answered;
 /// every other port is the inner set's.
 pub struct RecordedStores {
     inner: Arc<dyn StoreSet>,
@@ -420,7 +420,7 @@ pub struct RecordedStores {
 }
 
 impl RecordedStores {
-    /// `inner`, with its durable store and signals reported as `node`'s.
+    /// `inner`, with its durable store and node wakes reported as `node`'s.
     #[must_use]
     pub fn new(inner: Arc<dyn StoreSet>, node: &str) -> Self {
         let store = Arc::new(RecordedStore::new(inner.durable_store(), node));
@@ -439,9 +439,9 @@ impl StoreSet for RecordedStores {
         Arc::clone(&self.store) as _
     }
 
-    fn durable_signals(&self) -> Option<Arc<dyn Signals>> {
-        self.inner.durable_signals().map(|inner| {
-            Arc::new(RecordedSignals {
+    fn node_wakes(&self) -> Option<Arc<dyn NodeWakes>> {
+        self.inner.node_wakes().map(|inner| {
+            Arc::new(RecordedNodeWakes {
                 inner,
                 store: Arc::clone(&self.store),
                 seen: std::sync::Mutex::default(),
