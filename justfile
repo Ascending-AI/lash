@@ -5,26 +5,7 @@ repo := justfile_directory()
 default:
   @just --list
 
-runtime-commit-pins:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  : "${KILN_GATE_ID:?pin regeneration requires kiln gate}"
-  cd "{{repo}}"
-  source ./env.sh
-  python3 scripts/regenerate-runtime-commit-pins.py
-
-release-fixtures-read-back corpus *args:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  : "${KILN_GATE_ID:?release read-back requires kiln gate}"
-  cd "{{repo}}"
-  source ./env.sh
-  scripts/ci/with-service.sh pg -- python3 scripts/read_release_fixtures.py "{{corpus}}" {{args}}
-
 agent-workbench port='3030':
-  ./scripts/agent-workbench-dev.sh up --port "{{port}}"
-
-agent-workbench-up port='3030':
   ./scripts/agent-workbench-dev.sh up --port "{{port}}"
 
 # Non-destructive: replaces only the workbench process and keeps any managed
@@ -51,14 +32,8 @@ agent-workbench-down port='3030':
 agent-workbench-foreground port='3030':
   ./scripts/agent-workbench-dev.sh foreground --port "{{port}}"
 
-toolbench model='z-ai/glm-5.3-flash' *args:
-  kiln run //examples/toolbench:toolbench -- --model "{{model}}" {{args}}
-
 rlm-smoke-e2e:
   bash "{{repo}}/scripts/rlm-smoke-e2e.sh"
-
-example-core-shutdown-e2e:
-  bash "{{repo}}/scripts/example-core-shutdown-e2e.sh"
 
 workflow-graph-roundtrip port='3031':
   #!/usr/bin/env bash
@@ -74,14 +49,6 @@ workflow-graph-roundtrip port='3031':
 
 workflow-graph-integration-verify:
   bash "{{repo}}/scripts/workflow-graph-integration-verify.sh"
-
-# Generate the checked-in host contract schemas.
-workflow-schema-generate:
-  python3 scripts/generate-workflow-schemas.py
-
-# Fail when checked-in host contract schemas differ from Rust types.
-workflow-schema-check:
-  python3 scripts/generate-workflow-schemas.py --check
 
 # FIG-4042: token-free RLM warning and frame-switch companion for the manual
 # workbench continue_as runbook. The provider responses are scripted in-process.
@@ -152,34 +119,11 @@ latency-gate *args:
     exit "$status"
   fi
 
-# Fast live proof of the shared Postgres/S3 gate isolation contract.
-gate-container-smoke:
-  bash "{{repo}}/scripts/gate-container-smoke.sh"
-
-gate-worktree-concurrency-check peer:
-  bash "{{repo}}/scripts/test-gate-worktree-concurrency.sh" "{{peer}}"
-
-stack-budget:
-  bash "{{repo}}/scripts/ci-stack-budget.sh"
-
 # Opt-in full local diagnostic for unusual risk, release work, or an explicit
 # request. It is not a routine push or merge prerequisite; focused local checks
 # plus CI's aggregate conclusion are the default proof path.
 push-gate:
   bash "{{repo}}/scripts/push-gate.sh"
-
-# Opt-in confidence diagnostics. Choose a lane only for a named risk it covers.
-confidence lane='default':
-  bash "{{repo}}/scripts/confidence-gate.sh" "{{lane}}"
-
-confidence-fast:
-  bash "{{repo}}/scripts/confidence-gate.sh" fast
-
-confidence-broad:
-  bash "{{repo}}/scripts/confidence-gate.sh" broad
-
-confidence-full:
-  bash "{{repo}}/scripts/confidence-gate.sh" full
 
 # Local Confidence stage matrix, one shared build, and its strict conclusion.
 confidence-local *args:
@@ -259,10 +203,6 @@ schema-check:
     'kiln test //crates/lash-core-store:lash-core-store__unit_test' \
     | scripts/gate-table.sh
 
-# Reverse-dependency selection uses the same input-identified plan as dev-test.
-test-changed base='origin/main':
-  python3 scripts/dev-test.py --base {{base}} --dependents
-
 # Opt-in durable-store and session-graph property soak. PostgreSQL executes
 # when its standard LASH_POSTGRES_DATABASE_URL configuration is present.
 store-contract-soak cases='256':
@@ -305,96 +245,12 @@ cross-backend-store-soak cases='64' seed='852':
     --test_arg=--nocapture --test_arg=--include-ignored \
     //crates/lash-sim:cross_backend_store_differential__test
 
-# The runtime leg gates on allocation ceilings and phase inventory only;
-# wall-clock budgets print as advisories (see scripts/perf_guard_budgets.json,
-# whose runtime scenarios split `enforced_allocation` from `advisory_duration`).
-# The LashVm iteration counts are part of the gate, not a speed knob: the
-# cache-mode budgets in scripts/perf_guard_budgets.json are per-iteration costs
-# of a fixed setup, so they only hold at the count they were calibrated at.
-# Keep both counts equal to the ones perf.yml and release.yml run.
-perf-guard:
-  python3 "{{repo}}/scripts/profile_runtime.py" --profile quick --release --enforce-budgets --out "{{repo}}/.benchmarks/perf-guard/runtime-local.json"
-  python3 "{{repo}}/scripts/profile_lash_vm.py" --iterations 2500 --profile-iterations 2500 --enforce-budgets --out "{{repo}}/.benchmarks/perf-guard/lash-vm-local.json"
-
-release-version-test:
-  python3 "{{repo}}/scripts/test_release_version.py"
-
-release-automation-test:
-  python3 "{{repo}}/scripts/test_release_version.py"
-  python3 "{{repo}}/scripts/test_publish_workspace.py"
-  python3 "{{repo}}/scripts/test_package_workspace.py"
-
-# ── crates.io publishing ─────────────────────────────────────
-# Show the publishable workspace set. The in-tree version is the 0.0.0-dev
-# placeholder — the release publisher stamps the real version at packaging time
-# and computes the dependency layers from cargo metadata
-# (`python3 scripts/publish_workspace.py --plan --version X.Y.Z`).
-publish-order:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  python3 - <<'PY'
-  import json
-  import subprocess
-
-  metadata = json.loads(subprocess.check_output([
-      "cargo",
-      "metadata",
-      "--format-version",
-      "1",
-      "--locked",
-      "--no-deps",
-  ], text=True))
-  members = set(metadata["workspace_members"])
-  publishable = sorted(
-      package["name"]
-      for package in metadata["packages"]
-      if package["id"] in members and package.get("publish") != []
-  )
-  version = next(
-      package["version"]
-      for package in metadata["packages"]
-      if package["name"] == "lash-runtime"
-  )
-  print(f"Workspace version: {version}")
-  print()
-  print("Publishable crates:")
-  for index, name in enumerate(publishable, start=1):
-      print(f"  {index:2}. {name}")
-  PY
-
 # The packaging proof the release runs before it publishes anything: package
 # every publishable crate in one cargo invocation (so workspace siblings resolve
 # against the crates just packaged, not against crates.io) and report the sha256
 # of each .crate. `--no-verify` skips the per-crate verify builds.
 package-workspace *args:
   python3 "{{repo}}/scripts/package_workspace.py" {{args}}
-
-# Publish a single crate at the in-tree version. Idempotent: returns success if
-# the same version is already on crates.io. NOTE: the in-tree version is the
-# 0.0.0-dev placeholder unless you have stamped a real version first
-# (`python3 scripts/release_version.py stamp X.Y.Z`); for a real release use the
-# layered publisher (`python3 scripts/publish_workspace.py --version X.Y.Z`).
-publish-one CRATE *args:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-  status=$(curl -s -o /dev/null -w "%{http_code}" \
-    "https://crates.io/api/v1/crates/{{CRATE}}/$version")
-  if [ "$status" = "200" ]; then
-    echo "  ✓ {{CRATE}}@$version already on crates.io"
-    exit 0
-  fi
-  echo "  → publishing {{CRATE}}@$version"
-  cargo publish -p "{{CRATE}}" --no-verify --locked "$@"
-
-# Publish every publishable workspace crate in dependency order. Re-runnable:
-# already-published versions are skipped; transient crates.io/Cargo registry
-# failures are retried by the helper.
-publish-all *args:
-  python3 "{{repo}}/scripts/publish_workspace.py" "$@"
-
-check-file-size:
-  python3 scripts/check-production-file-size.py
 
 # Deterministic DOM/API/SQL transcript acceptance (Surfaces A-E).
 workbench-transcript-projection-e2e:

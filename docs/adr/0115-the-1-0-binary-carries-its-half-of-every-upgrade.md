@@ -421,9 +421,8 @@ or a rolling cluster under load.
 
 The former upgrade harness, Phase A and rolling recipes, rolling runbook and
 load-upgrade driver are absent. No executable proof of those choreographies is
-claimed here. The current `justfile` retains `release-fixtures-read-back`, but
-its reader and verifier import missing capture definitions. Tagged capture,
-verification and read-back therefore remain unavailable; see
+claimed here. The broken release read-back recipe and reader were removed.
+Tagged capture, verification and read-back remain unavailable; see
 [release fixtures](../agents/release-fixtures.md). Restoring that proof is
 separate implementation work required before the release can claim it.
 

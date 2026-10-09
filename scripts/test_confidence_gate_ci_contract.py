@@ -21,7 +21,6 @@ import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
-CHECKOUT_STEP = ROOT / "scripts" / "ci" / "checkout-step.sh"
 PERF_WORKFLOW = ROOT / ".github" / "workflows" / "perf.yml"
 RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 RELEASE_CACHE_WORKFLOW = ROOT / ".github" / "workflows" / "release-cache.yml"
@@ -846,8 +845,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                     obsolete_test_run(source),
                     f"{path} tries to run a Buck2 test wrapper as a binary",
                 )
-        justfile = sources["justfile"]
-        self.assertIn("kiln run //examples/toolbench:toolbench", justfile)
 
     def test_soak_callers_forward_only_declared_runtime_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1053,8 +1050,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 self.assertTrue(reason.strip(), "every exclusion needs a reason")
         self.assertEqual(
             set(exclusions) - BUCK2_TEST_NAMED_TOOLS,
-            {"scripts/test-gate-worktree-concurrency.sh",
-             "scripts/test_landing_gates.py"},
+            {"scripts/test-gate-worktree-concurrency.sh"},
         )
         self.assertGreater(len(candidates), 5, "discovery found nothing")
 

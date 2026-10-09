@@ -5,8 +5,8 @@
 # This file is sourced. It is the one owner of the service's facts -- the
 # image, the configuration, the throwaway credentials, the bucket -- and of
 # how a container of it is started and known to be ready. Every harness that
-# needs S3 goes through it: `scripts/ci/with-service.sh s3`,
-# `scripts/gate-container-smoke.sh` and `scripts/push-gate.sh`.
+# needs S3 goes through it: `scripts/ci/with-service.sh s3` and
+# `scripts/push-gate.sh`.
 #
 # No bootstrap step: `garage server --single-node --default-bucket` lays out
 # the one-node cluster, creates the access key from GARAGE_DEFAULT_ACCESS_KEY

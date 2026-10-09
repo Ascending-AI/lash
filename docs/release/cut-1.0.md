@@ -75,9 +75,9 @@ SHA before publication; preparation workers do not dispatch CI or create the
 release tag.
 
 Tagged capture is a release requirement that cannot currently run: the capture
-recipe and module are absent, while the retained verifier and read-back reader
-import that missing module. Do not run those entrypoints as proof or claim that
-a tagged corpus has been certified. The [release-fixture guide](../agents/release-fixtures.md)
+recipe and module are absent. The broken verifier and read-back reader were
+removed. Do not claim that a tagged corpus has been certified. The
+[release-fixture guide](../agents/release-fixtures.md)
 describes the current gap, and [ADR 0115 §6](../adr/0115-the-1-0-binary-carries-its-half-of-every-upgrade.md#6-current-format-evidence-and-release-proof-gaps)
 separates actor-format laws from release-upgrade proof.
 
