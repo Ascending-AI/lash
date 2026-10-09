@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use lash_core_execution::runtime::actor::round::MemberPin;
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, Material, MemberBody, MemberResult, SettledOutput,
+    AdmittedExecution, Material, MemberBody, MemberOutcome, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits::Resolution;
 use lash_core_execution::runtime::process::steps::{
@@ -66,7 +66,7 @@ impl DurableProcessWorker {
         step: StepRequest,
         execution: AdmittedExecution,
         token: tokio_util::sync::CancellationToken,
-    ) -> MemberResult {
+    ) -> MemberOutcome {
         let StepRequest::Tool { tool, input, .. } = step else {
             return SettledOutput::Interrupted.into();
         };
@@ -337,7 +337,7 @@ impl DurableProcessWorker {
         kind: lash_core_execution::EngineStepKind,
         input: serde_json::Value,
         token: tokio_util::sync::CancellationToken,
-    ) -> MemberResult {
+    ) -> MemberOutcome {
         let Some(engine) = engine_kind(&process) else {
             return engine_step_failure(
                 &process,
@@ -423,7 +423,7 @@ fn engine_step_failure(
     message: String,
     cause: crate::ToolFailureCause,
     source: Option<serde_json::Value>,
-) -> MemberResult {
+) -> MemberOutcome {
     use lash_core_execution::tool_run::{KnownFailureReason, MaterialOwner, MaterialRole};
     let mut failure = crate::ToolFailure::runtime(crate::ToolFailureClass::Internal, code, message)
         .with_cause(cause);

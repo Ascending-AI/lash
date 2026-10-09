@@ -803,7 +803,7 @@ fn checkpoint_pending_exec(
             calls: Vec::new(),
             tool_calls: Vec::new(),
             printed_images: Vec::new(),
-            result: lash_core::CellResult::Finished(lash_core::OutputValue::Inline(
+            result: lash_core::CellOutcome::Finished(lash_core::OutputValue::Inline(
                 serde_json::json!("runtime perf benchmark ok"),
             )),
             retained_finish_value: None,

@@ -62,7 +62,7 @@ fn step_event(code: &str) -> SessionHistoryRecord {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Completed,
+            result: lash_core::CellOutcome::Completed,
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
@@ -122,7 +122,7 @@ fn step_output_text_derives_image_metadata_from_the_trajectory_entry() {
         }],
         calls: Vec::new(),
         calls_omitted: 0,
-        result: lash_core::CellResult::Completed,
+        result: lash_core::CellOutcome::Completed,
     };
 
     let rendered = step_output_text(dialect.prompt_vocabulary(), 7, &entry);
@@ -226,7 +226,7 @@ fn failed_observation_lists_executed_calls_and_frames_retry() {
                 },
             ],
             calls_omitted: 0,
-            result: lash_core::CellResult::Failed(lash_core::CellFailure::new(
+            result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 "read failed at secret.txt; cache failed at .cache/lash/state",
             )),
@@ -272,7 +272,7 @@ fn successful_observation_keeps_calls_and_exact_earlier_omission_marker() {
                 call_id: None,
             }],
             calls_omitted: 3,
-            result: lash_core::CellResult::Completed,
+            result: lash_core::CellOutcome::Completed,
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
@@ -308,7 +308,7 @@ fn step_failed_with(id: &str, code: &str, failure: lash_core::CellFailure) -> Se
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Failed(failure),
+            result: lash_core::CellOutcome::Failed(failure),
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION

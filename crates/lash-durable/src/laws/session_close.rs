@@ -1,6 +1,6 @@
 //! The session closing state's rows (L6b, FIG-5176; ADR 0132 §12).
 
-use super::{LABEL, LawBroken, LawResult, create, node, session};
+use super::{LABEL, LawBroken, LawOutcome, create, node, session};
 use crate::domain::{DomainRefusal, SessionCloseStep, SessionCloseWrite};
 use crate::{DomainWrite, DurableError, DurableStore, Release};
 use lash_sansio::SessionId;
@@ -18,7 +18,7 @@ fn session_id(id: &str) -> Result<SessionId, LawBroken> {
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_session_close_moves_one_step_at_a_time(store: &dyn DurableStore) -> LawResult {
+pub async fn a_session_close_moves_one_step_at_a_time(store: &dyn DurableStore) -> LawOutcome {
     let actor = session("closing")?;
     let id = session_id("closing")?;
     create(store, std::slice::from_ref(&actor)).await?;

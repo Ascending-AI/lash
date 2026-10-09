@@ -204,7 +204,7 @@ fn fail_cell_on_nested_error(
 /// Resolves the cell to `failure`, whatever it had resolved to: a cell that
 /// finished and then failed is a failed cell, and keeps no finish value.
 fn fail_cell(response: &mut ExecResponse, failure: lash_core::CellFailure) {
-    response.result = lash_core::CellResult::Failed(failure);
+    response.result = lash_core::CellOutcome::Failed(failure);
     response.retained_finish_value = None;
 }
 
@@ -948,7 +948,7 @@ async fn execute_code_in_worker_scope(
                     );
                     return exec_response_from(
                         host.into_collected(),
-                        lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                        lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                             lash_core::CellFailureKind::Host,
                             error.to_string(),
                         )),
@@ -968,7 +968,7 @@ async fn execute_code_in_worker_scope(
                 Ok(()) => ExecResponse {
                     prints_retained: None,
                     suspended: true,
-                    ..exec_response_from(host.into_collected(), lash_core::CellResult::Completed)
+                    ..exec_response_from(host.into_collected(), lash_core::CellOutcome::Completed)
                 },
                 Err(error) => {
                     let error = format!("the cell's continuation was not held: {error}");
@@ -978,7 +978,7 @@ async fn execute_code_in_worker_scope(
                     ));
                     exec_response_from(
                         host.into_collected(),
-                        lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                        lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                             lash_core::CellFailureKind::Host,
                             error,
                         )),
@@ -1023,7 +1023,7 @@ async fn execute_code_in_worker_scope(
                 );
                 return exec_response_from(
                     host.into_collected(),
-                    lash_core::CellResult::Failed(
+                    lash_core::CellOutcome::Failed(
                         lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
                             .with_worker_limit(limit),
                     ),
@@ -1047,7 +1047,7 @@ async fn execute_code_in_worker_scope(
                 );
                 return exec_response_from(
                     host.into_collected(),
-                    lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                    lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                         lash_core::CellFailureKind::Host,
                         error.to_string(),
                     )),
@@ -1071,7 +1071,7 @@ async fn execute_code_in_worker_scope(
             }
             return exec_response_from(
                 host.into_collected(),
-                lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Host,
                     error.to_string(),
                 )),
@@ -1083,14 +1083,14 @@ async fn execute_code_in_worker_scope(
     }
     let result = match result {
         Ok(ExecutionOutcome::Finished(value)) => {
-            lash_core::CellResult::Finished(flow_to_json_value(&value).into())
+            lash_core::CellOutcome::Finished(flow_to_json_value(&value).into())
         }
-        Ok(ExecutionOutcome::Continued) => lash_core::CellResult::Completed,
+        Ok(ExecutionOutcome::Continued) => lash_core::CellOutcome::Completed,
         Ok(ExecutionOutcome::Failed(value)) if host.cancellation_observed() => {
             state.rollback_code_execution();
             return exec_response_from(
                 host.into_collected(),
-                lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Host,
                     format!("foreground execution stopped while returning failure: {value}"),
                 )),
@@ -1099,7 +1099,7 @@ async fn execute_code_in_worker_scope(
         Ok(ExecutionOutcome::Failed(value)) => {
             return exec_response_from(
                 host.into_collected(),
-                lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Program,
                     format!("process failed in foreground execution: {value}"),
                 )),
@@ -1142,7 +1142,7 @@ async fn execute_code_in_worker_scope(
             }
             return exec_response_from(
                 host.into_collected(),
-                lash_core::CellResult::Failed(cell_failure),
+                lash_core::CellOutcome::Failed(cell_failure),
             );
         }
     };
@@ -1225,7 +1225,7 @@ fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
         calls: Vec::new(),
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
-        result: lash_core::CellResult::Failed(error),
+        result: lash_core::CellOutcome::Failed(error),
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
         suspended: false,
@@ -1271,7 +1271,7 @@ fn worker_setup_failure(
             lash_core::CellFailureKind::Program,
             limit.to_string(),
         );
-        if let lash_core::CellResult::Failed(failure) = &mut response.result {
+        if let lash_core::CellOutcome::Failed(failure) = &mut response.result {
             failure.worker_limit = Some(*limit);
         }
         return response;
@@ -1315,7 +1315,7 @@ fn fail_attempt_on_host_verdict(
 
 fn exec_response_from(
     collected: CollectedExecutionOutput,
-    result: lash_core::CellResult,
+    result: lash_core::CellOutcome,
 ) -> ExecResponse {
     ExecResponse {
         prints_retained: None,

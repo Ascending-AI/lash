@@ -254,7 +254,7 @@ pub struct Bucket {
 /// always an observed operation and never interpolates below the tail. The
 /// buckets are unclipped: the last one holds `max`.
 #[derive(Clone, Debug, Serialize)]
-pub struct IntervalSummary {
+pub struct IntervalReport {
     pub quantity: &'static str,
     pub unit: &'static str,
     pub window: &'static str,
@@ -282,7 +282,7 @@ fn nearest_rank(sorted: &[u64], fraction: f64) -> u64 {
     sorted[rank.clamp(1, sorted.len()) - 1]
 }
 
-impl IntervalSummary {
+impl IntervalReport {
     fn of(
         quantity: &'static str,
         window: &'static str,
@@ -342,12 +342,12 @@ pub struct Counts {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Intervals {
-    pub scheduled_to_completed: Option<IntervalSummary>,
-    pub scheduled_to_sent: Option<IntervalSummary>,
-    pub sent_to_admitted: Option<IntervalSummary>,
-    pub admitted_to_settled: Option<IntervalSummary>,
-    pub settled_to_completed: Option<IntervalSummary>,
-    pub sent_to_completed: Option<IntervalSummary>,
+    pub scheduled_to_completed: Option<IntervalReport>,
+    pub scheduled_to_sent: Option<IntervalReport>,
+    pub sent_to_admitted: Option<IntervalReport>,
+    pub admitted_to_settled: Option<IntervalReport>,
+    pub settled_to_completed: Option<IntervalReport>,
+    pub sent_to_completed: Option<IntervalReport>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -367,7 +367,7 @@ pub struct FailedOperation {
 
 /// The receipt for one schedule.
 #[derive(Clone, Debug, Serialize)]
-pub struct LedgerSummary {
+pub struct LedgerReport {
     pub offered_rate: Quantity,
     pub achieved_rate: Quantity,
     pub achieved_to_offered: Quantity,
@@ -387,7 +387,7 @@ pub struct LedgerSummary {
 const GENERATOR_WINDOW: &str = "generator process, one schedule";
 
 impl ArrivalLedger {
-    pub fn summary(&self, slowest: usize) -> LedgerSummary {
+    pub fn summary(&self, slowest: usize) -> LedgerReport {
         let operations = &self.operations;
         let scheduled = operations.len();
         let completed: Vec<&OperationRecord> = operations
@@ -395,7 +395,7 @@ impl ArrivalLedger {
             .filter(|record| record.completed().is_some())
             .collect();
         let interval = |quantity, window, pick: &dyn Fn(&OperationRecord) -> Option<u64>| {
-            IntervalSummary::of(
+            IntervalReport::of(
                 quantity,
                 window,
                 scheduled,
@@ -419,7 +419,7 @@ impl ArrivalLedger {
         slow.sort_by_key(|record| {
             std::cmp::Reverse(record.completed_us.unwrap_or_default() - record.scheduled_us)
         });
-        LedgerSummary {
+        LedgerReport {
             offered_rate: Quantity {
                 quantity: "scheduled arrival rate",
                 unit: "operations/s",
@@ -587,8 +587,8 @@ pub struct Knee {
 }
 
 /// `summaries` are one sweep's steps in ascending rate order.
-pub fn knee(summaries: &[LedgerSummary], criteria: KneeCriteria) -> Knee {
-    let p99 = |summary: &LedgerSummary| {
+pub fn knee(summaries: &[LedgerReport], criteria: KneeCriteria) -> Knee {
+    let p99 = |summary: &LedgerReport| {
         summary
             .intervals
             .scheduled_to_completed

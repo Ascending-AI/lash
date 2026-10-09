@@ -25,7 +25,7 @@ async fn only_key(
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn an_awaited_engine_key_records_a_waiting_fact(backend: &Backend) -> LawResult {
+pub async fn an_awaited_engine_key_records_a_waiting_fact(backend: &Backend) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let result = async {
@@ -82,7 +82,7 @@ pub async fn an_awaited_engine_key_records_a_waiting_fact(backend: &Backend) -> 
 /// The first rule broken.
 pub async fn a_pinned_engine_key_is_listed_from_its_wait_after_a_restart_and_a_handover(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let first = law_backend(backend)?;
     let serving = serve(&first);
     let tag = tag("key-restart");

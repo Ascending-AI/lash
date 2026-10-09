@@ -1,7 +1,7 @@
 use super::*;
 use lash::SessionId;
 use lash::transcript::{
-    CellRecord, CellResult, EntryId, EntryProvenance, SuppressionReason, ToolResultBlock,
+    CellOutcome, CellRecord, EntryId, EntryProvenance, SuppressionReason, ToolResultBlock,
     TranscriptBlock, TranscriptEntry, TranscriptItem, TranscriptMessage, TranscriptRole,
 };
 
@@ -177,7 +177,7 @@ fn cell_row(cell: &CellRecord) -> ChatContent {
             .collect::<Vec<_>>()
             .join("\n"),
     };
-    if let CellResult::Finished(value) = &cell.result {
+    if let CellOutcome::Finished(value) = &cell.result {
         let terminal = match value {
             lash::attachments::OutputValue::Inline(value) => {
                 serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
@@ -193,9 +193,9 @@ fn cell_row(cell: &CellRecord) -> ChatContent {
         language: Some(cell.language.clone()),
         code: Some(cell.code.clone()),
         output: Some(output),
-        success: Some(!matches!(cell.result, CellResult::Failed(_))),
+        success: Some(!matches!(cell.result, CellOutcome::Failed(_))),
         error: match &cell.result {
-            CellResult::Failed(failure) => Some(failure.message.clone()),
+            CellOutcome::Failed(failure) => Some(failure.message.clone()),
             _ => None,
         },
         attachments: cell.images.clone(),

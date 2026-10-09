@@ -2099,7 +2099,7 @@ async fn a_cells_recorded_tool_calls_are_bounded_by_the_recorded_presentation() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_after_a_reopen()
 -> Result<()> {
-    use crate::transcript::{CellResult, TranscriptBlock, TranscriptItem, TranscriptRole};
+    use crate::transcript::{CellOutcome, TranscriptBlock, TranscriptItem, TranscriptRole};
     use lash_protocol_rlm::RlmChannel;
 
     const PROGRAM: &str = "print(\"counted\");\nfinish(\"three\");";
@@ -2211,7 +2211,7 @@ async fn a_cells_assistant_context_and_record_read_back_from_the_transcript_afte
         assert_eq!(cell.prints[0].value, serde_json::json!("counted"));
         assert_eq!(
             cell.result,
-            CellResult::Finished(serde_json::json!("three").into()),
+            CellOutcome::Finished(serde_json::json!("three").into()),
             "{name}"
         );
         assert_eq!(

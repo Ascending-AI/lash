@@ -470,7 +470,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Completed,
+            result: lash_core::CellOutcome::Completed,
         };
         let events = [lash_core::SessionHistoryRecord::Protocol(
             rlm_protocol_event(
@@ -811,7 +811,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Finished(serde_json::json!({ "answer": 42 }).into()),
+            result: lash_core::CellOutcome::Finished(serde_json::json!({ "answer": 42 }).into()),
         };
         let retained = CellRecord {
             language: "typescript".to_string(),
@@ -823,7 +823,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Completed,
+            result: lash_core::CellOutcome::Completed,
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(
@@ -903,7 +903,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Failed(lash_core::CellFailure::new(
+            result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 "unknown name",
             )),
@@ -918,7 +918,7 @@ mod tests {
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Finished(serde_json::json!("done").into()),
+            result: lash_core::CellOutcome::Finished(serde_json::json!("done").into()),
         };
         let events = [
             lash_core::SessionHistoryRecord::Conversation(

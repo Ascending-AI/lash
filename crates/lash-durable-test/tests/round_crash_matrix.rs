@@ -44,8 +44,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core_execution::runtime::actor::round::{
-    self, ExecutionDraft, Material, MemberBodies, MemberBody, MemberResult, PolicyView, RoundDraft,
-    RoundEnd, RoundRunner, RunFold, SettledOutput,
+    self, ExecutionDraft, Material, MemberBodies, MemberBody, MemberOutcome, PolicyView,
+    RoundDraft, RoundEnd, RoundRunner, RunFold, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits::{
     self, ParkDeadline, Resolution, ResolveAnswer, WaitDeadline, WaitId, WaitKind,
@@ -278,7 +278,7 @@ impl MemberBodies for Catalog {
                     Tool::Flaky => attempt == 1,
                     Tool::Failing => true,
                 };
-                MemberResult::from(if fails {
+                MemberOutcome::from(if fails {
                     SettledOutput::Failed(output.failure(KnownFailureReason::Reported, None))
                 } else {
                     SettledOutput::Completed(output)
@@ -317,7 +317,7 @@ impl Catalog {
                     let _ =
                         waits::resolve_host(&backend, key.as_str(), Resolution::Ok(answer)).await;
                 });
-                MemberResult::from(SettledOutput::Waiting(
+                MemberOutcome::from(SettledOutput::Waiting(
                     output("parked".to_owned()).parked(pinned.id.to_hex()),
                 ))
             })

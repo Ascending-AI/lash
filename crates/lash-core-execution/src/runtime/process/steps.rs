@@ -35,7 +35,7 @@ use lash_core_store::tool_run::{MaterialOwner, MaterialRole};
 
 use super::engine_state::StepRequest;
 use crate::runtime::actor::round::{
-    AdmittedExecution, Material, MemberBody, MemberResult, RoundTools, SettledOutput,
+    AdmittedExecution, Material, MemberBody, MemberOutcome, RoundTools, SettledOutput,
     decode_completed,
 };
 use crate::runtime::actor::waits::{ParkDeadline, Resolution};
@@ -307,8 +307,8 @@ struct ParkedProcessToolCall {
 pub fn tool_step_output(
     process: &ProcessId,
     call: &crate::sansio::PendingToolCall,
-    mut result: MemberResult,
-) -> MemberResult {
+    mut result: MemberOutcome,
+) -> MemberOutcome {
     result.output = match result.output {
         SettledOutput::Waiting(parked) => {
             let source = parked.named().clone();

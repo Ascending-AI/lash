@@ -509,13 +509,13 @@ pub(crate) fn step_output_text(
     match &entry.result {
         // The entry records the typed failure; its recovery guidance is
         // prompt text, rendered here in this dialect's words.
-        lash_core::CellResult::Failed(failure) => {
+        lash_core::CellOutcome::Failed(failure) => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
             out.push_str(&crate::feedback::render(failure, vocabulary.cell_noun));
         }
-        lash_core::CellResult::Finished(lash_core::OutputValue::Inline(final_output)) => {
+        lash_core::CellOutcome::Finished(lash_core::OutputValue::Inline(final_output)) => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
@@ -527,14 +527,14 @@ pub(crate) fn step_output_text(
         }
         // A final value too long for history is shown as its witness, never
         // expanded (FIG-1643).
-        lash_core::CellResult::Finished(lash_core::OutputValue::Retained(retained)) => {
+        lash_core::CellOutcome::Finished(lash_core::OutputValue::Retained(retained)) => {
             if !out.is_empty() {
                 out.push_str("\n\n");
             }
             out.push_str("Final output:\n");
             out.push_str(&retained.witness);
         }
-        lash_core::CellResult::Completed => {}
+        lash_core::CellOutcome::Completed => {}
     }
     if out.is_empty() {
         out.push_str("(no printed output)");

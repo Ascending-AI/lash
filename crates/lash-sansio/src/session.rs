@@ -239,7 +239,7 @@ impl From<String> for CellPrint {
 /// is distinct from one that ran to its end without finishing.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "value", rename_all = "snake_case")]
-pub enum CellResult {
+pub enum CellOutcome {
     /// The cell ran to its end without a finish value.
     #[default]
     Completed,
@@ -251,7 +251,7 @@ pub enum CellResult {
     Finished(crate::OutputValue),
 }
 
-impl CellResult {
+impl CellOutcome {
     /// The failure, when the cell failed.
     pub fn failure(&self) -> Option<&CellFailure> {
         match self {
@@ -344,7 +344,7 @@ pub struct CellRecord {
     /// Calls the cell made beyond the recorded `calls`.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub calls_omitted: usize,
-    pub result: CellResult,
+    pub result: CellOutcome,
 }
 
 fn is_zero(value: &usize) -> bool {
@@ -368,7 +368,7 @@ pub struct ExecResponse {
     /// What the cell resolved to, as history records it. A finish value is
     /// the surrounding protocol's terminal value: the dispatch loop uses it
     /// as the terminal result of the session.
-    pub result: CellResult,
+    pub result: CellOutcome,
     /// The finish value itself when `result` records only its retention
     /// (FIG-1643): history keeps the retention, and the value stays the
     /// turn's answer. `None` for every other result.
@@ -397,11 +397,11 @@ impl ExecResponse {
     /// The finish value itself, whether history keeps it inline or retained.
     pub fn finish_value(&self) -> Option<&serde_json::Value> {
         match &self.result {
-            CellResult::Finished(crate::OutputValue::Inline(value)) => Some(value),
-            CellResult::Finished(crate::OutputValue::Retained(_)) => {
+            CellOutcome::Finished(crate::OutputValue::Inline(value)) => Some(value),
+            CellOutcome::Finished(crate::OutputValue::Retained(_)) => {
                 self.retained_finish_value.as_ref()
             }
-            CellResult::Completed | CellResult::Failed(_) => None,
+            CellOutcome::Completed | CellOutcome::Failed(_) => None,
         }
     }
 }
@@ -456,11 +456,11 @@ mod tests {
             "code execution is not available in this session",
         ));
         for result in [
-            CellResult::Completed,
-            CellResult::Finished(serde_json::Value::Null.into()),
-            CellResult::Finished(serde_json::json!({"answer": 42}).into()),
-            CellResult::Finished(crate::OutputValue::Retained(retained("{\"rows\":["))),
-            CellResult::Failed(failure.clone()),
+            CellOutcome::Completed,
+            CellOutcome::Finished(serde_json::Value::Null.into()),
+            CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
+            CellOutcome::Finished(crate::OutputValue::Retained(retained("{\"rows\":["))),
+            CellOutcome::Failed(failure.clone()),
         ] {
             let record = CellRecord {
                 id: "step-1".to_string(),
@@ -476,7 +476,7 @@ mod tests {
             assert_eq!(decoded, record, "{encoded}");
         }
         assert_eq!(
-            serde_json::to_value(CellResult::Failed(failure)).expect("encode"),
+            serde_json::to_value(CellOutcome::Failed(failure)).expect("encode"),
             serde_json::json!({"kind": "failed", "value": {
                 "kind": "host",
                 "message": "code execution is not available in this session",
@@ -484,7 +484,7 @@ mod tests {
             }})
         );
         assert_eq!(
-            serde_json::to_value(CellResult::Finished(serde_json::Value::Null.into()))
+            serde_json::to_value(CellOutcome::Finished(serde_json::Value::Null.into()))
                 .expect("encode"),
             serde_json::json!({"kind": "finished", "value": {"inline": null}})
         );
@@ -494,7 +494,7 @@ mod tests {
             serde_json::json!({"kind": "running"}),
         ] {
             assert!(
-                serde_json::from_value::<CellResult>(malformed.clone()).is_err(),
+                serde_json::from_value::<CellOutcome>(malformed.clone()).is_err(),
                 "{malformed}"
             );
         }

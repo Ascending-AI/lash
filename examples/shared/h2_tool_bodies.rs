@@ -34,7 +34,7 @@ pub type BodyStep = Pin<Box<dyn Future<Output = Result<()>> + Send>>;
 pub type BodyBarrier = Arc<dyn Fn(ToolDelivery) -> BodyStep + Send + Sync>;
 
 #[derive(Clone, Debug)]
-pub enum BodyResult {
+pub enum BodyOutcome {
     Inline {
         value: serde_json::Value,
         intents: ToolIntents,
@@ -49,7 +49,7 @@ pub enum BodyResult {
 /// The file remains owned by the case when a host is killed and reopened.
 /// Each line is synced before the body-entered barrier becomes observable.
 pub struct ToolBodies {
-    plan: BTreeMap<String, BodyResult>,
+    plan: BTreeMap<String, BodyOutcome>,
     deliveries: Mutex<std::fs::File>,
     barrier: BodyBarrier,
 }
@@ -57,7 +57,7 @@ pub struct ToolBodies {
 impl ToolBodies {
     pub fn open(
         path: &Path,
-        plan: BTreeMap<String, BodyResult>,
+        plan: BTreeMap<String, BodyOutcome>,
         barrier: BodyBarrier,
     ) -> Result<Self> {
         ensure!(!plan.is_empty(), "a tool scenario needs at least one body");
@@ -87,7 +87,7 @@ impl ToolBodies {
             .iter()
             .map(|(label, result)| {
                 let output = match result {
-                    BodyResult::Handle { .. } => {
+                    BodyOutcome::Handle { .. } => {
                         serde_json::json!({"x-lash": {"kind": "process_unknown"}})
                     }
                     _ => serde_json::json!({}),
@@ -101,10 +101,10 @@ impl ToolBodies {
                 )?
                 .with_execution(std::time::Duration::from_secs(120));
                 let declaration = match result {
-                    BodyResult::Inline { intents, .. } => ToolDeclaration::default()
+                    BodyOutcome::Inline { intents, .. } => ToolDeclaration::default()
                         .with_intents(intents.intents.iter().map(ToolIntent::kind)),
-                    BodyResult::Deferred => ToolDeclaration::deferring(),
-                    BodyResult::Handle { .. } => ToolDeclaration::default(),
+                    BodyOutcome::Deferred => ToolDeclaration::deferring(),
+                    BodyOutcome::Handle { .. } => ToolDeclaration::default(),
                 };
                 // A deferred body parks until the scenario's host resolves
                 // it, or the turn that called it ends.
@@ -131,8 +131,8 @@ impl ToolBodies {
             .get(call.name())
             .ok_or_else(|| anyhow!("unplanned tool body {}", call.name()))?;
         let completion = match result {
-            BodyResult::Deferred => Some(call.context.completion_key()?.as_str().to_owned()),
-            BodyResult::Inline { .. } | BodyResult::Handle { .. } => None,
+            BodyOutcome::Deferred => Some(call.context.completion_key()?.as_str().to_owned()),
+            BodyOutcome::Inline { .. } | BodyOutcome::Handle { .. } => None,
         };
         let delivery = ToolDelivery {
             label: call.name().to_owned(),
@@ -154,15 +154,15 @@ impl ToolBodies {
         }
         (self.barrier)(delivery).await?;
         Ok(match result {
-            BodyResult::Inline { value, intents } => {
+            BodyOutcome::Inline { value, intents } => {
                 ToolAttemptOutcome::done(ToolOutcomeDone::ok(value.clone()), intents.clone())
             }
-            BodyResult::Deferred => {
+            BodyOutcome::Deferred => {
                 let mut completion = PendingCompletion::new();
                 completion.on_cancel = CancelHint::Ignore;
                 ToolAttemptOutcome::pending(completion)
             }
-            BodyResult::Handle { process } => {
+            BodyOutcome::Handle { process } => {
                 let process = process
                     .get()
                     .ok_or_else(|| anyhow!("no process was bound before submission"))?;

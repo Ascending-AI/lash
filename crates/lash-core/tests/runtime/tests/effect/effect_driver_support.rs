@@ -143,7 +143,7 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
             calls: Vec::new(),
             tool_calls: Vec::new(),
             printed_images: Vec::new(),
-            result: lash_core::CellResult::Completed,
+            result: lash_core::CellOutcome::Completed,
             retained_finish_value: None,
             degraded_bindings: Vec::new(),
             suspended: false,

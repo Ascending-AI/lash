@@ -845,7 +845,7 @@ pub(super) fn require_rlm_trajectory_error(
     };
     let recorded = last
         .get("result")
-        .map(|result| serde_json::from_value::<lash_core::CellResult>(result.clone()))
+        .map(|result| serde_json::from_value::<lash_core::CellOutcome>(result.clone()))
         .transpose()
         .map_err(|error| format!("{contract} trajectory result is not a typed result: {error}"))?
         .and_then(|result| result.failure().cloned());

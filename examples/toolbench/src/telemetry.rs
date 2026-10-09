@@ -363,7 +363,7 @@ mod tests {
                     language: "typescript".into(),
                     prints: vec!["é".repeat(2_001).into()],
                     prints_retained: None,
-                    result: lash::transcript::CellResult::Completed,
+                    result: lash::transcript::CellOutcome::Completed,
 
                     duration_ms: 1,
                     tool_call_ids: vec![],

@@ -1,5 +1,5 @@
 use lash_sansio::{
-    CellFailure, CellFailureKind, CellRecord, CellResult, ExecutedCall, ExecutedCallOutcome,
+    CellFailure, CellFailureKind, CellOutcome, CellRecord, ExecutedCall, ExecutedCallOutcome,
     OutputValue, RetainedOutput, SchemaShape, ShapeKind, TurnProtocol,
 };
 
@@ -181,7 +181,7 @@ impl From<&CellFailure> for HistoryCellError {
 /// cell, `final_output` for a finished one, neither for a cell that ran to
 /// its end. At most one key is ever written, and a finished cell whose value
 /// is `null` writes `final_output: null`. A view derived from the cell
-/// record's [`CellResult`], never a stored shape.
+/// record's [`CellOutcome`], never a stored shape.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, schemars::JsonSchema)]
 pub struct HistoryStepOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -190,8 +190,8 @@ pub struct HistoryStepOutcome {
     pub final_output: Option<HistoryValue>,
 }
 
-impl From<&CellResult> for HistoryStepOutcome {
-    fn from(result: &CellResult) -> Self {
+impl From<&CellOutcome> for HistoryStepOutcome {
+    fn from(result: &CellOutcome) -> Self {
         Self {
             error: result.failure().map(HistoryCellError::from),
             final_output: result.finish().map(HistoryValue::from),
@@ -288,7 +288,7 @@ mod rlm_step_serde_tests {
 
     use lash_sansio::{CellFailure, CellFailureKind, ShapeKind};
 
-    use lash_sansio::{CellRecord, CellResult};
+    use lash_sansio::{CellOutcome, CellRecord};
 
     use super::RlmHistoryItem;
 
@@ -316,7 +316,7 @@ mod rlm_step_serde_tests {
                 call_id: Some(lash_sansio::ToolCallId::fixture("math-add")),
             }],
             calls_omitted: 2,
-            result: CellResult::Finished(serde_json::json!({"answer": 42}).into()),
+            result: CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
         }
     }
 
@@ -352,7 +352,7 @@ mod rlm_step_serde_tests {
         let entry = CellRecord {
             prints_retained: Some(retained("[{\"value\": {\"rows\":[")),
             prints: Vec::new(),
-            result: CellResult::Finished(super::OutputValue::Retained(retained("{\"rows\":["))),
+            result: CellOutcome::Finished(super::OutputValue::Retained(retained("{\"rows\":["))),
             ..populated_entry()
         };
         let item = history(&entry);
@@ -379,12 +379,12 @@ mod rlm_step_serde_tests {
     fn a_null_finish_is_distinct_from_a_cell_that_ran_to_its_end() {
         for (result, expected) in [
             (
-                CellResult::Finished(serde_json::Value::Null.into()),
+                CellOutcome::Finished(serde_json::Value::Null.into()),
                 Some(serde_json::Value::Null),
             ),
-            (CellResult::Completed, None),
+            (CellOutcome::Completed, None),
             (
-                CellResult::Finished(serde_json::json!({"answer": 42}).into()),
+                CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
                 Some(serde_json::json!({"answer": 42})),
             ),
         ] {
@@ -402,7 +402,7 @@ mod rlm_step_serde_tests {
     #[test]
     fn a_failed_step_reads_back_as_its_kind_and_message() {
         let item = history(&CellRecord {
-            result: CellResult::Failed(program_failure()),
+            result: CellOutcome::Failed(program_failure()),
             ..populated_entry()
         });
         assert_eq!(
@@ -450,10 +450,10 @@ mod rlm_step_serde_tests {
             }),
         ];
         for result in [
-            CellResult::Finished(serde_json::json!({"answer": 42}).into()),
-            CellResult::Finished(super::OutputValue::Retained(retained("{\"answer\""))),
-            CellResult::Failed(program_failure()),
-            CellResult::Completed,
+            CellOutcome::Finished(serde_json::json!({"answer": 42}).into()),
+            CellOutcome::Finished(super::OutputValue::Retained(retained("{\"answer\""))),
+            CellOutcome::Failed(program_failure()),
+            CellOutcome::Completed,
         ] {
             items.push(history(&CellRecord {
                 prints_retained: Some(retained("ordered step observations")),

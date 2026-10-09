@@ -18,7 +18,7 @@ use std::time::Duration;
 use lash::persistence::CommittedTurnCursor;
 use lash::tools::{StaticToolExecute, StaticToolProvider};
 use lash::transcript::{
-    CellResult, CommittedTurn, SessionTranscript, ToolResultBlock, TranscriptBlock,
+    CellOutcome, CommittedTurn, SessionTranscript, ToolResultBlock, TranscriptBlock,
     TranscriptEntry, TranscriptItem, TranscriptRole,
 };
 use lash_core::ToolDefinitionBindingExt as _;
@@ -644,9 +644,9 @@ fn render(entries: &[TranscriptEntry]) -> Vec<String> {
                         .map(|print| &print.text)
                         .collect::<Vec<_>>(),
                     match &cell.result {
-                        CellResult::Completed => "completed".to_owned(),
-                        CellResult::Failed(failure) => format!("failed:{}", failure.message),
-                        CellResult::Finished(value) => format!("finished:{value:?}"),
+                        CellOutcome::Completed => "completed".to_owned(),
+                        CellOutcome::Failed(failure) => format!("failed:{}", failure.message),
+                        CellOutcome::Finished(value) => format!("finished:{value:?}"),
                     },
                     cell.calls.len(),
                     cell.calls_omitted,

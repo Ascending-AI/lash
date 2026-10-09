@@ -1378,7 +1378,7 @@ fn agent_failed_child_activity_facts(
     for activity in events {
         match &activity.event {
             lash::TurnEvent::CodeBlockCompleted {
-                result: lash::transcript::CellResult::Failed(error),
+                result: lash::transcript::CellOutcome::Failed(error),
                 ..
             } => failed_code_block_errors.push(error.clone()),
             lash::TurnEvent::Error(ReportedFailure { message, .. }) => {

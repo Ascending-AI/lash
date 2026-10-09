@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::{LABEL, LawBroken, LawResult, create, ensure, node, session};
+use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::{DomainRefusal, RunValuesWrite, TurnNamespaceWrite, TurnWrite};
 use crate::{DomainWrite, DurableError, DurableStore};
 use lash_core_store::plugin_state::{NamespaceBody, NamespaceEntry, PluginNamespaceState};
@@ -33,7 +33,7 @@ fn namespace(generation: u64, value: &str) -> (NamespaceEntry, Arc<[u8]>) {
 /// The first rule broken.
 pub async fn a_runs_namespace_write_modes_keep_only_current_values_and_end_with_it(
     store: &dyn DurableStore,
-) -> LawResult {
+) -> LawOutcome {
     let id = SessionId::try_from("namespace-session".to_owned())
         .map_err(|_| LawBroken("a constant session id".into()))?;
     let run = TurnId::try_from("namespace-turn".to_owned())

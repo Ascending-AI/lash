@@ -35,7 +35,7 @@ fn blockers(waits: &[WaitState]) -> Vec<(WaitKind, Option<lash_sansio::WorkflowO
 /// The first rule broken.
 pub async fn a_sleeping_process_reads_waiting_on_its_sleep_and_its_site(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let result = async {
@@ -85,7 +85,7 @@ pub async fn a_sleeping_process_reads_waiting_on_its_sleep_and_its_site(
 /// The first rule broken.
 pub async fn a_process_awaiting_a_child_reads_waiting_on_that_process(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let result = async {
@@ -126,7 +126,7 @@ pub async fn a_process_awaiting_a_child_reads_waiting_on_that_process(
 /// The first rule broken.
 pub async fn a_process_with_two_parked_calls_lists_both_without_their_keys(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let result = async {
@@ -202,7 +202,7 @@ const ABSENT_ENGINE_KIND: &str = "law-absent";
 /// The first rule broken.
 pub async fn a_process_parked_on_an_unknown_engine_shows_its_park_reason_beside_its_lifecycle(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve_decoding(
         &backend,

@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::process::ProcessActivation;
-use super::wait_laws::{LawBroken, LawResult};
+use super::wait_laws::{LawBroken, LawOutcome};
 use crate::runtime::actor::round::{
     self, AdmittedExecution, Material, MemberState, PolicyView, SettledOutput,
 };
@@ -742,7 +742,7 @@ async fn actor_state(
         .map(|snapshot| snapshot.state))
 }
 
-async fn cancel(backend: &Backend, process: &ProcessId) -> LawResult {
+async fn cancel(backend: &Backend, process: &ProcessId) -> LawOutcome {
     backend
         .process_registry()
         .request_process_cancel(
@@ -757,7 +757,7 @@ async fn cancel(backend: &Backend, process: &ProcessId) -> LawResult {
 }
 
 /// Poll `check` until it answers `true`, for at most `within`.
-async fn eventually<F, Fut>(within: Duration, what: &str, mut check: F) -> LawResult
+async fn eventually<F, Fut>(within: Duration, what: &str, mut check: F) -> LawOutcome
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<bool, LawBroken>>,
@@ -817,7 +817,7 @@ fn cancellation(outcome: &Value) -> Option<(String, bool)> {
 /// Claim actors on fresh boots of the law node without committing, until
 /// `process`'s failed-activation count reaches `count`: crashed claims.
 /// Every claim must take only `process`.
-async fn crash_claims(backend: &Backend, process: &ProcessId, count: u32) -> LawResult {
+async fn crash_claims(backend: &Backend, process: &ProcessId, count: u32) -> LawOutcome {
     let key = actor(process)?;
     // The first claim has no earlier claim to compare with: it counts none.
     for _ in 0..=count + 1 {
@@ -889,7 +889,7 @@ fn reason(row: &ParkEventRow) -> String {
 /// The first rule broken.
 pub async fn c1_a_parked_child_ends_engine_free_and_its_child_receives_parent_ended(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let (p_tag, a_tag, b_tag) = (tag("c1p"), tag("c1a"), tag("c1b"));
     let p = root(&backend, payload(&p_tag, "hold")).await?;
@@ -957,7 +957,7 @@ pub async fn c1_a_parked_child_ends_engine_free_and_its_child_receives_parent_en
 /// The first rule broken.
 pub async fn c1_a_waiting_child_ends_within_its_grace_with_one_cancelled_advance(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let (p_tag, a_tag, b_tag) = (tag("c1wp"), tag("c1wa"), tag("c1wb"));
     let serving = serve(&backend);
@@ -1007,7 +1007,9 @@ pub async fn c1_a_waiting_child_ends_within_its_grace_with_one_cancelled_advance
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn c2_a_cancel_the_engine_ignores_is_forced_at_its_grace(backend: &Backend) -> LawResult {
+pub async fn c2_a_cancel_the_engine_ignores_is_forced_at_its_grace(
+    backend: &Backend,
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let stuck_tag = tag("c2");
     let serving = serve(&backend);
@@ -1079,7 +1081,7 @@ pub async fn c2_a_cancel_the_engine_ignores_is_forced_at_its_grace(backend: &Bac
 /// The first rule broken.
 pub async fn w1_await_process_times_out_and_its_awaiters_cancel_ends_it(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let target = root(&backend, payload(&tag("w1t"), "hold")).await?;
@@ -1135,7 +1137,7 @@ pub async fn w1_await_process_times_out_and_its_awaiters_cancel_ends_it(
 
 /// Resolve the key `process` pinned with `peer`, the process it awaits:
 /// how a host tells a process something after it started.
-async fn tell_peer(backend: &Backend, process: &ProcessId, peer: Value) -> LawResult {
+async fn tell_peer(backend: &Backend, process: &ProcessId, peer: Value) -> LawOutcome {
     let actor = actor(process)?;
     let started = Instant::now();
     let pinned = loop {
@@ -1170,7 +1172,7 @@ async fn tell_peer(backend: &Backend, process: &ProcessId, peer: Value) -> LawRe
 /// The first rule broken.
 pub async fn w1_an_await_cycle_ends_by_a_timeout_and_is_cancellable(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let short = u64::try_from(SHORT.as_millis()).unwrap_or(u64::MAX);
@@ -1266,7 +1268,7 @@ pub async fn w1_an_await_cycle_ends_by_a_timeout_and_is_cancellable(
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawResult {
+pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawOutcome {
     let backend = law_backend(backend)?;
     let unstarted_tag = tag("free-unstarted");
     let unstarted = root(&backend, payload(&unstarted_tag, "hold")).await?;
@@ -1357,7 +1359,7 @@ pub async fn engine_free_end_runs_no_engine_code(backend: &Backend) -> LawResult
 /// The first rule broken.
 pub async fn p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let looping_tag = tag("p1-loop");
     let looping = root(&backend, payload(&looping_tag, "hold")).await?;
@@ -1427,7 +1429,7 @@ pub async fn p1_a_crash_loop_parks_at_its_budget_and_progress_resets_the_count(
 /// The first rule broken.
 pub async fn a_cascade_wider_than_its_batch_ends_a_tree_three_levels_deep(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     const WIDTH: usize = CASCADE_BATCH + 1;
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
@@ -1496,7 +1498,7 @@ pub async fn a_cascade_wider_than_its_batch_ends_a_tree_three_levels_deep(
 /// The first rule broken. The dialect may inject contention into the terminal.
 pub async fn a_process_terminal_keeps_its_real_outcome_after_contention(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let process = root(&backend, payload(&tag("contention"), "complete")).await?;
@@ -1522,7 +1524,7 @@ pub async fn a_process_terminal_keeps_its_real_outcome_after_contention(
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_transition_in_another_format_commits_no_state(backend: &Backend) -> LawResult {
+pub async fn a_transition_in_another_format_commits_no_state(backend: &Backend) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let process = root(&backend, payload(&tag("format"), "wrong_format")).await?;
@@ -1567,7 +1569,7 @@ pub async fn a_transition_in_another_format_commits_no_state(backend: &Backend) 
 /// The first rule broken.
 pub async fn a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_ordinal(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let result = async {
@@ -1629,7 +1631,7 @@ pub async fn a_repeatable_step_that_fails_retryably_once_succeeds_on_its_second_
 /// The first rule broken.
 pub async fn a_step_parked_on_its_wait_settles_when_the_wait_resolves(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let backend = law_backend(backend)?;
     let serving = serve(&backend);
     let result = async {

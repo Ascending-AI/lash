@@ -11,7 +11,7 @@ use lash_core::session_model::{
     TurnFailureKind, make_error_event,
 };
 use lash_core::{
-    CellRecord, CellResult, CheckpointKind, DriverAction, DriverContextView, ExecResponse,
+    CellOutcome, CellRecord, CheckpointKind, DriverAction, DriverContextView, ExecResponse,
     LlmResponse, ToolCallOutcome, ToolCallRecord, facade_support::TurnFinish,
     facade_support::TurnOutcome, facade_support::TurnStop,
     facade_support::normalized_response_parts,
@@ -446,7 +446,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     // A tool ended the turn: the cell's own finish never
                     // took effect, so it is not the cell's result.
                     if !record.result.is_failed() {
-                        record.result = CellResult::Completed;
+                        record.result = CellOutcome::Completed;
                     }
                     actions.push(DriverAction::AppendEvents(commit(record)));
                     actions.push(DriverAction::Start(PendingWork::Checkpoint {
@@ -458,7 +458,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             }
             // The effect failed before the executor answered: a host
             // failure that keeps its closed reason.
-            Err(failure) => record.result = CellResult::Failed(failure.into()),
+            Err(failure) => record.result = CellOutcome::Failed(failure.into()),
         }
 
         if let Some(finish_value) = finish_value {
@@ -475,7 +475,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
             {
                 // The program finished with a value its declared schema
                 // refuses: a defect in the program.
-                record.result = CellResult::Failed(
+                record.result = CellOutcome::Failed(
                     lash_core::CellFailure::new(
                         lash_core::CellFailureKind::Program,
                         error_text.to_string(),

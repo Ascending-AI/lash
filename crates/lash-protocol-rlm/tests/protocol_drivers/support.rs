@@ -377,12 +377,12 @@ pub(crate) fn exec_response(
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
         result: match (error, final_output) {
-            (Some(message), _) => lash_sansio::CellResult::Failed(lash_sansio::CellFailure::new(
+            (Some(message), _) => lash_sansio::CellOutcome::Failed(lash_sansio::CellFailure::new(
                 lash_sansio::CellFailureKind::Program,
                 message,
             )),
-            (None, Some(value)) => lash_sansio::CellResult::Finished(value.into()),
-            (None, None) => lash_sansio::CellResult::Completed,
+            (None, Some(value)) => lash_sansio::CellOutcome::Finished(value.into()),
+            (None, None) => lash_sansio::CellOutcome::Completed,
         },
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
@@ -974,7 +974,7 @@ impl RlmProtocolExpectations {
 pub(crate) struct RlmTrajectoryExpectation {
     pub(crate) code: &'static str,
     pub(crate) output: Vec<String>,
-    pub(crate) outcome: lash_core::CellResult,
+    pub(crate) outcome: lash_core::CellOutcome,
 }
 
 #[derive(Default)]

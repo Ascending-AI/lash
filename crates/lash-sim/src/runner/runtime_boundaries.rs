@@ -286,12 +286,12 @@ impl RuntimeBoundaryHarness {
             tool_calls: Vec::new(),
             printed_images: Vec::new(),
             result: if exit_code != 0 {
-                lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Program,
                     format!("exit code {exit_code}"),
                 ))
             } else {
-                lash_core::CellResult::Finished(
+                lash_core::CellOutcome::Finished(
                     json!({
                         "output": output,
                         "exit_code": exit_code,

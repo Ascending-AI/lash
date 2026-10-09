@@ -1,6 +1,6 @@
 //! Prompt snapshot roots and their shared text (P2, FIG-5256; ADR 0133 §5).
 
-use super::{LABEL, LawBroken, LawResult, create, ensure, node, session};
+use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::{
     DomainRefusal, ModelCallId, PromptCallKey, PromptText, PromptWrite, TurnWrite,
 };
@@ -33,7 +33,7 @@ fn hashes(names: &[&str]) -> Vec<String> {
 /// The first rule broken.
 pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
     store: &dyn DurableStore,
-) -> LawResult {
+) -> LawOutcome {
     let id = SessionId::try_from("prompted-session".to_owned())
         .map_err(|_| LawBroken("a constant session id".into()))?;
     let turn = |name: &str| {
@@ -201,7 +201,7 @@ pub async fn prompt_snapshot_roots_survive_phase_pruning_until_released(
 pub async fn deleting_a_session_releases_its_prompt_roots_and_keeps_shared_text(
     store: &dyn DurableStore,
     catalog: &dyn SessionCatalogStore,
-) -> LawResult {
+) -> LawOutcome {
     let id = |name: &str| {
         SessionId::try_from(name.to_owned()).map_err(|_| LawBroken(format!("session id {name}")))
     };

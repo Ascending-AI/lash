@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 #[path = "h2_tool_bodies.rs"]
 mod bodies;
-use bodies::{BodyResult, ToolBodies, ToolDelivery};
+use bodies::{BodyOutcome, ToolBodies, ToolDelivery};
 #[path = "h2_provider.rs"]
 pub(crate) mod provider;
 
@@ -92,15 +92,15 @@ impl Fixture {
                 value => value,
             });
             let result = if *label == "handle" {
-                BodyResult::Handle {
+                BodyOutcome::Handle {
                     process: self.receiver.clone(),
                 }
             } else if (*label == "loser" && self.config.deferred_loser)
                 || matches!(*label, "source" | "later")
             {
-                BodyResult::Deferred
+                BodyOutcome::Deferred
             } else {
-                BodyResult::Inline {
+                BodyOutcome::Inline {
                     value,
                     intents: Default::default(),
                 }

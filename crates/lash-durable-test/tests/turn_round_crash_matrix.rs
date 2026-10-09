@@ -77,7 +77,7 @@ use lash_core::{
 };
 use lash_core::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core_execution::runtime::actor::round::{
-    self, AdmittedExecution, CompletedCall, Material, MemberBody, MemberPin, MemberResult,
+    self, AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin,
     PolicyView, RoundTools, RunFold, SettledOutput,
 };
 use lash_core_execution::runtime::actor::waits::{self, ParkDeadline};
@@ -814,7 +814,7 @@ impl RoundTools for Catalog {
                             .lock_recover()
                             .approvals
                             .push((call.clone(), key.as_str().to_owned()));
-                        return MemberResult::from(SettledOutput::Waiting(
+                        return MemberOutcome::from(SettledOutput::Waiting(
                             output_material("parked").parked(pinned.id.to_hex()),
                         ));
                     }
@@ -838,7 +838,7 @@ impl RoundTools for Catalog {
                             )
                             .await;
                         });
-                        return MemberResult::from(SettledOutput::Waiting(
+                        return MemberOutcome::from(SettledOutput::Waiting(
                             output_material("parked").parked(pinned.id.to_hex()),
                         ));
                     }
@@ -850,7 +850,7 @@ impl RoundTools for Catalog {
                         world.write(&call, attempt);
                         services.request_cancel(TurnCancelMode::Immediate).await;
                         token.cancelled().await;
-                        return MemberResult::from(SettledOutput::Cancelled {
+                        return MemberOutcome::from(SettledOutput::Cancelled {
                             evidence: Default::default(),
                         });
                     }
@@ -858,7 +858,7 @@ impl RoundTools for Catalog {
                 }
                 world.write(&call, attempt);
                 let output = output_material(&format!("{}#{attempt}", tool.name()));
-                MemberResult::from(if tool == Tool::Flaky && attempt == 1 {
+                MemberOutcome::from(if tool == Tool::Flaky && attempt == 1 {
                     SettledOutput::Failed(output.failure(KnownFailureReason::Reported, None))
                 } else {
                     SettledOutput::Completed(output)

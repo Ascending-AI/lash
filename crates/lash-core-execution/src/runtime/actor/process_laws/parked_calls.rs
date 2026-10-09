@@ -23,7 +23,7 @@ use crate::runtime::actor::round::{CallOwner, PinnedWaits};
 /// The first rule broken.
 pub async fn a_parked_call_is_reopened_from_its_completion_wait_after_a_restart_and_a_handover(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let first = law_backend(backend)?;
     let serving = serve(&first);
     let tag = tag("park-reopen");

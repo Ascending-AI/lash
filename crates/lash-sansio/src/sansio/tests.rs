@@ -257,7 +257,7 @@ fn empty_exec_response() -> crate::ExecResponse {
         calls: Vec::new(),
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
-        result: crate::CellResult::Completed,
+        result: crate::CellOutcome::Completed,
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
         suspended: false,

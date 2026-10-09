@@ -5,7 +5,7 @@
 //! `x_outcome` (ADR 0132 §5).
 use super::*;
 use crate::runtime::actor::round::{
-    AdmittedExecution, CompletedCall, Discharge, Material, MemberBody, MemberPin, MemberResult,
+    AdmittedExecution, CompletedCall, Discharge, Material, MemberBody, MemberOutcome, MemberPin,
     PolicyView, Presented, RoundTools, SettledOutput, StoreLocalEffect, completed_material,
     decode_completed,
 };
@@ -89,7 +89,7 @@ fn parked_output(
     owner: &crate::EffectOpener,
     execution: &AdmittedExecution,
     parked: &ParkedCall,
-) -> MemberResult {
+) -> MemberOutcome {
     let encoded = execution.draft().pinned_wait().and_then(|pinned| {
         let text = serde_json::to_string(parked).ok()?;
         Some(
@@ -119,7 +119,7 @@ fn parked_output(
         )
         .into();
     };
-    MemberResult {
+    MemberOutcome {
         output: SettledOutput::Waiting(source),
         store_local: Vec::new(),
         terminal: parked.awaited_process().cloned(),

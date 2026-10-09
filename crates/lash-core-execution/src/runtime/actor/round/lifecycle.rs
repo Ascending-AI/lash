@@ -86,7 +86,7 @@ use super::{
 /// What a member's body answers: its output, and the store-local effects
 /// its completion or its park commits with.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MemberResult {
+pub struct MemberOutcome {
     /// The output.
     pub output: SettledOutput,
     /// The store writes that commit with the output.
@@ -96,7 +96,7 @@ pub struct MemberResult {
     pub terminal: Option<crate::ProcessId>,
 }
 
-impl From<SettledOutput> for MemberResult {
+impl From<SettledOutput> for MemberOutcome {
     fn from(output: SettledOutput) -> Self {
         Self {
             output,
@@ -107,15 +107,16 @@ impl From<SettledOutput> for MemberResult {
 }
 
 /// One attempt's body, given the cancel token it must observe.
-pub type MemberBody =
-    Box<dyn FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = MemberResult> + Send>> + Send>;
+pub type MemberBody = Box<
+    dyn FnOnce(CancellationToken) -> Pin<Box<dyn Future<Output = MemberOutcome> + Send>> + Send,
+>;
 
 /// The member body of `body`, whose answer is its output alone: no
 /// store-local effect, and no process whose terminal it awaits.
 pub fn member_body(body: super::ToolBody) -> MemberBody {
     Box::new(move |token| {
         let running = body(token);
-        Box::pin(async move { MemberResult::from(running.await) })
+        Box::pin(async move { MemberOutcome::from(running.await) })
     })
 }
 
@@ -258,7 +259,7 @@ impl Idle {
 /// A finished attempt the lifecycle holds until its outcome commits.
 struct Finished {
     id: AdmittedId,
-    result: Result<MemberResult, Stop>,
+    result: Result<MemberOutcome, Stop>,
 }
 
 /// One owner's admitted members on one activation: the bodies it runs and
@@ -281,7 +282,7 @@ pub struct Lifecycle {
     /// aborts every one still running.
     running: JoinSet<Finished>,
     in_flight: BTreeSet<AdmittedId>,
-    finished: BTreeMap<AdmittedId, Result<MemberResult, Stop>>,
+    finished: BTreeMap<AdmittedId, Result<MemberOutcome, Stop>>,
     batch_opened: Option<Instant>,
     /// The process-terminal waits this lifecycle checked against their
     /// process's recorded end.
@@ -806,7 +807,7 @@ impl Lifecycle {
                     let (store_local, terminal) = std::mem::take(
                         &mut *carried.lock().unwrap_or_else(PoisonError::into_inner),
                     );
-                    MemberResult {
+                    MemberOutcome {
                         output,
                         store_local,
                         terminal,
@@ -827,7 +828,7 @@ impl Lifecycle {
         &self,
         tx: &mut lash_durable::ActorTx,
         execution: &AdmittedExecution,
-        result: Result<MemberResult, Stop>,
+        result: Result<MemberOutcome, Stop>,
         now: DurableInstant,
     ) -> Result<Recorded, RoundError> {
         let (mut output, store_local, terminal) = match result {
@@ -942,10 +943,10 @@ fn staged_state(effects: &[StoreLocalEffect]) -> Vec<crate::plugin::StateResolut
 }
 
 /// Whether a finished result parks its call.
-fn parks(result: &Result<MemberResult, Stop>) -> bool {
+fn parks(result: &Result<MemberOutcome, Stop>) -> bool {
     matches!(
         result,
-        Ok(MemberResult {
+        Ok(MemberOutcome {
             output: SettledOutput::Waiting(_),
             ..
         })

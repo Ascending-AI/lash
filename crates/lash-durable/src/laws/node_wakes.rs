@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::{LawBroken, LawResult, ensure};
+use super::{LawBroken, LawOutcome, ensure};
 use crate::{
     ActorState, CommitLabel, DurableError, DurableStore, HeartbeatOutcome, LeaseSettings,
     NodeWakeEvent, NodeWakes, Owner, Release, WakeBatch,
@@ -81,7 +81,7 @@ async fn start_counted(
 /// nothing.
 pub async fn a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie(
     tier: &dyn NodeWakeTier,
-) -> LawResult {
+) -> LawOutcome {
     let (store, node_wakes) = tier.open().await;
     let (store, node_wakes) = (store.as_ref(), node_wakes.as_ref());
     let held_actor = actor("held")?;
@@ -153,7 +153,7 @@ pub async fn a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie(
 /// sent after that reach it.
 pub async fn a_lost_listener_session_resubscribes_holding_its_lock(
     tier: &dyn NodeWakeTier,
-) -> LawResult {
+) -> LawOutcome {
     let (store, node_wakes) = tier.open().await;
     let lease = node(store.as_ref(), "blip").await?;
     let mut feed = node_wakes.listen(&lease).await?;
@@ -192,7 +192,7 @@ pub async fn a_lost_listener_session_resubscribes_holding_its_lock(
 /// handle's publish.
 pub async fn an_appended_log_is_named_to_every_listening_node(
     tier: &dyn NodeWakeTier,
-) -> LawResult {
+) -> LawOutcome {
     let mut feeds = Vec::new();
     for name in ["follower-one", "follower-two"] {
         let (store, node_wakes) = tier.open().await;
@@ -228,7 +228,7 @@ pub async fn an_appended_log_is_named_to_every_listening_node(
 /// and its fallback poll is effectively disabled, so only the hint can deliver.
 pub async fn mail_from_another_node_reaches_a_hot_owner_through_its_hint(
     tier: &dyn NodeWakeTier,
-) -> LawResult {
+) -> LawOutcome {
     let (store, node_wakes) = tier.open().await;
     let hot = actor("hot")?;
     create(store.as_ref(), &hot).await?;
@@ -252,7 +252,7 @@ pub async fn mail_from_another_node_reaches_a_hot_owner_through_its_hint(
 /// waking its hot owner before the durable polling fallback is due.
 pub async fn mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint(
     tier: &dyn NodeWakeTier,
-) -> LawResult {
+) -> LawOutcome {
     let (store, node_wakes) = tier.open().await;
     let hot = actor(&"x".repeat(crate::node_wake_payload::MAX_BYTES))?;
     create(store.as_ref(), &hot).await?;
@@ -279,7 +279,7 @@ pub async fn mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_
 /// a dropped hint) still reaches a hot owner within its mail poll.
 pub async fn mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll(
     tier: &dyn NodeWakeTier,
-) -> LawResult {
+) -> LawOutcome {
     let (store, _) = tier.open().await;
     let hot = actor("hot")?;
     create(store.as_ref(), &hot).await?;
@@ -304,7 +304,7 @@ pub async fn mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll(
 /// disabled: the survivor must observe the held lock, then reap its release.
 pub async fn a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses(
     tier: &dyn NodeWakeTier,
-) -> LawResult {
+) -> LawOutcome {
     let (store, _) = tier.open().await;
     let hot = actor("hot")?;
     create(store.as_ref(), &hot).await?;
@@ -368,7 +368,7 @@ pub async fn a_dead_node_is_reaped_through_its_lock_long_before_its_lease_lapses
 /// but one came back empty.
 pub async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node(
     tier: &dyn NodeWakeTier,
-) -> LawResult {
+) -> LawOutcome {
     const NODES: usize = 16;
     const READIED: usize = 8;
     let (store, node_wakes) = tier.open().await;
@@ -443,7 +443,7 @@ pub async fn a_readied_actor_is_claimed_by_one_attempt_on_one_node(
 /// peer, so the hint goes to the dead node.
 pub async fn a_hint_to_a_dead_node_is_backed_by_the_claim_poll(
     tier: &dyn NodeWakeTier,
-) -> LawResult {
+) -> LawOutcome {
     let (store, node_wakes) = tier.open().await;
     let claims = Claims::default();
     let (doomed, _) = start_counted(tier, "doomed", holding(quiet(), 256), &claims).await;

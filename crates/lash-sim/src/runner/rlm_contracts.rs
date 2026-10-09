@@ -841,12 +841,12 @@ fn rlm_exec_response(
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
         result: match (error, terminal_finish) {
-            (Some(message), _) => lash_core::CellResult::Failed(lash_core::CellFailure::new(
+            (Some(message), _) => lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 message,
             )),
-            (None, Some(value)) => lash_core::CellResult::Finished(value.into()),
-            (None, None) => lash_core::CellResult::Completed,
+            (None, Some(value)) => lash_core::CellOutcome::Finished(value.into()),
+            (None, None) => lash_core::CellOutcome::Completed,
         },
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
@@ -886,12 +886,12 @@ fn rlm_exec_response_with_tool_calls(
         tool_calls,
         printed_images: Vec::new(),
         result: match (error, terminal_finish) {
-            (Some(message), _) => lash_core::CellResult::Failed(lash_core::CellFailure::new(
+            (Some(message), _) => lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 message,
             )),
-            (None, Some(value)) => lash_core::CellResult::Finished(value.into()),
-            (None, None) => lash_core::CellResult::Completed,
+            (None, Some(value)) => lash_core::CellOutcome::Finished(value.into()),
+            (None, None) => lash_core::CellOutcome::Completed,
         },
         retained_finish_value: None,
         degraded_bindings: Vec::new(),

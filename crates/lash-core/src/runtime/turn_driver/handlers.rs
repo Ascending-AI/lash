@@ -393,7 +393,7 @@ impl RuntimeTurnDriver<'_> {
                             language: language.clone(),
                             prints: Vec::new(),
                             prints_retained: None,
-                            result: crate::CellResult::Failed(crate::CellFailure::new(
+                            result: crate::CellOutcome::Failed(crate::CellFailure::new(
                                 crate::CellFailureKind::Host,
                                 message,
                             )),
@@ -447,7 +447,7 @@ impl RuntimeTurnDriver<'_> {
                             language: language.clone(),
                             prints: Vec::new(),
                             prints_retained: None,
-                            result: crate::CellResult::Failed(crate::CellFailure::new(
+                            result: crate::CellOutcome::Failed(crate::CellFailure::new(
                                 crate::CellFailureKind::Host,
                                 message,
                             )),
@@ -540,7 +540,7 @@ impl RuntimeTurnDriver<'_> {
                             language: language.clone(),
                             prints: Vec::new(),
                             prints_retained: None,
-                            result: crate::CellResult::Failed(crate::CellFailure::new(
+                            result: crate::CellOutcome::Failed(crate::CellFailure::new(
                                 crate::CellFailureKind::Host,
                                 error.message.clone(),
                             )),

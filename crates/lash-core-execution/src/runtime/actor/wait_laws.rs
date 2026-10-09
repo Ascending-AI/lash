@@ -41,7 +41,7 @@ impl From<DurableError> for LawBroken {
 }
 
 /// The outcome of one law.
-pub type LawResult = Result<(), LawBroken>;
+pub type LawOutcome = Result<(), LawBroken>;
 
 macro_rules! ensure {
     ($condition:expr, $($message:tt)+) => {
@@ -205,7 +205,7 @@ fn answer(value: &str) -> Resolution {
     Resolution::Ok(serde_json::json!({ "answer": value }))
 }
 
-async fn send_cancel(backend: &Backend, actor: &ActorKey) -> LawResult {
+async fn send_cancel(backend: &Backend, actor: &ActorKey) -> LawOutcome {
     let mut tx = MailTx::new();
     tx.append(actor.clone(), MailKind::new(CANCEL_MAIL), "{}");
     backend
@@ -228,7 +228,7 @@ async fn send_cancel(backend: &Backend, actor: &ActorKey) -> LawResult {
 /// The first rule broken.
 pub async fn k1_a_key_that_is_not_an_issued_wait_id_is_refused_and_writes_nothing(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let lease = node(backend, "k1", TTL_MILLIS).await?;
     let cx = own(backend, &lease, &session_actor("k1")?, turn_scope("k1")).await?;
     let (tool, key) = pin(&cx, WaitKind::ToolCompletion, None, Some(LONG)).await?;
@@ -339,7 +339,7 @@ pub async fn k1_a_key_that_is_not_an_issued_wait_id_is_refused_and_writes_nothin
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn the_first_resolution_wins(backend: &Backend) -> LawResult {
+pub async fn the_first_resolution_wins(backend: &Backend) -> LawOutcome {
     let lease = node(backend, "first-winner", TTL_MILLIS).await?;
     let cx = own(
         backend,
@@ -495,7 +495,7 @@ impl Activation for SettleOnClaim {
 /// The first rule broken.
 pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let actor = session_actor("t1")?;
     let minting = node(backend, "t1-minting", TTL_MILLIS).await?;
     let cx = own(backend, &minting, &actor, turn_scope("t1")).await?;
@@ -579,7 +579,9 @@ pub async fn a_waiting_actor_past_its_deadline_times_out_within_the_claim_poll(
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn an_unresolved_wait_suspends_and_resumes_on_resolution(backend: &Backend) -> LawResult {
+pub async fn an_unresolved_wait_suspends_and_resumes_on_resolution(
+    backend: &Backend,
+) -> LawOutcome {
     let actor = session_actor("suspend")?;
     let lease = node(backend, "suspend", TTL_MILLIS).await?;
     let cx = own(backend, &lease, &actor, turn_scope("suspend")).await?;
@@ -630,7 +632,7 @@ pub async fn an_unresolved_wait_suspends_and_resumes_on_resolution(backend: &Bac
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_completion_before_the_await_is_already_resolved(backend: &Backend) -> LawResult {
+pub async fn a_completion_before_the_await_is_already_resolved(backend: &Backend) -> LawOutcome {
     let lease = node(backend, "early", TTL_MILLIS).await?;
     let cx = own(
         backend,
@@ -655,7 +657,7 @@ pub async fn a_completion_before_the_await_is_already_resolved(backend: &Backend
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_duplicate_resolution_keeps_the_first(backend: &Backend) -> LawResult {
+pub async fn a_duplicate_resolution_keeps_the_first(backend: &Backend) -> LawOutcome {
     let lease = node(backend, "duplicate", TTL_MILLIS).await?;
     let cx = own(
         backend,
@@ -702,7 +704,7 @@ pub async fn a_duplicate_resolution_keeps_the_first(backend: &Backend) -> LawRes
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn the_awaiters_cancel_ends_its_wait(backend: &Backend) -> LawResult {
+pub async fn the_awaiters_cancel_ends_its_wait(backend: &Backend) -> LawOutcome {
     let actor = session_actor("cancel")?;
     let lease = node(backend, "cancel", TTL_MILLIS).await?;
     let cx = own(backend, &lease, &actor, turn_scope("cancel")).await?;
@@ -734,7 +736,7 @@ pub async fn the_awaiters_cancel_ends_its_wait(backend: &Backend) -> LawResult {
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_timeout_racing_a_completion_has_one_winner(backend: &Backend) -> LawResult {
+pub async fn a_timeout_racing_a_completion_has_one_winner(backend: &Backend) -> LawOutcome {
     let lease = node(backend, "timeout-race", TTL_MILLIS).await?;
     let cx = own(
         backend,
@@ -780,7 +782,7 @@ pub async fn a_timeout_racing_a_completion_has_one_winner(backend: &Backend) -> 
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_parked_call_is_listed_from_its_wait_row_alone(backend: &Backend) -> LawResult {
+pub async fn a_parked_call_is_listed_from_its_wait_row_alone(backend: &Backend) -> LawOutcome {
     use crate::runtime::actor::round::{CallOwner, parked};
     let actor = session_actor("listed")?;
     let lease = node(backend, "listed", TTL_MILLIS).await?;
@@ -820,7 +822,7 @@ pub async fn a_parked_call_is_listed_from_its_wait_row_alone(backend: &Backend) 
 /// The first rule broken.
 pub async fn a_wait_survives_its_owners_death_with_the_same_key_and_deadline(
     backend: &Backend,
-) -> LawResult {
+) -> LawOutcome {
     let actor = session_actor("failover")?;
     let dying = node(backend, "failover-dying", 200).await?;
     let cx = own(backend, &dying, &actor, turn_scope("failover")).await?;
@@ -875,7 +877,7 @@ pub async fn a_wait_survives_its_owners_death_with_the_same_key_and_deadline(
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_key_that_never_resolves_times_out(backend: &Backend) -> LawResult {
+pub async fn a_key_that_never_resolves_times_out(backend: &Backend) -> LawOutcome {
     let lease = node(backend, "never", TTL_MILLIS).await?;
     let cx = own(
         backend,
@@ -907,7 +909,7 @@ pub async fn a_key_that_never_resolves_times_out(backend: &Backend) -> LawResult
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn await_process_is_bounded_and_cancellable(backend: &Backend) -> LawResult {
+pub async fn await_process_is_bounded_and_cancellable(backend: &Backend) -> LawOutcome {
     let actor = session_actor("awaiter")?;
     let lease = node(backend, "w1", TTL_MILLIS).await?;
     let cx = own(backend, &lease, &actor, turn_scope("awaiter")).await?;

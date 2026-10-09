@@ -34,7 +34,7 @@ fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHis
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Completed,
+            result: lash_core::CellOutcome::Completed,
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
@@ -60,7 +60,7 @@ fn terminal_step_event(
             images,
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Finished(final_output.into()),
+            result: lash_core::CellOutcome::Finished(final_output.into()),
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION
@@ -600,7 +600,7 @@ fn printed_images_render_as_llm_image_blocks() {
             }],
             calls: Vec::new(),
             calls_omitted: 0,
-            result: lash_core::CellResult::Completed,
+            result: lash_core::CellOutcome::Completed,
         })),
         lash_core::FleetFormat::current().writer_version(lash_core::surface_format!(
             crate::RLM_PROTOCOL_EVENT_VERSION

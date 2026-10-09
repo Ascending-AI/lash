@@ -688,7 +688,7 @@ finish("done");"#,
     );
     let TurnEvent::CodeBlockCompleted {
         language,
-        result: cell_result,
+        result: cell_outcome,
         tool_call_ids,
         graph_key: completed_graph_key,
         ..
@@ -697,7 +697,7 @@ finish("done");"#,
         unreachable!();
     };
     assert_eq!(language, "typescript");
-    assert!(!cell_result.is_failed());
+    assert!(!cell_outcome.is_failed());
     assert_eq!(Some(call_id), tool_call_ids.first());
     assert_eq!(tool_call_ids.len(), 1);
     assert_eq!(completed_graph_key, started_graph_key);

@@ -646,7 +646,7 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                 ),
             }],
             printed_images: Vec::new(),
-            result: lash_core::CellResult::Completed,
+            result: lash_core::CellOutcome::Completed,
             retained_finish_value: None,
             degraded_bindings: Vec::new(),
             suspended: false,
@@ -841,7 +841,7 @@ fn host_failure_without_cancellation_evidence_retries_without_fabricating_cancel
         })
         .expect("cell execution");
     let mut response = exec_response(&[], None, None);
-    response.result = lash_sansio::CellResult::Failed(lash_sansio::CellFailure::new(
+    response.result = lash_sansio::CellOutcome::Failed(lash_sansio::CellFailure::new(
         lash_sansio::CellFailureKind::Host,
         "execution token failed without host cancellation evidence",
     ));
@@ -1012,7 +1012,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                 },
             ],
             printed_images: Vec::new(),
-            result: lash_core::CellResult::Completed,
+            result: lash_core::CellOutcome::Completed,
             retained_finish_value: None,
             degraded_bindings: Vec::new(),
             suspended: false,
@@ -1812,7 +1812,7 @@ fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
     );
     assert_eq!(
         repaired.result,
-        lash_core::CellResult::Completed,
+        lash_core::CellOutcome::Completed,
         "a clean cell must not inherit the previous iteration's error"
     );
     assert_eq!(repaired.code, "print \"repaired\"");

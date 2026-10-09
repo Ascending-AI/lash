@@ -29,7 +29,7 @@ impl From<DurableError> for LawBroken {
 }
 
 /// The outcome of one law.
-pub type LawResult = Result<(), LawBroken>;
+pub type LawOutcome = Result<(), LawBroken>;
 
 /// Moves the store's clock forward.
 pub type Advance<'a> = &'a (dyn Fn(Duration) + Sync);
@@ -85,7 +85,7 @@ async fn node(store: &dyn DurableStore, name: &str) -> Result<NodeLease, LawBrok
         .await?)
 }
 
-async fn create(store: &dyn DurableStore, actors: &[ActorKey]) -> LawResult {
+async fn create(store: &dyn DurableStore, actors: &[ActorKey]) -> LawOutcome {
     let mut tx = MailTx::new();
     for actor in actors {
         tx.create_actor(actor.clone(), formats());
@@ -96,7 +96,7 @@ async fn create(store: &dyn DurableStore, actors: &[ActorKey]) -> LawResult {
     Ok(())
 }
 
-async fn append(store: &dyn DurableStore, actor: &ActorKey, body: &str) -> LawResult {
+async fn append(store: &dyn DurableStore, actor: &ActorKey, body: &str) -> LawOutcome {
     let mut tx = MailTx::new();
     tx.append(actor.clone(), MailKind::new("law.note"), body);
     store.commit_mail(tx, CommitLabel::new("law.mail")).await?;
@@ -116,7 +116,7 @@ async fn stale_epochs_are_refused(
     store: &dyn DurableStore,
     actor: &ActorKey,
     current: Epoch,
-) -> LawResult {
+) -> LawOutcome {
     let before = store.actor(actor).await?;
     for held in 0..current.0 {
         match store.begin(actor, Epoch(held)).await {
@@ -140,7 +140,7 @@ async fn stale_epochs_are_refused(
 
 /// Several nodes claim the same ready actors at once. Every actor goes to
 /// exactly one of them, and only the epoch its claim answered commits.
-pub async fn one_writer_under_a_claim_race(store: &dyn DurableStore) -> LawResult {
+pub async fn one_writer_under_a_claim_race(store: &dyn DurableStore) -> LawOutcome {
     let actors = (0..8)
         .map(|index| session(&format!("race-{index}")))
         .collect::<Result<Vec<_>, _>>()?;
@@ -197,7 +197,7 @@ pub async fn one_writer_under_a_claim_race(store: &dyn DurableStore) -> LawResul
 pub async fn a_zombie_owner_past_reap_cannot_commit(
     store: &dyn DurableStore,
     advance: Advance<'_>,
-) -> LawResult {
+) -> LawOutcome {
     let actor = session("zombie")?;
     create(store, std::slice::from_ref(&actor)).await?;
     let zombie = node(store, "zombie").await?;
@@ -278,7 +278,7 @@ pub async fn a_zombie_owner_past_reap_cannot_commit(
 pub async fn a_lapsed_heartbeat_is_reaped_with_an_epoch_bump(
     store: &dyn DurableStore,
     advance: Advance<'_>,
-) -> LawResult {
+) -> LawOutcome {
     let actors = [session("lapsed-a")?, session("lapsed-b")?];
     create(store, &actors).await?;
     let lapsing = node(store, "lapsing").await?;
@@ -365,7 +365,7 @@ pub async fn a_lapsed_heartbeat_is_reaped_with_an_epoch_bump(
 pub async fn mail_from_non_owners_wakes_the_actor(
     store: &dyn DurableStore,
     advance: Advance<'_>,
-) -> LawResult {
+) -> LawOutcome {
     let actor = session("mailbox")?;
     let other = session("bystander")?;
     create(store, &[actor.clone(), other.clone()]).await?;
@@ -518,7 +518,7 @@ pub async fn mail_from_non_owners_wakes_the_actor(
 pub async fn no_write_through_a_stale_epoch(
     store: &dyn DurableStore,
     advance: Advance<'_>,
-) -> LawResult {
+) -> LawOutcome {
     let actor = session("epochs")?;
     create(store, std::slice::from_ref(&actor)).await?;
     let first = node(store, "epoch-first").await?;
@@ -599,7 +599,7 @@ pub async fn no_write_through_a_stale_epoch(
 /// The first rule broken.
 pub async fn a_turn_cancel_is_a_first_winner_row_with_a_wake(
     store: &dyn DurableStore,
-) -> LawResult {
+) -> LawOutcome {
     use crate::domain::{
         DomainWrite, MailAnswer, MailDomainWrite, TurnCancelAnswer, TurnCancelRequest, TurnWrite,
     };

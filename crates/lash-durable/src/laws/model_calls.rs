@@ -1,6 +1,6 @@
 //! A turn's model call identity (P1, FIG-5255; ADR 0133 §6).
 
-use super::{LABEL, LawBroken, LawResult, create, ensure, node, session};
+use super::{LABEL, LawBroken, LawOutcome, create, ensure, node, session};
 use crate::domain::{ModelPin, RunSeq, TurnWrite, UnfinishedPhase};
 use crate::{DomainWrite, DurableInstant, DurableStore};
 use lash_core_store::store::{AdmittedTurnRows, RunAdmissionRecord};
@@ -16,7 +16,7 @@ use lash_sansio::{SessionId, TurnId};
 /// # Errors
 ///
 /// The first rule broken.
-pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore) -> LawResult {
+pub async fn a_turn_counts_the_model_calls_it_admitted(store: &dyn DurableStore) -> LawOutcome {
     let id = SessionId::try_from("counted-session".to_owned())
         .map_err(|_| LawBroken("a constant session id".into()))?;
     let run = TurnId::try_from("counted-turn".to_owned())

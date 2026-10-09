@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::{CellRecord, CellResult};
+use lash_core::{CellOutcome, CellRecord};
 use lash_core::{Part, SessionHistoryRecord};
 use lash_rlm_types::RlmProtocolEvent;
 use lash_sansio::TurnId;
@@ -11,12 +11,12 @@ fn step(id: &str, error: Option<&str>, terminal: bool) -> CellRecord {
         code: "finish 1".to_string(),
         prints: vec!["observed".to_string().into()],
         result: match (error, terminal) {
-            (Some(message), _) => CellResult::Failed(lash_core::CellFailure::new(
+            (Some(message), _) => CellOutcome::Failed(lash_core::CellFailure::new(
                 lash_core::CellFailureKind::Program,
                 message,
             )),
-            (None, true) => CellResult::Finished(serde_json::json!(1).into()),
-            (None, false) => CellResult::Completed,
+            (None, true) => CellOutcome::Finished(serde_json::json!(1).into()),
+            (None, false) => CellOutcome::Completed,
         },
         ..CellRecord::default()
     }
@@ -252,7 +252,7 @@ fn a_refused_call_replays_as_its_pair_until_a_later_cell_supersedes_it() {
 fn reloaded_null_finish_remains_terminal_in_reconstructed_history() {
     let mut entry = step("null-finish", None, false);
     entry.code = "finish(null)".into();
-    entry.result = CellResult::Finished(serde_json::Value::Null.into());
+    entry.result = CellOutcome::Finished(serde_json::Value::Null.into());
     let events = pair(entry);
     let mut reloaded =
         serde_json::from_str::<Vec<SessionHistoryRecord>>(&serde_json::to_string(&events).unwrap())

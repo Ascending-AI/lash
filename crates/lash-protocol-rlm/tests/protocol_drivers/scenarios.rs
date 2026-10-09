@@ -223,7 +223,7 @@ fn rlm_protocol_scenario_typed_schema_repair_survives_a_cell_checkpoint_boundary
             trajectory_last: Some(RlmTrajectoryExpectation {
                 code: "finish({ missing: true });",
                 output: Vec::new(),
-                outcome: lash_core::CellResult::Failed(
+                outcome: lash_core::CellOutcome::Failed(
                     program_failure("\"ok\" is a required property").with_value_mismatch(
                         lash_sansio::ValueMismatch {
                             instance_path: String::new(),

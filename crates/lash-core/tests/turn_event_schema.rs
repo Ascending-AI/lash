@@ -248,7 +248,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 language: "python".to_string(),
                 prints: vec!["1".to_string().into()],
                 prints_retained: None,
-                result: lash_core::CellResult::Failed(lash_core::CellFailure::new(
+                result: lash_core::CellOutcome::Failed(lash_core::CellFailure::new(
                     lash_core::CellFailureKind::Program,
                     "boom",
                 )),
@@ -284,7 +284,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                 language: "python".to_string(),
                 prints: Vec::new(),
                 prints_retained: None,
-                result: lash_core::CellResult::Finished(json!(null).into()),
+                result: lash_core::CellOutcome::Finished(json!(null).into()),
                 duration_ms: 5,
                 tool_call_ids: vec![],
                 graph_key: None,

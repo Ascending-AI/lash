@@ -283,7 +283,7 @@ pub enum TurnEvent {
         prints: Vec<crate::CellPrint>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prints_retained: Option<crate::RetainedOutput>,
-        result: crate::CellResult,
+        result: crate::CellOutcome,
         duration_ms: u64,
         tool_call_ids: Vec<crate::ToolCallId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

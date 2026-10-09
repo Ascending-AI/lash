@@ -20,7 +20,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 
-use ledger::{ArrivalSchedule, Knee, KneeCriteria, LedgerSummary, OperationRecord};
+use ledger::{ArrivalSchedule, Knee, KneeCriteria, LedgerReport, OperationRecord};
 
 /// How a receipt's operations were generated, and so what its latencies
 /// mean.
@@ -123,7 +123,7 @@ pub struct Receipt {
     pub evidence: &'static str,
     pub population: PopulationReceipt,
     pub marks: Marks,
-    pub steps: Vec<LedgerSummary>,
+    pub steps: Vec<LedgerReport>,
     pub knee: Knee,
 }
 
@@ -178,7 +178,7 @@ pub async fn run(args: &Args) -> Result<Receipt> {
         ledgers.push(ledger);
     }
 
-    let steps: Vec<LedgerSummary> = ledgers
+    let steps: Vec<LedgerReport> = ledgers
         .iter()
         .map(|ledger| ledger.summary(args.slowest))
         .collect();

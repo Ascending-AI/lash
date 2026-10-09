@@ -200,7 +200,7 @@ async fn run_task_with_shutdown_witness(
         .iter()
         .filter_map(|activity| match &activity.event {
             TurnEvent::CodeBlockCompleted {
-                result: lash::transcript::CellResult::Failed(error),
+                result: lash::transcript::CellOutcome::Failed(error),
                 prints,
                 ..
             } => Some(

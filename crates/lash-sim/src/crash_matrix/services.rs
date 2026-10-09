@@ -28,7 +28,7 @@ use lash_core::{
 };
 use lash_core_execution::ActorContext;
 use lash_core_execution::runtime::actor::round::{
-    AdmittedExecution, CompletedCall, Material, MemberBody, MemberPin, MemberResult, PolicyView,
+    AdmittedExecution, CompletedCall, Material, MemberBody, MemberOutcome, MemberPin, PolicyView,
     RoundTools, SettledOutput, TraceProposal,
 };
 use lash_core_store::effect_opener::EffectOpener;
@@ -743,14 +743,14 @@ fn turn_output(opener: &EffectOpener, text: String) -> Material {
     )
 }
 
-fn unencodable() -> MemberResult {
-    MemberResult::from(SettledOutput::Interrupted)
+fn unencodable() -> MemberOutcome {
+    MemberOutcome::from(SettledOutput::Interrupted)
 }
 
 /// A body whose effect was refused: its known failure, which a `Once` call
 /// records as its outcome.
-fn refused(opener: &EffectOpener, error: &str) -> MemberResult {
-    MemberResult::from(SettledOutput::Failed(
+fn refused(opener: &EffectOpener, error: &str) -> MemberOutcome {
+    MemberOutcome::from(SettledOutput::Failed(
         turn_output(opener, format!("refused: {error}"))
             .failure(KnownFailureReason::Reported, None),
     ))
@@ -882,7 +882,7 @@ impl RoundTools for Catalog {
                     Tool::Hang => {
                         request_cancel(&world, session, run);
                         token.cancelled().await;
-                        return MemberResult::from(SettledOutput::Cancelled {
+                        return MemberOutcome::from(SettledOutput::Cancelled {
                             evidence: Default::default(),
                         });
                     }
@@ -896,7 +896,7 @@ impl RoundTools for Catalog {
                     Tool::WriteNow | Tool::Flaky => {}
                 }
                 let output = turn_output(&opener, format!("{}#{attempt}", tool.name()));
-                MemberResult {
+                MemberOutcome {
                     output: if tool == Tool::Flaky && attempt == 1 {
                         SettledOutput::Failed(output.failure(KnownFailureReason::Reported, None))
                     } else {

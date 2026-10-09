@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use tokio::sync::{Notify, mpsc};
 
-use super::super::{LawBroken, LawResult};
+use super::super::{LawBroken, LawOutcome};
 use crate::domain;
 use crate::runner::{Activation, Exit, Hints, Owned, Runner, RunnerConfig, Stopped};
 use crate::{
@@ -75,7 +75,7 @@ pub(super) async fn liveness(node_wakes: &dyn NodeWakes) -> Result<Vec<BootLiven
 
 /// Wait on stored state, yielding between reads. The test action's watchdog
 /// bounds hangs; scheduler latency is never part of a law's verdict.
-pub(super) async fn eventually<F, Fut>(mut reached: F) -> LawResult
+pub(super) async fn eventually<F, Fut>(mut reached: F) -> LawOutcome
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<bool, LawBroken>>,
@@ -87,7 +87,7 @@ where
 }
 
 /// Wait until `node`'s listener holds its liveness lock.
-pub(super) async fn listening(node_wakes: &dyn NodeWakes, node: &str) -> LawResult {
+pub(super) async fn listening(node_wakes: &dyn NodeWakes, node: &str) -> LawOutcome {
     eventually(|| async {
         Ok(liveness(node_wakes)
             .await?
@@ -137,7 +137,7 @@ pub struct LawNode {
 impl LawNode {
     /// Wait until an activation has read its mailbox and is waiting for
     /// a hint or its mail poll. A later append cannot race its initial read.
-    pub(super) async fn waiting(&mut self) -> LawResult {
+    pub(super) async fn waiting(&mut self) -> LawOutcome {
         self.waiting
             .recv()
             .await
@@ -145,7 +145,7 @@ impl LawNode {
     }
 
     /// Wait for the next mail to reach one of the node's actors.
-    pub(super) async fn arrived(&mut self) -> LawResult {
+    pub(super) async fn arrived(&mut self) -> LawOutcome {
         self.arrived
             .recv()
             .await

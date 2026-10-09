@@ -347,8 +347,8 @@ fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
         calls: Vec::new(),
         tool_calls: Vec::new(),
         printed_images: Vec::new(),
-        result: finish.map_or(lash_core::CellResult::Completed, |value| {
-            lash_core::CellResult::Finished(value.into())
+        result: finish.map_or(lash_core::CellOutcome::Completed, |value| {
+            lash_core::CellOutcome::Finished(value.into())
         }),
         retained_finish_value: None,
         degraded_bindings: Vec::new(),
@@ -1937,14 +1937,14 @@ fn a_natural_text_schema_refuses_a_record_finish_and_accepts_text() {
         let [refusal, accepted] = steps.as_slice() else {
             panic!("native={native}: two trajectory steps: {steps:?}");
         };
-        let lash_core::CellResult::Failed(failure) = refusal else {
+        let lash_core::CellOutcome::Failed(failure) = refusal else {
             panic!("native={native}: the record finish fails its cell: {refusal:?}");
         };
         assert_eq!(failure.kind, lash_core::CellFailureKind::Program);
         assert!(failure.value_mismatch.is_some(), "native={native}");
         assert_eq!(
             accepted,
-            &lash_core::CellResult::Finished(lash_core::OutputValue::Inline(serde_json::json!(
+            &lash_core::CellOutcome::Finished(lash_core::OutputValue::Inline(serde_json::json!(
                 "Order 7 has shipped."
             ))),
             "native={native}"

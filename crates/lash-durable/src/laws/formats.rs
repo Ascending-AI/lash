@@ -2,7 +2,7 @@
 //! cancel of an actor no node decodes, the fleet-format gate and the
 //! draining node.
 
-use super::{LawBroken, LawResult};
+use super::{LawBroken, LawOutcome};
 use crate::domain::CANCEL_MAIL;
 use crate::{
     ActorKey, ActorState, ClaimPurpose, CommitLabel, DurableError, DurableStore, FormatSet,
@@ -37,7 +37,7 @@ async fn node(
         .await?)
 }
 
-async fn create(store: &dyn DurableStore, actor: &ActorKey, formats: FormatSet) -> LawResult {
+async fn create(store: &dyn DurableStore, actor: &ActorKey, formats: FormatSet) -> LawOutcome {
     let mut tx = MailTx::new();
     tx.create_actor(actor.clone(), formats);
     store
@@ -66,7 +66,7 @@ async fn state(store: &dyn DurableStore, actor: &ActorKey) -> Result<ActorState,
 /// The first rule broken.
 pub async fn a_node_claims_only_actors_whose_formats_it_decodes(
     store: &dyn DurableStore,
-) -> LawResult {
+) -> LawOutcome {
     let older = node(store, "older", vec![old()]).await?;
     let newer = node(store, "newer", vec![old(), new()]).await?;
     let session = key(ActorKey::session("in-new"))?;
@@ -155,7 +155,7 @@ pub async fn a_node_claims_only_actors_whose_formats_it_decodes(
 /// The first rule broken.
 pub async fn a_newer_format_is_not_written_while_an_older_node_is_live(
     store: &dyn DurableStore,
-) -> LawResult {
+) -> LawOutcome {
     let candidates = [new(), old()];
     let older = node(store, "older", vec![old()]).await?;
     node(store, "newer", vec![old(), new()]).await?;
@@ -187,7 +187,7 @@ pub async fn a_newer_format_is_not_written_while_an_older_node_is_live(
 /// The first rule broken.
 pub async fn a_draining_node_claims_nothing_and_releases_ready(
     store: &dyn DurableStore,
-) -> LawResult {
+) -> LawOutcome {
     let draining = node(store, "draining", vec![old()]).await?;
     let first = key(ActorKey::session("held"))?;
     create(store, &first, old()).await?;
