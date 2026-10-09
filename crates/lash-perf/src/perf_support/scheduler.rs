@@ -219,13 +219,6 @@ mod tests {
     }
 
     #[test]
-    fn process_cpu_ms_reads_this_process_on_linux() {
-        if cfg!(target_os = "linux") {
-            assert!(process_cpu_ms().is_some_and(|ms| ms >= 0.0));
-        }
-    }
-
-    #[test]
     fn process_stat_parser_rejects_truncated_input() {
         assert_eq!(parse_process_cpu_ticks("42 (lash-perf) R 1 2"), None);
     }

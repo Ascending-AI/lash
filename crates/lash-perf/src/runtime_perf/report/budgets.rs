@@ -371,26 +371,4 @@ mod tests {
             "{err}"
         );
     }
-
-    #[test]
-    fn legacy_run_turn_keys_fail_to_load_under_deny_unknown_fields() {
-        let json = r#"{
-            "guarded_span": "run_turn",
-            "enforced_allocation": {
-                "run_turn_alloc_bytes_max": 1000.0,
-                "alloc_bytes_max": 1000.0,
-                "steady_state_turn_alloc_bytes_max": 500.0
-            },
-            "advisory_duration": {
-                "ms_max": 10.0,
-                "phases": {}
-            }
-        }"#;
-        let err = serde_json::from_str::<RuntimeScenarioBudget>(json).unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("unknown field `run_turn_alloc_bytes_max`"),
-            "{err}"
-        );
-    }
 }

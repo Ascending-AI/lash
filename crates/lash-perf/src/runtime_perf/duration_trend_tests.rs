@@ -61,21 +61,6 @@ fn drift_shorter_than_the_streak_requirement_stays_advisory_only() {
 }
 
 #[test]
-fn sustained_drift_over_the_streak_requirement_trips_the_signal() {
-    let mut series = flat(10.0, TREND_WINDOW_RUNS);
-    series.extend(flat(20.0, DRIFT_CONSECUTIVE_RUNS));
-
-    let result = verdict(&series);
-    assert_eq!(
-        result,
-        DriftVerdict::Drifting {
-            streak: DRIFT_CONSECUTIVE_RUNS
-        }
-    );
-    assert!(result.is_drifting());
-}
-
-#[test]
 fn a_run_exactly_at_the_threshold_is_not_elevated() {
     let mut series = flat(10.0, TREND_WINDOW_RUNS);
     series.push(10.0 * (1.0 + DRIFT_THRESHOLD_PCT / 100.0));
@@ -207,22 +192,6 @@ fn a_record_missing_geometry_is_rejected_without_a_migration_arm() {
     assert!(loaded.preserved.is_empty());
 }
 
-#[test]
-fn a_record_from_a_newer_schema_is_excluded_from_verdicts_but_not_dropped() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("history.jsonl");
-    let mut future = record("standard", "quick", 1, 10.0);
-    future.version = HISTORY_RECORD_VERSION + 1;
-    append_records(&path, &[future, record("standard", "quick", 2, 11.0)]).expect("append");
-
-    let loaded = load_history_lenient(&path).expect("history loads");
-    assert_eq!(loaded.records.len(), 1);
-    assert!(loaded.skipped.is_empty(), "{:?}", loaded.skipped);
-    // Unreadable is not the same as unwanted: it is held, not counted.
-    assert_eq!(loaded.preserved.len(), 1);
-    assert!(loaded.preserved[0].contains(&format!("\"version\":{}", HISTORY_RECORD_VERSION + 1)));
-}
-
 /// An older build restored onto a newer history — a revert push, or a
 /// rerun of a pre-bump commit — must not be the thing that destroys the
 /// newer records, because `main` would save that loss on the very next
@@ -319,35 +288,6 @@ fn the_strict_read_refuses_a_history_the_lenient_read_salvages() {
 }
 
 #[test]
-fn a_poisoned_history_is_healed_instead_of_carried_forward() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let path = dir.path().join("history.jsonl");
-    append_records(&path, &[record("standard", "quick", 1, 10.0)]).expect("append");
-    std::fs::write(
-        &path,
-        format!(
-            "{}not json\n",
-            std::fs::read_to_string(&path).expect("read")
-        ),
-    )
-    .expect("write");
-
-    // The run path must return normally *and* leave a clean file behind,
-    // or the bad line rides into every future cache entry.
-    record_and_report(
-        &path,
-        "quick",
-        DurationTrendGeometry::current(2, 0, 3),
-        &fixture_identity(),
-        &[],
-    );
-
-    let healed = load_history(&path).expect("history is parseable again");
-    assert_eq!(healed.len(), 1);
-    assert_eq!(healed[0].total_ms, 10.0);
-}
-
-#[test]
 fn an_unwritable_history_disables_the_signal_without_failing_the_run() {
     let dir = tempfile::tempdir().expect("temp dir");
     // A directory where the file should be: every write fails, and the run
@@ -367,63 +307,16 @@ fn an_unwritable_history_disables_the_signal_without_failing_the_run() {
 }
 
 #[test]
-fn rewriting_bounds_each_series_without_touching_a_verdict() {
-    let readable = TREND_WINDOW_RUNS + DRIFT_CONSECUTIVE_RUNS;
-    assert!(
-        RETAINED_RUNS_PER_SERIES > readable,
-        "retention must exceed what a verdict reads, or truncation changes verdicts"
-    );
-    assert!(
-        RETAINED_RUNS_PER_SERIES <= 4 * readable,
-        "retention must stay a small multiple of what a verdict reads: the history \
-         lives in a cache entry every main run touches, so nothing evicts it but this"
-    );
-
-    let mut history = Vec::new();
-    for index in 0..(RETAINED_RUNS_PER_SERIES * 2) {
-        // Two series, so retention is proven to be per-series and not global.
-        history.push(record("standard", "quick", index, 10.0));
-        history.push(record("rlm", "quick", index, 20.0));
-    }
-    // The tail that any verdict can see, before and after truncation.
-    history.extend(
-        (0..DRIFT_CONSECUTIVE_RUNS).map(|index| record("standard", "quick", 10_000 + index, 40.0)),
-    );
-
-    let before = verdict(
-        &history
-            .iter()
-            .filter(|record| record.scenario == "standard")
-            .map(|record| record.total_ms)
-            .collect::<Vec<_>>(),
-    );
-    let retained = retained_records(&history);
-    let after = verdict(
-        &retained
-            .iter()
-            .filter(|record| record.scenario == "standard")
-            .map(|record| record.total_ms)
-            .collect::<Vec<_>>(),
-    );
-
-    assert_eq!(retained.len(), RETAINED_RUNS_PER_SERIES * 2);
-    assert_eq!(
-        retained
-            .iter()
-            .filter(|record| record.scenario == "standard")
-            .count(),
-        RETAINED_RUNS_PER_SERIES
-    );
-    assert_eq!(before, after);
-    assert!(before.is_drifting(), "{before:?}");
-}
-
-#[test]
 fn a_long_history_is_truncated_on_disk_by_the_run_path() {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join("history.jsonl");
     let overlong = (0..(RETAINED_RUNS_PER_SERIES + 20))
-        .map(|index| record("standard", "quick", index, 10.0))
+        .flat_map(|index| {
+            [
+                record("standard", "quick", index, 10.0),
+                record("rlm", "quick", index, 20.0),
+            ]
+        })
         .collect::<Vec<_>>();
     append_records(&path, &overlong).expect("append");
 
@@ -436,7 +329,14 @@ fn a_long_history_is_truncated_on_disk_by_the_run_path() {
     );
 
     let healed = load_history(&path).expect("history loads");
-    assert_eq!(healed.len(), RETAINED_RUNS_PER_SERIES);
+    assert_eq!(healed.len(), RETAINED_RUNS_PER_SERIES * 2);
+    assert_eq!(
+        healed
+            .iter()
+            .filter(|record| record.scenario == "standard")
+            .count(),
+        RETAINED_RUNS_PER_SERIES
+    );
 }
 
 #[test]

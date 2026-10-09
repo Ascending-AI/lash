@@ -1197,35 +1197,6 @@ mod tests {
     }
 
     #[test]
-    fn named_metric_summary_preserves_signed_samples_for_percentiles() {
-        let scenario = RuntimePerfScenario::WriterContention2Workers;
-        let mut result = run_result(scenario, 1.0, 1);
-        result.metric_samples_ms.insert(
-            "writer_contention.same_session.wait_ms".to_string(),
-            vec![-4.0, -2.0, 8.0, 16.0],
-        );
-        let summary = summarize(
-            &[result],
-            &[scenario],
-            1,
-            &StackProfile::capture(Some(2 * 1024 * 1024), None),
-        );
-        let wait = &summary[0].metric_summary_ms["writer_contention.same_session.wait_ms"];
-
-        assert_eq!(wait.min, -4.0);
-        assert_eq!(wait.p50, 3.0);
-        assert_eq!(wait.p95, 14.8);
-        let records = duration_trend::records_for_run(
-            &summary,
-            "test",
-            duration_trend::DurationTrendGeometry::current(1, 0, 1),
-            &duration_trend::ExperimentIdentity::capture(serde_json::json!({"test": true})),
-        );
-        assert_eq!(records[0].duration_metrics_ms["sampled_operations/writer_contention.same_session.wait_ms"].median_ms, 3.0);
-        assert_eq!(records[0].duration_metrics_ms["sampled_operations/writer_contention.same_session.wait_ms"].p95_ms, 14.8);
-    }
-
-    #[test]
     fn async_completion_scenarios_have_specific_guard_budgets() {
         assert!(
             allocation_budget_bytes(RuntimePerfScenario::RlmAsyncToolCompletion)

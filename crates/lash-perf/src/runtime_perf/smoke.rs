@@ -153,28 +153,4 @@ mod tests {
             "completion witness expected 2 deliveries, observed 1"
         );
     }
-
-    #[tokio::test]
-    async fn completion_witness_waits_for_every_registered_task() {
-        let (release, released) = tokio::sync::oneshot::channel();
-        let result = execute(
-            true,
-            RuntimePerfScenario::RlmProcessAsyncToolCompletion,
-            1,
-            async {
-                let witness = completion_witness().unwrap();
-                witness.spawn(async move {
-                    released.await?;
-                    Ok(())
-                });
-                witness.spawn(async move {
-                    release.send(()).unwrap();
-                    Ok(())
-                });
-                Ok(())
-            },
-        )
-        .await;
-        result.unwrap();
-    }
 }

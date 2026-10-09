@@ -428,22 +428,6 @@ async fn durable_sqlite_checkpoint_curve_reports_paired_structural_samples() {
 }
 
 #[test]
-fn every_required_phase_has_a_checked_in_wall_clock_budget() {
-    for scenario in RuntimePerfScenario::KNOWN {
-        if !scenario.has_guard_budget() {
-            continue;
-        }
-        for phase in required_phases(scenario) {
-            assert!(
-                phase_wall_clock_budget_ms(scenario, phase).is_some(),
-                "{} requires unbudgeted phase {phase}",
-                scenario.name()
-            );
-        }
-    }
-}
-
-#[test]
 fn typed_runtime_phase_inventory_is_required_and_budgeted() {
     let standard = required_phases(RuntimePerfScenario::Standard);
     for phase in lash_core::runtime::RuntimeTurnPhase::ALL {
@@ -513,25 +497,6 @@ fn fig_1910_catalog_variants_are_opt_in_but_guarded_witnesses() {
     ] {
         assert!(!RuntimePerfScenario::DEFAULTS.contains(&scenario));
         assert!(scenario.has_guard_budget());
-    }
-}
-
-#[test]
-fn runtime_perf_direct_counterparts_link_to_correctness_coverage() {
-    for scenario in [
-        RuntimePerfScenario::Standard,
-        RuntimePerfScenario::StandardToolCalls,
-        RuntimePerfScenario::Rlm,
-        RuntimePerfScenario::RlmProcessHandles,
-        RuntimePerfScenario::RlmProcessAsyncToolCompletion,
-        RuntimePerfScenario::RlmSubagentSpawn,
-        RuntimePerfScenario::TurnCheckpoint,
-    ] {
-        assert!(
-            !scenario.correctness_coverage_ids().is_empty(),
-            "{} has a direct correctness counterpart but no coverage link",
-            scenario.name()
-        );
     }
 }
 

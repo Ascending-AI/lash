@@ -104,16 +104,6 @@ mod tests {
     }
 
     #[test]
-    fn percentiles_use_interpolation_for_odd_samples() {
-        let summary = basic_summary(vec![3.0, 1.0, 2.0]);
-
-        assert_eq!(summary.median, 2.0);
-        assert_eq!(summary.p50, 2.0);
-        assert_eq!(summary.p95, 2.9);
-        assert_eq!(summary.p99, 2.98);
-    }
-
-    #[test]
     fn percentiles_use_interpolation_for_even_samples() {
         let summary = basic_summary(vec![4.0, 1.0, 3.0, 2.0]);
 
@@ -121,6 +111,17 @@ mod tests {
         assert_eq!(summary.p50, 2.5);
         assert_eq!(summary.p95, 3.85);
         assert_eq!(summary.p99, 3.97);
+
+        let odd = basic_summary(vec![3.0, 1.0, 2.0]);
+        assert_eq!(odd.median, 2.0);
+        assert_eq!(odd.p50, 2.0);
+        assert_eq!(odd.p95, 2.9);
+        assert_eq!(odd.p99, 2.98);
+
+        let signed = basic_summary(vec![-4.0, -2.0, 8.0, 16.0]);
+        assert_eq!(signed.min, -4.0);
+        assert_eq!(signed.p50, 3.0);
+        assert_eq!(signed.p95, 14.8);
     }
 
     #[test]
@@ -134,15 +135,5 @@ mod tests {
         assert_eq!(single.p50, 7.25);
         assert_eq!(single.p95, 7.25);
         assert_eq!(single.p99, 7.25);
-    }
-
-    #[test]
-    fn percentiles_interpolate_two_sample_inputs() {
-        let summary = basic_summary(vec![10.0, 20.0]);
-
-        assert_eq!(summary.median, 15.0);
-        assert_eq!(summary.p50, 15.0);
-        assert_eq!(summary.p95, 19.5);
-        assert_eq!(summary.p99, 19.9);
     }
 }

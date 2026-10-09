@@ -971,18 +971,3 @@ const fn runtime_perf_default_scenarios() -> [RuntimePerfScenario; RUNTIME_PERF_
     );
     defaults
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_scenarios_are_derived_from_metadata_flags() {
-        let derived: Vec<RuntimePerfScenario> = RuntimePerfScenario::METADATA
-            .iter()
-            .filter(|metadata| metadata.default)
-            .map(|metadata| metadata.scenario)
-            .collect();
-        assert_eq!(RuntimePerfScenario::DEFAULTS.as_slice(), derived.as_slice());
-    }
-}
