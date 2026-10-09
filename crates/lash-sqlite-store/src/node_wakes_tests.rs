@@ -82,6 +82,7 @@ macro_rules! node_wake_laws {
 node_wake_laws!(
     a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie,
     a_lost_listener_session_resubscribes_holding_its_lock,
+    an_appended_log_is_named_to_every_listening_node,
     mail_from_another_node_reaches_a_hot_owner_through_its_hint,
     mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint,
     mail_whose_hint_is_lost_reaches_a_hot_owner_within_its_poll,
@@ -722,6 +723,7 @@ fn wake_payloads_split_encoded_batches_and_poll_for_oversized_keys() {
     let batch = WakeBatch {
         ready: std::collections::BTreeSet::from([NodeId::new("ready")]),
         owned: std::collections::BTreeMap::from([(NodeId::new("owned"), oversized)]),
+        ..WakeBatch::default()
     };
     let payloads: Vec<String> = rows(&batch)
         .into_iter()

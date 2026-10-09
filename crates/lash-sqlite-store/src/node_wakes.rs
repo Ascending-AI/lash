@@ -5,7 +5,9 @@
 //! - **Wakes.** A batch is one write transaction on the store's connection,
 //!   after the commits that woke its actors and never inside one: a row for
 //!   each node picked to claim a readied unowned actor, with no actors, and a
-//!   row for each owner node with the keys of its actors that took mail. The
+//!   row for each owner node with the keys of its actors that took mail, and
+//!   a row for every node, naming none, with the keys of the actors whose
+//!   event logs grew. The
 //!   same transaction deletes the rows older than the configured wake retention: a hint that
 //!   old is worth nothing, since the polls have found its work.
 //! - **Listener.** Each node's listener runs on a thread of its own with a
@@ -13,7 +15,7 @@
 //!   every the configured wake poll. The version moves exactly when another connection
 //!   commits, so a quiet database costs one pragma and one file check per
 //!   poll. When it moves, the listener reads the wake rows past its cursor
-//!   and forwards its own node's. A publish in this process also rings this
+//!   and forwards its own node's and every node's. A publish in this process also rings this
 //!   process's listeners of the database at once, so a wake between two
 //!   nodes of one process waits for no poll.
 //! - **Liveness.** The listener holds its boot's liveness lock, a file lock
@@ -51,13 +53,14 @@ use crate::location::DatabaseTarget;
 pub(crate) const TABLES: &str = "
 CREATE TABLE IF NOT EXISTS node_wakes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    node_id TEXT NOT NULL,
+    node_id TEXT,
     actors TEXT NOT NULL,
     published_at_ms INTEGER NOT NULL
 );
 ";
 
-/// Append one hint for node `?1`: the shared wake envelope `?2`.
+/// Append one hint for node `?1`, or for every node with none: the shared
+/// wake envelope `?2`.
 const INSERT: &str =
     "INSERT INTO node_wakes (node_id, actors, published_at_ms) VALUES (?1, ?2, ?3)";
 
@@ -70,9 +73,9 @@ const PRUNE: &str = "DELETE FROM node_wakes WHERE seq < COALESCE(
 /// The last hint published so far: where a new listener's cursor starts.
 const TAIL: &str = "SELECT COALESCE(MAX(seq), 0) FROM node_wakes";
 
-/// Node `?2`'s hints past cursor `?1`, in publish order.
-const PAST: &str =
-    "SELECT seq, actors FROM node_wakes WHERE seq > ?1 AND node_id = ?2 ORDER BY seq";
+/// Node `?2`'s hints and every node's past cursor `?1`, in publish order.
+const PAST: &str = "SELECT seq, actors FROM node_wakes
+    WHERE seq > ?1 AND (node_id = ?2 OR node_id IS NULL) ORDER BY seq";
 
 /// The rings of this process's listeners, one per database, so a publish
 /// here wakes them without a poll. Entries are weak: a database nobody
@@ -122,20 +125,24 @@ pub(crate) fn lock_failure(error: &std::io::Error) -> DurableError {
     })
 }
 
-/// The `(node, envelope)` rows that send `batch`.
-fn rows(batch: &WakeBatch) -> Vec<(String, String)> {
+/// The `(node, envelope)` rows that send `batch`; a row with no node is
+/// every node's.
+fn rows(batch: &WakeBatch) -> Vec<(Option<String>, String)> {
     let ready = batch.ready.iter().map(|node| {
         (
-            node.as_str().to_owned(),
+            Some(node.as_str().to_owned()),
             node_wake_payload::READY.to_owned(),
         )
     });
     let owned = batch.owned.iter().flat_map(|(node, actors)| {
         node_wake_payload::owned(actors)
             .into_iter()
-            .map(move |payload| (node.as_str().to_owned(), payload))
+            .map(move |payload| (Some(node.as_str().to_owned()), payload))
     });
-    ready.chain(owned).collect()
+    let appended = node_wake_payload::appended(&batch.appended)
+        .into_iter()
+        .map(|payload| (None, payload));
+    ready.chain(owned).chain(appended).collect()
 }
 
 /// The node wakes of one SQLite database file.

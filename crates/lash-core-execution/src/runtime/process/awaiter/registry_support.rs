@@ -2,6 +2,17 @@ use super::*;
 use crate::ProcessId;
 
 impl WatchedProcessRegistry {
+    /// A commit grew `process_id`'s log: tick this node's change hub, and
+    /// the other nodes' through the node hints, once named.
+    pub(super) fn appended(&self, process_id: &ProcessId) {
+        self.hub.notify(process_id);
+        if let Some(hints) = self.publication.hints.get()
+            && let Ok(actor) = lash_durable::ActorKey::process(process_id.as_str())
+        {
+            hints.appended(actor);
+        }
+    }
+
     pub(super) fn event_path(&self, process_id: &ProcessId) -> Arc<tokio::sync::Mutex<()>> {
         let mut paths = self.publication.event_paths.lock_recover();
         paths.retain(|_, path| path.strong_count() > 0);

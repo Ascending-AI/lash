@@ -376,8 +376,8 @@ async fn wake(report: &Report, url: &str, count: usize, events: usize) -> Result
         let publishing = Instant::now();
         node_wakes
             .publish(&WakeBatch {
-                ready: BTreeSet::new(),
                 owned: owned_batch,
+                ..WakeBatch::default()
             })
             .await
             .map_err(|error| anyhow::anyhow!("publish: {error}"))?;

@@ -189,6 +189,45 @@ pub async fn a_lost_listener_session_resubscribes_holding_its_lock(
     Ok(())
 }
 
+/// FIG-5549: an actor whose event log grew is named to every listening
+/// node, whoever owns it: a node cannot know which nodes follow the log.
+/// Two nodes that own nothing each hear one batch's actors from a third
+/// handle's publish.
+pub async fn an_appended_log_is_named_to_every_listening_node(
+    tier: &dyn NodeWakeTier,
+) -> LawResult {
+    let mut feeds = Vec::new();
+    for name in ["follower-one", "follower-two"] {
+        let (store, node_wakes) = tier.open().await;
+        let lease = node(store.as_ref(), name).await?;
+        feeds.push((name, node_wakes.listen(&lease).await?));
+    }
+    let appended: BTreeSet<_> = ["grew-one", "grew-two"]
+        .into_iter()
+        .map(|id| crate::ActorKey::process(id).map_err(|error| LawBroken(error.to_string())))
+        .collect::<Result<_, _>>()?;
+    let (_store, publisher) = tier.open().await;
+    publisher
+        .publish(&WakeBatch {
+            appended: appended.clone(),
+            ..WakeBatch::default()
+        })
+        .await?;
+    for (name, feed) in &mut feeds {
+        let event = tokio::time::timeout(Duration::from_secs(5), feed.next())
+            .await
+            .map_err(|_| LawBroken(format!("{name} never heard the appended logs")))?;
+        let NodeWakeEvent::Appended(heard) = event else {
+            return Err(LawBroken(format!("{name} heard {event:?}")));
+        };
+        ensure!(
+            heard.iter().cloned().collect::<BTreeSet<_>>() == appended,
+            "{name} heard {heard:?}"
+        );
+    }
+    Ok(())
+}
+
 /// O1: mail written on node B to an actor hot on node A reaches A through
 /// B's after-commit hint, far inside A's ten-second mail poll.
 pub async fn mail_from_another_node_reaches_a_hot_owner_through_its_hint(

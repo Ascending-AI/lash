@@ -7,10 +7,11 @@
 //!   0.41 ms p50 at sixteen listeners, and an in-transaction notify takes
 //!   the notification queue's lock on every writer's commit. Each node has
 //!   one channel. A ready hint rings the one node picked to claim a readied
-//!   unowned actor; mail for an owned actor rings its owner's channel. Both
-//!   carry the shared, escaped, size-bounded wake envelope.
+//!   unowned actor; mail for an owned actor rings its owner's channel; an
+//!   actor whose event log grew is named on one channel that every node
+//!   listens to. All carry the shared, escaped, size-bounded wake envelope.
 //! - **Listener.** Each node has one listener on a connection of its own. It
-//!   subscribes to its node's channel, then takes its boot's liveness lock, a
+//!   subscribes to its node's channel and the appended-log channel, then takes its boot's liveness lock, a
 //!   session advisory lock, before [`NodeWakes::listen`] returns. When its
 //!   session is lost it reconnects, subscribes and locks again, and only then
 //!   reports [`NodeWakeEvent::Resubscribed`], so the runner rescans after it. Its
@@ -62,6 +63,10 @@ pub(crate) fn node_channel(node: &NodeId) -> String {
     }
 }
 
+/// The channel every node listens to for the actors whose event logs grew.
+/// No node's own channel has this name: each starts `lash_node_`.
+const APPENDED_CHANNEL: &str = "lash_appended";
+
 /// The `(channel, payload)` notifications that send `batch`.
 fn notifications(batch: &WakeBatch) -> (Vec<String>, Vec<String>) {
     let mut channels = Vec::new();
@@ -76,6 +81,10 @@ fn notifications(batch: &WakeBatch) -> (Vec<String>, Vec<String>) {
             channels.push(channel.clone());
             payloads.push(payload);
         }
+    }
+    for payload in node_wake_payload::appended(&batch.appended) {
+        channels.push(APPENDED_CHANNEL.to_owned());
+        payloads.push(payload);
     }
     (channels, payloads)
 }
@@ -112,7 +121,9 @@ impl Session {
     async fn open(&self) -> Result<PgListener, sqlx::Error> {
         let open = async {
             let mut listener = PgListener::connect_with(&self.pool).await?;
-            listener.listen(&self.channel).await?;
+            listener
+                .listen_all([self.channel.as_str(), APPENDED_CHANNEL])
+                .await?;
             sqlx::query(SQL.postgres.hold_liveness.sql())
                 .bind(&self.boot)
                 .execute(&mut listener)

@@ -1186,8 +1186,12 @@ impl LashCoreBuilder {
             pages: data_retention.process_observation.snapshot_page_budget,
             page_size: data_retention.process_observation.snapshot_page_size,
         };
+        // Appends through this core tick the other nodes' process change
+        // hubs, and theirs tick this core's, through the backend's node hints.
+        let watched = lash_core::runtime::watch_process_registry(backend.process_registry());
+        watched.announce_through(backend.hints().clone());
         let process_work = lash_core::ProcessWorkWiring::new(
-            lash_core::runtime::watch_process_registry(backend.process_registry()),
+            watched,
             Arc::new(
                 lash_core::DurableProcessWork::new(backend.clone())
                     .with_work_cadence(self.work_cadence.clone())?,

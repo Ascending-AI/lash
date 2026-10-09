@@ -223,10 +223,16 @@ async fn delete_session_and_await(core: &LashCore, session_id: &str) -> Result<(
 
 /// A standard core over `backend`.
 pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
-    explicit_ephemeral_facets(LashCore::standard_builder(backend))
-        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
+    standard_core_builder_over(backend)
         .build(crate::testing::runtime_lease_owner())
         .expect("standard core")
+}
+
+/// The builder of a standard core over `backend`, for a law that names the
+/// core's owner or pacing itself.
+fn standard_core_builder_over(backend: lash_core::Backend) -> crate::LashCoreBuilder {
+    explicit_ephemeral_facets(LashCore::standard_builder(backend))
+        .serve_test_llm_profile(mock_provider(), mock_llm_profile_spec())
 }
 
 /// A catalog serving every model in `models` by its wire model, on `provider`.
@@ -406,6 +412,7 @@ mod cell_race_loser;
 mod config_transactions;
 mod core_session_builder;
 mod crashed_create_drain;
+mod cross_core_process_changes;
 mod deleted_session_run_replay;
 mod deployment_and_testing_facade;
 mod direct_completion;

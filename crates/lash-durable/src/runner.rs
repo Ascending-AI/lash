@@ -462,8 +462,21 @@ struct HintsInner {
     peers: Mutex<Vec<NodeId>>,
     /// What the next flush publishes.
     pending: Mutex<WakeBatch>,
+    /// Who hears of the logs other nodes appended to.
+    followers: Mutex<Option<Arc<dyn LogFollowers>>>,
     /// Rings the publisher.
     flush: Notify,
+}
+
+/// A node's followers of actor event logs: what its listener heard of logs
+/// that grew on any node. A latency aid only: a follower still re-reads its
+/// log on its own cadence.
+pub trait LogFollowers: Send + Sync + 'static {
+    /// These actors' logs grew.
+    fn appended(&self, actors: &[ActorKey]);
+
+    /// The listener lost hints: any followed log may have grown.
+    fn resubscribed(&self);
 }
 
 /// A wake's delivery: a mailbox writer on this node hands the runner what
@@ -512,6 +525,32 @@ impl Hints {
             }
             None => {}
         }
+    }
+
+    /// Tell every listening node that a commit grew `actor`'s event log.
+    /// Called after the commit; nothing is published without node wakes.
+    pub fn appended(&self, actor: ActorKey) {
+        self.queue(|batch| {
+            batch.appended.insert(actor);
+        });
+    }
+
+    /// Hand what this node's listener hears of appended logs to
+    /// `followers`.
+    pub fn follow(&self, followers: Arc<dyn LogFollowers>) {
+        *self
+            .inner
+            .followers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(followers);
+    }
+
+    fn followers(&self) -> Option<Arc<dyn LogFollowers>> {
+        self.inner
+            .followers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn is_mine(&self, owner: &Owner) -> bool {
@@ -901,6 +940,12 @@ impl Runner {
                             }
                         }
                     }
+                    NodeWakeEvent::Appended(actors) => {
+                        if let Some(followers) = self.hints.followers() {
+                            followers.appended(&actors);
+                        }
+                        continue;
+                    }
                     NodeWakeEvent::PollStore => {
                         self.hints.hint_all_running();
                         next_claim = self.clock.now();
@@ -909,6 +954,9 @@ impl Runner {
                     NodeWakeEvent::Resubscribed => {
                         seen_held.clear();
                         self.hints.hint_all_running();
+                        if let Some(followers) = self.hints.followers() {
+                            followers.resubscribed();
+                        }
                         next_claim = self.clock.now();
                         claim_delay = settings.claim_backoff;
                     }

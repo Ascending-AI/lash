@@ -98,6 +98,7 @@ node_wake_laws!(
     a_released_liveness_lock_is_reaped_at_once_and_fences_the_zombie =>
         crate::testing::fixture_config(),
     a_lost_listener_session_resubscribes_holding_its_lock => crate::testing::fixture_config(),
+    an_appended_log_is_named_to_every_listening_node => crate::testing::fixture_config(),
     mail_for_an_oversized_key_reaches_a_hot_owner_through_a_store_scan_hint =>
         crate::testing::fixture_config(),
     mail_from_another_node_reaches_a_hot_owner_through_its_hint =>
@@ -234,6 +235,33 @@ fn wake_payloads_round_trip_delimiters_and_a_maximal_fitting_key() {
 
 /// FIG-5555: both transports split encoded batches at the byte bound and
 /// replace individually oversized keys with one typed store-scan hint.
+/// FIG-5549: an appended log rides the one channel every node listens to,
+/// in an envelope that decodes to the same actors.
+#[test]
+fn an_appended_log_is_named_on_every_nodes_channel() {
+    let grew = std::collections::BTreeSet::from([
+        ActorKey::process("grew\n\"one\"").expect("a valid escaped actor key"),
+        ActorKey::process("grew-two").expect("a valid actor key"),
+    ]);
+    let (channels, payloads) = notifications(&WakeBatch {
+        appended: grew.clone(),
+        ..WakeBatch::default()
+    });
+    assert_eq!(channels, [APPENDED_CHANNEL]);
+    let [payload] = payloads.as_slice() else {
+        panic!("one envelope names both logs: {payloads:?}");
+    };
+    match node_wake_payload::decode(payload).expect("a valid wake payload") {
+        NodeWakeEvent::Appended(actors) => assert_eq!(
+            actors
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>(),
+            grew
+        ),
+        event => panic!("expected appended logs, got {event:?}"),
+    }
+}
+
 #[test]
 fn wake_payloads_split_encoded_batches_and_poll_for_oversized_keys() {
     let actors: std::collections::BTreeSet<ActorKey> = (0..1_000)
@@ -253,6 +281,7 @@ fn wake_payloads_split_encoded_batches_and_poll_for_oversized_keys() {
             NodeId::new("a node name that cannot be a channel identifier as it stands"),
             oversized,
         )]),
+        ..WakeBatch::default()
     };
     let (channels, payloads) = notifications(&batch);
     assert_eq!(channels[0], node_channel(&NodeId::new("ready")));

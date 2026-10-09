@@ -1,7 +1,8 @@
 //! The shared SQLite-row / PostgreSQL-NOTIFY wake envelope (FIG-5555).
 //!
 //! A JSON array of complete actor-key strings carries owned-mail hints;
-//! the JSON strings `"ready"` and `"poll_store"` carry the two scan hints.
+//! the JSON strings `"ready"` and `"poll_store"` carry the two scan hints;
+//! a JSON object `{"appended": [keys]}` names actors whose event logs grew.
 //! Every payload is at most [`MAX_BYTES`] UTF-8 bytes, including JSON
 //! escaping, brackets and separators. This is below PostgreSQL's exclusive
 //! 8000-byte NOTIFY limit, and also bounds each SQLite wake row.
@@ -23,42 +24,61 @@ pub const READY: &str = "\"ready\"";
 
 const POLL_STORE: &str = "\"poll_store\"";
 
+/// What opens and closes the envelope that names appended logs.
+const APPENDED_OPEN: &str = "{\"appended\":[";
+const APPENDED_CLOSE: &str = "]}";
+
 /// Encode owned-mail hints, splitting at the encoded byte bound. Emit at
 /// most one [`NodeWakeEvent::PollStore`] hint for keys that cannot fit alone.
 #[must_use]
 pub fn owned(actors: &BTreeSet<ActorKey>) -> Vec<String> {
+    let (mut payloads, oversized) = key_lists(actors, "[", "]");
+    if oversized {
+        payloads.push(POLL_STORE.to_owned());
+    }
+    payloads
+}
+
+/// Encode appended-log hints, splitting at the encoded byte bound. A key
+/// that cannot fit alone is left out: its followers re-read on their own
+/// cadence.
+#[must_use]
+pub fn appended(actors: &BTreeSet<ActorKey>) -> Vec<String> {
+    key_lists(actors, APPENDED_OPEN, APPENDED_CLOSE).0
+}
+
+/// `actors`' keys as JSON strings between `open` and `close`, in as many
+/// envelopes as the byte bound needs, and whether some key fits in none.
+fn key_lists(actors: &BTreeSet<ActorKey>, open: &str, close: &str) -> (Vec<String>, bool) {
     let mut payloads = Vec::new();
-    let mut payload = String::from("[");
-    let mut poll_store = false;
+    let mut payload = String::from(open);
+    let mut oversized = false;
     for actor in actors {
-        // Even without escaping, a key needs two quotes and two brackets.
-        if actor.as_str().len() > MAX_BYTES - 4 {
-            poll_store = true;
+        // Even without escaping, a key needs two quotes around it.
+        if actor.as_str().len() + 2 + open.len() + close.len() > MAX_BYTES {
+            oversized = true;
             continue;
         }
         let key = serde_json::Value::from(actor.as_str()).to_string();
-        if key.len() + 2 > MAX_BYTES {
-            poll_store = true;
+        if key.len() + open.len() + close.len() > MAX_BYTES {
+            oversized = true;
             continue;
         }
-        let separator = usize::from(payload.len() > 1);
-        if payload.len() + separator + key.len() + 1 > MAX_BYTES {
-            payload.push(']');
-            payloads.push(std::mem::replace(&mut payload, String::from("[")));
+        let separator = usize::from(payload.len() > open.len());
+        if payload.len() + separator + key.len() + close.len() > MAX_BYTES {
+            payload.push_str(close);
+            payloads.push(std::mem::replace(&mut payload, String::from(open)));
         }
-        if payload.len() > 1 {
+        if payload.len() > open.len() {
             payload.push(',');
         }
         payload.push_str(&key);
     }
-    if payload.len() > 1 {
-        payload.push(']');
+    if payload.len() > open.len() {
+        payload.push_str(close);
         payloads.push(payload);
     }
-    if poll_store {
-        payloads.push(POLL_STORE.to_owned());
-    }
-    payloads
+    (payloads, oversized)
 }
 
 /// Decode one complete envelope. Reject an oversized, malformed, unknown
@@ -75,13 +95,25 @@ pub fn decode(payload: &str) -> Option<NodeWakeEvent> {
             "poll_store" => Some(NodeWakeEvent::PollStore),
             _ => None,
         },
-        serde_json::Value::Array(keys) if !keys.is_empty() => keys
-            .iter()
-            .map(|key| ActorKey::parse(key.as_str()?).ok())
-            .collect::<Option<Vec<_>>>()
-            .map(NodeWakeEvent::Owned),
+        serde_json::Value::Array(keys) => actor_keys(&keys).map(NodeWakeEvent::Owned),
+        serde_json::Value::Object(hint) if hint.len() == 1 => {
+            let serde_json::Value::Array(keys) = hint.get("appended")? else {
+                return None;
+            };
+            actor_keys(keys).map(NodeWakeEvent::Appended)
+        }
         _ => None,
     }
+}
+
+/// A non-empty list of actor keys, every one valid.
+fn actor_keys(keys: &[serde_json::Value]) -> Option<Vec<ActorKey>> {
+    if keys.is_empty() {
+        return None;
+    }
+    keys.iter()
+        .map(|key| ActorKey::parse(key.as_str()?).ok())
+        .collect()
 }
 
 #[cfg(test)]
@@ -101,6 +133,10 @@ mod tests {
             "[\"s/\"]",
             "[\"s/a\"] trailing",
             "\"unknown\"",
+            "{\"appended\":[]}",
+            "{\"appended\":[\"s/a\",\"invalid\"]}",
+            "{\"appended\":[\"s/a\"],\"owned\":[\"s/a\"]}",
+            "{\"grew\":[\"s/a\"]}",
         ] {
             assert_eq!(decode(payload), None, "invalid envelope {payload:?}");
         }

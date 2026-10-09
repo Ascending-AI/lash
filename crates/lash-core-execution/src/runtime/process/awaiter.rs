@@ -20,7 +20,10 @@ pub use event_sink::ProcessEventSink;
 
 /// [`ProcessRegistry`] decorator: publishes in-process change ticks on every
 /// mutation (so native process waits wake without polling) and, when a
-/// [`ProcessEventSink`] is installed, emits each appended event to it.
+/// [`ProcessEventSink`] is installed, emits each appended event to it. Once
+/// it announces through a node's hints
+/// ([`WatchedRegistry::announce_through`]), an append here also ticks the
+/// change hubs of the other nodes, and theirs tick this one's.
 ///
 /// Sinks share the same watched handle used by the process port.
 struct WatchedProcessRegistry {
@@ -47,6 +50,28 @@ struct Publication {
     durable: std::sync::OnceLock<Arc<dyn lash_durable::DurableReads>>,
     /// Only degraded reads occupy this map; successful absence is healthy.
     read_failures: Mutex<HashMap<(ProcessId, &'static str), u64>>,
+    /// The node hints an append is announced to the other nodes through,
+    /// once the composition names them.
+    hints: std::sync::OnceLock<lash_durable::runner::Hints>,
+}
+
+/// Ticks a change hub for the process logs another node appended to.
+struct HubFollowers(ProcessChangeHub);
+
+impl lash_durable::runner::LogFollowers for HubFollowers {
+    fn appended(&self, actors: &[lash_durable::ActorKey]) {
+        for actor in actors {
+            if actor.kind() == lash_durable::ActorKind::Process
+                && let Ok(process) = ProcessId::parse(actor.id())
+            {
+                self.0.notify(&process);
+            }
+        }
+    }
+
+    fn resubscribed(&self) {
+        self.0.notify_all();
+    }
 }
 
 /// A process registry paired with the change hub published by its decorator.
@@ -131,7 +156,7 @@ impl WatchedRegistry {
     pub async fn publish_committed(&self, process_id: &ProcessId, published: u64) -> u64 {
         let event_path = self.watched.event_path(process_id);
         let _guard = event_path.lock().await;
-        self.hub.notify(process_id);
+        self.watched.appended(process_id);
         self.watched
             .emit_event_pages_since(process_id, Some(published), published)
             .await
@@ -159,6 +184,15 @@ impl WatchedRegistry {
         let mut marks = self.watched.publication.emitted.lock_recover();
         if marks.get(process_id).is_some_and(|mark| *mark <= published) {
             marks.remove(process_id);
+        }
+    }
+
+    /// Announce every append to a process's log to the other nodes of
+    /// `hints`' store, and tick this registry's change hub for theirs. The
+    /// first hints named stay: a registry serves one backend.
+    pub fn announce_through(&self, hints: lash_durable::runner::Hints) {
+        if self.watched.publication.hints.set(hints.clone()).is_ok() {
+            hints.follow(Arc::new(HubFollowers(self.hub.clone())));
         }
     }
 
@@ -205,7 +239,7 @@ delegate_process_registrar!(
         let _guard = event_path.lock().await;
         let sink_cursor = watched.sink_cursor(process_id).await;
         let record = forwarded.await?;
-        watched.hub.notify(process_id);
+        watched.appended(process_id);
         watched
             .emit_event_pages_since(process_id, sink_cursor, 0)
             .await;
@@ -225,7 +259,7 @@ delegate_process_event_log!(
         let _guard = event_path.lock().await;
         let sink_cursor = watched.sink_cursor(process_id).await;
         let result = forwarded.await?;
-        watched.hub.notify(process_id);
+        watched.appended(process_id);
         watched
             .emit_event_pages_since(process_id, sink_cursor, 0)
             .await;
@@ -243,7 +277,7 @@ delegate_process_lifecycle!(
         let _guard = event_path.lock().await;
         let sink_cursor = watched.sink_cursor(process_id).await;
         let result = forwarded.await?;
-        watched.hub.notify(process_id);
+        watched.appended(process_id);
         watched
             .emit_event_pages_since(process_id, sink_cursor, 0)
             .await;

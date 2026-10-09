@@ -9,6 +9,10 @@
 //!   only, and a writer on the owner's own node hints in process and
 //!   publishes nothing. A lost or late hint costs latency only: the claim
 //!   poll and each owner's mail scan find the work.
+//! - **Appended logs.** An actor whose event log a commit grew is named to
+//!   every listening node, whoever owns it: a node cannot know which nodes
+//!   follow the log. Each node tells its own followers, which re-read the
+//!   log. A lost hint costs a follower its own slow re-read.
 //! - **Liveness.** A node's [`NodeWakeFeed`] holds its boot's liveness lock
 //!   for as long as the feed's session lives. A watcher that saw a boot's
 //!   lock held, and later sees it free while the boot is still registered,
@@ -36,13 +40,15 @@ pub struct WakeBatch {
     pub ready: BTreeSet<NodeId>,
     /// Owned actors that took mail, under the node that owns each.
     pub owned: BTreeMap<NodeId, BTreeSet<ActorKey>>,
+    /// Actors whose event logs grew: every listening node hears each.
+    pub appended: BTreeSet<ActorKey>,
 }
 
 impl WakeBatch {
     /// Whether the batch rings nothing.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.ready.is_empty() && self.owned.is_empty()
+        self.ready.is_empty() && self.owned.is_empty() && self.appended.is_empty()
     }
 }
 
@@ -54,14 +60,16 @@ pub enum NodeWakeEvent {
     Ready,
     /// These actors, owned by this node, took mail.
     Owned(Vec<ActorKey>),
+    /// These actors' event logs grew, on whichever node committed.
+    Appended(Vec<ActorKey>),
     /// A key exceeded the wake envelope's byte bound. Poll claimable
     /// actors and every owned actor's mailbox; their durable rows carry
     /// the identities the hint could not include.
     PollStore,
     /// The listener lost its session and has a new one: every hint sent in
     /// between is lost and every liveness observation is stale. Rescan the
-    /// claimable actors and every hot actor's mailbox, and see each boot's
-    /// lock afresh.
+    /// claimable actors and every hot actor's mailbox, re-read every
+    /// followed log, and see each boot's lock afresh.
     Resubscribed,
 }
 

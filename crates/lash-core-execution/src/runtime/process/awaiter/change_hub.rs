@@ -108,6 +108,14 @@ impl ProcessChangeHub {
         }
     }
 
+    /// Bump every watched process: what a node does when it may have missed
+    /// any change.
+    pub fn notify_all(&self) {
+        for sender in self.inner.lock_recover().values() {
+            sender.send_modify(|version| *version = version.wrapping_add(1));
+        }
+    }
+
     /// Number of process registrations retained by the hub, for lifecycle laws.
     #[cfg(any(test, feature = "testing"))]
     pub fn tracked_processes(&self) -> usize {
