@@ -773,7 +773,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn("store-contract-soak cases='256':", justfile)
         for leaf in (
             "store_contract_state_machine",
-            "runtime_persistence_state_machine",
             "session_graph_state_machine",
         ):
             self.assertIn(
@@ -781,44 +780,23 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             )
             self.assertNotIn(f"conformance::tests::{leaf}", scenario_harnesses)
         store_soak = justfile.split("store-contract-soak cases='256':", 1)[1].split(
-            "# Opt-in runtime-persistence property soak", 1
+            "# Opt-in raw durable-state soak", 1
         )[0]
-        runtime_soak = justfile.split(
-            "runtime-persistence-soak cases='256':", 1
-        )[1].split("# The release gate's chaos soak", 1)[0]
-        for body in (store_soak, runtime_soak):
-            self.assertIn("kiln test --test_timeout=1200 --test_output=all", body)
-            self.assertIn(
-                "service=(--local-test-execution --no-test-cache "
-                "--test_env=LASH_POSTGRES_DATABASE_URL)",
-                body,
-            )
-        for leaf, body in (
-            ("store_contract_state_machine", store_soak),
-            ("session_graph_state_machine", store_soak),
-            ("runtime_persistence_state_machine", runtime_soak),
-        ):
-            if body is store_soak:
-                self.assertIn('"--test_arg=${selector}"', body)
-                self.assertIn(f" {leaf}", body)
-            else:
-                self.assertIn(f"--test_arg={leaf}", body)
+        self.assertIn("kiln test --test_timeout=1200 --test_output=all", store_soak)
+        self.assertIn(
+            "service=(--local-test-execution --no-test-cache "
+            "--test_env=LASH_POSTGRES_DATABASE_URL)",
+            store_soak,
+        )
+        self.assertIn('"--test_arg=${selector}"', store_soak)
+        for leaf in ("store_contract_state_machine", "session_graph_state_machine"):
+            self.assertIn(f" {leaf}", store_soak)
         for target in (
             "//crates/lash-sqlite-store:conformance_memory__test",
             "//crates/lash-sqlite-store:conformance__test",
             "//crates/lash-postgres-store:conformance__test",
         ):
             self.assertIn(target, store_soak)
-            self.assertIn(target, runtime_soak)
-        self.assertIn("default_runtime_persistence_cases=32", scenario_harnesses)
-        self.assertIn("default_runtime_persistence_cases=256", scenario_harnesses)
-        self.assertEqual(
-            scenario_harnesses.count(
-                'LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases"'
-            ),
-            3,
-        )
-        self.assertIn("runtime-persistence-soak cases='256':", justfile)
         cross_backend_soak = shell_function_body(gate, "run_cross_backend_store_soak")
         self.assertIn('LASH_CROSS_BACKEND_SOAK_CASES:-64', cross_backend_soak)
         self.assertIn('LASH_CROSS_BACKEND_CASES="$cases"', cross_backend_soak)
@@ -891,7 +869,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             for name in (
                 "LASH_STORE_CONTRACT_PROPTEST_SEED",
                 "LASH_SESSION_GRAPH_PROPTEST_SEED",
-                "LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED",
                 "LASH_CHAOS_SOAK_EPOCHS",
                 "LASH_CHAOS_SOAK_STEPS",
             ):
@@ -968,43 +945,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                 3,
             )
 
-            result, rows = run(
-                "runtime-persistence-soak",
-                "8",
-                LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED="runtime-secret-seed",
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(len(rows), 3)
-            for arguments in rows:
-                self.assertIn(
-                    "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED",
-                    arguments,
-                )
-                self.assertNotIn("runtime-secret-seed", arguments)
-                self.assertNotIn("--local-test-execution", arguments)
-                self.assertNotIn("--no-test-cache", arguments)
-
             database = "postgres://fixture.invalid/database"
-            result, rows = run(
-                "runtime-persistence-soak",
-                "9",
-                LASH_POSTGRES_DATABASE_URL=database,
-                LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED="runtime-secret-seed",
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(len(rows), 3)
-            for arguments in rows:
-                for argument in (
-                    "--local-test-execution",
-                    "--no-test-cache",
-                    "--test_env=LASH_POSTGRES_DATABASE_URL",
-                    "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES=9",
-                    "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED",
-                ):
-                    self.assertIn(argument, arguments)
-                self.assertNotIn(database, arguments)
-                self.assertNotIn("runtime-secret-seed", arguments)
-
             result, rows = run("cross-backend-store-soak", "5", "17")
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(rows, [])

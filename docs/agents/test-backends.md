@@ -56,12 +56,13 @@ its own suite owns it.
 test lands in a binary no Postgres suite runs, or is named so the filter
 misses it.
 
-`just store-contract-soak` and `just runtime-persistence-soak` increase the
-property-case budgets on SQLite memory, SQLite file and PostgreSQL. Their
-PostgreSQL leg still requires a service. The storage differential is
+`just store-contract-soak` increases the property-case budgets on SQLite
+memory, SQLite file and PostgreSQL. Its PostgreSQL leg still requires a
+service. The storage differential is
 `//crates/lash-sim:cross_backend_store_differential__test`;
-`just cross-backend-store-soak` runs its generated law with PostgreSQL required.
-It compares SQLite memory, SQLite file and PostgreSQL storage, not engine
+`just cross-backend-store-soak` runs its generated law with PostgreSQL required
+(`scripts/ci/with-service.sh pg -- just cross-backend-store-soak`). The
+generated law compares SQLite file and PostgreSQL storage rows, not engine
 journal semantics. These are targeted soak recipes, not extra default gates.
 
 ## Engines and effect hosts

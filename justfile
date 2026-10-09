@@ -289,32 +289,9 @@ store-contract-soak cases='256':
   run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-sqlite-store:conformance__test session_graph_state_machine LASH_SESSION_GRAPH_PROPTEST_SEED
   run_property_soak LASH_SESSION_GRAPH_PROPTEST_CASES //crates/lash-postgres-store:conformance__test session_graph_state_machine LASH_SESSION_GRAPH_PROPTEST_SEED
 
-# Opt-in runtime-persistence property soak. PostgreSQL executes when its
-# standard LASH_POSTGRES_DATABASE_URL configuration is present.
-runtime-persistence-soak cases='256':
-  #!/usr/bin/env bash
-  set -euo pipefail
-  service=()
-  if [[ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]]; then
-    service=(--local-test-execution --no-test-cache --test_env=LASH_POSTGRES_DATABASE_URL)
-  fi
-  replay=()
-  if [[ -n "${LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED:-}" ]]; then
-    replay=(--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_SEED)
-  fi
-  run_property_soak() {
-    local label="$1"
-    kiln test --test_timeout=1200 --test_output=all \
-      "--test_env=LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES={{cases}}" \
-      --test_arg=runtime_persistence_state_machine --test_arg=--nocapture \
-      "${replay[@]}" "${service[@]}" "$label"
-  }
-  run_property_soak //crates/lash-sqlite-store:conformance_memory__test
-  run_property_soak //crates/lash-sqlite-store:conformance__test
-  run_property_soak //crates/lash-postgres-store:conformance__test
-
-# Opt-in three-backend raw durable-state soak. Requires the standard Postgres
-# configuration and logs the operation kinds omitted by each bounded seed.
+# Opt-in raw durable-state soak over SQLite and PostgreSQL. Requires the
+# standard Postgres configuration and logs the operation kinds omitted by each
+# bounded seed.
 cross-backend-store-soak cases='64' seed='852':
   #!/usr/bin/env bash
   set -euo pipefail

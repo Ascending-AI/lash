@@ -77,6 +77,7 @@ use observation::*;
 struct SurfaceRunner {
     name: &'static str,
     scenario: StoreContractScenario,
+    registry: Arc<dyn lash_core::ProcessRegistry>,
     /// The durable store the registry commits through.
     reader: SurfaceReader,
 }
@@ -95,7 +96,19 @@ impl SurfaceRunner {
         }
     }
 
+    /// The raw rows, read once the process feed is sequenced. PostgreSQL
+    /// stages a save and gives it its feed sequence on the next feed read
+    /// (FIG-5276), where SQLite sequences in the save itself; reading the
+    /// feed's bounds is that read on both.
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: a refused bounds read is a store defect the differential must surface"
+    )]
     async fn observe(&self) -> SurfaceState {
+        self.registry
+            .process_change_bounds()
+            .await
+            .expect("the process feed's bounds read");
         self.reader.observe().await
     }
 }
@@ -183,6 +196,9 @@ async fn surface_runners(
         .await
         .unwrap();
     let postgres_runtime: Arc<dyn RuntimeStore> = postgres_store;
+    // Every generated registration names the fixture execution env, and the
+    // per-case reset truncates it, so each backend publishes it per case.
+    lash_core::testing::process_execution_env_fixture(&storage.process_env_store()).await;
     let postgres_registry = Arc::new(
         storage
             .process_registry()
@@ -197,6 +213,7 @@ async fn surface_runners(
                 registry: sqlite_registry.clone(),
                 runtime: Arc::clone(&sqlite_runtime),
             }),
+            registry: sqlite_registry,
             reader: SurfaceReader::Sqlite {
                 process_path: sqlite_stores_path.clone(),
             },
@@ -207,6 +224,7 @@ async fn surface_runners(
                 registry: postgres_registry.clone(),
                 runtime: Arc::clone(&postgres_runtime),
             }),
+            registry: postgres_registry,
             reader: SurfaceReader::Postgres {
                 pool: storage.pool().clone(),
             },

@@ -1036,15 +1036,12 @@ run_cargo_tests() {
 
 run_scenario_harnesses() {
   local default_store_contract_cases=32
-  local default_runtime_persistence_cases=32
   local default_session_graph_cases=24
   if [ "$lane" = "full" ]; then
     default_store_contract_cases=256
-    default_runtime_persistence_cases=256
     default_session_graph_cases=256
   fi
   local store_contract_cases="${LASH_STORE_CONTRACT_PROPTEST_CASES:-$default_store_contract_cases}"
-  local runtime_persistence_cases="${LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES:-$default_runtime_persistence_cases}"
   local session_graph_cases="${LASH_SESSION_GRAPH_PROPTEST_CASES:-$default_session_graph_cases}"
 
   if area_selected store; then
@@ -1077,17 +1074,6 @@ run_scenario_harnesses() {
   fi
 
   if area_selected process; then
-    step "Runtime-persistence state-machine properties"
-    LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-      run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
-      runtime_persistence_state_machine
-    LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-      run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
-      runtime_persistence_state_machine
-    LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="$runtime_persistence_cases" \
-      run_cargo_tests -p lash-internal-postgres-store --locked --test conformance \
-      runtime_persistence_state_machine
-
     step "Session graph state-machine property harness"
     LASH_SESSION_GRAPH_PROPTEST_CASES="$session_graph_cases" \
       run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \

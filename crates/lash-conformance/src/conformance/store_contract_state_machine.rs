@@ -487,25 +487,25 @@ async fn apply_operation(
     match operation {
         StoreContractOp::Register { process } => {
             let slot = *process % PROCESS_COUNT;
-            let result = handles
+            // No generated history refuses a registration: a refusal is the
+            // store's defect or a fixture the backend was not given.
+            let record = handles
                 .registry
                 .register_process(
                     registration(&format!("prop-process-{slot}"))
                         .with_start_key(Some(slot_start_key(slot))),
                 )
-                .await;
-            if let Ok(record) = result {
-                let id = record.id.clone();
-                model.slot_ids.insert(slot, id.clone());
-                let entry = model.process_mut(&id);
-                // The slot's start key returns its retained run; once that run
-                // is pruned the key starts a new run under a new id (ADR 0107).
-                if !entry.is_live() {
-                    entry.install_fresh(record);
-                    model.process_counts.record_spawn();
-                    shape[RunShapeCounter::Spawns] =
-                        shape[RunShapeCounter::Spawns].saturating_add(1);
-                }
+                .await
+                .map_err(|error| format!("register slot {slot} was refused: {error}"))?;
+            let id = record.id.clone();
+            model.slot_ids.insert(slot, id.clone());
+            let entry = model.process_mut(&id);
+            // The slot's start key returns its retained run; once that run
+            // is pruned the key starts a new run under a new id (ADR 0107).
+            if !entry.is_live() {
+                entry.install_fresh(record);
+                model.process_counts.record_spawn();
+                shape[RunShapeCounter::Spawns] = shape[RunShapeCounter::Spawns].saturating_add(1);
             }
         }
         StoreContractOp::FirstStart {
