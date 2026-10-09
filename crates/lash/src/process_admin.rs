@@ -442,6 +442,34 @@ impl Processes {
             .map_err(Into::into)
     }
 
+    /// Read the process as its workflow: the identity and signature of the
+    /// definition it runs, its graph, its canonical TypeScript and its entry
+    /// process, or the typed reason there is none.
+    ///
+    /// The read names the definition through the process's own recorded
+    /// input, so it answers for as long as the row is retained, on any core
+    /// over the same stores.
+    #[cfg(feature = "rlm")]
+    pub async fn graph(&self, process_id: &ProcessId) -> Result<crate::workflow::WorkflowRead> {
+        use crate::workflow::{WorkflowRead, WorkflowUnavailable};
+        let Some(process) = self.get(process_id).await? else {
+            return Ok(WorkflowRead::Unavailable(WorkflowUnavailable::Process {
+                process_id: process_id.clone(),
+            }));
+        };
+        let lash_core::ProcessInput::Engine { kind, payload } = &process.input else {
+            return Ok(WorkflowRead::Unsupported {
+                engine_kind: process.identity.kind.clone(),
+            });
+        };
+        crate::workflow::read(
+            &self.core.host_process_engines,
+            &lash_core::ProcessEngineKind::from(kind.as_str()),
+            payload,
+        )
+        .await
+    }
+
     /// Read one durable event page from a process cursor, or from the start of
     /// the lifetime a process id currently names. Full/Lite is a request
     /// parameter; the returned cursor continues the history and resumes live

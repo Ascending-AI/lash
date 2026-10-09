@@ -216,6 +216,24 @@ impl ArtifactReferrerPorts {
         }
     }
 
+    /// The descriptor stored under `id`, checked against the id and asked of
+    /// no engine. A snapshot that holds nothing.
+    ///
+    /// # Errors
+    ///
+    /// The store's failure, and a corrupt descriptor.
+    pub async fn read_definition_draft(
+        &self,
+        id: &ProcessDefinitionId,
+    ) -> Result<Option<ProcessDefinitionDraft>, crate::PluginError> {
+        let Some(bytes) = self.definitions().get_process_definition(id).await? else {
+            return Ok(None);
+        };
+        ProcessDefinitionDraft::from_store_bytes(id, &bytes)
+            .map(Some)
+            .map_err(|error| definition_corrupt(id, &error))
+    }
+
     /// The definition stored under `id`, as its engine derives it: a
     /// snapshot that holds nothing and promises nothing about retention.
     ///
@@ -229,11 +247,9 @@ impl ArtifactReferrerPorts {
         engines: &ProcessEngineRegistry,
         id: &ProcessDefinitionId,
     ) -> Result<Option<ResolvedProcessDefinition>, crate::PluginError> {
-        let Some(bytes) = self.definitions().get_process_definition(id).await? else {
+        let Some(draft) = self.read_definition_draft(id).await? else {
             return Ok(None);
         };
-        let draft = ProcessDefinitionDraft::from_store_bytes(id, &bytes)
-            .map_err(|error| definition_corrupt(id, &error))?;
         let definition = engines
             .derive_definition(&draft)
             .await

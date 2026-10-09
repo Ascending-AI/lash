@@ -23,6 +23,11 @@ pub enum Request {
         #[serde(with = "serde_bytes")]
         bytes: Vec<u8>,
     },
+    InspectDocument {
+        module_ref: lashlang::ModuleRef,
+        #[serde(with = "serde_bytes")]
+        bytes: Vec<u8>,
+    },
     CompileAst {
         source: String,
         program: lashlang::Program,
@@ -125,6 +130,7 @@ pub enum Response {
     Module(Box<CompiledModule>),
     Definition(CreatedDefinition),
     Artifact(crate::InspectedArtifact),
+    Document(Box<crate::InspectedDocument>),
     ArtifactRefused(lashlang::ModuleArtifactRefusal),
     CompileRefused {
         error: lashlang::ModuleCompileError,
@@ -405,7 +411,32 @@ pub mod runtime_ops {
             >,
         > + Send;
 
+        /// The stored artifact read as a document, or `None` when nothing
+        /// retains it.
+        fn inspect_document(
+            &self,
+            store: &lashlang::LashlangArtifacts,
+            module_ref: &lashlang::ModuleRef,
+        ) -> impl Future<
+            Output = Result<
+                Option<crate::InspectedDocument>,
+                lash_core_execution::ArtifactStoreError,
+            >,
+        > + Send;
+
         fn pool_accounted(&self) -> impl Future<Output = Result<WorkerPool, PoolError>> + Send;
+    }
+
+    fn inspection_error(error: PoolError) -> lash_core_execution::ArtifactStoreError {
+        match error {
+            PoolError::Infrastructure(lash_vm_protocol::InfrastructureOutcome::RunRefused {
+                refusal: lash_vm_protocol::RunRefusal::UnusableSchema { source },
+            }) => lash_core_execution::ArtifactStoreError::UnusableSchema { source },
+            PoolError::CheckoutTimedOut => {
+                lash_core_execution::ArtifactStoreError::WorkerCheckoutTimedOut
+            }
+            error => lash_core_execution::ArtifactStoreError::Backend(error.to_string()),
+        }
     }
 
     #[doc(hidden)]
@@ -455,21 +486,41 @@ pub mod runtime_ops {
                     bytes,
                 })
                 .await
-                .map_err(|error| match error {
-                    PoolError::Infrastructure(
-                        lash_vm_protocol::InfrastructureOutcome::RunRefused {
-                            refusal: lash_vm_protocol::RunRefusal::UnusableSchema { source },
-                        },
-                    ) => lash_core_execution::ArtifactStoreError::UnusableSchema { source },
-                    PoolError::CheckoutTimedOut => {
-                        lash_core_execution::ArtifactStoreError::WorkerCheckoutTimedOut
-                    }
-                    error => lash_core_execution::ArtifactStoreError::Backend(error.to_string()),
-                })? {
+                .map_err(inspection_error)?
+            {
                 Response::Artifact(artifact) => Ok(Some(artifact)),
                 Response::ArtifactRefused(refusal) => Err(refusal.into()),
                 _ => Err(lash_core_execution::ArtifactStoreError::Backend(
                     "unexpected worker artifact inspection response".into(),
+                )),
+            }
+        }
+
+        async fn inspect_document(
+            &self,
+            store: &lashlang::LashlangArtifacts,
+            module_ref: &lashlang::ModuleRef,
+        ) -> Result<Option<crate::InspectedDocument>, lash_core_execution::ArtifactStoreError>
+        {
+            let Some(bytes) = store
+                .store()
+                .get_module_artifact(module_ref.as_str())
+                .await?
+            else {
+                return Ok(None);
+            };
+            match self
+                .request_accounted(Request::InspectDocument {
+                    module_ref: module_ref.clone(),
+                    bytes,
+                })
+                .await
+                .map_err(inspection_error)?
+            {
+                Response::Document(document) => Ok(Some(*document)),
+                Response::ArtifactRefused(refusal) => Err(refusal.into()),
+                _ => Err(lash_core_execution::ArtifactStoreError::Backend(
+                    "unexpected worker document inspection response".into(),
                 )),
             }
         }

@@ -128,10 +128,7 @@ pub use schema::lashlang_type_expr_schema;
 
 #[path = "process/trace_map.rs"]
 mod trace_map;
-pub use trace_map::{
-    TraceLanguageExecutionMapError, trace_lashlang_main_map, trace_lashlang_process_map,
-    trace_lashlang_process_map_snapshot,
-};
+pub use trace_map::{trace_lashlang_main_map, trace_lashlang_process_map};
 
 #[cfg(test)]
 #[path = "process/opaque_state_tests.rs"]

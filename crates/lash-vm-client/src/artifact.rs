@@ -79,6 +79,16 @@ impl InspectedArtifact {
             .ok_or_else(|| "process export has no complete signature".into())
     }
 }
+/// A worker-verified artifact read as a document: its metadata, the graph of
+/// the program it executes with spans into its canonical TypeScript, and that
+/// text.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InspectedDocument {
+    pub artifact: InspectedArtifact,
+    pub graph: lashlang::WorkflowGraph,
+    pub source: String,
+}
 impl lashlang::ModuleArtifactBytes for InspectedArtifact {
     fn artifact_ref(&self) -> &lashlang::ModuleRef {
         &self.module_ref

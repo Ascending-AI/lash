@@ -22,22 +22,19 @@ pub(crate) fn perform(
             };
             Response::ArtifactVerification(verification)
         }
-        Request::InspectArtifact { module_ref, bytes } => {
-            match lashlang::ModuleArtifact::from_store_bytes(&bytes) {
-                Ok(artifact) if artifact.module_ref() == &module_ref => {
-                    Response::Artifact(inspect(&artifact)?)
-                }
-                Ok(artifact) => {
-                    Response::ArtifactRefused(lashlang::ModuleArtifactRefusal::Corrupt(
-                        lashlang::ModuleArtifactCorruption::StorageKeyMismatch {
-                            expected: module_ref.to_string(),
-                            actual: artifact.module_ref().to_string(),
-                        },
-                    ))
-                }
-                Err(error) => Response::ArtifactRefused(error.into()),
-            }
-        }
+        Request::InspectArtifact { module_ref, bytes } => match verified(&module_ref, &bytes) {
+            Ok(artifact) => Response::Artifact(inspect(&artifact)?),
+            Err(refusal) => Response::ArtifactRefused(refusal),
+        },
+        Request::InspectDocument { module_ref, bytes } => match verified(&module_ref, &bytes) {
+            Ok(artifact) => Response::Document(Box::new(lash_vm_client::InspectedDocument {
+                source: lash_typescript::workflow_graph::typescript_program_source(artifact.ir())
+                    .map_err(inconsistent_artifact)?,
+                graph: lash_typescript::workflow_graph::workflow_graph_from_artifact(&artifact),
+                artifact: inspect(&artifact)?,
+            })),
+            Err(refusal) => Response::ArtifactRefused(refusal),
+        },
 
         Request::CreateDefinition {
             source,
@@ -387,6 +384,23 @@ fn capture(
         fragments,
         baseline,
     })
+}
+
+/// The artifact `bytes` decode to, when it is the one stored under `module_ref`.
+fn verified(
+    module_ref: &lashlang::ModuleRef,
+    bytes: &[u8],
+) -> Result<lashlang::ModuleArtifact, lashlang::ModuleArtifactRefusal> {
+    let artifact = lashlang::ModuleArtifact::from_store_bytes(bytes)?;
+    if artifact.module_ref() != module_ref {
+        return Err(lashlang::ModuleArtifactRefusal::Corrupt(
+            lashlang::ModuleArtifactCorruption::StorageKeyMismatch {
+                expected: module_ref.to_string(),
+                actual: artifact.module_ref().to_string(),
+            },
+        ));
+    }
+    Ok(artifact)
 }
 
 fn compiled_output(

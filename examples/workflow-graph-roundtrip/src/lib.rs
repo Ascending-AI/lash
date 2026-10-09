@@ -98,8 +98,8 @@ struct SavedWorkflow {
     source: String,
     /// The canonical draft an edit is rebuilt on.
     graph: WorkflowGraph,
-    /// The version's admission, when its source admits: what a run executes
-    /// and the view its overlay binds to.
+    /// The version's admission, when its source admits: what a run publishes
+    /// and starts.
     admitted: Result<runtime::AdmittedWorkflow, Arc<runtime::RunError>>,
 }
 
@@ -310,7 +310,7 @@ async fn run_workflow(
         .admitted
         .as_ref()
         .map_err(RenderErrorResponse::run_preparation)?;
-    let prepared = runtime::PreparedRun::new(admitted.view(), admitted, saved.version)
+    let prepared = runtime::PreparedRun::new(admitted, saved.version)
         .map_err(RenderErrorResponse::run_preparation)?;
     let (tx, rx) = mpsc::channel::<Result<RunEvent, runtime::RunError>>(64);
     let key = uuid::Uuid::new_v4().to_string();

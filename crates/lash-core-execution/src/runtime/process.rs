@@ -57,7 +57,8 @@ pub use effect_summary::{
     ProcessEffectOutcomeClass, ProcessEffectReport, ProcessEffectReportError, tool_failure_code,
 };
 pub use engine::{
-    AdmittedProcessIdentity, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
+    AdmittedProcessIdentity, InspectedProcessDefinition, ProcessDocument, ProcessDocumentProvider,
+    ProcessDocumentRead, ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration,
     ProcessEngineRegistry, ProcessInfraError, ProcessRunOutcome, WeakProcessEngineRegistry,
 };
 pub use engine_state::{

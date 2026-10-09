@@ -5,8 +5,9 @@ use std::time::Duration;
 
 use lash::LashCore;
 use lash::process::*;
-use lash::rlm::lang::{LinkedModule, ProcessRef, WorkflowGraph};
+use lash::rlm::lang::{LinkedModule, ProcessRef};
 use lash::tracing::{TraceEvent, TraceLanguageExecutionPayload};
+use lash::workflow::{WorkflowDocument, WorkflowRead};
 use tokio::sync::mpsc;
 
 use crate::{DisplayDelta, DisplayState, RunEvent, RunStatus};
@@ -27,10 +28,12 @@ pub(crate) enum RunError {
     Invalid(String),
 }
 
+/// A saved version's admission: the module a run publishes and the process
+/// it starts. The run's graph is not kept here: lash answers it for the
+/// process it started ([`RunView::read`]).
 #[derive(Clone)]
 pub(crate) struct AdmittedWorkflow {
     linked: LinkedModule,
-    view: WorkflowGraph,
     entry: Option<ProcessRef>,
 }
 
@@ -48,54 +51,67 @@ impl AdmittedWorkflow {
                 }
                 _ => None,
             });
-        let view = lash::typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
-        Ok(Self {
-            linked,
-            view,
-            entry,
-        })
-    }
-
-    pub(crate) fn view(&self) -> &WorkflowGraph {
-        &self.view
+        Ok(Self { linked, entry })
     }
 }
 
 pub(crate) struct PreparedRun {
     admitted: AdmittedWorkflow,
     workflow_version: u64,
-    definition: String,
     process_name: String,
+}
+
+/// What a run's overlay binds to, read from lash for the process itself:
+/// the definition it executes and the nodes of its entry process.
+struct RunView {
+    workflow_version: u64,
+    definition: String,
     root_node: String,
     nodes: BTreeSet<String>,
 }
 
+impl RunView {
+    async fn read(
+        core: &LashCore,
+        process: &lash::ProcessId,
+        workflow_version: u64,
+    ) -> Result<Self, RunError> {
+        match core.processes().graph(process).await? {
+            WorkflowRead::Inspected(inspection) => Self::of(&inspection.document, workflow_version),
+            unreadable => Err(RunError::Invalid(format!(
+                "the run's workflow cannot be read: {unreadable:?}"
+            ))),
+        }
+    }
+
+    fn of(document: &WorkflowDocument, workflow_version: u64) -> Result<Self, RunError> {
+        let definition = document
+            .graph
+            .source_identity
+            .clone()
+            .ok_or_else(|| RunError::Invalid("the run's graph names no artifact".into()))?;
+        let map = trace_lashlang_process_map(&document.graph, &document.entry)
+            .ok_or_else(|| RunError::Invalid("the run's process has no execution map".into()))?;
+        let root_node = document
+            .graph
+            .process(&document.entry)
+            .ok_or_else(|| RunError::Invalid("the run's process has no graph".into()))?
+            .id
+            .to_string();
+        Ok(Self {
+            workflow_version,
+            definition,
+            root_node,
+            nodes: map.nodes.into_iter().map(|node| node.id).collect(),
+        })
+    }
+}
+
 impl PreparedRun {
     pub(crate) fn new(
-        graph: &WorkflowGraph,
         admitted: &AdmittedWorkflow,
         workflow_version: u64,
     ) -> Result<Self, RunError> {
-        let definition = admitted.linked.artifact.source_identity();
-        if graph.source_identity.as_deref() != Some(definition.as_str()) {
-            return Err(RunError::Invalid(
-                "the run overlay's graph is not the admitted artifact's".into(),
-            ));
-        }
-        let ids = |graph: &WorkflowGraph| {
-            graph
-                .nodes()
-                .map(|node| node.id.clone())
-                .collect::<BTreeSet<_>>()
-        };
-        if let Some(node) = ids(graph)
-            .symmetric_difference(&ids(admitted.view()))
-            .next()
-        {
-            return Err(RunError::Invalid(format!(
-                "workflow node `{node}` is not shared by the run overlay's graph and its admitted artifact"
-            )));
-        }
         let entry = admitted
             .entry
             .as_ref()
@@ -115,20 +131,10 @@ impl PreparedRun {
             })
             .ok_or_else(|| RunError::Invalid("saved entry is not exported".into()))?
             .clone();
-        let map = trace_lashlang_process_map(graph, &process_name)
-            .ok_or_else(|| RunError::Invalid("saved process has no execution map".into()))?;
-        let root_node = graph
-            .process(&process_name)
-            .ok_or_else(|| RunError::Invalid("saved process has no graph".into()))?
-            .id
-            .to_string();
         Ok(Self {
             admitted: admitted.clone(),
             workflow_version,
-            definition,
             process_name,
-            root_node,
-            nodes: map.nodes.into_iter().map(|node| node.id).collect(),
         })
     }
 
@@ -189,8 +195,14 @@ impl PreparedRun {
         sender: mpsc::Sender<Result<RunEvent, RunError>>,
         host: Arc<crate::display::HostTools>,
     ) -> Result<(), RunError> {
+        // Subscribe before reading the graph: the live route buffers what the
+        // process publishes while lash reads its workflow.
+        let mut live = core
+            .processes()
+            .subscribe_observation(&process, None)
+            .await?;
         let mut overlay = Overlay {
-            prepared: self,
+            view: RunView::read(&core, &process, self.workflow_version).await?,
             process: process.clone(),
             sequence: 0,
             display: DisplayState::default(),
@@ -199,10 +211,6 @@ impl PreparedRun {
             host,
             observed: BTreeSet::new(),
         };
-        let mut live = core
-            .processes()
-            .subscribe_observation(&process, None)
-            .await?;
         if let Some(item) = live.recv().await.map_err(lash::EmbedError::from)? {
             for event in overlay.observation(item) {
                 if sender.send(Ok(event)).await.is_err() {
@@ -280,7 +288,7 @@ impl PreparedRun {
 }
 
 struct Overlay {
-    prepared: PreparedRun,
+    view: RunView,
     process: lash::ProcessId,
     sequence: u64,
     display: DisplayState,
@@ -301,8 +309,8 @@ impl Overlay {
         self.sequence += 1;
         RunEvent {
             run_id: self.process.to_string(),
-            workflow_version: self.prepared.workflow_version,
-            definition: self.prepared.definition.clone(),
+            workflow_version: self.view.workflow_version,
+            definition: self.view.definition.clone(),
             sequence: self.sequence,
             node_id,
             status,
@@ -317,7 +325,7 @@ impl Overlay {
         let mut events = Vec::new();
         match &event.fact {
             ProcessLifecycleFact::EffectOutcome(occurrence) => {
-                if !self.prepared.nodes.contains(&occurrence.node_id) {
+                if !self.view.nodes.contains(&occurrence.node_id) {
                     return Err(RunError::Invalid(format!(
                         "process event names a node outside the saved execution map: {}",
                         occurrence.node_id
@@ -338,7 +346,7 @@ impl Overlay {
             }
             ProcessLifecycleFact::Waiting { wait } => {
                 let mut event = self.event(
-                    self.prepared.root_node.clone(),
+                    self.view.root_node.clone(),
                     RunStatus::Waiting,
                     DisplayDelta::default(),
                     None,
@@ -356,7 +364,7 @@ impl Overlay {
                 };
                 events.extend(self.deliver_display()?);
                 events.push(self.event(
-                    self.prepared.root_node.clone(),
+                    self.view.root_node.clone(),
                     status,
                     DisplayDelta::default(),
                     (status == RunStatus::Failed).then(|| format!("{outcome:?}")),
@@ -409,7 +417,7 @@ impl Overlay {
         };
         let mut events = Vec::new();
         for observed in payloads {
-            if observed.identity.source_identity != self.prepared.definition
+            if observed.identity.source_identity != self.view.definition
                 || !self.observed.insert(observed.event_key.clone())
             {
                 continue;
@@ -421,7 +429,7 @@ impl Overlay {
         match self.deliver_display() {
             Ok(delivered) => events.extend(delivered),
             Err(error) => events.push(self.event(
-                self.prepared.root_node.clone(),
+                self.view.root_node.clone(),
                 RunStatus::Failed,
                 DisplayDelta::default(),
                 Some(error.to_string()),
@@ -439,7 +447,7 @@ impl Overlay {
             call_id: Some(call),
             ..
         } = &payload
-            && self.prepared.nodes.contains(node_id)
+            && self.view.nodes.contains(node_id)
         {
             self.completed_calls
                 .insert(call.to_string(), node_id.clone());
@@ -450,7 +458,7 @@ impl Overlay {
                 (node_id, RunStatus::Started, None)
             }
             TraceLanguageExecutionPayload::NodeWaiting { node_id, .. } => {
-                if !self.prepared.nodes.contains(&node_id) {
+                if !self.view.nodes.contains(&node_id) {
                     return None;
                 }
                 return Some(self.event(
@@ -476,7 +484,7 @@ impl Overlay {
             }
             _ => return None,
         };
-        self.prepared
+        self.view
             .nodes
             .contains(&node)
             .then(|| self.event(node, status, DisplayDelta::default(), error))
@@ -560,16 +568,31 @@ impl CommandClient {
 mod tests {
     use super::*;
 
-    fn admitted() -> AdmittedWorkflow {
-        AdmittedWorkflow::admit(crate::DEFAULT_WORKFLOW).expect("the default workflow admits")
-    }
-
     #[test]
     fn a_call_wait_shows_the_run_waiting_without_an_unregistered_approval() {
-        let admitted = admitted();
-        let prepared = PreparedRun::new(admitted.view(), &admitted, 1).expect("prepare the view");
+        let linked = lash::typescript::link(crate::DEFAULT_WORKFLOW, &host_environment())
+            .expect("the default workflow admits");
+        let graph =
+            lash::typescript::workflow_graph::workflow_graph_from_artifact(&linked.artifact);
+        let entry = linked
+            .artifact
+            .exports()
+            .processes
+            .keys()
+            .next()
+            .expect("the default workflow exports a process")
+            .clone();
+        let view = RunView::of(
+            &WorkflowDocument {
+                graph,
+                source: String::new(),
+                entry,
+            },
+            1,
+        )
+        .expect("the run view");
         let mut overlay = Overlay {
-            prepared,
+            view,
             process: lash::ProcessId::fixture("call-wait-overlay"),
             sequence: 0,
             display: DisplayState::default(),
@@ -600,39 +623,5 @@ mod tests {
             waiting.approval_key.is_none(),
             "a call the host registered no approval for offers no key"
         );
-    }
-
-    #[test]
-    fn a_run_refuses_a_graph_that_is_not_its_admitted_view() {
-        let admitted = admitted();
-        let refused = |graph: &WorkflowGraph, what: &str| {
-            let Err(error) = PreparedRun::new(graph, &admitted, 1) else {
-                panic!("{what} must be refused");
-            };
-            error.to_string()
-        };
-
-        // Same shape, another definition: node ids hash only owner and path,
-        // so a foreign graph of the same shape shares every id.
-        let mut foreign = admitted.view().clone();
-        foreign.source_identity = Some("another-definition".to_string());
-        assert!(refused(&foreign, "a foreign definition").contains("not the admitted artifact's"));
-
-        // A draft claims no definition.
-        let mut draft = admitted.view().clone();
-        draft.source_identity = None;
-        refused(&draft, "a draft");
-
-        // Fewer nodes than the artifact's view.
-        let mut fewer = admitted.view().clone();
-        fewer.main.nodes.pop();
-        assert!(refused(&fewer, "a graph missing a node").contains("not shared"));
-
-        // More nodes than the artifact's view.
-        let mut more = admitted.view().clone();
-        let mut extra = more.main.nodes[0].clone();
-        extra.id = lash::rlm::lang::WorkflowNodeId::new("node:foreign".to_string());
-        more.main.nodes.push(extra);
-        assert!(refused(&more, "a graph with a foreign node").contains("node:foreign"));
     }
 }

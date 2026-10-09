@@ -181,6 +181,8 @@ mod tool_intent_ingress;
 /// Turn builders, streams, activities, and output types.
 pub mod turn;
 pub mod usage;
+#[cfg(feature = "rlm")]
+pub mod workflow;
 
 pub use crate::admin::{
     AdminMutation, AdvancedToolAdmin, Completions, SessionCommandAdmin, SessionCommandWithdrawal,
@@ -955,6 +957,7 @@ pub mod plugins {
     /// Protocol-driver and process-engine inputs that core owns independently of plugin storage.
     pub use lash_core::{
         AgentFrameAssignment, AgentFrameReason, AgentFrameRecord, FrameNodeId, HostTurnProtocol,
+        InspectedProcessDefinition, ProcessDocument, ProcessDocumentProvider, ProcessDocumentRead,
         ProcessEngine, ProcessEngineAdmission, ProcessEngineRegistration, ProcessInfraError,
         ProcessRunOutcome, ProtocolBuildInput, ProtocolDriverState, ProtocolTurnOptionsError,
         TurnDriverPreamble,
@@ -1156,8 +1159,7 @@ pub mod process {
     };
     #[cfg(feature = "rlm")]
     pub use lash_lashlang_runtime::{
-        LASHLANG_ENGINE_KIND, LashlangProcessInput, TraceLanguageExecutionMapError,
-        trace_lashlang_process_map, trace_lashlang_process_map_snapshot,
+        LASHLANG_ENGINE_KIND, LashlangProcessInput, trace_lashlang_process_map,
     };
 }
 

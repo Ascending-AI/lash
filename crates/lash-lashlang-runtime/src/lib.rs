@@ -1039,24 +1039,7 @@ impl lash_core::ProcessEngine for LashlangProcessEngine {
         &self,
         payload: &serde_json::Value,
     ) -> Result<Vec<lash_core::ArtifactName>, lash_core::PluginError> {
-        let definition_value = payload.as_object().is_some_and(|fields| fields.len() == 3);
-        let module_ref = if definition_value {
-            lashlang::ProcessDefinitionIdentity::from_process_value(payload)
-                .map_err(|error| {
-                    lash_core::PluginError::Session(format!(
-                        "invalid lashlang process definition: {error}"
-                    ))
-                })?
-                .module_ref
-        } else {
-            LashlangProcessInput::from_payload(payload.clone())
-                .map_err(|error| {
-                    lash_core::PluginError::Session(format!(
-                        "invalid lashlang process payload: {error}"
-                    ))
-                })?
-                .module_ref
-        };
+        let module_ref = document::payload_definition_identity(payload)?.module_ref;
         Ok(vec![lash_core::ArtifactName {
             store: lash_core::ArtifactStoreId::LashlangModule,
             artifact_ref: module_ref.as_str().to_owned(),
@@ -1128,6 +1111,10 @@ pub fn lashlang_process_engine_registration(
         lash_core::ProcessEngineAdmission::new(LASHLANG_ENGINE_KIND, admit_lashlang_process),
     )
     .expect("lashlang engine and admission share a fixed kind")
+    .with_document_provider(Arc::new(document::LashlangDocumentProvider {
+        artifact_store: engine.artifact_store.clone(),
+        workers: engine.workers.clone(),
+    }))
     .with_engine_steps(Arc::new(LashlangEngineSteps::new(Arc::clone(&engine))))
 }
 
@@ -1138,6 +1125,7 @@ pub mod engine;
 pub use engine::{LashlangEngineSteps, VmSegmentPolicy};
 mod catalogue_preview;
 mod deferred;
+mod document;
 mod process;
 
 pub use bridge::{
@@ -1157,10 +1145,11 @@ pub use deferred::{
     resolve_and_build_deferred_environment, resolve_and_build_deferred_environment_from_references,
     resolve_and_fold_deferred,
 };
+pub use document::WorkflowDocument;
 pub use engine::LASHLANG_SEGMENT_STATE_VERSION;
 pub use process::{
-    TraceLanguageExecutionMapError, lashlang_program_hash, lashlang_type_expr_schema,
-    trace_lashlang_main_map, trace_lashlang_process_map, trace_lashlang_process_map_snapshot,
+    lashlang_program_hash, lashlang_type_expr_schema, trace_lashlang_main_map,
+    trace_lashlang_process_map,
 };
 
 #[cfg(test)]

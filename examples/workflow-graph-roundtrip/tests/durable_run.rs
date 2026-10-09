@@ -46,14 +46,29 @@ async fn a_saved_workflow_runs_as_a_durable_process() {
         process.env_ref.is_some(),
         "execution uses the published environment"
     );
-    let graph = lash::typescript::workflow_graph::workflow_graph_from_source(&document.source)
-        .expect("saved graph");
-    let process_name = document
-        .nodes
-        .iter()
-        .find_map(|node| node.data.process_name().as_deref())
-        .expect("saved process name");
-    let map = lash::process::trace_lashlang_process_map(&graph, process_name)
+    // The run's graph is lash's read of the process itself: the host kept no
+    // module to draw it from.
+    let lash::workflow::WorkflowRead::Inspected(inspection) = core
+        .processes()
+        .graph(&process_id)
+        .await
+        .expect("the process's workflow reads")
+    else {
+        panic!("a retained lashlang process has a workflow");
+    };
+    assert_eq!(
+        Some(&inspection.definition.id),
+        process.identity.definition_id.as_ref(),
+        "the read names the definition the process runs"
+    );
+    let graph = &inspection.document.graph;
+    let process_name = inspection.document.entry.as_str();
+    assert!(
+        events
+            .iter()
+            .all(|event| Some(&event.definition) == graph.source_identity.as_ref())
+    );
+    let map = lash::process::trace_lashlang_process_map(graph, process_name)
         .expect("saved execution map");
     let mut node_ids = map
         .nodes

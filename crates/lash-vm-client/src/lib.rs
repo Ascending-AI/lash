@@ -33,4 +33,4 @@ mod projections;
 pub use projections::Projections;
 
 mod artifact;
-pub use artifact::{InspectedArtifact, ProcessMetadata};
+pub use artifact::{InspectedArtifact, InspectedDocument, ProcessMetadata};

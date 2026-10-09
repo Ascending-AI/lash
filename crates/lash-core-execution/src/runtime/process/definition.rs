@@ -45,6 +45,7 @@
 //! publish_definition(pin: HostArtifactPin, draft: ProcessDefinitionDraft) -> Result<ProcessDefinition>
 //! pin_definition(pin: HostArtifactPin, id: ProcessDefinitionId) -> Result<()>
 //! get_definition(id: ProcessDefinitionId) -> Result<Option<ProcessDefinition>>
+//! definition_graph(id: ProcessDefinitionId) -> Result<WorkflowRead>
 //! release(pin: HostArtifactPin) -> Result<()>
 //! start(request: ProcessStartRequest, cx: ActorContext) -> Result<ProcessStartReceipt>
 //! ```
@@ -52,6 +53,8 @@
 //! A host publishes the module bytes a draft names under the same pin before it
 //! publishes the draft. `get_definition` answers a snapshot and acquires no
 //! lasting pin; only `publish_definition` and `pin_definition` retain.
+//! `definition_graph` answers the definition as its engine's document
+//! provider reads it, or the typed reason there is no document.
 
 use serde::{Deserialize, Serialize};
 

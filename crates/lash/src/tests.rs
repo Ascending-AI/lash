@@ -472,4 +472,6 @@ mod turn_cancel_modes;
 mod turn_cancel_waits;
 mod turn_checkpoints;
 mod turn_streaming;
+#[cfg(all(feature = "rlm", feature = "typescript"))]
+mod workflow_reads;
 mod writer_fence;

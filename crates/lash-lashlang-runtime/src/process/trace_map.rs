@@ -1,59 +1,9 @@
-use lash_vm_client::service::runtime_ops::ServiceRuntimeOps as _;
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 
 use lash_trace::{
     TraceBranchMembership, TraceBranchSelection, TraceLabelMetadata, TraceLanguageExecutionMap,
     TraceLanguageExecutionMapEdge, TraceLanguageExecutionMapNode,
 };
-
-#[derive(Debug, thiserror::Error)]
-pub enum TraceLanguageExecutionMapError {
-    #[error("failed to read Lashlang module artifact: {0}")]
-    ArtifactStore(#[from] lash_core::ArtifactStoreError),
-    #[error("Lashlang module artifact `{0}` is unavailable")]
-    ArtifactMissing(String),
-    #[error("process reference `{process_ref:?}` is absent from Lashlang module `{module_ref}`")]
-    ProcessRefMissing {
-        module_ref: String,
-        process_ref: lashlang::ProcessRef,
-    },
-    #[error("process `{process_name}` is absent from Lashlang module `{module_ref}`")]
-    ProcessMissing {
-        module_ref: String,
-        process_name: String,
-    },
-}
-
-/// Loads the current process definition and returns its static execution map.
-///
-/// This is independent of trace delivery: a host can call it after attaching
-/// to a resumed process whose initial `ExecutionStarted` event is unavailable.
-/// The persisted process reference selects the export; the input's convenience
-/// name is not authoritative.
-pub async fn trace_lashlang_process_map_snapshot(
-    workers: &lash_vm_client::service::Service,
-    store: &lashlang::LashlangArtifacts,
-    input: &crate::LashlangProcessInput,
-) -> Result<TraceLanguageExecutionMap, TraceLanguageExecutionMapError> {
-    let artifact = workers
-        .inspect_artifact(store, &input.module_ref)
-        .await?
-        .ok_or_else(|| {
-            TraceLanguageExecutionMapError::ArtifactMissing(input.module_ref.to_string())
-        })?;
-    let process_name = artifact
-        .process_name_for_ref(&input.process_ref)
-        .ok_or_else(|| TraceLanguageExecutionMapError::ProcessRefMissing {
-            module_ref: input.module_ref.to_string(),
-            process_ref: input.process_ref.clone(),
-        })?;
-    trace_lashlang_process_map(&artifact.graph, process_name).ok_or_else(|| {
-        TraceLanguageExecutionMapError::ProcessMissing {
-            module_ref: input.module_ref.to_string(),
-            process_name: process_name.to_owned(),
-        }
-    })
-}
 
 /// Returns the current static execution map for one process definition.
 ///

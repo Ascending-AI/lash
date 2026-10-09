@@ -181,6 +181,67 @@ pub trait ProcessEngine: Send + Sync {
     ) -> Result<ProcessDefinitionResolution, ProcessDefinitionRefusal>;
 }
 
+/// A definition's language document, as its engine's
+/// [`ProcessDocumentProvider`] answers it.
+///
+/// Core names no language: the document crosses it as the provider's own
+/// type, and the reader that knows the type takes it back with
+/// [`Self::downcast`].
+pub struct ProcessDocument(Box<dyn std::any::Any + Send + Sync>);
+
+impl ProcessDocument {
+    pub fn new<T: std::any::Any + Send + Sync>(document: T) -> Self {
+        Self(Box::new(document))
+    }
+
+    /// The document as `T`, or the document unchanged when it is another
+    /// type.
+    pub fn downcast<T: std::any::Any>(self) -> Result<T, Self> {
+        self.0
+            .downcast::<T>()
+            .map(|document| *document)
+            .map_err(Self)
+    }
+}
+
+impl std::fmt::Debug for ProcessDocument {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ProcessDocument(..)")
+    }
+}
+
+/// What a document provider reads of one definition: its engine-neutral
+/// identity, derived from the same artifact read as its language document.
+#[derive(Debug)]
+pub struct InspectedProcessDefinition {
+    /// The content-derived id and the signature the stored artifact states.
+    pub definition: super::ProcessDefinition,
+    pub document: ProcessDocument,
+}
+
+/// The answer of a [`ProcessDocumentProvider`].
+#[derive(Debug)]
+pub enum ProcessDocumentRead {
+    Inspected(Box<InspectedProcessDefinition>),
+    /// Nothing retains an artifact the definition reads.
+    ArtifactMissing {
+        artifact: crate::ArtifactName,
+    },
+}
+
+/// An engine's optional reading of its definitions as a language document
+/// (FIG-5563). An engine registered without one has no document: a host's
+/// inspection of its processes and definitions answers `Unsupported`.
+#[async_trait::async_trait]
+pub trait ProcessDocumentProvider: Send + Sync {
+    /// The document of the definition `payload` names: a start payload or a
+    /// definition value, as [`ProcessEngine::start_artifacts`] reads it.
+    async fn document(
+        &self,
+        payload: &serde_json::Value,
+    ) -> Result<ProcessDocumentRead, crate::PluginError>;
+}
+
 /// A process identity the engine registry produced.
 ///
 /// This is the only way an identity reaches a
@@ -272,6 +333,7 @@ pub struct ProcessEngineRegistration {
     engine: Arc<dyn ProcessEngine>,
     admission: ProcessEngineAdmission,
     engine_steps: Option<Arc<dyn super::engine_state::EngineSteps>>,
+    document_provider: Option<Arc<dyn ProcessDocumentProvider>>,
     /// The host's retry policies for engine step kinds, over the engine's.
     engine_step_retries:
         BTreeMap<super::engine_state::EngineStepKind, lash_sansio::ExecutionPolicy>,
@@ -293,6 +355,7 @@ impl ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: None,
+            document_provider: None,
             engine_step_retries: BTreeMap::new(),
         })
     }
@@ -304,6 +367,7 @@ impl ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: None,
+            document_provider: None,
             engine_step_retries: BTreeMap::new(),
         }
     }
@@ -314,6 +378,13 @@ impl ProcessEngineRegistration {
     #[must_use]
     pub fn with_engine_steps(mut self, steps: Arc<dyn super::engine_state::EngineSteps>) -> Self {
         self.engine_steps = Some(steps);
+        self
+    }
+
+    /// Declare how this engine's definitions read as a language document.
+    #[must_use]
+    pub fn with_document_provider(mut self, provider: Arc<dyn ProcessDocumentProvider>) -> Self {
+        self.document_provider = Some(provider);
         self
     }
 
@@ -336,6 +407,7 @@ pub struct ProcessEngineRegistry {
     engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
     engine_steps: Arc<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
+    document_providers: Arc<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -345,6 +417,7 @@ pub struct WeakProcessEngineRegistry {
     engines: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
     engine_steps: std::sync::Weak<BTreeMap<String, Arc<dyn super::engine_state::EngineSteps>>>,
+    document_providers: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessDocumentProvider>>>,
     artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
@@ -356,6 +429,7 @@ impl WeakProcessEngineRegistry {
             engines: self.engines.upgrade()?,
             admissions: self.admissions.upgrade()?,
             engine_steps: self.engine_steps.upgrade()?,
+            document_providers: self.document_providers.upgrade()?,
             artifact_ports: self.artifact_ports.clone(),
         })
     }
@@ -405,6 +479,7 @@ impl ProcessEngineRegistry {
             engines: Arc::downgrade(&self.engines),
             admissions: Arc::downgrade(&self.admissions),
             engine_steps: Arc::downgrade(&self.engine_steps),
+            document_providers: Arc::downgrade(&self.document_providers),
             artifact_ports: self.artifact_ports.clone(),
         }
     }
@@ -423,10 +498,12 @@ impl ProcessEngineRegistry {
         let mut engines = (*self.engines).clone();
         let mut admissions = (*self.admissions).clone();
         let mut engine_steps = (*self.engine_steps).clone();
+        let mut document_providers = (*self.document_providers).clone();
         let ProcessEngineRegistration {
             engine,
             admission,
             engine_steps: steps,
+            document_provider,
             engine_step_retries: retries,
         } = registration;
         match steps {
@@ -439,12 +516,17 @@ impl ProcessEngineRegistry {
             ),
             None => engine_steps.remove(engine.kind()),
         };
+        match document_provider {
+            Some(provider) => document_providers.insert(engine.kind().to_string(), provider),
+            None => document_providers.remove(engine.kind()),
+        };
         engines.insert(engine.kind().to_string(), engine);
         admissions.insert(admission.kind().to_string(), admission);
         Self {
             engines: Arc::new(engines),
             admissions: Arc::new(admissions),
             engine_steps: Arc::new(engine_steps),
+            document_providers: Arc::new(document_providers),
             artifact_ports: self.artifact_ports,
         }
     }
@@ -483,6 +565,11 @@ impl ProcessEngineRegistry {
             });
         }
         Ok(Arc::clone(steps))
+    }
+
+    /// The document provider the `kind` engine was registered with, if any.
+    pub fn document_provider(&self, kind: &str) -> Option<Arc<dyn ProcessDocumentProvider>> {
+        self.document_providers.get(kind).cloned()
     }
 
     /// Apply one resolved cleanup to every installed engine's own store

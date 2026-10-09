@@ -153,6 +153,37 @@ impl HostArtifacts {
             .map(|resolved| resolved.definition))
     }
 
+    /// Read the definition `id` names as its workflow: its identity and
+    /// signature, its graph, its canonical TypeScript and its entry process,
+    /// or the typed reason there is none. This acquires no lasting pin.
+    #[cfg(feature = "rlm")]
+    pub async fn definition_graph(
+        &self,
+        id: &ProcessDefinitionId,
+    ) -> Result<crate::workflow::WorkflowRead> {
+        use crate::workflow::{WorkflowRead, WorkflowUnavailable};
+        let Some(draft) = self.definition_ports.read_definition_draft(id).await? else {
+            return Ok(WorkflowRead::Unavailable(WorkflowUnavailable::Definition {
+                definition_id: id.clone(),
+            }));
+        };
+        let read =
+            crate::workflow::read(&self.engines, draft.engine_kind(), draft.value().as_json())
+                .await?;
+        if let WorkflowRead::Inspected(inspection) = &read
+            && inspection.definition.id != *id
+        {
+            return Err(lash_core::PluginError::from(
+                lash_core::ProcessDefinitionRefusal::DefinitionIdMismatch {
+                    claimed: id.clone(),
+                    derived: inspection.definition.id.clone(),
+                },
+            )
+            .into());
+        }
+        Ok(read)
+    }
+
     /// Ends the pin: its `Ended` record, and on the store set's own
     /// database its fence, in one core transaction. The artifact-cleanup
     /// relay then severs every edge the pin holds in every store. The pin can
